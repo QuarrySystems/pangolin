@@ -12,7 +12,10 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@quarry-systems/agora-core": "workspace:*"
+    "@quarry-systems/agora-core": "workspace:*",
+    "mustache": "^4.2.0"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "@types/mustache": "^1.0.5"
+  }
 }
