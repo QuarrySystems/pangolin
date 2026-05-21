@@ -32,7 +32,10 @@ export class AwsCredentialProvider implements CredentialProvider {
   }>;
 
   constructor(opts: AwsCredentialProviderOpts = {}) {
-    this.resolver = opts.providerOverride ?? fromNodeProviderChain();
+    // Construction is side-effect-free: `fromNodeProviderChain()` is invoked
+    // lazily on each `resolve()` call rather than eagerly here, so that any
+    // I/O the SDK might perform happens at resolution time.
+    this.resolver = opts.providerOverride ?? (() => fromNodeProviderChain()());
   }
 
   async resolve(): Promise<ResolvedCredentials> {

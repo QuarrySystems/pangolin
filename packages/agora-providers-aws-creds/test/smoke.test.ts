@@ -29,3 +29,13 @@ it('propagates sessionToken when present on the underlying credentials', async (
   const resolved = await provider.resolve();
   expect(resolved.sessionToken).toBe('session-test');
 });
+
+it('propagates errors thrown by the underlying credential provider', async () => {
+  const boom = new Error('credential chain failed');
+  const provider = new AwsCredentialProvider({
+    providerOverride: async () => {
+      throw boom;
+    },
+  });
+  await expect(provider.resolve()).rejects.toThrow('credential chain failed');
+});
