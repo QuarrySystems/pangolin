@@ -86,3 +86,44 @@ export function buildAgoraUri(parts: AgoraUriParts): string {
   }
   return base;
 }
+
+/**
+ * Construct a dispatch-record URI under the reserved `dispatches/` prefix
+ * documented in §7.8 of the agora-core spec. The general {@link buildAgoraUri}
+ * rejects `type: 'dispatches'` to prevent capability/subagent/env writes from
+ * colliding with this prefix; this helper is the documented escape hatch for
+ * the retention layer, which legitimately owns the reserved namespace.
+ *
+ * Shape:
+ *   `agora://<namespace>/dispatches/<dispatchId>`            (no suffix)
+ *   `agora://<namespace>/dispatches/<dispatchId>/<suffix>`   (with suffix)
+ *
+ * `suffix` may itself contain `/` to address nested record components (e.g.
+ * `"events/0001.json"`), but must not be empty or contain `//`.
+ *
+ * @throws Error if `namespace` or `dispatchId` is empty or contains `/`, or
+ *   if `suffix` is the empty string or contains `//`.
+ */
+export function buildDispatchRecordUri(
+  namespace: string,
+  dispatchId: string,
+  suffix?: string,
+): string {
+  if (!namespace || namespace.includes('/')) {
+    throw new Error(
+      `buildDispatchRecordUri: invalid namespace: ${JSON.stringify(namespace)}`,
+    );
+  }
+  if (!dispatchId || dispatchId.includes('/')) {
+    throw new Error(
+      `buildDispatchRecordUri: invalid dispatchId: ${JSON.stringify(dispatchId)}`,
+    );
+  }
+  if (suffix !== undefined && (suffix === '' || suffix.includes('//'))) {
+    throw new Error(
+      `buildDispatchRecordUri: invalid suffix: ${JSON.stringify(suffix)}`,
+    );
+  }
+  const tail = suffix ? `/${suffix}` : '';
+  return `${SCHEME}${namespace}/dispatches/${dispatchId}${tail}`;
+}
