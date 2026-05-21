@@ -1,0 +1,18 @@
+{
+  "name": "@quarry-systems/agora-providers-fargate",
+  "version": "0.0.0",
+  "private": true,
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "lint": "eslint src --ext .ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@quarry-systems/agora-core": "workspace:*"
+  },
+  "devDependencies": {}
+}

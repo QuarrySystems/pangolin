@@ -1,0 +1,22 @@
+{
+  "name": "@quarry-systems/agora-cli",
+  "version": "0.0.0",
+  "private": true,
+  "description": "CLI for agora — implementation lands in DAG 2.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "agora": "dist/index.js"
+  },
+  "scripts": {
+    "lint": "eslint src --ext .ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@quarry-systems/agora-client": "workspace:*"
+  },
+  "devDependencies": {}
+}
