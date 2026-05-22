@@ -1,0 +1,51 @@
+name: MCP tool allowlist
+
+on:
+  pull_request:
+    paths:
+      - 'packages/agora-mcp/**'
+      - 'scripts/check-mcp-tool-allowlist.mjs'
+      - '.github/workflows/mcp-tool-allowlist.yml'
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  allowlist:
+    name: tool surface §7.7
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Enable corepack
+        run: corepack enable
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Resolve pnpm store path
+        id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build agora-mcp
+        run: pnpm -F @quarry-systems/agora-mcp build
+
+      - name: Check MCP tool allowlist
+        run: node scripts/check-mcp-tool-allowlist.mjs
