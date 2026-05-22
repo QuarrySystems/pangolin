@@ -16,6 +16,6 @@
     "mustache": "^4.2.0"
   },
   "devDependencies": {
-    "@types/mustache": "^1.0.5"
+    "@types/mustache": "^4.2.0"
   }
 }
