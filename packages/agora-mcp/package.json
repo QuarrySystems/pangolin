@@ -4,6 +4,9 @@
   "private": true,
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "bin": {
+    "agora-mcp": "dist/index.js"
+  },
   "scripts": {
     "lint": "eslint src --ext .ts",
     "test": "vitest run",
@@ -12,7 +15,9 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@quarry-systems/agora-client": "workspace:*"
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@quarry-systems/agora-client": "workspace:*",
+    "@quarry-systems/agora-core": "workspace:*"
   },
   "devDependencies": {}
 }
