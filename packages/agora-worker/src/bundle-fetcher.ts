@@ -52,21 +52,40 @@ export async function constructStorageProvider(
   storageUri: string,
 ): Promise<StorageProvider> {
   if (storageUri.startsWith("s3://")) {
-    const { S3StorageProvider } = await import(
-      "@quarry-systems/agora-storage-s3"
-    );
+    let S3StorageProvider: any;
+    try {
+      ({ S3StorageProvider } = await import(
+        "@quarry-systems/agora-storage-s3"
+      ));
+    } catch (err) {
+      throw new Error(
+        `agora-worker: failed to load S3StorageProvider: ${(err as Error).message}`,
+      );
+    }
     const withoutScheme = storageUri.slice("s3://".length);
     const slashIdx = withoutScheme.indexOf("/");
     const bucket =
       slashIdx === -1 ? withoutScheme : withoutScheme.slice(0, slashIdx);
     const prefix =
       slashIdx === -1 ? undefined : withoutScheme.slice(slashIdx + 1);
+    if (!bucket) {
+      throw new Error(
+        `s3:// URI requires a non-empty bucket: ${storageUri}`,
+      );
+    }
     return new S3StorageProvider({ bucket, prefix });
   }
   if (storageUri.startsWith("file://") || storageUri.startsWith("/")) {
-    const { LocalStorageProvider } = await import(
-      "@quarry-systems/agora-storage-local"
-    );
+    let LocalStorageProvider: any;
+    try {
+      ({ LocalStorageProvider } = await import(
+        "@quarry-systems/agora-storage-local"
+      ));
+    } catch (err) {
+      throw new Error(
+        `agora-worker: failed to load LocalStorageProvider: ${(err as Error).message}`,
+      );
+    }
     const rootDir = storageUri.startsWith("file://")
       ? storageUri.slice("file://".length)
       : storageUri;
