@@ -31,7 +31,7 @@ export interface RunServerOpts {
   client: AgoraClient;
   /** Override the server name; defaults to `'agora-mcp'`. */
   name?: string;
-  /** Override the server version; defaults to the package version. */
+  /** Override the server version; defaults to `'0.1.0'`. */
   version?: string;
 }
 

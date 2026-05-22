@@ -5,7 +5,7 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "agora-mcp": "dist/index.js"
+    "agora-mcp": "dist/bin.js"
   },
   "scripts": {
     "lint": "eslint src --ext .ts",
