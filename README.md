@@ -38,7 +38,7 @@ await client.capabilities.register({ name: 'echo-cap', files: { 'agora-setup.sh'
 await client.subagent.register({ name: 'echo', systemPrompt: 'Just exit.', capabilities: ['echo-cap'] });
 await client.env.register({ name: 'minimal', values: { LOG_LEVEL: 'info' } });
 
-const result = await client.dispatch({ subagent: 'echo', env: 'minimal', target: 'local', workerImage: 'ghcr.io/quarry-systems/agora-worker:latest' });
+const result = await client.dispatch({ subagent: 'echo', env: 'minimal', target: 'local', workerImage: 'ghcr.io/quarrysystems/agora-worker:latest' });
 console.log(result.stdout);
 ```
 

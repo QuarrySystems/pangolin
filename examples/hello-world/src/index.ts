@@ -101,7 +101,7 @@ export async function main(): Promise<void> {
       subagent: 'echo',
       env: 'minimal',
       target: 'local',
-      workerImage: 'ghcr.io/quarry-systems/agora-worker:latest',
+      workerImage: 'ghcr.io/quarrysystems/agora-worker:latest',
     });
 
     console.log('\n=== resolved ===\n' + JSON.stringify(result.resolved, null, 2));

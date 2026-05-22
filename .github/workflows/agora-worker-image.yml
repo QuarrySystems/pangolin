@@ -23,7 +23,10 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: quarry-systems/agora-worker
+  # GHCR namespace must match the lowercase GitHub org slug (`quarrysystems`,
+  # no hyphen). The npm scope `@quarry-systems/*` keeps the hyphenated form —
+  # see /memory/agora-identity-split.md for the why.
+  IMAGE_NAME: quarrysystems/agora-worker
 
 jobs:
   build-and-push:

@@ -35,7 +35,7 @@ where you stalled.
 
 - Node.js 20+ and pnpm 9
 - Docker Desktop (or equivalent) running locally
-- A locally-built `ghcr.io/quarry-systems/agora-worker:latest` image
+- A locally-built `ghcr.io/quarrysystems/agora-worker:latest` image
   available to your Docker daemon
 
 The example sets `allowUnpinnedImage: true` on `LocalDockerProvider` so
@@ -51,7 +51,7 @@ root:
 
 ```sh
 docker build \
-  -t ghcr.io/quarry-systems/agora-worker:latest \
+  -t ghcr.io/quarrysystems/agora-worker:latest \
   -f docker/agora-worker/Dockerfile \
   .
 ```

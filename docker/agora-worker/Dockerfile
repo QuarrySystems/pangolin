@@ -2,7 +2,7 @@
 #
 # agora-worker OCI image.
 #
-# The published image at ghcr.io/quarry-systems/agora-worker bundles the
+# The published image at ghcr.io/quarrysystems/agora-worker bundles the
 # runtime-agnostic worker (`@quarry-systems/agora-worker`) plus the stock
 # Claude Code runtime adapter (`@quarry-systems/agora-runtime-claude-code`).
 # The adapter is placed at `/opt/agora/adapters/claude-code/index.js` because

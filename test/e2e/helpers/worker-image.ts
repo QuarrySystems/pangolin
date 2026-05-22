@@ -15,4 +15,4 @@
 // the real digest and drop the comment about the all-zero placeholder.
 export const WORKER_IMAGE =
   process.env.AGORA_E2E_WORKER_IMAGE ??
-  'ghcr.io/quarry-systems/agora-worker@sha256:0000000000000000000000000000000000000000000000000000000000000000';
+  'ghcr.io/quarrysystems/agora-worker@sha256:0000000000000000000000000000000000000000000000000000000000000000';
