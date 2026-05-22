@@ -54,7 +54,7 @@ describe('E2E: register + dispatch via local-docker + local storage', () => {
         capabilities: [cap],
       });
 
-      await client.env.register({
+      const env = await client.env.register({
         name: 'minimal',
         values: { LOG_LEVEL: 'info' },
       });
@@ -70,6 +70,7 @@ describe('E2E: register + dispatch via local-docker + local storage', () => {
       expect(result.exitCode).toBe(0);
       expect(result.resolved.subagent.contentHash).toBe(sub.contentHash);
       expect(result.resolved.capabilities[0].contentHash).toBe(cap.contentHash);
+      expect(result.resolved.env![0].contentHash).toBe(env.contentHash);
       expect(result.stdout).toContain('hello from agora');
     },
     120_000,
