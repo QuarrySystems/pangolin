@@ -1,0 +1,256 @@
+import { describe, it, expect } from "vitest";
+import {
+  fetchBundles,
+  constructStorageProvider,
+} from "../src/bundle-fetcher.js";
+import {
+  IntegrityMismatchError,
+  computeContentHash,
+  type StorageProvider,
+} from "@quarry-systems/agora-core";
+import type { BundleRefs } from "../src/env-parser.js";
+
+/**
+ * Minimal in-memory StorageProvider stub. Keyed by URI; returns the bytes
+ * registered via `put()`. Other StorageProvider methods are not exercised
+ * by the bundle fetcher.
+ */
+class FakeStorage implements StorageProvider {
+  readonly name = "fake";
+  private blobs = new Map<string, Uint8Array>();
+
+  set(uri: string, bytes: Uint8Array): this {
+    this.blobs.set(uri, bytes);
+    return this;
+  }
+
+  async put(): Promise<{ contentHash: string }> {
+    throw new Error("not used in bundle-fetcher tests");
+  }
+
+  async get(uri: string): Promise<Uint8Array> {
+    const v = this.blobs.get(uri);
+    if (!v) throw new Error(`fake storage: missing ${uri}`);
+    return v;
+  }
+
+  async resolveLatest(): Promise<null> {
+    return null;
+  }
+
+  async list(): Promise<[]> {
+    return [];
+  }
+}
+
+function asBytes(obj: unknown): Uint8Array {
+  return new TextEncoder().encode(JSON.stringify(obj));
+}
+
+describe("fetchBundles", () => {
+  it("fetches and verifies a subagent JSON bundle", async () => {
+    const subagentDef = { name: "alpha", prompt: "hello" };
+    const storage = new FakeStorage();
+    const uri = "agora://ns/subagent/alpha/sha256:1";
+    storage.set(uri, asBytes(subagentDef));
+    const refs: BundleRefs = {
+      subagent: { uri, contentHash: computeContentHash(subagentDef) },
+      capabilities: [],
+      env: [],
+    };
+
+    const result = await fetchBundles(refs, storage);
+
+    expect(result.subagentDef).toEqual(subagentDef);
+  });
+
+  it("throws IntegrityMismatchError when subagent hash does not match", async () => {
+    const storage = new FakeStorage();
+    const uri = "agora://ns/subagent/alpha/sha256:1";
+    storage.set(uri, asBytes({ tampered: true }));
+    const refs: BundleRefs = {
+      subagent: { uri, contentHash: "sha256:wrong" },
+      capabilities: [],
+      env: [],
+    };
+
+    await expect(fetchBundles(refs, storage)).rejects.toBeInstanceOf(
+      IntegrityMismatchError,
+    );
+  });
+
+  it("fetches capability bundles in declared order and verifies packed-bytes hash", async () => {
+    const capA = new Uint8Array([1, 2, 3]);
+    const capB = new Uint8Array([4, 5, 6, 7]);
+    const storage = new FakeStorage();
+    const uriA = "agora://ns/capability/cap-a/sha256:a";
+    const uriB = "agora://ns/capability/cap-b/sha256:b";
+    storage.set(uriA, capA);
+    storage.set(uriB, capB);
+    const refs: BundleRefs = {
+      subagent: {
+        uri: "agora://ns/subagent/s/sha256:s",
+        contentHash: computeContentHash({}),
+      },
+      capabilities: [
+        { uri: uriA, contentHash: computeContentHash(capA) },
+        { uri: uriB, contentHash: computeContentHash(capB) },
+      ],
+      env: [],
+    };
+    storage.set(refs.subagent.uri, asBytes({}));
+
+    const result = await fetchBundles(refs, storage);
+
+    expect(result.capabilities).toHaveLength(2);
+    expect(result.capabilities[0]?.name).toBe("cap-a");
+    expect(result.capabilities[0]?.bytes).toEqual(capA);
+    expect(result.capabilities[1]?.name).toBe("cap-b");
+    expect(result.capabilities[1]?.bytes).toEqual(capB);
+  });
+
+  it("throws IntegrityMismatchError when a capability hash does not match", async () => {
+    const storage = new FakeStorage();
+    storage.set(
+      "agora://ns/subagent/s/sha256:s",
+      asBytes({}),
+    );
+    storage.set(
+      "agora://ns/capability/c/sha256:c",
+      new TextEncoder().encode("tampered"),
+    );
+    const refs: BundleRefs = {
+      subagent: {
+        uri: "agora://ns/subagent/s/sha256:s",
+        contentHash: computeContentHash({}),
+      },
+      capabilities: [
+        {
+          uri: "agora://ns/capability/c/sha256:c",
+          contentHash: "sha256:wrong",
+        },
+      ],
+      env: [],
+    };
+
+    await expect(fetchBundles(refs, storage)).rejects.toBeInstanceOf(
+      IntegrityMismatchError,
+    );
+  });
+
+  it("fetches and verifies env JSON bundles", async () => {
+    const envDef = { vars: { FOO: "bar" } };
+    const storage = new FakeStorage();
+    storage.set("agora://ns/subagent/s/sha256:s", asBytes({}));
+    storage.set("agora://ns/env/e/sha256:e", asBytes(envDef));
+    const refs: BundleRefs = {
+      subagent: {
+        uri: "agora://ns/subagent/s/sha256:s",
+        contentHash: computeContentHash({}),
+      },
+      capabilities: [],
+      env: [
+        {
+          uri: "agora://ns/env/e/sha256:e",
+          contentHash: computeContentHash(envDef),
+        },
+      ],
+    };
+
+    const result = await fetchBundles(refs, storage);
+
+    expect(result.envs).toHaveLength(1);
+    expect(result.envs[0]?.name).toBe("e");
+    expect(result.envs[0]?.def).toEqual(envDef);
+    expect(result.envs[0]?.contentHash).toBe(computeContentHash(envDef));
+  });
+
+  it("throws IntegrityMismatchError when env hash does not match", async () => {
+    const storage = new FakeStorage();
+    storage.set("agora://ns/subagent/s/sha256:s", asBytes({}));
+    storage.set("agora://ns/env/e/sha256:e", asBytes({ tampered: true }));
+    const refs: BundleRefs = {
+      subagent: {
+        uri: "agora://ns/subagent/s/sha256:s",
+        contentHash: computeContentHash({}),
+      },
+      capabilities: [],
+      env: [
+        {
+          uri: "agora://ns/env/e/sha256:e",
+          contentHash: "sha256:wrong",
+        },
+      ],
+    };
+
+    await expect(fetchBundles(refs, storage)).rejects.toBeInstanceOf(
+      IntegrityMismatchError,
+    );
+  });
+
+  it("returns subagent + capabilities + envs together when all hashes match", async () => {
+    const subagentDef = { name: "alpha" };
+    const capBytes = new Uint8Array([9, 9, 9]);
+    const envDef = { e: 1 };
+    const storage = new FakeStorage();
+    storage.set("agora://ns/subagent/alpha/sha256:s", asBytes(subagentDef));
+    storage.set("agora://ns/capability/cap/sha256:c", capBytes);
+    storage.set("agora://ns/env/env1/sha256:e", asBytes(envDef));
+    const refs: BundleRefs = {
+      subagent: {
+        uri: "agora://ns/subagent/alpha/sha256:s",
+        contentHash: computeContentHash(subagentDef),
+      },
+      capabilities: [
+        {
+          uri: "agora://ns/capability/cap/sha256:c",
+          contentHash: computeContentHash(capBytes),
+        },
+      ],
+      env: [
+        {
+          uri: "agora://ns/env/env1/sha256:e",
+          contentHash: computeContentHash(envDef),
+        },
+      ],
+    };
+
+    const result = await fetchBundles(refs, storage);
+
+    expect(result.subagentDef).toEqual(subagentDef);
+    expect(result.capabilities[0]?.name).toBe("cap");
+    expect(result.capabilities[0]?.contentHash).toBe(
+      computeContentHash(capBytes),
+    );
+    expect(result.envs[0]?.name).toBe("env1");
+    expect(result.envs[0]?.def).toEqual(envDef);
+  });
+});
+
+describe("constructStorageProvider", () => {
+  it("constructs an S3StorageProvider for s3:// URIs with bucket only", async () => {
+    const provider = await constructStorageProvider("s3://my-bucket");
+    expect(provider.name).toBe("s3");
+  });
+
+  it("constructs an S3StorageProvider for s3:// URIs with bucket + prefix", async () => {
+    const provider = await constructStorageProvider("s3://my-bucket/some/prefix");
+    expect(provider.name).toBe("s3");
+  });
+
+  it("constructs a LocalStorageProvider for file:// URIs", async () => {
+    const provider = await constructStorageProvider("file:///tmp/agora-store");
+    expect(provider.name).toBe("local-fs");
+  });
+
+  it("constructs a LocalStorageProvider for bare absolute paths", async () => {
+    const provider = await constructStorageProvider("/tmp/agora-store");
+    expect(provider.name).toBe("local-fs");
+  });
+
+  it("throws for unrecognized URI schemes", async () => {
+    await expect(
+      constructStorageProvider("http://example.com/bucket"),
+    ).rejects.toThrow(/unrecognized/);
+  });
+});
