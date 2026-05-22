@@ -11,6 +11,7 @@
 // the caller opts in via `allowUnpinnedImage: true` (intended for dev/test).
 
 import Docker from 'dockerode';
+import { fileURLToPath } from 'node:url';
 import {
   UnpinnedImageError,
   type ComputeProvider,
@@ -39,6 +40,29 @@ export interface LocalDockerProviderOpts {
    * called. Defaults to 10s (matches §6.8 cancellation contract).
    */
   sigtermGraceSeconds?: number;
+  /**
+   * When `spec.env.AGORA_STORAGE_URI` is a `file://` URI, automatically
+   * bind-mount the host directory inside the container and rewrite the env
+   * var to the in-container path. This is what makes the hello-world (§4.4)
+   * and the §9 acceptance dispatch succeed against `LocalStorageProvider` —
+   * without it the worker can't read bundles staged on the host's tmpdir.
+   * Defaults to `true`; opt out only if a capability is responsible for
+   * staging the bundles via its own setup script.
+   */
+  autoMountFileStorage?: boolean;
+  /**
+   * In-container mount target used by `autoMountFileStorage`. Must be an
+   * absolute Linux path. Defaults to `/agora/storage` so the path is
+   * distinct from the worker's `/workspace` and `/opt/agora` trees.
+   */
+  storageMountTarget?: string;
+  /**
+   * Additional bind mounts to apply to every container `run()`. Each entry
+   * is a Dockerode `Binds` string — `<host>:<container>[:ro]`. Useful for
+   * surfacing a pre-built capability bundle directory or custom worker
+   * configuration without rebuilding the image.
+   */
+  extraBinds?: string[];
 }
 
 /** Matches the `name@sha256:<64-hex>` tail. */
@@ -54,25 +78,70 @@ export class LocalDockerProvider implements ComputeProvider {
   private readonly docker: Docker;
   private readonly allowUnpinnedImage: boolean;
   private readonly graceSeconds: number;
+  private readonly autoMountFileStorage: boolean;
+  private readonly storageMountTarget: string;
+  private readonly extraBinds: string[];
 
   constructor(opts: LocalDockerProviderOpts = {}) {
     this.docker = opts.docker ?? new Docker();
     this.allowUnpinnedImage = opts.allowUnpinnedImage ?? false;
     this.graceSeconds = opts.sigtermGraceSeconds ?? 10;
+    this.autoMountFileStorage = opts.autoMountFileStorage ?? true;
+    this.storageMountTarget = opts.storageMountTarget ?? '/agora/storage';
+    this.extraBinds = opts.extraBinds ?? [];
   }
 
   async run(spec: TaskSpec, _ctx: ProviderContext): Promise<TaskHandle> {
     this.assertImagePinned(spec.image);
 
-    const env = Object.entries(spec.env).map(([k, v]) => `${k}=${v}`);
+    const { env: rewrittenEnv, binds } = this.prepareEnvAndBinds(spec);
+    const env = Object.entries(rewrittenEnv).map(([k, v]) => `${k}=${v}`);
     const container = await this.docker.createContainer({
       Image: spec.image,
       Env: env,
       Cmd: spec.command,
       Labels: { 'agora.dispatchId': spec.dispatchId },
+      HostConfig: binds.length > 0 ? { Binds: binds } : undefined,
     });
     await container.start();
     return { providerTaskId: container.id };
+  }
+
+  /**
+   * Compute the env vars + bind mounts to apply to a single `run()`.
+   *
+   * Auto-mount semantics: when `AGORA_STORAGE_URI` is a `file://` URI and
+   * `autoMountFileStorage` is enabled (the default), translate the file URI
+   * to a host filesystem path via `fileURLToPath`, bind-mount it at
+   * `storageMountTarget` inside the container, and rewrite the env var to
+   * point at the in-container path. The conversion preserves Windows drive
+   * letters (Docker Desktop translates `C:\path\to\dir` automatically when
+   * passed as a Binds source).
+   */
+  private prepareEnvAndBinds(spec: TaskSpec): {
+    env: Record<string, string>;
+    binds: string[];
+  } {
+    const env = { ...spec.env };
+    const binds = [...this.extraBinds];
+    const storageUri = env.AGORA_STORAGE_URI;
+    if (
+      this.autoMountFileStorage &&
+      storageUri &&
+      storageUri.startsWith('file://')
+    ) {
+      let hostPath: string | null = null;
+      try {
+        hostPath = fileURLToPath(storageUri);
+      } catch {
+        hostPath = null;
+      }
+      if (hostPath) {
+        binds.push(`${hostPath}:${this.storageMountTarget}`);
+        env.AGORA_STORAGE_URI = `file://${this.storageMountTarget}`;
+      }
+    }
+    return { env, binds };
   }
 
   async awaitExit(handle: TaskHandle, _ctx: ProviderContext): Promise<TaskExit> {
