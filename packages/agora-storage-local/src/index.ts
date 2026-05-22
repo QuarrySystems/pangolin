@@ -22,7 +22,7 @@
 // both shapes. The general `parseAgoraUri` still rejects `dispatches` as a
 // client-side write-safety guard.
 
-import { writeFile, readFile, mkdir } from 'node:fs/promises';
+import { writeFile, readFile, readdir, mkdir } from 'node:fs/promises';
 import { join, dirname, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -123,6 +123,59 @@ export class LocalStorageProvider implements StorageProvider {
       contentHash: latest.contentHash,
       registeredAt: latest.registeredAt,
     };
+  }
+
+  async resolveByHash(
+    query: { namespace: string; type: string; contentHash: string },
+  ): Promise<{
+    uri: string;
+    name: string;
+    contentHash: string;
+    registeredAt: string;
+  } | null> {
+    this.assertSafeSegment(query.namespace, 'namespace');
+    this.assertSafeSegment(query.type, 'type');
+    this.assertSafeSegment(query.contentHash, 'contentHash');
+
+    const typeDir = join(this.opts.rootDir, query.namespace, query.type);
+    let names: string[];
+    try {
+      const entries = await readdir(typeDir, { withFileTypes: true });
+      names = entries
+        .filter((e) => e.isDirectory())
+        .map((e) => e.name);
+    } catch (err) {
+      if (
+        err &&
+        typeof err === 'object' &&
+        'code' in err &&
+        (err as NodeJS.ErrnoException).code === 'ENOENT'
+      ) {
+        return null;
+      }
+      throw err;
+    }
+
+    for (const name of names) {
+      const index = await this.readIndex(
+        join(typeDir, name, '_index.json'),
+      );
+      const entry = index.entries.find((e) => e.contentHash === query.contentHash);
+      if (entry) {
+        return {
+          uri: buildAgoraUri({
+            namespace: query.namespace,
+            type: query.type,
+            name,
+            contentHash: entry.contentHash,
+          }),
+          name,
+          contentHash: entry.contentHash,
+          registeredAt: entry.registeredAt,
+        };
+      }
+    }
+    return null;
   }
 
   async list(

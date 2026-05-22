@@ -32,6 +32,7 @@ import {
   S3Client,
   PutObjectCommand,
   GetObjectCommand,
+  ListObjectsV2Command,
   NoSuchKey,
 } from '@aws-sdk/client-s3';
 
@@ -136,6 +137,25 @@ export class S3StorageProvider implements StorageProvider {
     this.prefix = raw.length === 0 ? '' : `${raw}/`;
   }
 
+  /**
+   * Canonical `s3://` URI for the storage root. Surfaced as the
+   * `StorageProvider.rootUri` duck-typed property that `agora-client`'s
+   * dispatch path reads when populating the worker's `AGORA_STORAGE_URI`
+   * env var (§6.1). The worker's bundle-fetcher recognizes both
+   * `s3://<bucket>` and `s3://<bucket>/<prefix>` forms and routes to
+   * `S3StorageProvider`.
+   */
+  get rootUri(): string {
+    // `this.prefix` already has a trailing slash (or is empty); strip it so
+    // the canonical URI does not end on `/`.
+    const trimmed = this.prefix.endsWith('/')
+      ? this.prefix.slice(0, -1)
+      : this.prefix;
+    return trimmed.length === 0
+      ? `s3://${this.opts.bucket}`
+      : `s3://${this.opts.bucket}/${trimmed}`;
+  }
+
   async put(
     uri: string,
     contents: Uint8Array,
@@ -196,6 +216,70 @@ export class S3StorageProvider implements StorageProvider {
       contentHash: latest.contentHash,
       registeredAt: latest.registeredAt,
     };
+  }
+
+  async resolveByHash(
+    query: { namespace: string; type: string; contentHash: string },
+  ): Promise<{
+    uri: string;
+    name: string;
+    contentHash: string;
+    registeredAt: string;
+  } | null> {
+    // Enumerate logical names under `<prefix><ns>/<type>/` via ListObjectsV2
+    // with `Delimiter: '/'` — the per-name subdirectories surface as
+    // `CommonPrefixes`. For each candidate name read its `_index.json` and
+    // check for a matching contentHash. O(names) GET requests; acceptable
+    // for v0.1, a sidecar hash→name index lands in v0.2 if registries grow.
+    const namePrefix = `${this.prefix}${query.namespace}/${query.type}/`;
+    let continuationToken: string | undefined;
+    const names: string[] = [];
+    do {
+      const resp = (await this.s3.send(
+        new ListObjectsV2Command({
+          Bucket: this.opts.bucket,
+          Prefix: namePrefix,
+          Delimiter: '/',
+          ContinuationToken: continuationToken,
+        }),
+      )) as {
+        CommonPrefixes?: Array<{ Prefix?: string }>;
+        NextContinuationToken?: string;
+        IsTruncated?: boolean;
+      };
+      for (const cp of resp.CommonPrefixes ?? []) {
+        if (!cp.Prefix) continue;
+        // CommonPrefixes look like `<namePrefix><name>/` — strip both ends.
+        const tail = cp.Prefix.slice(namePrefix.length);
+        const name = tail.endsWith('/') ? tail.slice(0, -1) : tail;
+        if (name.length > 0) names.push(name);
+      }
+      continuationToken = resp.IsTruncated ? resp.NextContinuationToken : undefined;
+    } while (continuationToken);
+
+    for (const name of names) {
+      const index = await this.readIndex({
+        kind: 'blob',
+        namespace: query.namespace,
+        type: query.type,
+        name,
+      } as AgoraUriParts);
+      const entry = index.entries.find((e) => e.contentHash === query.contentHash);
+      if (entry) {
+        return {
+          uri: buildAgoraUri({
+            namespace: query.namespace,
+            type: query.type,
+            name,
+            contentHash: entry.contentHash,
+          }),
+          name,
+          contentHash: entry.contentHash,
+          registeredAt: entry.registeredAt,
+        };
+      }
+    }
+    return null;
   }
 
   async list(

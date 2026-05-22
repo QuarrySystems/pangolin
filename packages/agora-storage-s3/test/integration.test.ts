@@ -211,4 +211,88 @@ describeIf('S3StorageProvider against LocalStack', () => {
     );
     expect(new Set(fetched)).toEqual(new Set(['A', 'B', 'C']));
   });
+
+  describe('resolveByHash', () => {
+    it('returns null when (ns, type) has no registered blobs', async () => {
+      const sp = new S3StorageProvider({
+        bucket: BUCKET,
+        client,
+        prefix: `tests/${Date.now()}-rbh-empty`,
+      });
+      const hit = await sp.resolveByHash({
+        namespace: 'test',
+        type: 'capability',
+        contentHash:
+          'sha256:0000000000000000000000000000000000000000000000000000000000000000',
+      });
+      expect(hit).toBeNull();
+    });
+
+    it('finds the matching name when a capability is registered', async () => {
+      const sp = new S3StorageProvider({
+        bucket: BUCKET,
+        client,
+        prefix: `tests/${Date.now()}-rbh-single`,
+      });
+      const { contentHash } = await sp.put(
+        'agora://test/capability/alpha',
+        new TextEncoder().encode('alpha-bytes'),
+      );
+      const hit = await sp.resolveByHash({
+        namespace: 'test',
+        type: 'capability',
+        contentHash,
+      });
+      expect(hit).not.toBeNull();
+      expect(hit!.name).toBe('alpha');
+      expect(hit!.contentHash).toBe(contentHash);
+      expect(hit!.uri).toBe(`agora://test/capability/alpha/${contentHash}`);
+    });
+
+    it('distinguishes between multiple registered names', async () => {
+      const sp = new S3StorageProvider({
+        bucket: BUCKET,
+        client,
+        prefix: `tests/${Date.now()}-rbh-multi`,
+      });
+      const { contentHash: hA } = await sp.put(
+        'agora://test/capability/alpha',
+        new TextEncoder().encode('A'),
+      );
+      const { contentHash: hB } = await sp.put(
+        'agora://test/capability/bravo',
+        new TextEncoder().encode('B'),
+      );
+      const hitA = await sp.resolveByHash({
+        namespace: 'test',
+        type: 'capability',
+        contentHash: hA,
+      });
+      const hitB = await sp.resolveByHash({
+        namespace: 'test',
+        type: 'capability',
+        contentHash: hB,
+      });
+      expect(hitA!.name).toBe('alpha');
+      expect(hitB!.name).toBe('bravo');
+    });
+
+    it('does not bleed across types', async () => {
+      const sp = new S3StorageProvider({
+        bucket: BUCKET,
+        client,
+        prefix: `tests/${Date.now()}-rbh-types`,
+      });
+      const { contentHash } = await sp.put(
+        'agora://test/capability/alpha',
+        new TextEncoder().encode('alpha'),
+      );
+      const hit = await sp.resolveByHash({
+        namespace: 'test',
+        type: 'subagent',
+        contentHash,
+      });
+      expect(hit).toBeNull();
+    });
+  });
 });

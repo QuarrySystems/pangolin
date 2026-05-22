@@ -22,4 +22,24 @@ export interface StorageProvider {
   list(
     uri: string,
   ): Promise<Array<{ uri: string; contentHash: string; registeredAt: string }>>;
+  /**
+   * Reverse-lookup: find the registered blob in `(namespace, type)` whose
+   * content hash matches `contentHash`, returning its logical `name` plus the
+   * pinned URI + registeredAt. Returns `null` when no registered entry under
+   * that (ns, type) has the requested hash.
+   *
+   * Used by the dispatch path to round-trip the subagent's bound
+   * `capabilities: [hash, hash, ...]` (stored as hashes only) back to
+   * `CapabilityRef[]` so the worker can fetch them. Implementations are
+   * permitted to do an O(N) walk of the (ns, type) directory; v0.2 may add
+   * a sidecar hash→name index for large registries.
+   */
+  resolveByHash(
+    query: { namespace: string; type: string; contentHash: string },
+  ): Promise<{
+    uri: string;
+    name: string;
+    contentHash: string;
+    registeredAt: string;
+  } | null>;
 }

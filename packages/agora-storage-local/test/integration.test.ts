@@ -134,6 +134,98 @@ describe('LocalStorageProvider', () => {
     expect(latest).toBeNull();
   });
 
+  // ── resolveByHash ────────────────────────────────────────────────────
+  //
+  // The dispatch path uses this to round-trip the subagent's bound
+  // capability set (stored as content hashes) back to `CapabilityRef[]`.
+  // O(N) walk of (ns, type) is acceptable for v0.1.
+
+  describe('resolveByHash', () => {
+    it('returns null when no blobs are registered under (ns, type)', async () => {
+      const sp = new LocalStorageProvider({ rootDir });
+      const hit = await sp.resolveByHash({
+        namespace: 'test',
+        type: 'capability',
+        contentHash:
+          'sha256:0000000000000000000000000000000000000000000000000000000000000000',
+      });
+      expect(hit).toBeNull();
+    });
+
+    it('finds the matching name when one capability is registered', async () => {
+      const sp = new LocalStorageProvider({ rootDir });
+      const { contentHash } = await sp.put(
+        'agora://test/capability/alpha',
+        new TextEncoder().encode('alpha-bytes'),
+      );
+      const hit = await sp.resolveByHash({
+        namespace: 'test',
+        type: 'capability',
+        contentHash,
+      });
+      expect(hit).not.toBeNull();
+      expect(hit!.name).toBe('alpha');
+      expect(hit!.contentHash).toBe(contentHash);
+      expect(hit!.uri).toBe(`agora://test/capability/alpha/${contentHash}`);
+      expect(hit!.registeredAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    });
+
+    it('distinguishes between multiple names sharing the same (ns, type)', async () => {
+      const sp = new LocalStorageProvider({ rootDir });
+      const { contentHash: hA } = await sp.put(
+        'agora://test/capability/alpha',
+        new TextEncoder().encode('alpha-bytes'),
+      );
+      const { contentHash: hB } = await sp.put(
+        'agora://test/capability/bravo',
+        new TextEncoder().encode('bravo-bytes'),
+      );
+      expect(hA).not.toBe(hB);
+
+      const hitA = await sp.resolveByHash({
+        namespace: 'test',
+        type: 'capability',
+        contentHash: hA,
+      });
+      const hitB = await sp.resolveByHash({
+        namespace: 'test',
+        type: 'capability',
+        contentHash: hB,
+      });
+      expect(hitA!.name).toBe('alpha');
+      expect(hitB!.name).toBe('bravo');
+    });
+
+    it('does not bleed across types (capability hash not matched against subagent type)', async () => {
+      const sp = new LocalStorageProvider({ rootDir });
+      const { contentHash } = await sp.put(
+        'agora://test/capability/alpha',
+        new TextEncoder().encode('alpha-bytes'),
+      );
+      const hit = await sp.resolveByHash({
+        namespace: 'test',
+        type: 'subagent',
+        contentHash,
+      });
+      expect(hit).toBeNull();
+    });
+
+    it('returns null for a hash that does not match any registered entry', async () => {
+      const sp = new LocalStorageProvider({ rootDir });
+      await sp.put(
+        'agora://test/capability/alpha',
+        new TextEncoder().encode('alpha-bytes'),
+      );
+      const hit = await sp.resolveByHash({
+        namespace: 'test',
+        type: 'capability',
+        contentHash:
+          'sha256:1111111111111111111111111111111111111111111111111111111111111111',
+      });
+      expect(hit).toBeNull();
+    });
+  });
+
   // ── Dispatch-record prefix (reserved `dispatches/`) support ─────────────
   //
   // The retention layer in agora-client writes dispatch records to URIs
