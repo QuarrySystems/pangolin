@@ -172,24 +172,34 @@ describe('agora-cli integration', () => {
   it('dispatch run rejects malformed --input JSON cleanly (exit non-zero surrogate)', async () => {
     const fake = makeFakeClient();
     const program = buildAll(fake);
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => {
+      throw new Error('process.exit(1)');
+    });
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-    await expect(
-      program.parseAsync([
-        'node',
-        'agora',
-        'dispatch',
-        'run',
-        '--subagent',
-        's1',
-        '--target',
-        't1',
-        '--input',
-        '{not valid json',
-      ]),
-    ).rejects.toThrow(SyntaxError);
+    try {
+      await expect(
+        program.parseAsync([
+          'node',
+          'agora',
+          'dispatch',
+          'run',
+          '--subagent',
+          's1',
+          '--target',
+          't1',
+          '--input',
+          '{not valid json',
+        ]),
+      ).rejects.toThrow(/process\.exit/);
 
-    // Bad parse must abort before we hit the client.
-    expect(fake.dispatch).not.toHaveBeenCalled();
+      expect(exitSpy).toHaveBeenCalledWith(1);
+      // Bad parse must abort before we hit the client.
+      expect(fake.dispatch).not.toHaveBeenCalled();
+    } finally {
+      exitSpy.mockRestore();
+      errorSpy.mockRestore();
+    }
   });
 
   it('deploy reconciler walks a sample manifest in order: capabilities → subagents → envs', async () => {
