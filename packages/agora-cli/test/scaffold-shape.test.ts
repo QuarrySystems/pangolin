@@ -68,11 +68,8 @@ describe('agora-cli scaffold shape', () => {
       readme = readFileSync(resolve(pkgRoot, 'README.md'), 'utf8');
     });
 
-    it('mentions "DAG 2" to indicate future implementation', () => {
-      expect(readme).toContain('DAG 2');
-    });
-
     it('describes this package as the CLI for agora', () => {
+      // task-readmes-per-package owns README content; this is a sanity check.
       expect(readme.toLowerCase()).toContain('cli');
       expect(readme.toLowerCase()).toContain('agora');
     });

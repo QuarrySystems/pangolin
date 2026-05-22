@@ -53,13 +53,14 @@ describe('@quarry-systems/agora-providers-local-docker scaffold shape', () => {
   });
 
   describe('README.md', () => {
-    it('(4) mentions local-docker ComputeProvider and DAG 2', () => {
+    it('(4) mentions local-docker and ComputeProvider', () => {
+      // task-readmes-per-package owns the exact prose; this just sanity-checks
+      // the README is present and identifies the package.
       const full = resolve(pkgRoot, 'README.md');
       expect(existsSync(full)).toBe(true);
       const raw = readFileSync(full, 'utf8');
       expect(raw.toLowerCase()).toContain('local-docker');
       expect(raw.toLowerCase()).toContain('computeprovider');
-      expect(raw.toLowerCase()).toContain('dag 2');
     });
   });
 });

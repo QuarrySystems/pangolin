@@ -37,11 +37,8 @@ describe("agora-providers-aws-creds scaffold shape", () => {
     expect(readme).toContain("CredentialProvider");
   });
 
-  it("README mentions AWS default credential chain", () => {
-    expect(readme).toContain("AWS default credential chain");
-  });
-
-  it("README mentions DAG 2", () => {
-    expect(readme).toContain("DAG 2");
+  it("README mentions the AWS default credential chain", () => {
+    // Case-insensitive check — task-readmes-per-package owns the exact prose.
+    expect(readme.toLowerCase()).toContain("default credential chain");
   });
 });

@@ -33,11 +33,9 @@ describe("agora-providers-fargate scaffold shape", () => {
     }
   });
 
-  it("README mentions Fargate ComputeProvider", () => {
-    expect(readme).toContain("Fargate ComputeProvider");
-  });
-
-  it("README mentions DAG 2", () => {
-    expect(readme).toContain("DAG 2");
+  it("README mentions Fargate and ComputeProvider", () => {
+    // Case-insensitive: task-readmes-per-package owns the exact prose.
+    expect(readme.toLowerCase()).toContain("fargate");
+    expect(readme.toLowerCase()).toContain("computeprovider");
   });
 });

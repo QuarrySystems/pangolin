@@ -33,11 +33,8 @@ describe("agora-client scaffold shape", () => {
     }
   });
 
-  it("README contains the phrase 'caller-side SDK'", () => {
-    expect(readme).toContain("caller-side SDK");
-  });
-
-  it("README contains the phrase 'DAG 2'", () => {
-    expect(readme).toContain("DAG 2");
+  it("README mentions agora-client / SDK identity", () => {
+    // Case-insensitive: task-readmes-per-package owns the exact prose.
+    expect(readme.toLowerCase()).toContain("agora-client");
   });
 });
