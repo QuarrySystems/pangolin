@@ -1,0 +1,23 @@
+{
+  "name": "hello-world-example",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The §4.4 Hello World worked example: AgoraClient + LocalDockerProvider + LocalStorageProvider, dispatched end-to-end.",
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --esModuleInterop --skipLibCheck --strict src/index.ts test/run.test.ts",
+    "build": "tsc --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --esModuleInterop --skipLibCheck --strict src/index.ts"
+  },
+  "dependencies": {
+    "@quarry-systems/agora-client": "workspace:*",
+    "@quarry-systems/agora-providers-local-docker": "workspace:*",
+    "@quarry-systems/agora-storage-local": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.9"
+  }
+}
