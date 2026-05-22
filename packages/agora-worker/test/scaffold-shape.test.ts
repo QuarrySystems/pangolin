@@ -29,7 +29,7 @@ describe("agora-worker scaffold shape", () => {
     expect(forbidden).toHaveLength(0);
   });
 
-  it("no forbidden @quarry-systems/* prefixes other than agora-core", () => {
+  it("no forbidden @quarry-systems/* prefixes other than allowed storage providers", () => {
     const deps = {
       ...pkg.dependencies,
       ...pkg.devDependencies,
@@ -38,10 +38,13 @@ describe("agora-worker scaffold shape", () => {
     const quarryDeps = Object.keys(deps).filter((k) =>
       k.startsWith("@quarry-systems/")
     );
-    // Only agora-core is allowed as a Quarry Systems dep
-    const unexpected = quarryDeps.filter(
-      (k) => k !== "@quarry-systems/agora-core"
-    );
+    // Storage providers at boot per spec §5.8
+    const allowed = [
+      "@quarry-systems/agora-core",
+      "@quarry-systems/agora-storage-local",
+      "@quarry-systems/agora-storage-s3",
+    ];
+    const unexpected = quarryDeps.filter((k) => !allowed.includes(k));
     expect(unexpected).toHaveLength(0);
   });
 
