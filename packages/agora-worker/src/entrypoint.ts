@@ -333,13 +333,26 @@ export async function runWorker(
     baseEnv,
   });
 
-  // Step 9: run agora-setup.sh if present.
+  // Step 9: run agora-setup.sh if present. The captured stdout/stderr are
+  // surfaced via the structured logger per §6.3 so an integrator can see the
+  // setup script's output in the worker's stream (the `setup-script.ran`
+  // event) without having to also rebuild the worker to stream the script
+  // stdout live.
   try {
-    await runSetupScriptIfPresent({
+    const setupResult = await runSetupScriptIfPresent({
       workspaceDir,
       env: mergedEnv,
       timeoutSeconds: cfg.setupTimeoutSeconds,
     });
+    if (setupResult) {
+      logger.log({
+        kind: 'setup-script.ran',
+        exitCode: setupResult.exitCode,
+        durationMs: setupResult.durationMs,
+        stdout: setupResult.stdout,
+        stderr: setupResult.stderr,
+      });
+    }
   } catch (err) {
     if (err instanceof SetupScriptError) {
       return failWith(

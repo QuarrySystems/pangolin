@@ -42,7 +42,21 @@ export async function loadRuntimeAdapter(
     default?: unknown;
     createAdapter?: unknown;
   };
-  const factory = mod.default ?? mod.createAdapter;
+  // When the adapter ships as TypeScript-compiled CommonJS, Node's dynamic
+  // `import()` interop exposes the entire `module.exports` object as the
+  // namespace's `default`, and the user's actual default factory lives at
+  // `mod.default.default`. Unwrap one level transparently so both ESM
+  // (`export default fn`) and CJS-compiled (`exports.default = fn`) adapter
+  // builds work without callers caring which compile target was used.
+  let factory: unknown = mod.default ?? mod.createAdapter;
+  if (
+    factory !== undefined &&
+    factory !== null &&
+    typeof factory === "object"
+  ) {
+    const nested = factory as { default?: unknown; createAdapter?: unknown };
+    factory = nested.default ?? nested.createAdapter ?? factory;
+  }
   if (typeof factory !== "function") {
     throw new Error(
       `agora-worker: adapter ${name} at ${entryPath} does not export a default factory`,
