@@ -200,3 +200,55 @@ it('dispatch cancel calls client.dispatch.cancel and prints confirmation', async
     console.log = originalLog;
   }
 });
+
+it('dispatch run exits 1 and prints error message on invalid JSON input without calling client.dispatch', async () => {
+  const mockClient = {
+    dispatch: vi.fn().mockResolvedValue({}),
+  };
+
+  const mockCtx = {
+    getClient: vi.fn().mockResolvedValue(mockClient),
+  };
+
+  const program = new Command();
+  attachDispatchCmd(program, mockCtx);
+
+  const errors: string[] = [];
+  const originalError = console.error;
+  const originalExit = process.exit;
+  let exitCode: number | undefined;
+
+  console.error = vi.fn((msg: string) => errors.push(msg));
+  process.exit = vi.fn((code?: number) => {
+    exitCode = code;
+    throw new Error('exit');
+  }) as any;
+
+  try {
+    await program.parseAsync(
+      [
+        'dispatch',
+        'run',
+        '--subagent',
+        'my-subagent',
+        '--target',
+        'prod',
+        '--input',
+        'not valid json {',
+      ],
+      { from: 'user' },
+    );
+  } catch (e) {
+    // Expected to throw due to process.exit mock
+  } finally {
+    console.error = originalError;
+    process.exit = originalExit;
+  }
+
+  expect(exitCode).toBe(1);
+  expect(errors.length).toBeGreaterThan(0);
+  expect(errors[0]).toContain('agora dispatch run');
+  expect(errors[0]).toContain('--input');
+  expect(errors[0]).toContain('not valid JSON');
+  expect(mockClient.dispatch).not.toHaveBeenCalled();
+});

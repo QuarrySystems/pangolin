@@ -13,11 +13,19 @@ export function attachDispatchCmd(program: Command, ctx: CliContext): void {
     .requiredOption('--target <name>', 'target name from AgoraClient.targets')
     .option('--worker-image <digest>', 'worker image (digest-pinned)')
     .action(async (opts) => {
+      let parsedInput: Record<string, unknown>;
+      try {
+        parsedInput = JSON.parse(opts.input);
+      } catch (err) {
+        console.error(`agora dispatch run: --input is not valid JSON: ${(err as Error).message}`);
+        process.exit(1);
+      }
+
       const client = await ctx.getClient();
       const result = await client.dispatch({
         subagent: opts.subagent,
         env: opts.env,
-        input: JSON.parse(opts.input),
+        input: parsedInput,
         capabilities: opts.capability,
         addCapabilities: opts.addCapability,
         target: opts.target,
