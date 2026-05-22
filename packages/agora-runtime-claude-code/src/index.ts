@@ -5,4 +5,5 @@
 // factory as expected by the loader's `mod.default ?? mod.createAdapter` pattern.
 
 export { ClaudeCodeRuntimeAdapter } from "./adapter.js";
-export { default } from "./adapter.js";
+export { default, default as createAdapter } from "./adapter.js";
+export { getNeedsInputHelperOverlay, isHelperDisabled } from "./needs-input-helper.js";
