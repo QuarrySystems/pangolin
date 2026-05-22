@@ -88,8 +88,17 @@ export async function registerSubagent(
   } else {
     await client.storage.put(pinnedUri, new TextEncoder().encode(JSON.stringify(def)));
     // The storage layer is the authority on registeredAt — re-read it.
+    // If resolveLatest returns null here, the storage provider is inconsistent
+    // (a put just succeeded for this name); fail fast rather than inventing a
+    // local timestamp, which would silently violate the storage-as-authority
+    // contract.
     const after = await client.storage.resolveLatest(baseUri);
-    registeredAt = after?.registeredAt ?? new Date().toISOString();
+    if (!after) {
+      throw new Error(
+        `storage.resolveLatest returned null immediately after put: ${pinnedUri}. Storage provider may be inconsistent.`,
+      );
+    }
+    registeredAt = after.registeredAt;
   }
 
   const ref: SubagentRef = { name: opts.name, registeredAt, contentHash };

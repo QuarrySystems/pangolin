@@ -184,4 +184,28 @@ describe('registerSubagent', () => {
     });
     expect(handle.contentHash).toMatch(/^sha256:[0-9a-f]+$/);
   });
+
+  it('throws if resolveLatest returns null immediately after a successful put (inconsistent storage)', async () => {
+    // Storage that "succeeds" on put but never indexes the result — simulates
+    // a buggy provider where the registry update path is broken.
+    const brokenStorage: StorageProvider = {
+      name: 'broken',
+      async put(_uri: string, _contents: Uint8Array) {
+        return { contentHash: 'sha256:ignored' };
+      },
+      async get(uri: string) {
+        throw new Error(`broken storage: not found: ${uri}`);
+      },
+      async resolveLatest(_uri: string) {
+        return null;
+      },
+      async list(_uri: string) {
+        return [];
+      },
+    };
+    const client = makeClient(brokenStorage);
+    await expect(
+      registerSubagent(client, { name: 'reviewer', systemPrompt: 'hi' }),
+    ).rejects.toThrow(/resolveLatest returned null immediately after put/);
+  });
 });
