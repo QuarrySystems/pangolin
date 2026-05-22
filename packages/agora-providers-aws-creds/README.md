@@ -1,13 +1,40 @@
 # @quarry-systems/agora-providers-aws-creds
 
-Scaffold package — future home of the AWS `CredentialProvider` implementation.
+A `CredentialProvider` implementation that wraps the AWS SDK's default credential chain (environment variables, shared credentials file, container IAM role, EC2 instance metadata) and projects the resolved credentials into a `ResolvedCredentials` discriminated with `kind: 'aws'`. No caching beyond what the underlying chain itself performs; integrators wanting cross-process caching wire their own resolver via `providerOverride`. Construction is side-effect-free — the chain is invoked lazily on each `resolve()` call so any SDK I/O happens at resolution time, not at client construction.
 
-The CredentialProvider will wrap the AWS default credential chain (environment variables, shared credentials file, IAM role, etc.) and will be implemented in DAG 2, conforming to the `CredentialProvider` interface defined in `@quarry-systems/agora-core`.
+## Install
 
-## Status
+```bash
+pnpm add @quarry-systems/agora-providers-aws-creds
+```
 
-Scaffold only. No public API yet.
+## Basic usage
 
-## Dependencies
+```typescript
+import { AgoraClient } from '@quarry-systems/agora-client';
+import { AwsCredentialProvider } from '@quarry-systems/agora-providers-aws-creds';
 
-- `@quarry-systems/agora-core` — workspace peer providing core types and interfaces.
+const client = new AgoraClient({
+  namespace: 'my-org',
+  credentials: { aws: new AwsCredentialProvider() },
+  // ...
+});
+```
+
+For assume-role flows or other custom credential sources that don't fit the default chain, pass `providerOverride:`:
+
+```typescript
+new AwsCredentialProvider({
+  providerOverride: async () => assumeRoleAndReturnCreds(),
+});
+```
+
+## Spec
+
+- [§5 Pluggable interfaces](../../docs/superpowers/specs/2026-05-21-agora-mvp-design.md#5-pluggable-interfaces) — the `CredentialProvider` contract this package implements.
+- [§7.5 Storage IAM](../../docs/superpowers/specs/2026-05-21-agora-mvp-design.md#75-storage-iam) — the IAM boundary this provider operates within.
+
+## Decisions
+
+- [ADR-0001 — Package scope](../../docs/decisions/0001-package-scope.md): the `@quarry-systems/agora-*` namespace this package publishes under.
+- [ADR-0007 — Inline secret TTL auto-computed](../../docs/decisions/0007-inline-secret-ttl-auto-computed.md): the secrets lifecycle this credential provider supports for Secrets Manager access.
