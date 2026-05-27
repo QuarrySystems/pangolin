@@ -50,6 +50,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      # The e2e suites load package src that imports `@quarry-systems/*` by
+      # name, resolving to built dist/; build the workspace first.
+      - name: Build
+        run: pnpm -r build
+
       # Authenticate to GHCR so the container suites can pull the pinned
       # worker image. GITHUB_TOKEN is sufficient for same-org packages;
       # harmless for a public image.

@@ -40,6 +40,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      # Cross-package imports resolve to each package's built dist/ (main:
+      # dist/index.js), so the workspace must be built before tests run.
+      - name: Build
+        run: pnpm -r build
+
       - name: Lint
         run: pnpm -r lint
 

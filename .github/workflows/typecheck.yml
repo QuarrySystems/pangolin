@@ -40,5 +40,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      # Cross-package type resolution reads each package's emitted
+      # dist/index.d.ts (types: dist/index.d.ts), so build before typechecking.
+      - name: Build
+        run: pnpm -r build
+
       - name: Typecheck
         run: pnpm -r typecheck
