@@ -10,12 +10,15 @@
   "scripts": {
     "lint": "pnpm -r run lint",
     "test": "pnpm -r run test",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "typecheck": "pnpm -r run typecheck",
     "build": "pnpm -r run build"
   },
   "devDependencies": {
+    "@types/dockerode": "^3.3.30",
     "@typescript-eslint/eslint-plugin": "^8.18.2",
     "@typescript-eslint/parser": "^8.18.2",
+    "dockerode": "^4.0.0",
     "eslint": "^8.57.1",
     "prettier": "^3.4.2",
     "typescript": "^5.7.2",

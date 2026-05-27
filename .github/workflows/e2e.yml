@@ -1,0 +1,60 @@
+name: e2e
+
+# Runs the repo-root cross-package E2E suite (`test/`), which is NOT a
+# workspace package and is therefore not covered by the `ci` workflow's
+# `pnpm -r test`.
+#
+# ubuntu-latest ships a working Docker daemon, so the container-backed suites
+# (local-docker happy path, file-editing git-push, etc.) run for real against
+# the digest-pinned `ghcr.io/quarrysystems/agora-worker` image — they
+# self-skip only when no daemon answers (see test/e2e/helpers/docker-skip.ts).
+# The live-AWS suite stays gated behind its AGORA_E2E_AWS_* env vars.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    name: root e2e suite
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Enable corepack
+        run: corepack enable
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Resolve pnpm store path
+        id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install
+
+      # Authenticate to GHCR so the container suites can pull the pinned
+      # worker image. GITHUB_TOKEN is sufficient for same-org packages;
+      # harmless for a public image.
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: E2E
+        run: pnpm test:e2e
