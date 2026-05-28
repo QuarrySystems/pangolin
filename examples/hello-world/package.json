@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "start": "tsx src/index.ts",
+    "start:env": "tsx --env-file=.env src/index.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --esModuleInterop --skipLibCheck --strict src/index.ts test/run.test.ts",
     "build": "tsc --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --esModuleInterop --skipLibCheck --strict src/index.ts"

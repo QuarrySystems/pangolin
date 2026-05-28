@@ -88,9 +88,22 @@ export async function main(): Promise<void> {
       systemPrompt: 'Just exit.',
       capabilities: ['echo-cap'],
     });
+    // Thread the host's ANTHROPIC_API_KEY into the dispatch when present, so
+    // the stock `claude-code` runtime adapter can authenticate and the dispatch
+    // can reach a clean `exitCode: 0`. Without it, the dispatch reports
+    // `provider-failed` (see the README).
+    //
+    // DEMO-ONLY shortcut: a real deployment passes credentials as per-dispatch
+    // secrets (`work.secrets`) or `secretRefs` resolved against a secrets
+    // manager — NOT as plaintext env-bundle values. This is fine for a local
+    // hello-world whose tmp storage root is cleaned up on exit.
+    const apiKey = process.env.ANTHROPIC_API_KEY;
     await client.env.register({
       name: 'minimal',
-      values: { LOG_LEVEL: 'info' },
+      values: {
+        LOG_LEVEL: 'info',
+        ...(apiKey ? { ANTHROPIC_API_KEY: apiKey } : {}),
+      },
     });
 
     // The worker image MUST be available to the local Docker daemon for
@@ -106,6 +119,32 @@ export async function main(): Promise<void> {
 
     console.log('\n=== resolved ===\n' + JSON.stringify(result.resolved, null, 2));
     console.log('\n=== stdout ===\n' + result.stdout);
+
+    // Surface the dispatch OUTCOME honestly. `result.stdout` above is the
+    // worker's structured-log stream, and the bundled `agora-setup.sh` runs
+    // (and prints its greeting) regardless of whether the *runtime adapter*
+    // step then succeeds. So printing stdout alone is NOT evidence of success.
+    // A non-zero `exitCode` — or an infrastructural `failure` block — means the
+    // dispatch did not succeed, and we must not let the process exit 0 and read
+    // as a clean run.
+    if (result.exitCode !== 0 || result.failure) {
+      console.error(
+        '\n=== dispatch FAILED ===\n' +
+          `exitCode: ${result.exitCode}\n` +
+          (result.failure
+            ? `reason:   ${result.failure.reason}\ndetail:   ${result.failure.detail}\n`
+            : '') +
+          (result.stderr ? `stderr:   ${result.stderr}\n` : '') +
+          '\nThe stock worker image runs the `claude-code` runtime adapter, which\n' +
+          'requires an ANTHROPIC_API_KEY. Without one the adapter exits non-zero and\n' +
+          'the dispatch is reported as `provider-failed`. See this example’s README.',
+      );
+      throw new Error(
+        `dispatch ${result.dispatchId} did not succeed (exitCode ${result.exitCode})`,
+      );
+    }
+
+    console.log('\n=== dispatch OK ===');
     void storageRoot; // surfaced for readers / debugging; not used post-cleanup
   } finally {
     // REFINEMENT: rm the mkdtemp'd storage root so each run does not leak
