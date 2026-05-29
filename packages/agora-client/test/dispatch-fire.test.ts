@@ -6,7 +6,6 @@ import type {
   StorageProvider,
   TaskExit,
 } from '@quarry-systems/agora-core';
-import * as secretsManager from '../src/secrets-manager.js';
 
 /**
  * In-memory storage stub. Mirrors the helper in dispatch.test.ts.
@@ -88,13 +87,6 @@ function makeCredentials(): CredentialProvider {
 
 beforeEach(() => {
   vi.restoreAllMocks();
-  vi.spyOn(secretsManager.InlineSecretStager.prototype, 'stage').mockImplementation(
-    async ({ dispatchId, envName }) => ({
-      arn: `arn:aws:secretsmanager:us-east-1:000000000000:secret:${dispatchId}/${envName}-AbCdEf`,
-      ttlSeconds: 7500,
-    }),
-  );
-  vi.spyOn(secretsManager.InlineSecretStager.prototype, 'cleanup').mockResolvedValue(undefined);
 });
 
 describe('client.dispatch.fire', () => {

@@ -12,10 +12,9 @@ import type {
   LifecycleEvent,
   ResultSink,
   DispatchResult,
+  SecretStore,
 } from '@quarry-systems/agora-core';
-import * as secretsManager from '../src/secrets-manager.js';
 import * as callbackHmac from '../src/callback-hmac.js';
-import { LocalSecretStore } from '@quarry-systems/agora-secret-store';
 
 /**
  * In-memory storage stub. `put` indexes the trailing path segment as the
@@ -141,6 +140,35 @@ function makeTelemetry(): { telemetry: TelemetryHook; events: LifecycleEvent[] }
   return { telemetry, events };
 }
 
+/**
+ * Build a minimal in-memory SecretStore stub. `staged` records every call
+ * to `stage` for assertion; `cleanupCalls` records every `cleanupByTag` call.
+ */
+function makeStore(opts: { name?: string; dir?: string } = {}): {
+  store: SecretStore;
+  staged: Array<{ name: string; value: string; ttlSeconds: number; tags?: Record<string, string> }>;
+  cleanupCalls: Array<{ tagKey: string; tagValue: string }>;
+} {
+  const staged: Array<{ name: string; value: string; ttlSeconds: number; tags?: Record<string, string> }> = [];
+  const cleanupCalls: Array<{ tagKey: string; tagValue: string }> = [];
+  const store: SecretStore = {
+    name: opts.name ?? 'test-store',
+    dir: opts.dir,
+    async stage(args) {
+      staged.push({ name: args.name, value: args.value, ttlSeconds: args.ttlSeconds, tags: args.tags });
+      return { ref: `store-ref://${args.name}`, ttlSeconds: args.ttlSeconds };
+    },
+    async resolve(ref: string) {
+      const entry = staged.find((s) => `store-ref://${s.name}` === ref);
+      return entry?.value ?? '';
+    },
+    async cleanupByTag(tagKey: string, tagValue: string) {
+      cleanupCalls.push({ tagKey, tagValue });
+    },
+  };
+  return { store, staged, cleanupCalls };
+}
+
 function makeClient(overrides: Partial<ConstructorParameters<typeof AgoraClient>[0]> = {}) {
   const storage = makeMemoryStorage();
   const { compute } = makeCompute();
@@ -158,17 +186,9 @@ function makeClient(overrides: Partial<ConstructorParameters<typeof AgoraClient>
 
 beforeEach(() => {
   vi.restoreAllMocks();
-  // Stub the InlineSecretStager constructor so `dispatchWork` does not reach AWS.
-  vi.spyOn(secretsManager.InlineSecretStager.prototype, 'stage').mockImplementation(
-    async ({ dispatchId, envName }) => ({
-      arn: `arn:aws:secretsmanager:us-east-1:000000000000:secret:${dispatchId}/${envName}-AbCdEf`,
-      ttlSeconds: 7500,
-    }),
-  );
-  vi.spyOn(secretsManager.InlineSecretStager.prototype, 'cleanup').mockResolvedValue(undefined);
   // Stub HMAC mint so callbacks don't hit AWS.
   vi.spyOn(callbackHmac, 'mintCallbackHmac').mockResolvedValue({
-    arn: 'arn:aws:secretsmanager:us-east-1:000000000000:secret:hmac-AbCdEf',
+    ref: 'store-ref://agora/callback-hmac/hmac-AbCdEf',
     ttlSeconds: 7500,
   });
 });
@@ -407,6 +427,102 @@ describe('dispatchWork — ref resolution', () => {
 });
 
 describe('dispatchWork — secrets + callback', () => {
+  it('stages per-dispatch inline secrets via the target store and emits AGORA_SECRET_STORE_KIND + AGORA_SECRET_STORE_DIR', async () => {
+    const storage = makeMemoryStorage();
+    storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
+    const { store, staged } = makeStore({ name: 'local-file', dir: '/tmp/agora-secrets' });
+    const { compute, runs } = makeCompute();
+    const client = new AgoraClient({
+      namespace: 'ns',
+      compute: { default: compute },
+      credentials: { default: makeCredentials() },
+      storage,
+      targets: { prod: { compute: 'default', credentials: 'default', secretStore: 's' } },
+      secretStores: { s: store },
+    });
+
+    const inflight = await fireWork(
+      client,
+      { subagent: 's', target: 'prod', secrets: { TOKEN: { inline: 'v' } } },
+      { workerImage: WORKER_IMAGE },
+    );
+
+    // The staged entry should have name `<dispatchId>/TOKEN`
+    expect(staged).toHaveLength(1);
+    expect(staged[0].name).toBe(`${inflight.dispatchId}/TOKEN`);
+    expect(staged[0].value).toBe('v');
+
+    const spec = runs[0].spec;
+    expect(spec.env.AGORA_SECRET_STORE_KIND).toBe('local-file');
+    expect(spec.env.AGORA_SECRET_STORE_DIR).toBe('/tmp/agora-secrets');
+  });
+
+  it('emits AGORA_SECRET_STORE_KIND but NOT AGORA_SECRET_STORE_DIR when store has no dir', async () => {
+    const storage = makeMemoryStorage();
+    storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
+    const { store } = makeStore({ name: 'aws-secrets-manager' }); // no dir
+    const { compute, runs } = makeCompute();
+    const client = new AgoraClient({
+      namespace: 'ns',
+      compute: { default: compute },
+      credentials: { default: makeCredentials() },
+      storage,
+      targets: { prod: { compute: 'default', credentials: 'default', secretStore: 's' } },
+      secretStores: { s: store },
+    });
+
+    await dispatchWork(
+      client,
+      { subagent: 's', target: 'prod', secrets: { TOKEN: { inline: 'v' } } },
+      { workerImage: WORKER_IMAGE },
+    );
+
+    expect(runs[0].spec.env.AGORA_SECRET_STORE_KIND).toBe('aws-secrets-manager');
+    expect(runs[0].spec.env.AGORA_SECRET_STORE_DIR).toBeUndefined();
+  });
+
+  it('throws when inline secrets are staged but target has no secretStore', async () => {
+    const storage = makeMemoryStorage();
+    storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
+    const { compute } = makeCompute();
+    const client = new AgoraClient({
+      namespace: 'ns',
+      compute: { default: compute },
+      credentials: { default: makeCredentials() },
+      storage,
+      targets: { prod: { compute: 'default', credentials: 'default' } }, // no secretStore
+    });
+
+    await expect(
+      dispatchWork(
+        client,
+        { subagent: 's', target: 'prod', secrets: { TOKEN: { inline: 'v' } } },
+        { workerImage: WORKER_IMAGE },
+      ),
+    ).rejects.toThrow(/secretStore/);
+  });
+
+  it('throws when callback is set but target has no secretStore', async () => {
+    const storage = makeMemoryStorage();
+    storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
+    const { compute } = makeCompute();
+    const client = new AgoraClient({
+      namespace: 'ns',
+      compute: { default: compute },
+      credentials: { default: makeCredentials() },
+      storage,
+      targets: { prod: { compute: 'default', credentials: 'default' } }, // no secretStore
+    });
+
+    await expect(
+      dispatchWork(
+        client,
+        { subagent: 's', target: 'prod', callback: { url: 'https://example.com/cb' } },
+        { workerImage: WORKER_IMAGE },
+      ),
+    ).rejects.toThrow(/secretStore/);
+  });
+
   it('stages inline per-dispatch secrets and merges with per-dispatch precedence over env-bundle secrets', async () => {
     const storage = makeMemoryStorage();
     storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
@@ -416,13 +532,15 @@ describe('dispatchWork — secrets + callback', () => {
       values: {},
       secretRefs: { GH_TOKEN: 'arn:env-bundle:gh-token', DB: 'arn:env-bundle:db' },
     });
+    const { store } = makeStore({ name: 'test-store' });
     const { compute, runs } = makeCompute();
     const client = new AgoraClient({
       namespace: 'ns',
       compute: { default: compute },
       credentials: { default: makeCredentials() },
       storage,
-      targets: { prod: { compute: 'default', credentials: 'default' } },
+      targets: { prod: { compute: 'default', credentials: 'default', secretStore: 's' } },
+      secretStores: { s: store },
     });
 
     await dispatchWork(
@@ -433,7 +551,7 @@ describe('dispatchWork — secrets + callback', () => {
         target: 'prod',
         secrets: {
           GH_TOKEN: { inline: 'override-me' },           // collides → per-dispatch wins
-          API_KEY: { arn: 'arn:per-dispatch:api-key' },  // pre-resolved ARN form
+          API_KEY: { ref: 'store-ref://per-dispatch:api-key' },  // pre-resolved ref form
         },
       },
       { workerImage: WORKER_IMAGE },
@@ -442,14 +560,14 @@ describe('dispatchWork — secrets + callback', () => {
     const refs = runs[0].spec.secretRefs;
     // env-bundle secret survives when no collision
     expect(refs.DB).toBe('arn:env-bundle:db');
-    // pre-resolved per-dispatch ARN passes through
-    expect(refs.API_KEY).toBe('arn:per-dispatch:api-key');
-    // collision: per-dispatch (stager-produced) wins, NOT env-bundle
+    // pre-resolved per-dispatch ref passes through
+    expect(refs.API_KEY).toBe('store-ref://per-dispatch:api-key');
+    // collision: per-dispatch (store-staged) wins, NOT env-bundle
     expect(refs.GH_TOKEN).not.toBe('arn:env-bundle:gh-token');
-    expect(refs.GH_TOKEN).toMatch(/GH_TOKEN-AbCdEf$/);
+    expect(refs.GH_TOKEN).toMatch(/GH_TOKEN$/);
   });
 
-  it('passes per-dispatch secret refs to the worker via AGORA_PER_DISPATCH_SECRET_REFS_JSON so the worker resolves+redacts them', async () => {
+  it('passes per-dispatch secret refs to the worker via AGORA_PER_DISPATCH_SECRET_REFS_JSON', async () => {
     const storage = makeMemoryStorage();
     storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
     storage.seed('shared', 'env', 'ns', 'sha256:e', {
@@ -458,13 +576,15 @@ describe('dispatchWork — secrets + callback', () => {
       values: {},
       secretRefs: { DB: 'arn:env-bundle:db' },
     });
+    const { store } = makeStore({ name: 'test-store' });
     const { compute, runs } = makeCompute();
     const client = new AgoraClient({
       namespace: 'ns',
       compute: { default: compute },
       credentials: { default: makeCredentials() },
       storage,
-      targets: { prod: { compute: 'default', credentials: 'default' } },
+      targets: { prod: { compute: 'default', credentials: 'default', secretStore: 's' } },
+      secretStores: { s: store },
     });
 
     await dispatchWork(
@@ -474,7 +594,7 @@ describe('dispatchWork — secrets + callback', () => {
         env: 'shared',
         target: 'prod',
         secrets: {
-          API_KEY: { arn: 'arn:per-dispatch:api-key' },
+          API_KEY: { ref: 'store-ref://per-dispatch:api-key' },
           INLINE_TOK: { inline: 'v' },
         },
       },
@@ -485,78 +605,25 @@ describe('dispatchWork — secrets + callback', () => {
     expect(raw).toBeTruthy();
     const refs = JSON.parse(raw);
     // Per-dispatch refs are present so the worker can resolve + register them.
-    expect(refs.API_KEY).toBe('arn:per-dispatch:api-key');
-    expect(refs.INLINE_TOK).toMatch(/INLINE_TOK-AbCdEf$/);
+    expect(refs.API_KEY).toBe('store-ref://per-dispatch:api-key');
+    expect(refs.INLINE_TOK).toMatch(/INLINE_TOK$/);
     // Env-bundle secrets are NOT in this map — the worker resolves those from
     // the env-bundle blob itself; duplicating them here would double-resolve.
     expect(refs.DB).toBeUndefined();
   });
 
-  it('stages per-dispatch inline secrets via LocalSecretStore (local-secret:// refs + AGORA_SECRET_STORE_DIR) when storage is file://', async () => {
-    const storage = makeMemoryStorage();
-    // Mark this storage as local so dispatchWork routes per-dispatch staging
-    // to the on-disk LocalSecretStore instead of AWS Secrets Manager.
-    (storage as { rootUri?: string }).rootUri = 'file:///tmp/agora-local-store';
-    storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
-
-    let dirAtRun: string | undefined;
-    let refsAtRun: Record<string, string> | undefined;
-    let resolvedAtRun: string | undefined;
-    // Resolve the staged secret inside run() — files still exist there
-    // (the dispatcher cleans the dir only after awaitExit).
-    const compute: ComputeProvider = {
-      name: 'local',
-      async run(spec) {
-        dirAtRun = spec.env.AGORA_SECRET_STORE_DIR;
-        refsAtRun = JSON.parse(spec.env.AGORA_PER_DISPATCH_SECRET_REFS_JSON);
-        const store = new LocalSecretStore({ dir: dirAtRun! });
-        resolvedAtRun = await store.resolve(refsAtRun!.DEPLOY_KEY);
-        return { providerTaskId: 'p-local' };
-      },
-      async awaitExit(): Promise<TaskExit> {
-        return {
-          exitCode: 0,
-          startedAt: new Date(0),
-          finishedAt: new Date(1000),
-          stdout: '',
-          stderr: '',
-        };
-      },
-    };
-    const client = new AgoraClient({
-      namespace: 'ns',
-      compute: { local: compute },
-      credentials: { none: makeCredentials() },
-      storage,
-      targets: { t: { compute: 'local', credentials: 'none' } },
-    });
-
-    await dispatchWork(
-      client,
-      {
-        subagent: 's',
-        target: 't',
-        secrets: { DEPLOY_KEY: { inline: 'LOCAL_SECRET_VAL' } },
-      },
-      { workerImage: WORKER_IMAGE },
-    );
-
-    expect(dirAtRun).toBeTruthy();
-    expect(refsAtRun!.DEPLOY_KEY.startsWith('local-secret://')).toBe(true);
-    // The full round-trip: the worker (here, run()) resolves the staged value.
-    expect(resolvedAtRun).toBe('LOCAL_SECRET_VAL');
-  });
-
   it('mints callback HMAC and injects AGORA_CALLBACK_URL + AGORA_CALLBACK_TOKEN_REF when work.callback set', async () => {
     const storage = makeMemoryStorage();
     storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
+    const { store } = makeStore({ name: 'test-store' });
     const { compute, runs } = makeCompute();
     const client = new AgoraClient({
       namespace: 'ns',
       compute: { default: compute },
       credentials: { default: makeCredentials() },
       storage,
-      targets: { prod: { compute: 'default', credentials: 'default' } },
+      targets: { prod: { compute: 'default', credentials: 'default', secretStore: 's' } },
+      secretStores: { s: store },
     });
 
     await dispatchWork(
@@ -567,7 +634,7 @@ describe('dispatchWork — secrets + callback', () => {
 
     expect(callbackHmac.mintCallbackHmac).toHaveBeenCalledTimes(1);
     expect(runs[0].spec.env.AGORA_CALLBACK_URL).toBe('https://example.com/cb');
-    expect(runs[0].spec.env.AGORA_CALLBACK_TOKEN_REF).toMatch(/hmac-AbCdEf$/);
+    expect(runs[0].spec.env.AGORA_CALLBACK_TOKEN_REF).toMatch(/hmac-AbCdEf/);
   });
 
   it('does not mint HMAC when no callback is configured', async () => {
@@ -589,19 +656,19 @@ describe('dispatchWork — secrets + callback', () => {
     expect(runs[0].spec.env.AGORA_CALLBACK_TOKEN_REF).toBeUndefined();
   });
 
-  it('flows dispatchTimeoutSeconds to the stager', async () => {
+  it('flows dispatchTimeoutSeconds to the store stage call via computeInlineSecretTtl', async () => {
     const storage = makeMemoryStorage();
     storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
+    const { store, staged } = makeStore({ name: 'test-store' });
     const { compute } = makeCompute();
     const client = new AgoraClient({
       namespace: 'ns',
       compute: { default: compute },
       credentials: { default: makeCredentials() },
       storage,
-      targets: { prod: { compute: 'default', credentials: 'default' } },
+      targets: { prod: { compute: 'default', credentials: 'default', secretStore: 's' } },
+      secretStores: { s: store },
     });
-    const stageSpy = secretsManager.InlineSecretStager.prototype
-      .stage as unknown as ReturnType<typeof vi.fn>;
 
     await dispatchWork(
       client,
@@ -614,11 +681,9 @@ describe('dispatchWork — secrets + callback', () => {
       { workerImage: WORKER_IMAGE },
     );
 
-    expect(stageSpy).toHaveBeenCalledTimes(1);
-    expect(stageSpy.mock.calls[0][0]).toMatchObject({
-      envName: 'K',
-      dispatchTimeoutSeconds: 1800,
-    });
+    expect(staged).toHaveLength(1);
+    // TTL = 1800 + 300 = 2100
+    expect(staged[0].ttlSeconds).toBe(2100);
   });
 });
 
@@ -760,19 +825,19 @@ describe('dispatchWork — provider + telemetry + sink + record', () => {
     expect(result.resolved.subagent.contentHash).toBe('sha256:s');
   });
 
-  it('cleans up per-dispatch staged secrets after awaitExit', async () => {
+  it('cleans up per-dispatch staged secrets after awaitExit via store.cleanupByTag', async () => {
     const storage = makeMemoryStorage();
     storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
+    const { store, cleanupCalls } = makeStore({ name: 'test-store' });
     const { compute } = makeCompute();
     const client = new AgoraClient({
       namespace: 'ns',
       compute: { default: compute },
       credentials: { default: makeCredentials() },
       storage,
-      targets: { prod: { compute: 'default', credentials: 'default' } },
+      targets: { prod: { compute: 'default', credentials: 'default', secretStore: 's' } },
+      secretStores: { s: store },
     });
-    const cleanupSpy = secretsManager.InlineSecretStager.prototype
-      .cleanup as unknown as ReturnType<typeof vi.fn>;
 
     const result = await dispatchWork(
       client,
@@ -782,12 +847,15 @@ describe('dispatchWork — provider + telemetry + sink + record', () => {
 
     // cleanup is best-effort; allow microtask flush
     await new Promise((r) => setImmediate(r));
-    expect(cleanupSpy).toHaveBeenCalledWith(result.dispatchId);
+    expect(cleanupCalls).toHaveLength(1);
+    expect(cleanupCalls[0].tagKey).toBe('agora:dispatchId');
+    expect(cleanupCalls[0].tagValue).toBe(result.dispatchId);
   });
 
   it('cleans up per-dispatch staged secrets even when awaitExit throws', async () => {
     const storage = makeMemoryStorage();
     storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
+    const { store, cleanupCalls } = makeStore({ name: 'test-store' });
     // Compute provider whose awaitExit throws — simulates a provider-side
     // failure between run() and exit. The cleanup of per-dispatch staged
     // secrets must still happen (best-effort, never propagate).
@@ -805,10 +873,9 @@ describe('dispatchWork — provider + telemetry + sink + record', () => {
       compute: { default: throwingCompute },
       credentials: { default: makeCredentials() },
       storage,
-      targets: { prod: { compute: 'default', credentials: 'default' } },
+      targets: { prod: { compute: 'default', credentials: 'default', secretStore: 's' } },
+      secretStores: { s: store },
     });
-    const cleanupSpy = secretsManager.InlineSecretStager.prototype
-      .cleanup as unknown as ReturnType<typeof vi.fn>;
 
     await expect(
       dispatchWork(
@@ -825,7 +892,9 @@ describe('dispatchWork — provider + telemetry + sink + record', () => {
 
     // cleanup is best-effort; allow microtask flush
     await new Promise((r) => setImmediate(r));
-    expect(cleanupSpy).toHaveBeenCalledWith('cleanup-on-throw-id');
+    expect(cleanupCalls).toHaveLength(1);
+    expect(cleanupCalls[0].tagKey).toBe('agora:dispatchId');
+    expect(cleanupCalls[0].tagValue).toBe('cleanup-on-throw-id');
   });
 
   it('honors work.retentionDays in the written record', async () => {
@@ -916,19 +985,19 @@ describe('fireWork / reconcile split (D9)', () => {
     expect(parsed.target).toBe('prod');
   });
 
-  it('cleanup() sweeps per-dispatch staged secrets', async () => {
+  it('cleanup() calls store.cleanupByTag for per-dispatch staged secrets', async () => {
     const storage = makeMemoryStorage();
     storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
+    const { store, cleanupCalls } = makeStore({ name: 'test-store' });
     const { compute } = makeCompute();
     const client = new AgoraClient({
       namespace: 'ns',
       compute: { default: compute },
       credentials: { default: makeCredentials() },
       storage,
-      targets: { prod: { compute: 'default', credentials: 'default' } },
+      targets: { prod: { compute: 'default', credentials: 'default', secretStore: 's' } },
+      secretStores: { s: store },
     });
-    const cleanupSpy = secretsManager.InlineSecretStager.prototype
-      .cleanup as unknown as ReturnType<typeof vi.fn>;
 
     const inflight = await fireWork(
       client,
@@ -938,6 +1007,8 @@ describe('fireWork / reconcile split (D9)', () => {
     inflight.cleanup();
 
     await new Promise((r) => setImmediate(r)); // cleanup is best-effort; flush microtasks
-    expect(cleanupSpy).toHaveBeenCalledWith(inflight.dispatchId);
+    expect(cleanupCalls).toHaveLength(1);
+    expect(cleanupCalls[0].tagKey).toBe('agora:dispatchId');
+    expect(cleanupCalls[0].tagValue).toBe(inflight.dispatchId);
   });
 });
