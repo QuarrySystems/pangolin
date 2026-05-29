@@ -71,7 +71,7 @@ describe("spawnClaude", () => {
   );
 
   it.skipIf(skipOnWindows)(
-    "invokes the binary with `--print <prompt>` as the first two args",
+    "invokes the binary with `--print <prompt>` when dangerouslySkipPermissions is unset",
     async () => {
       // Stub echoes its own argv (one arg per line) so the test can
       // assert ordering without depending on shell quoting.
@@ -90,8 +90,38 @@ describe("spawnClaude", () => {
 
       expect(result.exitCode).toBe(0);
       const lines = result.stdout.split("\n").filter((l) => l.length > 0);
-      expect(lines[0]).toBe("--print");
-      expect(lines[1]).toBe("the-rendered-prompt");
+      // Spawn is policy-free: it only emits the flag when the caller
+      // asked for it. The adapter resolves the policy from env.
+      expect(lines).toEqual(["--print", "the-rendered-prompt"]);
+    },
+  );
+
+  it.skipIf(skipOnWindows)(
+    "inserts --dangerously-skip-permissions before the prompt when requested",
+    async () => {
+      await writeFile(
+        stubBin,
+        '#!/bin/bash\nfor a in "$@"; do echo "$a"; done\n',
+      );
+      await chmod(stubBin, 0o755);
+
+      const result = await spawnClaude({
+        prompt: "the-rendered-prompt",
+        workspaceDir: dir,
+        env: {},
+        claudeBin: stubBin,
+        dangerouslySkipPermissions: true,
+      });
+
+      expect(result.exitCode).toBe(0);
+      const lines = result.stdout.split("\n").filter((l) => l.length > 0);
+      // Flag MUST precede the prompt so claude reads it as a flag, not as
+      // text appended to whatever the prompt arg consumed.
+      expect(lines).toEqual([
+        "--print",
+        "--dangerously-skip-permissions",
+        "the-rendered-prompt",
+      ]);
     },
   );
 
