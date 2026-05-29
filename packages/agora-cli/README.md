@@ -13,20 +13,35 @@ pnpm add -D @quarry-systems/agora-cli
 ```bash
 # Register artifacts ad-hoc
 agora capabilities register --name git-write --from ./caps/git-write/
-agora subagent register --name code-reviewer --from ./subagents/code-reviewer.yaml
+agora subagent register --name code-reviewer \
+  --system-prompt "Review code carefully." --capability git-write
 agora env register --name prod --secret CLAUDE_API_KEY=arn:...
 
 # Or reconcile a full manifest
 agora deploy --from agora-manifest.yaml
 
+# Or bulk-import an existing Claude Code skill/agent tree
+agora capabilities sync --provider claude-code
+agora subagent sync --provider claude-code
+
 # Then dispatch
-agora dispatch --subagent code-reviewer --env prod \
-  --input '{"repoUrl":"https://github.com/my-org/repo"}' --target fargate-prod
+agora dispatch run --target fargate-prod --subagent code-reviewer --env prod \
+  --worker-image public.ecr.aws/quarry-systems/agora-worker@sha256:...
 agora dispatch describe <id>
 agora dispatch cancel <id>
 ```
 
 The CLI expects an `agora.config.ts` in the working directory exporting an `AgoraClient` as the default (or named `client`) export.
+
+## Guides
+
+- [Getting started](../../docs/getting-started.md) — zero-to-first-dispatch runbook including CLI wiring and `agora.config.mjs`.
+- [Dispatch lifecycle](../../docs/dispatch-lifecycle.md) — what each event in worker stdout means, and which step each `dispatch.failed.reason` maps to.
+- [Capability recipes](../../docs/capability-recipes.md) — where to put files so the worker picks them up (skills, settings, plugins, setup scripts), and the `agora-setup.sh` single-slot constraint that catches first-time authors.
+- [Sync providers](../../docs/sync-providers.md) — `agora capabilities sync` / `agora subagent sync` reference, the `claude-code` and `stoa` providers shipped today, and how to author a new one.
+- [needs_input](../../docs/needs-input.md) — how a sub-agent pauses for clarification and how to resume it.
+- [Writing a provider](../../docs/writing-a-provider.md) — plug in a new compute backend, storage layer, credential source, or result sink.
+- [Remote dispatch over SSH](../../docs/remote-dispatch-windows.md) — orchestrate from one machine, run workers on another's Docker daemon.
 
 ## Spec
 
