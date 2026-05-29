@@ -109,13 +109,10 @@ function makeFakeClient(): FakeClient {
 
 function buildAll(fakeClient: FakeClient) {
   const ctx = { getClient: async () => fakeClient as any };
-  const program = buildProgram(ctx);
-  attachCapabilitiesCmd(program, ctx);
-  attachSubagentCmd(program, ctx);
-  attachEnvCmd(program, ctx);
-  attachDispatchCmd(program, ctx);
-  attachDeployCmd(program, ctx);
-  return program;
+  // buildProgram now wires every attach*Cmd internally (since the index.ts
+  // bin fix); the explicit per-command attaches that used to live here
+  // would now double-register and commander throws.
+  return buildProgram(ctx);
 }
 
 describe('agora-cli integration', () => {

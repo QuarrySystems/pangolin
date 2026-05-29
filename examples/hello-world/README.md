@@ -37,6 +37,13 @@ where you stalled.
 - Docker Desktop (or equivalent) running locally
 - A locally-built `ghcr.io/quarrysystems/agora-worker:latest` image
   available to your Docker daemon
+- **An `ANTHROPIC_API_KEY`** available to the dispatch. The stock worker
+  image runs the `claude-code` runtime adapter, which spawns the `claude`
+  binary. Without a key the adapter exits non-zero and the dispatch is
+  reported as **`provider-failed`** (see "What you'll see" below). This is
+  expected v0.1 behavior — the adapter, not agora's machinery, is what
+  needs the credential. A credential-free `noop` runtime adapter for a
+  zero-setup on-ramp is tracked as a follow-up.
 
 The example sets `allowUnpinnedImage: true` on `LocalDockerProvider` so
 the `:latest` tag works for local iteration. Production dispatches must
@@ -68,7 +75,10 @@ pnpm -F hello-world-example build
 pnpm -F hello-world-example start
 ```
 
-You should see two blocks of output:
+### What you'll see
+
+First, the `resolved` block — the bound artifact refs, the audit trail
+proving exactly which bytes ran:
 
 ```text
 === resolved ===
@@ -77,10 +87,34 @@ You should see two blocks of output:
   "capabilities": [{ "name": "echo-cap", "contentHash": "sha256:...", "registeredAt": "..." }],
   "env":          [{ "name": "minimal",  "contentHash": "sha256:...", "registeredAt": "..." }]
 }
-
-=== stdout ===
-hello from agora-worker
 ```
+
+Then `stdout`. Note: this is the worker's **structured-log stream** (one
+JSON object per line), *not* a bare line of text. The `agora-setup.sh`
+greeting is carried inside the `setup-script.ran` event's `stdout` field:
+
+```text
+=== stdout ===
+{"kind":"worker.boot","dispatchId":"..."}
+{"kind":"setup-script.ran","exitCode":0,"stdout":"hello from agora-worker\n","stderr":""}
+{"kind":"dispatch.finished","dispatchId":"...","exitCode":0}
+```
+
+Finally, the dispatch **outcome**:
+
+- **With** an `ANTHROPIC_API_KEY`, the `claude-code` adapter exits 0 and you
+  see `=== dispatch OK ===` (exit code 0).
+- **Without** a key, the adapter exits non-zero — the `setup-script.ran`
+  line above still shows the greeting (the setup step ran fine), but the
+  terminal event is `dispatch.failed` / `provider-failed`, and the example
+  prints `=== dispatch FAILED ===` and exits non-zero:
+
+  ```text
+  === dispatch FAILED ===
+  exitCode: 1
+  reason:   provider-failed
+  detail:   runtime exited with code 1
+  ```
 
 The `resolved` block is the same shape your production callers will see
 — it's the contract every `ResultSink.collect()` honors regardless of

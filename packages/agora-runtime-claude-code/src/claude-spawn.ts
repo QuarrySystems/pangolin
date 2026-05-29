@@ -25,13 +25,25 @@ export interface SpawnClaudeOptions {
   claudeBin?: string;
   /** Additional arguments appended after `--print <prompt>`. */
   extraArgs?: ReadonlyArray<string>;
+  /**
+   * When true, inserts `--dangerously-skip-permissions` between `--print`
+   * and the prompt so claude bypasses the interactive tool-call gate.
+   * The adapter chooses this based on `AGORA_CLAUDE_PERMISSION_MODE`
+   * (see adapter.ts). Spawn itself is policy-free.
+   */
+  dangerouslySkipPermissions?: boolean;
 }
 
 export async function spawnClaude(
   opts: SpawnClaudeOptions,
 ): Promise<ClaudeSpawnResult> {
   const bin = opts.claudeBin ?? "claude";
-  const args = ["--print", opts.prompt, ...(opts.extraArgs ?? [])];
+  const args = [
+    "--print",
+    ...(opts.dangerouslySkipPermissions ? ["--dangerously-skip-permissions"] : []),
+    opts.prompt,
+    ...(opts.extraArgs ?? []),
+  ];
 
   return new Promise<ClaudeSpawnResult>((resolve, reject) => {
     const child = spawn(bin, args, {

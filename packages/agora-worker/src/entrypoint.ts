@@ -428,6 +428,7 @@ export async function runWorker(
     model?: string;
   };
   let runtimeExit;
+  const runtimeStartedAt = Date.now();
   try {
     runtimeExit = await adapter.invoke(
       {
@@ -454,6 +455,20 @@ export async function runWorker(
     // catch above's early return — so the background loop never leaks.
     if (channel) await channel.stop();
   }
+
+  // Emit the runtime adapter's captured stdout/stderr as a worker-internal
+  // structured-log event, symmetric with `setup-script.ran`. This is the
+  // ONLY place the adapter's output reaches the dispatch result — without
+  // it, the orchestrator sees only worker events and runtime work is opaque.
+  // Not a lifecycle event (the §5.7 vocabulary is closed at six per ADR-0004);
+  // travels the same worker-stdout channel as `worker.boot` / `setup-script.ran`.
+  logger.log({
+    kind: 'runtime.adapter.ran',
+    exitCode: runtimeExit.exitCode,
+    durationMs: Date.now() - runtimeStartedAt,
+    stdout: runtimeExit.stdout,
+    stderr: runtimeExit.stderr,
+  });
 
   // Step 13: needs_input sentinel resolution.
   if (runtimeExit.needsInputSentinelPath) {

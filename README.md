@@ -73,6 +73,36 @@ Plus:
   decisions taken during MVP design.
 - [`docker/`](docker/) — the published worker OCI image build context.
 
+## User guides
+
+Start here if you're new:
+
+- [Getting started](docs/getting-started.md) — zero-to-first-dispatch on
+  local Docker. Build the worker image, write `agora.config.mjs`, wire the
+  CLI and MCP server, register and dispatch.
+
+Reference:
+
+- [Dispatch lifecycle](docs/dispatch-lifecycle.md) — what each event in the
+  worker stdout stream means, which lifecycle step each `dispatch.failed`
+  reason maps to.
+- [Capability recipes](docs/capability-recipes.md) — where to put files so the
+  worker picks them up (skills, settings, plugins, setup scripts), and the
+  `agora-setup.sh` single-slot constraint that catches first-time authors.
+- [Sync providers](docs/sync-providers.md) — `agora capabilities sync` /
+  `agora subagent sync` reference, the `claude-code` and `stoa` providers
+  shipped today, and how to author a new one.
+- [needs_input](docs/needs-input.md) — how a sub-agent pauses for
+  clarification, what the orchestrator does with the question, and how
+  re-dispatch threads continuity through `partial_state`.
+
+Extension + deployment:
+
+- [Writing a provider](docs/writing-a-provider.md) — plug in a new compute
+  backend, storage layer, credential source, or result sink.
+- [Remote dispatch over SSH](docs/remote-dispatch-windows.md) — orchestrate
+  from one machine, run workers on another machine's Docker daemon.
+
 ## Architecture
 
 The package dependency graph (§8 of the spec). `agora-core` is the

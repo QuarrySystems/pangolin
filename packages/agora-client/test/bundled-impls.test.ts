@@ -177,4 +177,95 @@ describe('StdoutResultSink', () => {
       writeSpy.mockRestore();
     }
   });
+
+  it('attributes an infrastructural failure to result.failure and a dispatch.failed summary', async () => {
+    const sink = new StdoutResultSink();
+    const writes: string[] = [];
+    const writeSpy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation((chunk: string | Uint8Array) => {
+        writes.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'));
+        return true;
+      });
+    try {
+      const result = await sink.collect(
+        handle,
+        makeExit({ exitCode: 1, providerFailureReason: 'image pull failed' }),
+        { dispatchId: 'd-fail', resolved: resolvedFixture },
+      );
+      // A provider-reported infrastructural failure MUST populate result.failure
+      // (the DispatchResult contract); an unrecognized reason maps to 'provider-failed'
+      // with the raw string preserved in `detail`.
+      expect(result.failure).toEqual({ reason: 'provider-failed', detail: 'image pull failed' });
+      // ...and the one-line summary must not claim the dispatch "finished".
+      const summary = JSON.parse(writes[0]!.trim()) as Record<string, unknown>;
+      expect(summary.kind).toBe('dispatch.failed');
+    } finally {
+      writeSpy.mockRestore();
+    }
+  });
+
+  it('preserves a recognized provider failure reason verbatim', async () => {
+    const sink = new StdoutResultSink();
+    const writeSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    try {
+      const result = await sink.collect(
+        handle,
+        makeExit({ exitCode: 1, providerFailureReason: 'timeout' }),
+        { dispatchId: 'd-timeout', resolved: resolvedFixture },
+      );
+      expect(result.failure).toEqual({ reason: 'timeout', detail: 'timeout' });
+    } finally {
+      writeSpy.mockRestore();
+    }
+  });
+
+  it("populates result.needsInput.question when the worker logs a 'dispatch.needs_input' event", async () => {
+    const sink = new StdoutResultSink();
+    const writeSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    try {
+      // Per agora-worker (entrypoint.ts step 13), a valid sentinel pauses the
+      // dispatch cleanly: the worker logs a JSON line with the question and
+      // exits 0. Result.needsInput SHOULD reflect that so an overnight
+      // orchestrator can detect-and-continue without grepping stdout itself.
+      const stdout =
+        '{"kind":"worker.boot","dispatchId":"d-needs"}\n' +
+        '{"kind":"setup-script.ran","exitCode":0,"stdout":"hi\\n","stderr":""}\n' +
+        '{"kind":"dispatch.needs_input","dispatchId":"d-needs","question":"Which DB driver?"}\n';
+      const result = await sink.collect(
+        handle,
+        makeExit({ exitCode: 0, stdout }),
+        { dispatchId: 'd-needs', resolved: resolvedFixture },
+      );
+      expect(result.needsInput).toEqual({ question: 'Which DB driver?' });
+      // Sanity: it's not a failure path.
+      expect(result.failure).toBeUndefined();
+    } finally {
+      writeSpy.mockRestore();
+    }
+  });
+
+  it("emits a 'dispatch.needs_input' one-line summary when the worker paused for input", async () => {
+    const sink = new StdoutResultSink();
+    const writes: string[] = [];
+    const writeSpy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation((chunk: string | Uint8Array) => {
+        writes.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'));
+        return true;
+      });
+    try {
+      const stdout =
+        '{"kind":"dispatch.needs_input","dispatchId":"d-needs","question":"Which DB driver?"}\n';
+      await sink.collect(handle, makeExit({ exitCode: 0, stdout }), {
+        dispatchId: 'd-needs',
+        resolved: resolvedFixture,
+      });
+      const summary = JSON.parse(writes[0]!.trim()) as Record<string, unknown>;
+      expect(summary.kind).toBe('dispatch.needs_input');
+      expect(summary.question).toBe('Which DB driver?');
+    } finally {
+      writeSpy.mockRestore();
+    }
+  });
 });

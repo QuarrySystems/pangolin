@@ -1,6 +1,7 @@
 import { readFileSync } from "fs";
 import { join } from "path";
 import { describe, it, expect } from "vitest";
+import * as agoraClient from "../src/index.js";
 
 const pkgPath = join(__dirname, "..", "package.json");
 const readmePath = join(__dirname, "..", "README.md");
@@ -36,5 +37,11 @@ describe("agora-client scaffold shape", () => {
   it("README mentions agora-client / SDK identity", () => {
     // Case-insensitive: task-readmes-per-package owns the exact prose.
     expect(readme.toLowerCase()).toContain("agora-client");
+  });
+});
+
+describe("package barrel — fire/reconcile seam (D9)", () => {
+  it("re-exports fireWork", () => {
+    expect(typeof agoraClient.fireWork).toBe("function");
   });
 });

@@ -5,7 +5,7 @@
 // on every platform; the integration test that exercises `invoke()` relies
 // on a bash-stub binary and is gated off on Windows.
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtemp, writeFile, chmod, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -168,7 +168,71 @@ describe("ClaudeCodeRuntimeAdapter — invoke()", () => {
       expect(exit.exitCode).toBe(0);
       const lines = exit.stdout.split("\n").filter((l) => l.length > 0);
       expect(lines[0]).toBe("--print");
-      expect(lines[1]).toBe("hi world");
+      expect(lines[1]).toBe("--dangerously-skip-permissions");
+      expect(lines[2]).toBe("hi world");
+    },
+  );
+
+  it.skipIf(skipOnWindows)(
+    "AGORA_CLAUDE_PERMISSION_MODE=strict drops --dangerously-skip-permissions",
+    async () => {
+      await writeFile(
+        stubBin,
+        '#!/bin/bash\nfor a in "$@"; do echo "$a"; done\n',
+      );
+      await chmod(stubBin, 0o755);
+
+      const adapter = new ClaudeCodeRuntimeAdapter({ claudeBin: stubBin });
+      const exit = await adapter.invoke(
+        { systemPrompt: "do nothing", workspaceDir: dir },
+        {
+          dispatchId: "d-strict",
+          env: {
+            PATH: process.env.PATH ?? "",
+            AGORA_CLAUDE_PERMISSION_MODE: "strict",
+          },
+        },
+      );
+
+      expect(exit.exitCode).toBe(0);
+      const lines = exit.stdout.split("\n").filter((l) => l.length > 0);
+      expect(lines).not.toContain("--dangerously-skip-permissions");
+      expect(lines[0]).toBe("--print");
+    },
+  );
+
+  it.skipIf(skipOnWindows)(
+    "unrecognized AGORA_CLAUDE_PERMISSION_MODE warns and falls back to bypass",
+    async () => {
+      await writeFile(
+        stubBin,
+        '#!/bin/bash\nfor a in "$@"; do echo "$a"; done\n',
+      );
+      await chmod(stubBin, 0o755);
+
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        const adapter = new ClaudeCodeRuntimeAdapter({ claudeBin: stubBin });
+        const exit = await adapter.invoke(
+          { systemPrompt: "anything", workspaceDir: dir },
+          {
+            dispatchId: "d-typo",
+            env: {
+              PATH: process.env.PATH ?? "",
+              AGORA_CLAUDE_PERMISSION_MODE: "bypaaass",
+            },
+          },
+        );
+
+        expect(exit.exitCode).toBe(0);
+        const lines = exit.stdout.split("\n").filter((l) => l.length > 0);
+        expect(lines).toContain("--dangerously-skip-permissions");
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringMatching(/unrecognized AGORA_CLAUDE_PERMISSION_MODE/),
+        );
+      } finally {
+        warnSpy.mockRestore();
+      }
     },
   );
 });
