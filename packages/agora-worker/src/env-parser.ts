@@ -34,6 +34,12 @@ export interface WorkerConfig {
    * path, where the worker falls back to `AwsSecretStore`.
    */
   secretStoreDir?: string;
+  /**
+   * Which secret-store adapter the worker should instantiate.
+   * Defaults to `"aws-secrets-manager"` when `AGORA_SECRET_STORE_KIND` is
+   * absent, preserving the existing AWS behavior.
+   */
+  secretStoreKind: "aws-secrets-manager" | "local-file";
   runtimeAdapter: string;
   setupTimeoutSeconds: number;
   disableNeedsInputHelper: boolean;
@@ -111,6 +117,10 @@ export function parseWorkerEnv(
 
   const secretStoreDir = env.AGORA_SECRET_STORE_DIR || undefined;
 
+  const secretStoreKind =
+    (env.AGORA_SECRET_STORE_KIND as WorkerConfig["secretStoreKind"]) ??
+    "aws-secrets-manager";
+
   const callbackUrl = env.AGORA_CALLBACK_URL;
   const callbackTokenRef = env.AGORA_CALLBACK_TOKEN_REF;
   if (callbackUrl && !callbackTokenRef) {
@@ -136,6 +146,7 @@ export function parseWorkerEnv(
     callbackTokenRef,
     perDispatchSecretRefs,
     secretStoreDir,
+    secretStoreKind,
     runtimeAdapter,
     setupTimeoutSeconds,
     disableNeedsInputHelper,

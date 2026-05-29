@@ -50,11 +50,11 @@ export interface SubagentHandle extends SubagentRef {
 }
 
 /**
- * Reference to a secret stored in an external secret manager
- * (e.g. AWS Secrets Manager). The runtime materializes the secret value
- * by ARN at execution time; the secret itself never crosses the API.
+ * Reference to an already-staged secret in the active SecretStore. Opaque:
+ * an ARN for the AWS adapter, a `local-secret://` URI for the local adapter.
+ * Callers never parse it.
  */
-export type SecretRef = { arn: string };
+export type SecretRef = { ref: string };
 
 /**
  * An inline secret value bound for a single dispatch. The runtime is

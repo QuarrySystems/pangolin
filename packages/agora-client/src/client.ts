@@ -9,6 +9,7 @@
 import type {
   ComputeProvider,
   CredentialProvider,
+  SecretStore,
   StorageProvider,
   TelemetryHook,
   ResultSink,
@@ -23,6 +24,8 @@ import type {
 export interface TargetConfig {
   compute: string;
   credentials: string;
+  /** Name of the SecretStore (in secretStores) used for this target's secrets. */
+  secretStore?: string;
   defaultResources?: { cpu?: number; memory?: number };
 }
 
@@ -54,6 +57,8 @@ export interface AgoraClientOptions {
   resultSink?: ResultSink;
   defaultModel?: string;
   dispatchRetention?: DispatchRetentionConfig;
+  /** Per-target secret stores. Defaults to {} — no implicit AWS store. */
+  secretStores?: Record<string, SecretStore>;
 }
 
 const DEFAULT_RETENTION_DAYS = 30;
@@ -71,6 +76,7 @@ export class AgoraClient {
   readonly credentials: Record<string, CredentialProvider>;
   readonly storage: StorageProvider;
   readonly targets: Record<string, TargetConfig>;
+  readonly secretStores: Record<string, SecretStore>;
   readonly telemetry?: TelemetryHook;
   readonly resultSink?: ResultSink;
   readonly defaultModel?: string;
@@ -84,6 +90,7 @@ export class AgoraClient {
       throw new Error('AgoraClient: storage is required');
     }
     const targets = opts.targets ?? {};
+    const secretStores = opts.secretStores ?? {};
     for (const targetName of Object.keys(targets)) {
       const t = targets[targetName];
       if (!opts.compute[t.compute]) {
@@ -94,6 +101,11 @@ export class AgoraClient {
       if (!opts.credentials[t.credentials]) {
         throw new Error(
           `AgoraClient: target ${targetName} references unknown credentials ${t.credentials}`,
+        );
+      }
+      if (t.secretStore !== undefined && !secretStores[t.secretStore]) {
+        throw new Error(
+          `AgoraClient: target ${targetName} references unknown secretStore ${t.secretStore}`,
         );
       }
     }
@@ -115,6 +127,7 @@ export class AgoraClient {
     this.credentials = opts.credentials;
     this.storage = opts.storage;
     this.targets = targets;
+    this.secretStores = secretStores;
     this.telemetry = opts.telemetry;
     this.resultSink = opts.resultSink;
     this.defaultModel = opts.defaultModel;
