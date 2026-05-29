@@ -1,4 +1,5 @@
 import type { AgoraClient, InFlightDispatch } from '@quarry-systems/agora-client';
+import type { DispatchWork } from '@quarry-systems/agora-core';
 import type { Executor, ExecutionResult, WorkItem } from '../contracts/index.js';
 
 export interface DispatchExecutorOptions {
@@ -8,6 +9,14 @@ export interface DispatchExecutorOptions {
   target: string;
   /** Deploy-time: digest-pinned worker image (NOT from WorkItem inputs). */
   workerImage: string;
+  /**
+   * Deploy-time secrets attached to EVERY dispatch — staged via the client's
+   * secret path (LocalSecretStore for file:// storage, AWS otherwise) and
+   * log-redacted by the worker. Configured here (privileged, e.g. from
+   * `process.env` in agora.config.mjs), NEVER carried in a WorkItem's inputs:
+   * a run-time/MCP-submitted item must not supply or read secret values (§10.6).
+   */
+  secrets?: DispatchWork['secrets'];
 }
 
 type Settled =
@@ -37,6 +46,7 @@ export class DispatchExecutor implements Executor {
       input: (item.inputs.workerInput as Record<string, unknown> | undefined) ?? {},
       target: this.opts.target,
       workerImage: this.opts.workerImage,
+      secrets: this.opts.secrets,
     });
     const entry: InFlightEntry = { inflight: flight, settled: null };
     // Detached background await — never throws out; records terminal state for reconcile().

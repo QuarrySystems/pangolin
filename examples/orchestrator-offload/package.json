@@ -1,0 +1,23 @@
+{
+  "name": "orchestrator-offload-example",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Battle-test / on-ramp: AgoraOrchestrator + DispatchExecutor driving a real container dispatch end-to-end (fire -> reconcile) against the local Docker stack.",
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "start:env": "tsx --env-file=../../.env src/index.ts",
+    "typecheck": "tsc --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --esModuleInterop --skipLibCheck --strict src/index.ts",
+    "build": "tsc --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --esModuleInterop --skipLibCheck --strict src/index.ts"
+  },
+  "dependencies": {
+    "@quarry-systems/agora-client": "workspace:*",
+    "@quarry-systems/agora-orchestrator": "workspace:*",
+    "@quarry-systems/agora-providers-local-docker": "workspace:*",
+    "@quarry-systems/agora-storage-local": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.2"
+  }
+}
