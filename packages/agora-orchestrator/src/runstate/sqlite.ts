@@ -23,7 +23,7 @@ export class SqliteRunStateStore implements RunStateStore {
 
   constructor(path = ':memory:') {
     this.db = new Database(path);
-    this.db.pragma('journal_mode = WAL');
+    this.db.pragma('journal_mode = WAL'); // no-op for :memory:; applies to file-backed DBs (the production deploy)
     this.db.exec(SCHEMA);
   }
 
@@ -36,21 +36,13 @@ export class SqliteRunStateStore implements RunStateStore {
   }
 
   saveRun(run: Run): void {
-    const ins = this.db.prepare(
-      'INSERT INTO items(id,run_id,queue,executor,inputs,depends_on,resource_locks,status,dispatch_hash) VALUES(?,?,?,?,?,?,?,?,NULL)',
-    );
     const tx = this.db.transaction((r: Run) => {
       for (const it of r.items)
-        ins.run(
-          it.id,
-          r.id,
-          r.queue,
-          it.executor,
-          JSON.stringify(it.inputs),
-          JSON.stringify(it.depends_on),
-          JSON.stringify(it.resourceLocks),
-          'pending',
-        );
+        this.db.prepare(
+          'INSERT INTO items(id,run_id,queue,executor,inputs,depends_on,resource_locks,status,dispatch_hash) VALUES(?,?,?,?,?,?,?,?,NULL)',
+        ).run(it.id, r.id, r.queue, it.executor,
+              JSON.stringify(it.inputs), JSON.stringify(it.depends_on),
+              JSON.stringify(it.resourceLocks), 'pending');
     });
     tx(run);
   }
@@ -101,7 +93,7 @@ export class SqliteRunStateStore implements RunStateStore {
 
   acquireLocks(itemId: string, keys: string[]): boolean {
     if (keys.length === 0) return true;
-    const ins = this.db.prepare('INSERT INTO locks(key,item_id) VALUES(?,?)'); // PK conflict throws
+    const ins = this.db.prepare('INSERT INTO locks(key,item_id) VALUES(?,?)'); // PK conflict throws → better-sqlite3 rolls back the whole tx, so NO key is acquired (all-or-nothing)
     const tx = this.db.transaction((ks: string[]) => {
       for (const k of ks) ins.run(k, itemId);
     });
