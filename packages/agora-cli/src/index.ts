@@ -10,18 +10,25 @@
 
 import { Command } from 'commander';
 import type { AgoraClient } from '@quarry-systems/agora-client';
+import { attachCapabilitiesCmd } from './cmd-capabilities.js';
+import { attachSubagentCmd } from './cmd-subagent.js';
+import { attachEnvCmd } from './cmd-env.js';
+import { attachDispatchCmd } from './cmd-dispatch.js';
+import { attachDeployCmd } from './cmd-deploy.js';
 
 export interface CliContext {
   /** Lazily-loaded AgoraClient instance (from agora.config.ts in cwd). */
   getClient: () => Promise<AgoraClient>;
 }
 
-export function buildProgram(_ctx: CliContext): Command {
+export function buildProgram(ctx: CliContext): Command {
   const program = new Command();
   program.name('agora').description('Agora CLI — register artifacts and dispatch workers');
-  // Subcommands are registered by their own tasks (cmd-capabilities,
-  // cmd-subagent, etc.) and attached here. Each module exports an
-  // `attach(program, ctx)` function.
+  attachCapabilitiesCmd(program, ctx);
+  attachSubagentCmd(program, ctx);
+  attachEnvCmd(program, ctx);
+  attachDispatchCmd(program, ctx);
+  attachDeployCmd(program, ctx);
   return program;
 }
 

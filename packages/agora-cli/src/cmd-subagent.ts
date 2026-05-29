@@ -17,31 +17,62 @@ import { Command } from 'commander';
 import { readFile } from 'node:fs/promises';
 import { parse as parseYaml } from 'yaml';
 import type { CliContext } from './index.js';
+import { resolveProvider } from './providers/index.js';
+import { runSync } from './sync.js';
 
 export function attachSubagentCmd(program: Command, ctx: CliContext): void {
   const sub = program.command('subagent').description('Manage subagents');
 
   sub
     .command('register')
-    .description('Register a subagent from a YAML definition file')
+    .description('Register a subagent from a YAML file or inline flags')
     .requiredOption('--name <name>', 'subagent name')
-    .requiredOption(
-      '--from <file>',
-      'YAML file with systemPrompt / promptTemplate / model / capabilities',
-    )
-    .action(async (opts: { name: string; from: string }) => {
-      const client = await ctx.getClient();
-      const raw = await readFile(opts.from, 'utf8');
-      const def = (parseYaml(raw) ?? {}) as Record<string, unknown>;
-      const handle = await client.subagent.register({ name: opts.name, ...def });
-      console.log(
-        JSON.stringify({
-          name: handle.name,
-          contentHash: handle.contentHash,
-          registeredAt: handle.registeredAt,
-        }),
-      );
-    });
+    .option('--from <file>', 'YAML file with systemPrompt / promptTemplate / model / capabilities')
+    .option('--system-prompt <text>', 'inline systemPrompt')
+    .option('--prompt-template <text>', 'inline promptTemplate')
+    .option('--model <id>', 'inline model id')
+    .option('--capability <names...>', 'capability name(s) to bind (repeatable)')
+    .action(
+      async (opts: {
+        name: string;
+        from?: string;
+        systemPrompt?: string;
+        promptTemplate?: string;
+        model?: string;
+        capability?: string[];
+      }) => {
+        const hasInline =
+          opts.systemPrompt !== undefined ||
+          opts.promptTemplate !== undefined ||
+          opts.model !== undefined ||
+          (opts.capability?.length ?? 0) > 0;
+        if (opts.from && hasInline) {
+          throw new Error('use either --from <file> or inline flags, not both');
+        }
+        if (!opts.from && !hasInline) {
+          throw new Error(
+            'supply --from <file> or at least one of --system-prompt / --prompt-template / --model / --capability',
+          );
+        }
+        const def: Record<string, unknown> = opts.from
+          ? ((parseYaml(await readFile(opts.from, 'utf8')) ?? {}) as Record<string, unknown>)
+          : {
+              ...(opts.systemPrompt !== undefined && { systemPrompt: opts.systemPrompt }),
+              ...(opts.promptTemplate !== undefined && { promptTemplate: opts.promptTemplate }),
+              ...(opts.model !== undefined && { model: opts.model }),
+              ...(opts.capability && { capabilities: opts.capability }),
+            };
+        const client = await ctx.getClient();
+        const handle = await client.subagent.register({ name: opts.name, ...def });
+        console.log(
+          JSON.stringify({
+            name: handle.name,
+            contentHash: handle.contentHash,
+            registeredAt: handle.registeredAt,
+          }),
+        );
+      },
+    );
 
   sub
     .command('assign <name>')
@@ -79,5 +110,27 @@ export function attachSubagentCmd(program: Command, ctx: CliContext): void {
       const client = await ctx.getClient();
       const ref = await client.subagent.get(name);
       console.log(ref ? JSON.stringify(ref) : '(not found)');
+    });
+
+  sub
+    .command('sync')
+    .description("Bulk-register subagents from an external tool's on-disk convention")
+    .requiredOption('--provider <name>', "provider adapter (e.g. 'claude-code')")
+    .option('--from <dir>', "source directory (defaults to the provider's convention)")
+    .option('--dry-run', 'parse and print, do not register', false)
+    .action(async (opts: { provider: string; from?: string; dryRun: boolean }) => {
+      const provider = resolveProvider(opts.provider);
+      const dir = opts.from ?? provider.defaultSubagentDir;
+      const defs = await provider.loadSubagents(dir);
+      const client = opts.dryRun ? null : await ctx.getClient();
+      await runSync({
+        kind: 'subagent',
+        items: defs,
+        dryRun: opts.dryRun,
+        register: async (def) => {
+          const handle = await client!.subagent.register(def);
+          return { name: handle.name, contentHash: handle.contentHash };
+        },
+      });
     });
 }

@@ -18,6 +18,8 @@ import { Command } from 'commander';
 import { readdir, readFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import type { CliContext } from './index.js';
+import { resolveProvider } from './providers/index.js';
+import { runSync } from './sync.js';
 
 export function attachCapabilitiesCmd(program: Command, ctx: CliContext): void {
   const caps = program.command('capabilities').description('Manage capability bundles');
@@ -44,6 +46,28 @@ export function attachCapabilitiesCmd(program: Command, ctx: CliContext): void {
     const ref = await client.capabilities.get(name);
     console.log(ref ? JSON.stringify(ref) : '(not found)');
   });
+
+  caps
+    .command('sync')
+    .description("Bulk-register capabilities from an external tool's on-disk convention")
+    .requiredOption('--provider <name>', "provider adapter (e.g. 'claude-code')")
+    .option('--from <dir>', "source directory (defaults to the provider's convention)")
+    .option('--dry-run', 'parse and print, do not register', false)
+    .action(async (opts: { provider: string; from?: string; dryRun: boolean }) => {
+      const provider = resolveProvider(opts.provider);
+      const dir = opts.from ?? provider.defaultCapabilityDir;
+      const bundles = await provider.loadCapabilities(dir);
+      const client = opts.dryRun ? null : await ctx.getClient();
+      await runSync({
+        kind: 'capability',
+        items: bundles,
+        dryRun: opts.dryRun,
+        register: async (b) => {
+          const ref = await client!.capabilities.register(b);
+          return { name: ref.name, contentHash: ref.contentHash };
+        },
+      });
+    });
 }
 
 /**
