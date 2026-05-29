@@ -6,7 +6,9 @@ created: 2026-05-29
 ```mermaid
 flowchart TD
     task-secretref-rename["task-secretref-rename: SecretRef -> {ref}<br/>files: packages/agora-core/src/refs.ts"]
+    task-core-secretstore-dir["task-core-secretstore-dir: SecretStore.dir<br/>files: packages/agora-core/src/providers.ts"]
     task-store-factory["task-store-factory: storeFromConfig<br/>files: agora-secret-store/src/store-from-config.ts +1 more"]
+    task-local-store-dir["task-local-store-dir: expose LocalSecretStore.dir<br/>files: agora-secret-store/src/local-secret-store.ts"]
     task-client-ctor["task-client-ctor: per-target secretStores<br/>files: packages/agora-client/src/client.ts +1 more"]
     task-ttl-extract["task-ttl-extract: extract computeInlineSecretTtl<br/>files: packages/agora-client/src/secret-ttl.ts +1 more"]
     task-worker-env-parser["task-worker-env-parser: parse AGORA_SECRET_STORE_KIND<br/>files: packages/agora-worker/src/env-parser.ts"]
@@ -22,6 +24,8 @@ flowchart TD
     task-secretref-rename --> task-dispatch-migrate
     task-secretref-rename --> task-envregister-ref
     task-secretref-rename --> task-cli-refs
+    task-core-secretstore-dir --> task-local-store-dir
+    task-core-secretstore-dir --> task-dispatch-migrate
     task-client-ctor --> task-dispatch-migrate
     task-callback-hmac --> task-dispatch-migrate
     task-ttl-extract --> task-dispatch-migrate
@@ -32,6 +36,7 @@ flowchart TD
     task-dispatch-migrate --> task-e2e-wiring
     task-worker-resolve --> task-e2e-wiring
     task-client-ctor --> task-example-offload
+    task-local-store-dir --> task-example-offload
     task-dispatch-migrate --> task-example-offload
 
     classDef done fill:#90ee90,stroke:#333
@@ -65,6 +70,36 @@ its consumer tasks (`task-callback-hmac`, `task-dispatch-migrate`,
 `task-envregister-ref`, `task-cli-refs`) land, a *global* typecheck is
 transiently red — each consumer task is green within its own scope, and the
 final state compiles. This is expected for a cross-package contract change.
+
+**Audit corrections (2026-05-29).** A read of the worker internals surfaced
+three gaps now folded into the tasks:
+
+- **Fourth resolution site.** The worker resolves the callback HMAC key via raw
+  `secretsClient.send(GetSecretValueCommand)` (`entrypoint.ts:233–259`, Step 4),
+  *not* through a `SecretStore`. Staging it via the injected store (PR4a) without
+  migrating this would break local callbacks. `task-worker-resolve` now also
+  moves the `SecretStore` construction **above Step 4** and resolves the callback
+  ref through `secretStore.resolve`.
+- **`SecretStore.dir` is load-bearing.** The local-docker provider bind-mounts off
+  `spec.env.AGORA_SECRET_STORE_DIR` (`providers-local-docker/src/index.ts:161`).
+  With an injected `LocalSecretStore`, `dispatch.ts` can only emit that var if it
+  can read the store's `dir` — so `dir?` is added to the `SecretStore` contract
+  (`task-core-secretstore-dir`) and exposed on `LocalSecretStore`
+  (`task-local-store-dir`).
+- **Client-injection seam preserved.** `storeFromConfig` threads an optional
+  `client?: SecretsManagerClient` so the worker's `deps.secretsManagerClient` test
+  seam (`entrypoint.ts:101`) still works on the AWS path.
+
+**Behavior-preservation mechanism (AWS):** `task-worker-env-parser` defaults
+`secretStoreKind` to `"aws-secrets-manager"` when `AGORA_SECRET_STORE_KIND` is
+unset, so dispatches that emit no kind resolve via AWS exactly as before. This
+default is load-bearing for keeping the AWS e2e suite green.
+
+**Lifecycle change (local cleanup):** per-dispatch cleanup moves from
+`rm(<mkdtemp dir>)` to `store.cleanupByTag('agora:dispatchId', id)`. The injected
+`LocalSecretStore` dir is now caller-owned and persists across dispatches; only
+the dispatch's tagged secret files are swept. This is intentional and more
+correct than destroying a shared dir.
 
 ## Tasks
 
@@ -114,6 +149,64 @@ it("SecretRef discriminates on the `ref` field", () => {
 
 Test file: `packages/agora-core/test/refs.test.ts`.
 
+## Task: add SecretStore.dir to the contract
+
+```yaml
+id: task-core-secretstore-dir
+depends_on: []
+files:
+  - packages/agora-core/src/providers.ts
+status: pending
+```
+
+Add an optional `readonly dir?: string` to the `SecretStore` interface so a
+caller can read a file-backed store's directory and emit it as
+`AGORA_SECRET_STORE_DIR` for the local-docker bind-mount (audit C2). AWS adapters
+leave it undefined; only file-backed stores set it.
+
+## Implementation
+
+```typescript
+// packages/agora-core/src/providers.ts  (addition to the SecretStore interface)
+export interface SecretStore {
+  readonly name: string;
+  /**
+   * For file-backed stores, the host directory holding staged secret files.
+   * The dispatcher reads this to emit AGORA_SECRET_STORE_DIR for the provider
+   * bind-mount. Undefined for stores with no on-disk directory (e.g. AWS).
+   */
+  readonly dir?: string;
+  stage(args: StageSecretArgs): Promise<StagedSecret>;
+  resolve(ref: string): Promise<string>;
+  cleanupByTag(tagKey: string, tagValue: string): Promise<void>;
+}
+```
+
+```typescript
+// packages/agora-core/test/providers.test.ts
+import type { SecretStore } from "../src/providers.js";
+
+it("permits a SecretStore with an optional dir", () => {
+  const s: SecretStore = {
+    name: "x", dir: "/tmp/secrets",
+    stage: async () => ({ ref: "r", ttlSeconds: 1 }),
+    resolve: async () => "v", cleanupByTag: async () => {},
+  };
+  expect(s.dir).toBe("/tmp/secrets");
+  const noDir: SecretStore = { name: "y", stage: s.stage, resolve: s.resolve, cleanupByTag: s.cleanupByTag };
+  expect(noDir.dir).toBeUndefined();
+});
+```
+
+## Acceptance criteria
+
+- `SecretStore` gains `readonly dir?: string`; a store without `dir` still
+  satisfies the interface (optional).
+- `agora-core` builds; existing implementers (`AwsSecretStore`, `LocalSecretStore`)
+  still satisfy the interface without modification (the field is optional).
+
+Test file: `packages/agora-core/test/providers.test.ts`.
+
 ## Task: add storeFromConfig factory
 
 ```yaml
@@ -134,6 +227,7 @@ the adapters' own `.name` values. The worker uses it to rebuild the adapter from
 ```typescript
 // packages/agora-secret-store/src/store-from-config.ts
 import type { SecretStore } from "@quarry-systems/agora-core";
+import type { SecretsManagerClient } from "@aws-sdk/client-secrets-manager";
 import { AwsSecretStore } from "./aws-secret-store.js";
 import { LocalSecretStore } from "./local-secret-store.js";
 
@@ -143,12 +237,17 @@ export interface SecretStoreConfig {
   kind: SecretStoreKind;
   /** Required when kind === "local-file": the per-secret file directory. */
   dir?: string;
+  /**
+   * Optional Secrets Manager client for the AWS kind — preserves the worker's
+   * `deps.secretsManagerClient` test seam (audit C3). Ignored for local-file.
+   */
+  client?: SecretsManagerClient;
 }
 
 export function storeFromConfig(cfg: SecretStoreConfig): SecretStore {
   switch (cfg.kind) {
     case "aws-secrets-manager":
-      return new AwsSecretStore();
+      return new AwsSecretStore({ client: cfg.client });
     case "local-file":
       if (!cfg.dir) throw new Error("storeFromConfig: local-file requires dir");
       return new LocalSecretStore({ dir: cfg.dir });
@@ -174,9 +273,56 @@ it("throws on unknown kind", () => {
 - `storeFromConfig({ kind: "local-file", dir })` returns a `LocalSecretStore`;
   omitting `dir` throws.
 - Unknown kind throws naming the kind.
+- A `client` passed for the AWS kind is forwarded to `AwsSecretStore`
+  (preserves the worker test seam); it is ignored for `local-file`.
 - `storeFromConfig` is re-exported from `agora-secret-store/src/index.ts`.
 
 Test file: `packages/agora-secret-store/test/store-from-config.test.ts`.
+
+## Task: expose LocalSecretStore.dir
+
+```yaml
+id: task-local-store-dir
+depends_on: [task-core-secretstore-dir]
+files:
+  - packages/agora-secret-store/src/local-secret-store.ts
+status: pending
+```
+
+Make the `LocalSecretStore` directory publicly readable so the dispatcher can
+emit it as `AGORA_SECRET_STORE_DIR` (audit C2). Satisfies the optional
+`SecretStore.dir` contract added in `task-core-secretstore-dir`.
+
+## Implementation
+
+```typescript
+// packages/agora-secret-store/src/local-secret-store.ts  (visibility change)
+export class LocalSecretStore implements SecretStore {
+  readonly name = "local-file";
+  readonly dir: string; // was: private readonly dir
+
+  constructor(opts: LocalSecretStoreOpts) {
+    this.dir = opts.dir;
+  }
+  // ...stage/resolve/cleanupByTag unchanged...
+}
+```
+
+```typescript
+// packages/agora-secret-store/test/local-secret-store.test.ts  (added)
+it("exposes its dir for bind-mount emission", () => {
+  const store = new LocalSecretStore({ dir: "/tmp/agora-secrets" });
+  expect(store.dir).toBe("/tmp/agora-secrets");
+});
+```
+
+## Acceptance criteria
+
+- `LocalSecretStore.dir` is a public `readonly` field equal to the constructor's
+  `dir`; all internal `this.dir` uses still compile.
+- Existing `local-secret-store` tests (stage/resolve/cleanupByTag) still pass.
+
+Test file: `packages/agora-secret-store/test/local-secret-store.test.ts`.
 
 ## Task: inject per-target secret stores into AgoraClient
 
@@ -403,7 +549,7 @@ Test file: `packages/agora-client/test/callback-hmac.test.ts`.
 
 ```yaml
 id: task-dispatch-migrate
-depends_on: [task-secretref-rename, task-client-ctor, task-callback-hmac, task-ttl-extract]
+depends_on: [task-secretref-rename, task-core-secretstore-dir, task-client-ctor, task-callback-hmac, task-ttl-extract]
 files:
   - packages/agora-client/src/dispatch.ts
   - packages/agora-client/test/dispatch.test.ts
@@ -413,8 +559,10 @@ status: pending
 
 Replace the `file://`-URI store sniffing with the target's injected store. Per-
 dispatch secrets stage via `store.stage`; `mintCallbackHmac` gets the store;
-emit `AGORA_SECRET_STORE_KIND` (= `store.name`); update the `isSecretRef` guard
-to `'ref'`; import `computeInlineSecretTtl` from `secret-ttl.js`.
+emit `AGORA_SECRET_STORE_KIND` (= `store.name`) and `AGORA_SECRET_STORE_DIR`
+(= `store.dir`, when set); update the `isSecretRef` guard to `'ref'`; import
+`computeInlineSecretTtl` from `secret-ttl.js`. Cleanup moves to
+`store.cleanupByTag` (the injected dir is caller-owned — no `rm`).
 
 ## Implementation
 
@@ -441,21 +589,31 @@ for (const [envName, entry] of Object.entries(work.secrets ?? {})) {
   perDispatchSecretRefs[envName] = ref;
 }
 // ...callback: const minted = await mintCallbackHmac({ store: store!, dispatchId, dispatchTimeoutSeconds: effectiveTimeoutSeconds }); callbackTokenRef = minted.ref;
-// ...envVars: if (store) envVars.AGORA_SECRET_STORE_KIND = store.name;
-//             if (store?.name === "local-file") envVars.AGORA_SECRET_STORE_DIR = <store dir>;
-// ...cleanup: store?.cleanupByTag("agora:dispatchId", dispatchId).catch(() => {});
+// ...envVars:
+//   if (store) envVars.AGORA_SECRET_STORE_KIND = store.name;       // store.name === SecretStoreKind token
+//   if (store?.dir) envVars.AGORA_SECRET_STORE_DIR = store.dir;    // file-backed stores only; drives the provider bind-mount
+// ...cleanup: store?.cleanupByTag("agora:dispatchId", dispatchId).catch(() => {});  // replaces rm(localSecretsDir)
 
 function isSecretRef(v: SecretRef | InlineSecret): v is SecretRef { return "ref" in v; }
 ```
 
 ```typescript
 // packages/agora-client/test/dispatch.test.ts  (added)
-it("stages per-dispatch inline secrets through the target's injected store", async () => {
-  const staged: string[] = [];
-  const store = { name: "local-file", stage: async (a: { name: string }) => { staged.push(a.name); return { ref: "local-secret://x", ttlSeconds: 1 }; }, resolve: async () => "", cleanupByTag: async () => {} };
+it("stages per-dispatch inline secrets via the target's store and emits kind + dir", async () => {
+  const staged: Array<{ name: string; value: string }> = [];
+  const store = {
+    name: "local-file", dir: "/tmp/agora-secrets",
+    stage: async (a: { name: string; value: string }) => { staged.push(a); return { ref: "local-secret://x", ttlSeconds: 1 }; },
+    resolve: async () => "", cleanupByTag: async () => {},
+  };
   const client = makeClient({ secretStores: { s: store as never }, targetSecretStore: "s" });
-  await fireWork(client, { target: "t", subagent: "a", secrets: { TOKEN: { inline: "v" } } }, { workerImage: "img" });
-  expect(staged).toEqual(["<dispatchId>/TOKEN".replace("<dispatchId>", expect.anything() as never)] as never);
+  const inflight = await fireWork(client, { target: "t", subagent: "a", secrets: { TOKEN: { inline: "v" } } }, { workerImage: "img" });
+  expect(staged).toHaveLength(1);
+  expect(staged[0].name).toBe(`${inflight.dispatchId}/TOKEN`);
+  expect(staged[0].value).toBe("v");
+  // env emitted to the worker carries the kind + dir for the provider bind-mount:
+  expect(capturedSpec.env.AGORA_SECRET_STORE_KIND).toBe("local-file");
+  expect(capturedSpec.env.AGORA_SECRET_STORE_DIR).toBe("/tmp/agora-secrets");
 });
 ```
 
@@ -463,12 +621,14 @@ it("stages per-dispatch inline secrets through the target's injected store", asy
 
 - The `file://`-URI sniffing and `InlineSecretStager` import are gone from
   `dispatch.ts`; per-dispatch staging + callback minting use the target's store.
-- `AGORA_SECRET_STORE_KIND` is set to `store.name` in the worker env when a store
-  is used; `AGORA_SECRET_STORE_DIR` set only for `local-file`.
+- `AGORA_SECRET_STORE_KIND` is set to `store.name` when a store is used;
+  `AGORA_SECRET_STORE_DIR` is set to `store.dir` whenever the store exposes one
+  (file-backed stores) — the contract field added in `task-core-secretstore-dir`.
 - A dispatch that stages inline secrets or sets a callback but whose target has
   no `secretStore` throws a clear error.
 - `isSecretRef` discriminates on `'ref'`; `entry.ref` flows into the refs map.
-- Cleanup calls `store.cleanupByTag('agora:dispatchId', dispatchId)`.
+- Cleanup calls `store.cleanupByTag('agora:dispatchId', dispatchId)` and no longer
+  `rm`s a dispatcher-created dir.
 
 Test file: `packages/agora-client/test/dispatch.test.ts`.
 
@@ -486,22 +646,42 @@ files:
 status: pending
 ```
 
-Resolve env-bundle secrets (Step 7) through the same `SecretStore` already used
-for per-dispatch secrets (Step 7b), built via `storeFromConfig(cfg)`. Delete the
-bespoke `SecretResolver` and its test; map any `resolve` throw to `fetch-failed`.
+Route **all three** worker resolution paths through one `SecretStore` built via
+`storeFromConfig(cfg)`: the callback HMAC key (Step 4), env-bundle secrets
+(Step 7), and per-dispatch secrets (Step 7b). This requires **constructing the
+store above Step 4** (today it's built at Step 7b, after the callback resolution
+at `entrypoint.ts:233–259`). Thread the existing `secretsClient`
+(`deps.secretsManagerClient ?? new SecretsManagerClient({})`) into
+`storeFromConfig` so the AWS test seam survives. Delete the bespoke
+`SecretResolver` and its test; map any `resolve` throw to `fetch-failed`.
 
 ## Implementation
 
 ```typescript
-// packages/agora-worker/src/entrypoint.ts  (Step 7 + store construction)
+// packages/agora-worker/src/entrypoint.ts
 import { storeFromConfig } from "@quarry-systems/agora-secret-store";
 
+// Construct the SecretStore ONCE, before Step 4 (callback). secretsClient stays
+// the AWS test seam; storeFromConfig forwards it for the aws-secrets-manager kind.
+const secretsClient = deps.secretsManagerClient ?? new SecretsManagerClient({});
 const secretStore = deps.secretStore ?? storeFromConfig({
   kind: cfg.secretStoreKind,
   dir: cfg.secretStoreDir,
+  client: secretsClient,
 });
 
-// Step 7 — env-bundle secrets now go through secretStore.resolve:
+// Step 4 — callback HMAC key now resolves through secretStore (was a raw
+// secretsClient.send(GetSecretValueCommand)):
+if (cfg.callbackUrl && cfg.callbackTokenRef) {
+  let key: string;
+  try { key = await secretStore.resolve(cfg.callbackTokenRef); }
+  catch (err) { return failWith("fetch-failed", `callback HMAC key fetch failed: ${(err as Error).message}`); }
+  logger.registerSecret(key);
+  hmacKeyForNotifications = key;
+  lifecycleEmitter = new LifecycleEmitter({ callbackUrl: cfg.callbackUrl, hmacKey: key, fetchImpl: deps.fetchImpl });
+}
+
+// Step 7 — env-bundle secrets through secretStore.resolve (replaces SecretResolver):
 for (const envBundle of bundles.envs) {
   const def = envBundle.def as { values?: Record<string,string>; secretRefs?: Record<string,string> };
   const resolvedSecrets: Record<string, string> = {};
@@ -514,8 +694,9 @@ for (const envBundle of bundles.envs) {
   }
   envBundles.push({ values: def.values ?? {}, secrets: resolvedSecrets });
 }
-// secret-resolver.ts deleted; SecretResolver/SecretResolutionError imports removed;
-// agora-worker/src/index.ts no longer re-exports them.
+// Step 7b (per-dispatch) already uses secretStore.resolve — now the SAME instance.
+// `defaultSecretStore`, `SecretResolver`, and the GetSecretValueCommand import are
+// deleted; secret-resolver.ts removed; agora-worker/src/index.ts drops the re-export.
 ```
 
 ```typescript
@@ -529,12 +710,15 @@ it("resolves env-bundle secrets through the SecretStore and redacts them", async
 
 ## Acceptance criteria
 
-- `SecretResolver` and `secret-resolver.ts` (and its test) are deleted; no
-  re-export remains in `agora-worker/src/index.ts`.
-- Env-bundle and per-dispatch secrets both resolve through one `secretStore`
-  built from `storeFromConfig(cfg)`; each resolved value is registered for
-  redaction.
-- Any `resolve` throw yields `reason: 'fetch-failed'` naming the env var.
+- `SecretResolver`, `secret-resolver.ts` (and its test), `defaultSecretStore`,
+  and the `GetSecretValueCommand` import are deleted; no re-export remains in
+  `agora-worker/src/index.ts`.
+- The `secretStore` is constructed once **before Step 4**; the callback HMAC key,
+  env-bundle secrets, and per-dispatch secrets all resolve through that single
+  instance, and every resolved value is registered for redaction.
+- `storeFromConfig` receives `secretsClient` for the AWS kind, so tests injecting
+  `deps.secretsManagerClient` resolve against their fake (no behavior change).
+- Any `resolve` throw yields `reason: 'fetch-failed'` naming the failing item.
 - The AWS path (`secretStoreKind` default) resolves identically to before.
 
 Test file: `packages/agora-worker/test/index.test.ts`.
@@ -684,7 +868,7 @@ Test file: `test/e2e/inline-secret-lifecycle.test.ts`.
 
 ```yaml
 id: task-example-offload
-depends_on: [task-client-ctor, task-dispatch-migrate]
+depends_on: [task-client-ctor, task-local-store-dir, task-dispatch-migrate]
 files:
   - examples/orchestrator-offload/src/index.ts
 status: pending
@@ -692,16 +876,18 @@ is_wiring_task: true
 ```
 
 The orchestrator-offload example stages deploy-time secrets (PR #12), so it must
-now provide a `SecretStore` for its target. Wire a `LocalSecretStore` (the
-example runs against local Docker) into `secretStores` and point the target at
-it. Pure construction wiring.
+now provide a `SecretStore` for its target. Wire a `LocalSecretStore` over a
+**real host directory** (the old inline `mkdtemp` is gone — pick a stable path the
+local-docker provider can bind-mount) into `secretStores`, and point the target
+at it. Pure construction wiring; the full local-Docker secret battle-test is PR4b.
 
 ## Acceptance criteria
 
-- The example constructs `AgoraClient` with `secretStores: { local: new LocalSecretStore({ dir }) }`
-  and `targets.<name>.secretStore = "local"`.
+- The example constructs `AgoraClient` with
+  `secretStores: { local: new LocalSecretStore({ dir: <host path> }) }` and
+  `targets.<name>.secretStore = "local"`.
 - The example type-checks and builds against the new client surface.
-- No `file://`-sniffing assumption remains; the store is explicit.
+- No `file://`-sniffing assumption remains; the store (and its dir) is explicit.
 
 Test file: `examples/orchestrator-offload/test/smoke.test.ts` (build/type check; the
 full local-Docker secret battle-test lands in PR4b).
