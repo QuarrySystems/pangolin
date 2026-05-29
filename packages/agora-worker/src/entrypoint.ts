@@ -44,14 +44,8 @@ import type {
   NotificationConfig,
   SecretStore,
 } from '@quarry-systems/agora-core';
-import {
-  AwsSecretStore,
-  LocalSecretStore,
-} from '@quarry-systems/agora-secret-store';
-import {
-  GetSecretValueCommand,
-  SecretsManagerClient,
-} from '@aws-sdk/client-secrets-manager';
+import { storeFromConfig } from '@quarry-systems/agora-secret-store';
+import { SecretsManagerClient } from '@aws-sdk/client-secrets-manager';
 
 import { parseWorkerEnv, type WorkerConfig } from './env-parser.js';
 import { loadRuntimeAdapter } from './adapter-loader.js';
@@ -65,7 +59,6 @@ import {
   overlayCapabilities,
   type CapabilityBundle,
 } from './overlay-engine.js';
-import { SecretResolver, SecretResolutionError } from './secret-resolver.js';
 import { mergeEnv, type EnvBundle } from './env-merger.js';
 import { filterRuntimeEnv } from './runtime-env-filter.js';
 import {
@@ -229,34 +222,45 @@ export async function runWorker(
     );
   }
 
-  // Step 4: resolve the callback HMAC key (if a callback is configured).
+  // Construct the SecretStore ONCE before Step 4 so it can serve all three
+  // resolution paths: the callback HMAC key, env-bundle secrets, and
+  // per-dispatch secrets. The secretsClient is threaded in as the AWS test seam.
   const secretsClient =
     deps.secretsManagerClient ?? new SecretsManagerClient({});
+  // Resolve the effective store kind: an explicit `local-file` in the config
+  // always wins. When the config says `aws-secrets-manager` (the default), we
+  // still auto-detect local mode if the storage URI uses `file://` AND the
+  // secret-store dir is provided — this preserves the behaviour that the local
+  // Docker provider relied on before `AGORA_SECRET_STORE_KIND` was introduced.
+  const effectiveStoreKind =
+    cfg.secretStoreKind === 'local-file' ||
+    (cfg.storageUri.startsWith('file://') && !!cfg.secretStoreDir)
+      ? 'local-file'
+      : 'aws-secrets-manager';
+  const secretStore = deps.secretStore ?? storeFromConfig({
+    kind: effectiveStoreKind,
+    dir: cfg.secretStoreDir,
+    client: secretsClient,
+  });
+
+  // Step 4: resolve the callback HMAC key (if a callback is configured).
   if (cfg.callbackUrl && cfg.callbackTokenRef) {
+    let key: string;
     try {
-      const res = await secretsClient.send(
-        new GetSecretValueCommand({ SecretId: cfg.callbackTokenRef }),
-      );
-      const key = res.SecretString;
-      if (!key) {
-        return failWith(
-          'fetch-failed',
-          `callback HMAC key for ${cfg.callbackTokenRef} has empty SecretString`,
-        );
-      }
-      logger.registerSecret(key);
-      hmacKeyForNotifications = key;
-      lifecycleEmitter = new LifecycleEmitter({
-        callbackUrl: cfg.callbackUrl,
-        hmacKey: key,
-        fetchImpl: deps.fetchImpl,
-      });
+      key = await secretStore.resolve(cfg.callbackTokenRef);
     } catch (err) {
       return failWith(
         'fetch-failed',
         `callback HMAC key fetch failed: ${(err as Error).message}`,
       );
     }
+    logger.registerSecret(key);
+    hmacKeyForNotifications = key;
+    lifecycleEmitter = new LifecycleEmitter({
+      callbackUrl: cfg.callbackUrl,
+      hmacKey: key,
+      fetchImpl: deps.fetchImpl,
+    });
   }
 
   // Step 5: emit dispatch.started.
@@ -300,45 +304,37 @@ export async function runWorker(
     });
   }
 
-  // Step 7: resolve env-bundle secrets.
+  // Step 7: resolve env-bundle secrets through the single SecretStore.
   const envBundles: EnvBundle[] = [];
-  const secretResolver = new SecretResolver({ client: secretsClient });
   for (const envBundle of bundles.envs) {
     const def = envBundle.def as {
       values?: Record<string, string>;
       secretRefs?: Record<string, string>;
     };
-    let resolvedSecrets: Record<string, string> = {};
-    if (def.secretRefs && Object.keys(def.secretRefs).length > 0) {
+    const resolvedSecrets: Record<string, string> = {};
+    for (const [k, ref] of Object.entries(def.secretRefs ?? {})) {
+      let value: string;
       try {
-        resolvedSecrets = await secretResolver.resolve(def.secretRefs);
+        value = await secretStore.resolve(ref);
       } catch (err) {
-        if (err instanceof SecretResolutionError) {
-          return failWith(
-            'fetch-failed',
-            `env-bundle ${envBundle.name} secret: ${err.message}`,
-          );
-        }
         return failWith(
           'fetch-failed',
-          `env-bundle ${envBundle.name} secret resolution: ${(err as Error).message}`,
+          `env-bundle ${envBundle.name} secret ${k}: ${(err as Error).message}`,
         );
       }
-    }
-    for (const v of Object.values(resolvedSecrets)) {
-      logger.registerSecret(v);
+      logger.registerSecret(value);
+      resolvedSecrets[k] = value;
     }
     envBundles.push({ values: def.values ?? {}, secrets: resolvedSecrets });
   }
 
-  // Step 7b: resolve per-dispatch secret refs through the SecretStore and
+  // Step 7b: resolve per-dispatch secret refs through the same SecretStore and
   // register every value for log redaction (§7.1). Previously per-dispatch
   // secrets were injected ambiently by the compute layer and never passed
   // through the worker, so their values escaped the redaction set and could
   // surface verbatim in worker logs (e.g. an echoing setup script). Routing
   // them through the worker here closes that gap — and the SecretStore seam
   // makes it work for the local file store as well as AWS.
-  const secretStore = deps.secretStore ?? defaultSecretStore(cfg, secretsClient);
   const perDispatchSecrets: Record<string, string> = {};
   for (const [envName, ref] of Object.entries(cfg.perDispatchSecretRefs)) {
     let value: string;
@@ -530,26 +526,6 @@ export async function runWorker(
     at: new Date().toISOString(),
   });
   return runtimeExit.exitCode;
-}
-
-/**
- * Pick the SecretStore the worker resolves per-dispatch refs through, by
- * storage scheme. A `file://` storage URI means the dispatch ran locally
- * (LocalStorageProvider + LocalDockerProvider), so secrets were staged on
- * disk and bind-mounted in at `secretStoreDir` — resolve them with a
- * `LocalSecretStore`. Otherwise fall back to AWS Secrets Manager. The
- * `file://`-without-dir case (no per-dispatch secrets staged locally) also
- * falls through to AWS, which is harmless because `perDispatchSecretRefs`
- * is empty and `resolve` is never called.
- */
-function defaultSecretStore(
-  cfg: WorkerConfig,
-  secretsClient: SecretsManagerClient,
-): SecretStore {
-  if (cfg.storageUri.startsWith('file://') && cfg.secretStoreDir) {
-    return new LocalSecretStore({ dir: cfg.secretStoreDir });
-  }
-  return new AwsSecretStore({ client: secretsClient });
 }
 
 /**

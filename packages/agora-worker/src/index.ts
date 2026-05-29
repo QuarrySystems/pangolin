@@ -8,7 +8,6 @@ export {
 } from './env-parser.js';
 export { LifecycleEmitter } from './lifecycle.js';
 export { StructuredLogger } from './logger.js';
-export { SecretResolver, SecretResolutionError } from './secret-resolver.js';
 export { mergeEnv, type EnvBundle } from './env-merger.js';
 export {
   overlayCapabilities,
