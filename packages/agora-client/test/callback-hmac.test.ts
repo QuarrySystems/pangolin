@@ -1,9 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import { createHmac } from 'node:crypto';
-import {
-  CreateSecretCommand,
-  SecretsManagerClient,
-} from '@aws-sdk/client-secrets-manager';
 import { mintCallbackHmac, signCallback } from '../src/callback-hmac.js';
 
 describe('signCallback', () => {
@@ -56,35 +52,35 @@ describe('signCallback', () => {
 });
 
 /**
- * Minimal fake SecretsManagerClient that captures sent commands and
- * returns a synthesized ARN response. We only need the `send` shape.
+ * Minimal fake SecretStore for testing mintCallbackHmac.
  */
-function makeFakeSecretsClient(arn = 'arn:aws:secretsmanager:us-east-1:000000000000:secret:test-AbCdEf') {
-  const sent: CreateSecretCommand[] = [];
-  const client = {
-    send: async (cmd: CreateSecretCommand) => {
-      sent.push(cmd);
-      return { ARN: arn, Name: cmd.input.Name, VersionId: 'v1' };
+function makeFakeStore(ref = 'local-secret://test-key') {
+  const staged: unknown[] = [];
+  const store = {
+    name: 'fake',
+    stage: async (args: unknown) => {
+      staged.push(args);
+      const ttlSeconds = (args as { ttlSeconds: number }).ttlSeconds;
+      return { ref, ttlSeconds };
     },
-  } as unknown as SecretsManagerClient;
-  return { client, sent };
+    resolve: async () => '',
+    cleanupByTag: async () => {},
+  };
+  return { store, staged };
 }
 
 describe('mintCallbackHmac', () => {
-  it('returns the ARN reported by Secrets Manager', async () => {
-    const arn = 'arn:aws:secretsmanager:us-east-1:000000000000:secret:my-AbCdEf';
-    const { client } = makeFakeSecretsClient(arn);
-    const result = await mintCallbackHmac({
-      client,
-      dispatchId: 'dispatch-1',
-    });
-    expect(result.arn).toBe(arn);
+  it('stages the HMAC key via the injected store and returns its ref', async () => {
+    const { store, staged } = makeFakeStore('local-secret://k');
+    const { ref } = await mintCallbackHmac({ store: store as never, dispatchId: 'd1' });
+    expect(ref).toBe('local-secret://k');
+    expect(staged).toHaveLength(1);
   });
 
   it('returns ttlSeconds equal to dispatchTimeoutSeconds + 300 (5min buffer)', async () => {
-    const { client } = makeFakeSecretsClient();
+    const { store } = makeFakeStore();
     const result = await mintCallbackHmac({
-      client,
+      store: store as never,
       dispatchId: 'dispatch-1',
       dispatchTimeoutSeconds: 3600,
     });
@@ -92,73 +88,61 @@ describe('mintCallbackHmac', () => {
   });
 
   it('defaults ttlSeconds to 7200+300 when no dispatchTimeoutSeconds given', async () => {
-    const { client } = makeFakeSecretsClient();
+    const { store } = makeFakeStore();
     const result = await mintCallbackHmac({
-      client,
+      store: store as never,
       dispatchId: 'dispatch-1',
     });
     expect(result.ttlSeconds).toBe(7500);
   });
 
-  it('sends a CreateSecretCommand with name prefix + dispatchId', async () => {
-    const { client, sent } = makeFakeSecretsClient();
+  it('stages with name agora/callback-hmac/<dispatchId>', async () => {
+    const { store, staged } = makeFakeStore();
     await mintCallbackHmac({
-      client,
+      store: store as never,
       dispatchId: 'dispatch-xyz',
     });
-    expect(sent).toHaveLength(1);
-    expect(sent[0]!.input.Name).toBe('agora/callback-hmac/dispatch-xyz');
+    expect(staged).toHaveLength(1);
+    expect((staged[0] as { name: string }).name).toBe('agora/callback-hmac/dispatch-xyz');
   });
 
   it('uses a custom namePrefix when provided', async () => {
-    const { client, sent } = makeFakeSecretsClient();
+    const { store, staged } = makeFakeStore();
     await mintCallbackHmac({
-      client,
+      store: store as never,
       namePrefix: 'my/prefix',
       dispatchId: 'd9',
     });
-    expect(sent[0]!.input.Name).toBe('my/prefix/d9');
+    expect((staged[0] as { name: string }).name).toBe('my/prefix/d9');
   });
 
-  it('stages a 64-char hex (32-byte) random key as the SecretString', async () => {
-    const { client, sent } = makeFakeSecretsClient();
+  it('stages a 64-char hex (32-byte) random key as the value', async () => {
+    const { store, staged } = makeFakeStore();
     await mintCallbackHmac({
-      client,
+      store: store as never,
       dispatchId: 'dispatch-1',
     });
-    const secret = sent[0]!.input.SecretString!;
-    expect(secret).toMatch(/^[0-9a-f]{64}$/);
+    const value = (staged[0] as { value: string }).value;
+    expect(value).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it('generates a fresh key on each invocation', async () => {
-    const { client, sent } = makeFakeSecretsClient();
-    await mintCallbackHmac({ client, dispatchId: 'a' });
-    await mintCallbackHmac({ client, dispatchId: 'b' });
-    expect(sent[0]!.input.SecretString).not.toBe(sent[1]!.input.SecretString);
+    const { store, staged } = makeFakeStore();
+    await mintCallbackHmac({ store: store as never, dispatchId: 'a' });
+    await mintCallbackHmac({ store: store as never, dispatchId: 'b' });
+    const key1 = (staged[0] as { value: string }).value;
+    const key2 = (staged[1] as { value: string }).value;
+    expect(key1).not.toBe(key2);
   });
 
-  it('tags the secret with agora:dispatchId and agora:ttlSeconds', async () => {
-    const { client, sent } = makeFakeSecretsClient();
+  it('tags the secret with agora:dispatchId', async () => {
+    const { store, staged } = makeFakeStore();
     await mintCallbackHmac({
-      client,
+      store: store as never,
       dispatchId: 'dispatch-tagged',
       dispatchTimeoutSeconds: 1800,
     });
-    const tags = sent[0]!.input.Tags ?? [];
-    expect(tags).toEqual(
-      expect.arrayContaining([
-        { Key: 'agora:dispatchId', Value: 'dispatch-tagged' },
-        { Key: 'agora:ttlSeconds', Value: '2100' },
-      ]),
-    );
-  });
-
-  it('throws if Secrets Manager returns no ARN', async () => {
-    const client = {
-      send: async () => ({}),
-    } as unknown as SecretsManagerClient;
-    await expect(
-      mintCallbackHmac({ client, dispatchId: 'dispatch-1' }),
-    ).rejects.toThrow(/no ARN/);
+    const tags = (staged[0] as { tags: Record<string, string> }).tags;
+    expect(tags).toMatchObject({ 'agora:dispatchId': 'dispatch-tagged' });
   });
 });
