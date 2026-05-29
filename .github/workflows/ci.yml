@@ -43,5 +43,15 @@ jobs:
       - name: Lint
         run: pnpm -r lint
 
+      # Build before test: vitest resolves cross-package imports
+      # (e.g. @quarry-systems/agora-core) via each package's dist entry,
+      # which only exists after a build. pnpm builds in topological order.
+      - name: Build
+        run: pnpm -r build
+
+      # --workspace-concurrency=1 runs each package's suite one at a time.
+      # Parallel (default) launches all suites × their vitest workers at once,
+      # which flakes resource-heavy imports (e.g. the MCP SDK in agora-mcp)
+      # under CI's limited cores. Serial is slower but deterministic.
       - name: Test
-        run: pnpm -r test
+        run: pnpm -r --workspace-concurrency=1 test
