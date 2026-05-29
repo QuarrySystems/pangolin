@@ -9,13 +9,15 @@ export async function tick(
   executors: Record<string, Executor>,
   queue: string,
 ): Promise<{ readied: number; fired: number; reconciled: number }> {
-  // 1. Ready newly-satisfied items.
-  const newlyReady = computeNewlyReady(store.getItems());
+  const queueItems = () => store.getItems().filter((i) => i.queue === queue);
+
+  // 1. Ready newly-satisfied items (scoped to this queue).
+  const newlyReady = computeNewlyReady(queueItems());
   store.markReady(newlyReady);
 
-  // 2. Reconcile in-flight items; release locks on terminal status.
+  // 2. Reconcile in-flight items in this queue; release locks on terminal status.
   let reconciled = 0;
-  for (const it of store.getItems().filter((i) => i.status === 'running')) {
+  for (const it of store.getItems().filter((i) => i.queue === queue && i.status === 'running')) {
     const ex = executors[it.executor];
     if (!ex) throw new Error(`tick: no executor registered for '${it.executor}'`);
     const res = await ex.reconcile(it.dispatchHash!);
@@ -27,10 +29,10 @@ export async function tick(
   }
 
   // Re-evaluate newly-ready items now that reconciled items may have unblocked dependents.
+  let moreReady: string[] = [];
   if (reconciled > 0) {
-    const moreReady = computeNewlyReady(store.getItems());
+    moreReady = computeNewlyReady(queueItems());
     store.markReady(moreReady);
-    newlyReady.push(...moreReady);
   }
 
   // 3. Fire ready items within remaining concurrency + lock budget.
@@ -46,5 +48,5 @@ export async function tick(
     store.setRunning(it.id, dispatchHash);
     fired++;
   }
-  return { readied: newlyReady.length, fired, reconciled };
+  return { readied: newlyReady.length + moreReady.length, fired, reconciled };
 }

@@ -122,4 +122,36 @@ describe('tick', () => {
     expect(t2.fired).toBe(1); // second item fires after lock released
     store.close();
   });
+
+  it('reconcile: failed status releases locks so the next item can fire', async () => {
+    const store = new SqliteRunStateStore();
+    store.ensureQueue('default', 10); // high concurrency — lock is the bottleneck
+    store.saveRun({ id: 'r7', queue: 'default', items: [
+      { id: 'm', executor: 'fake', inputs: {}, depends_on: [], resourceLocks: ['shared'] },
+      { id: 'n', executor: 'fake', inputs: {}, depends_on: [], resourceLocks: ['shared'] },
+    ] });
+    store.markReady(['m', 'n']);
+
+    const firedItems: string[] = [];
+    const ex: Executor = {
+      id: 'fake',
+      async fire(i) { firedItems.push(i.id); return { dispatchHash: `h-${i.id}` }; },
+      async reconcile() { return { status: 'failed' as const }; },
+    };
+
+    // Tick 1: m fires (acquires 'shared'), n is held by the lock
+    const t1 = await tick(store, { fake: ex }, 'default');
+    expect(t1.fired).toBe(1); // only one fires — lock blocks the second
+    const firstFired = firedItems[0]; // either m or n (whichever was selected)
+
+    // Tick 2: the running item reconciles → 'failed', lock released; the other item fires
+    const t2 = await tick(store, { fake: ex }, 'default');
+    expect(t2.reconciled).toBe(1);
+    const firstItem = store.getItems('r7').find((i) => i.id === firstFired)!;
+    expect(firstItem.status).toBe('failed'); // failed status set
+    expect(t2.fired).toBe(1); // the other item fires now that lock is released
+    expect(firedItems).toHaveLength(2); // both items have fired across the two ticks
+
+    store.close();
+  });
 });
