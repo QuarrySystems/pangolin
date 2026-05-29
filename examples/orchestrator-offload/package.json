@@ -14,6 +14,7 @@
     "@quarry-systems/agora-client": "workspace:*",
     "@quarry-systems/agora-orchestrator": "workspace:*",
     "@quarry-systems/agora-providers-local-docker": "workspace:*",
+    "@quarry-systems/agora-secret-store": "workspace:*",
     "@quarry-systems/agora-storage-local": "workspace:*"
   },
   "devDependencies": {

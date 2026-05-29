@@ -66,6 +66,9 @@ importers:
       '@quarry-systems/agora-providers-local-docker':
         specifier: workspace:*
         version: link:../../packages/agora-providers-local-docker
+      '@quarry-systems/agora-secret-store':
+        specifier: workspace:*
+        version: link:../../packages/agora-secret-store
       '@quarry-systems/agora-storage-local':
         specifier: workspace:*
         version: link:../../packages/agora-storage-local
