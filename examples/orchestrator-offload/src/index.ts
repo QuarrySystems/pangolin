@@ -58,7 +58,9 @@ async function main(): Promise<void> {
       resultSink: new StdoutResultSink(),
     });
 
-    // 2. Register a trivial subagent + an env bundle carrying the API key to the worker.
+    // 2. Register a trivial subagent. The API key is NOT registered as an env-bundle
+    //    value — the env firewall (correctly) rejects credential-shaped plaintext env.
+    //    It travels as a deploy-time executor secret instead (step 3).
     await client.capabilities.register({
       name: 'echo-cap',
       files: { 'agora-setup.sh': '#!/bin/sh\necho "hello from agora-offload worker"\n' },
@@ -68,14 +70,20 @@ async function main(): Promise<void> {
       systemPrompt: 'Just exit.',
       capabilities: ['echo-cap'],
     });
-    await client.env.register({ name: 'keys', values: { ANTHROPIC_API_KEY: apiKey } });
 
-    // 3. Build the orchestrator with the real DispatchExecutor. target + workerImage
-    //    are the executor's deploy-time config (NOT the WorkItem's) — §10.6.
+    // 3. Build the orchestrator with the real DispatchExecutor. target, workerImage,
+    //    AND secrets are the executor's deploy-time config (NOT the WorkItem's) — §10.6.
+    //    The inline API-key secret stages via LocalSecretStore for file:// storage
+    //    (no AWS) and is log-redacted by the worker; it never touches the WorkItem.
     const orch = new AgoraOrchestrator({
       store,
       executors: {
-        dispatch: new DispatchExecutor({ client, target: 'local', workerImage: WORKER_IMAGE }),
+        dispatch: new DispatchExecutor({
+          client,
+          target: 'local',
+          workerImage: WORKER_IMAGE,
+          secrets: { ANTHROPIC_API_KEY: { inline: apiKey } },
+        }),
       },
       triggers: { manual: new ManualTrigger() },
       queues: { default: { concurrency: 1 } },
@@ -89,7 +97,7 @@ async function main(): Promise<void> {
         {
           id: 'edit-1',
           executor: 'dispatch',
-          inputs: { subagent: 'echo', env: 'keys', workerInput: {} },
+          inputs: { subagent: 'echo', workerInput: {} },
           depends_on: [],
           resourceLocks: [],
         },
