@@ -38,13 +38,13 @@ export class AgoraOrchestrator {
     this.store.markReady(trigger.initialReady(run));
     return run.id;
   }
-  async tick(queue = this.defaultQueue) { return tick(this.store, this.executors, queue); }
+  async tick(queue?: string) { return tick(this.store, this.executors, queue ?? this.defaultQueue); }
   getStatus(runId?: string): StatusItem[] {
     const items = this.store.getItems(runId);
-    const byId = new Map(items.map((i) => [i.id, i]));
+    const byId = new Map(items.map((i) => [`${i.runId}:${i.id}`, i]));
     return items.map((i: ItemState) => ({
       id: i.id, status: i.status,
-      blockedBy: i.depends_on.filter((d) => byId.get(d)?.status !== 'done'),
+      blockedBy: i.depends_on.filter((d) => byId.get(`${i.runId}:${d}`)?.status !== 'done'),
     }));
   }
 }
