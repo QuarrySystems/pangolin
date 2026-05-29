@@ -37,7 +37,7 @@ floats as "likely" or "open", the body carries an inline **Resolved (Dn)** note.
 | **D5** | Submission/query transport | **S3 inbox/outbox (poll)** behind a `SubmissionTransport` seam. Clients write a Run spec to an S3 `submissions/` prefix; the orchestrator polls, ingests, runs, and publishes status + completion records to the outbox. **No inbound networking to the container** (there is no Stoa/CF tunnel to lean on today). An HTTP transport is an additive seam impl, deferred until an ingress exists. |
 | **D6** | Execution model | **Tick-based fire-and-reconcile.** `agora-client.dispatch()` blocks on `awaitExit()` today — fatal for an overnight queue. The orchestrator must NOT loop over blocking dispatch. Each tick: advance ready items, fire dispatches *without blocking*, record each `dispatch_hash`, and reconcile completed dispatches from their records on later ticks. Crash-safe by construction; mirrors the DAG executor's controller-turn loop. |
 | **D7** | Worker output channel | **New `.agora/output.json` sentinel**, schema-validated against `subagentShape.outputSchema`, carrying typed `output` + `intents` + `signals`. Mirrors the existing `.agora/needs_input.json` sentinel. This is the one net-new *worker* mechanism the trunk requires — it is what makes `dev.code-edit → Patch` and `dev.open-pr → Intent` work. |
-| **D8** | Registry model | **Static construction-time maps**, not a dynamic `.register()` registry. The four registries (packs/executors/triggers/interpreters) are `Record<string, Impl>` injected into the `AgoraOrchestrator` constructor and resolved from `agora.config.mjs`, validated fail-fast — identical to how `compute`/`credentials`/`targets` work on `AgoraClient` today (`client.ts:86-99`). No runtime registration API; "duplicate-id rejection" becomes construction-time validation. Aligns with the `agora-inline-secret` constructor-hook follow-up. |
+| **D8** | Registry model | **Static construction-time maps**, not a dynamic `.register()` registry. The four registries (packs/executors/triggers/interpreters) are `Record<string, Impl>` injected into the `AgoraOrchestrator` constructor and resolved from `agora.config.mjs`, validated fail-fast — identical to how `compute`/`credentials`/`targets` work on `AgoraClient` today (`client.ts:86-99`). No runtime registration API; "duplicate-id rejection" becomes construction-time validation. Aligns with the `agora-inline-secret` constructor-hook follow-up. **Accepted cost:** no plugin-style runtime extension — adding an executor/pack means rebuilding the orchestrator binary. The package-as-distribution pattern (`agora-pack-dev`) absorbs this; it's a real choice, not free. |
 | **D9** | dispatch-executor reuse | **Split `AgoraClient.dispatch` into internal `fire()` + `reconcile()`.** Existing blocking `dispatch()` becomes `fire()` → `awaitExit()` → `reconcile()`. The `dispatch-executor` *composes* `fire()` + later `reconcile()` (per D6); all ref-resolution / secret-staging / record-writing stays in `agora-client`, not duplicated. This is a real, called-out change to existing `agora-client` code. |
 | **D10** | SubmissionTransport | **Thin layer over the existing `StorageProvider` seam**, not a parallel storage stack. Inbox/outbox = a prefix convention (`submissions/`, `outbox/`) + a poll helper on `agora-storage-s3`/`agora-storage-local`. Local dev and remote S3 both work with zero new storage code. (A distinct HTTP transport remains an additive seam impl, D5.) |
 | **D11** | Contracts home | Orchestrator seams + shared types live **in the new `agora-orchestrator` package** (`src/contracts/`), not in `agora-core`. Keeps `agora-core` minimal — low-level providers/worker stay ignorant of orchestration. Mirrors how `agora-secret-store` holds its own interface. |
@@ -822,6 +822,49 @@ SQLite is the first database in the repo. It is confined to
 nothing else in the repo gains a DB dependency. `better-sqlite3` (synchronous,
 single-file) is already in use in the sibling **Mneme** project, so it is a known
 quantity on this machine.
+
+### 13.6 Implementation guardrails (from 2026-05-28 design review)
+
+Non-blocking sharpenings to carry into the plan as acceptance criteria:
+
+- **D3 single-writer invariant is topology-enforced, not code-enforced.** Nothing
+  in code stops a future PR from opening the DB elsewhere. `runstate/sqlite.ts`
+  MUST carry a header comment: *"This DB is the orchestrator service's exclusive
+  property (D3). Do not open it from the CLI, MCP, or any other process — they
+  are clients of the running service, not of the file."* Cheap insurance against
+  a corruption incident later.
+- **CI allowlist must grow with the new MCP tools.** The new run-time tools
+  (`agora_orchestrator_submit`/`status`/`watch`) trivially pass the existing
+  MCP-tool exclusion check (§10.6). The privileged set — `approve_intent`,
+  `cancel_run`, `cancel_item`, `configure_queue`, `pause_queue`, `resume_queue`
+  — MUST be added to that exclusion list. Mechanical, but easy to forget.
+- **`serve` cold-start sequence (the contract for what the service does on a
+  fresh container):** (1) create the SQLite schema if absent; (2) read
+  `agora.config.mjs` and construct the static registry maps (D8); (3) connect the
+  configured `StorageProvider`; (4) start polling the S3 inbox (D5/D10);
+  (5) start the tick loop (D6). Idempotent — safe to restart.
+- **Keep the Mneme link one click away.** Place the Mneme reference (project path
+  + spec v0.2 §2 claim model) as a doc comment in
+  `agora-orchestrator/src/contracts/` near where `Claim` would land, so the
+  second `Claim` consumer finds the alignment target immediately (see §2).
+
+### 13.7 Recommended PR staging
+
+The trunk is one DAG, but human-review confidence wants cut-points. Recommended:
+
+- **PR 1 — D9 refactor, behavior-preserving.** Split `AgoraClient.dispatch` into
+  `fire()` + `reconcile()`; existing `dispatch()` = `fire` → `awaitExit` →
+  `reconcile`. **No behavior change; the full existing test suite must still
+  pass.** This is the one restructuring of load-bearing code, so it lands and is
+  reviewed alone. Nothing else in this PR.
+- **PR 2 — orchestrator skeleton.** `AgoraOrchestrator` operations API +
+  `RunStateStore` seam + SQLite impl + the `default` queue + tick loop + `manual`
+  trigger only. No executors yet. Proves the core in isolation.
+- **PR 3 — first end-to-end.** Wire the `dispatch-executor` (composing PR 1's
+  `fire`/`reconcile`) and run a single trivial `WorkItem` start→finish.
+- **Thereafter:** `dev` pack shapes, `cron`/`dep-satisfied` triggers, the
+  `dev.open-pr` interpreter, `.agora/output.json` worker channel, and the CLI/MCP
+  surfaces accrete on the proven spine.
 
 ---
 
