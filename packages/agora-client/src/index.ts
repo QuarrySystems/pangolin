@@ -112,7 +112,7 @@ import { registerCapability, type RegisterCapabilityOpts } from './capabilities-
 import { listCapabilities, getCapability, listSubagents, getSubagent, listEnvs, getEnv } from './catalog.js';
 import { registerSubagent, type RegisterSubagentOpts } from './subagent-register.js';
 import { registerEnv, type RegisterEnvOpts } from './env-register.js';
-import { dispatchWork, type ClientDispatchOpts } from './dispatch.js';
+import { dispatchWork, fireWork, type ClientDispatchOpts, type InFlightDispatch } from './dispatch.js';
 import { describeDispatch } from './describe.js';
 import { cancelDispatch } from './cancel.js';
 import type { DispatchWork } from '@quarry-systems/agora-core';
@@ -148,6 +148,7 @@ export interface AgoraClientEnvAPI {
  */
 export interface AgoraClientDispatchFn {
   (work: DispatchWork & ClientDispatchOpts): Promise<DispatchResult>;
+  fire(work: DispatchWork & ClientDispatchOpts): Promise<InFlightDispatch>;
   describe(dispatchId: string): Promise<DispatchResult>;
   cancel(dispatchId: string): Promise<void>;
 }
@@ -234,6 +235,10 @@ Object.defineProperty(AgoraClient.prototype, 'dispatch', {
     };
     fn.describe = (dispatchId: string) => describeDispatch(this, dispatchId);
     fn.cancel = (dispatchId: string) => cancelDispatch(this, dispatchId);
+    fn.fire = (workAndOpts: DispatchWork & ClientDispatchOpts): Promise<InFlightDispatch> => {
+      const { workerImage, defaultDispatchTimeoutSeconds, ...work } = workAndOpts;
+      return fireWork(this, work as DispatchWork, { workerImage, defaultDispatchTimeoutSeconds });
+    };
     return fn as unknown as AgoraClientDispatchFn;
   },
 });
