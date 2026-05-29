@@ -41,6 +41,46 @@ describe("parseWorkerEnv", () => {
     });
   });
 
+  describe("per-dispatch secret refs", () => {
+    it("defaults perDispatchSecretRefs to an empty object when unset", () => {
+      const cfg = parseWorkerEnv(baseEnv());
+      expect(cfg.perDispatchSecretRefs).toEqual({});
+    });
+
+    it("parses AGORA_PER_DISPATCH_SECRET_REFS_JSON into envName→ref map", () => {
+      const env = baseEnv();
+      env.AGORA_PER_DISPATCH_SECRET_REFS_JSON = JSON.stringify({
+        GH_TOKEN: "arn:aws:secretsmanager:us-east-1:1:secret:gh",
+        DEPLOY_KEY: "local-secret://abc",
+      });
+      const cfg = parseWorkerEnv(env);
+      expect(cfg.perDispatchSecretRefs).toEqual({
+        GH_TOKEN: "arn:aws:secretsmanager:us-east-1:1:secret:gh",
+        DEPLOY_KEY: "local-secret://abc",
+      });
+    });
+
+    it("throws when AGORA_PER_DISPATCH_SECRET_REFS_JSON is malformed JSON", () => {
+      const env = baseEnv();
+      env.AGORA_PER_DISPATCH_SECRET_REFS_JSON = "{not-json";
+      expect(() => parseWorkerEnv(env)).toThrow(
+        /AGORA_PER_DISPATCH_SECRET_REFS_JSON.*not valid JSON/,
+      );
+    });
+  });
+
+  describe("secret store dir", () => {
+    it("leaves secretStoreDir undefined when AGORA_SECRET_STORE_DIR is unset", () => {
+      expect(parseWorkerEnv(baseEnv()).secretStoreDir).toBeUndefined();
+    });
+
+    it("parses AGORA_SECRET_STORE_DIR into secretStoreDir", () => {
+      const env = baseEnv();
+      env.AGORA_SECRET_STORE_DIR = "/agora/secrets";
+      expect(parseWorkerEnv(env).secretStoreDir).toBe("/agora/secrets");
+    });
+  });
+
   describe("bundle refs validation", () => {
     it("throws when AGORA_BUNDLE_REFS_JSON is malformed JSON", () => {
       const env = baseEnv();

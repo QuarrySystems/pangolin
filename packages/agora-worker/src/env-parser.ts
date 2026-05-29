@@ -20,6 +20,20 @@ export interface WorkerConfig {
   inputJson: Record<string, unknown>;
   callbackUrl?: string;
   callbackTokenRef?: string;
+  /**
+   * Per-dispatch secret references (envName → store ref), passed by the
+   * client so the WORKER resolves and registers them for redaction rather
+   * than relying on ambient compute-layer injection (which left them
+   * un-redacted). Empty when the dispatch carried no per-dispatch secrets.
+   */
+  perDispatchSecretRefs: Record<string, string>;
+  /**
+   * Directory the `LocalSecretStore` reads per-dispatch secret files from.
+   * Set (by the local-docker provider, to the in-container bind-mount target)
+   * only when secrets are staged on the local filesystem; unset for the AWS
+   * path, where the worker falls back to `AwsSecretStore`.
+   */
+  secretStoreDir?: string;
   runtimeAdapter: string;
   setupTimeoutSeconds: number;
   disableNeedsInputHelper: boolean;
@@ -82,6 +96,21 @@ export function parseWorkerEnv(
     }
   }
 
+  let perDispatchSecretRefs: Record<string, string> = {};
+  if (env.AGORA_PER_DISPATCH_SECRET_REFS_JSON) {
+    try {
+      perDispatchSecretRefs = JSON.parse(
+        env.AGORA_PER_DISPATCH_SECRET_REFS_JSON,
+      ) as Record<string, string>;
+    } catch (err) {
+      throw new Error(
+        `agora-worker: AGORA_PER_DISPATCH_SECRET_REFS_JSON is not valid JSON: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  const secretStoreDir = env.AGORA_SECRET_STORE_DIR || undefined;
+
   const callbackUrl = env.AGORA_CALLBACK_URL;
   const callbackTokenRef = env.AGORA_CALLBACK_TOKEN_REF;
   if (callbackUrl && !callbackTokenRef) {
@@ -105,6 +134,8 @@ export function parseWorkerEnv(
     inputJson,
     callbackUrl,
     callbackTokenRef,
+    perDispatchSecretRefs,
+    secretStoreDir,
     runtimeAdapter,
     setupTimeoutSeconds,
     disableNeedsInputHelper,

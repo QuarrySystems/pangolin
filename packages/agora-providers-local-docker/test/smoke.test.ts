@@ -135,6 +135,67 @@ describe('LocalDockerProvider.run — container creation contract', () => {
   });
 });
 
+describe('LocalDockerProvider.run — secret store bind-mount', () => {
+  it('bind-mounts AGORA_SECRET_STORE_DIR and rewrites it to the in-container path', async () => {
+    const createSpy = vi.fn(async () => ({ id: 'cs1', start: async () => {} }));
+    const provider = new LocalDockerProvider({
+      docker: { createContainer: createSpy } as never,
+    });
+
+    await provider.run(
+      baseSpec({ env: { AGORA_SECRET_STORE_DIR: '/host/tmp/agora-secrets-abc' } }),
+      baseCtx,
+    );
+
+    const arg = createSpy.mock.calls[0]![0] as {
+      Env: string[];
+      HostConfig?: { Binds?: string[] };
+    };
+    expect(arg.HostConfig?.Binds).toContain(
+      '/host/tmp/agora-secrets-abc:/agora/secrets',
+    );
+    expect(arg.Env).toContain('AGORA_SECRET_STORE_DIR=/agora/secrets');
+  });
+
+  it('honors a custom secretStoreMountTarget', async () => {
+    const createSpy = vi.fn(async () => ({ id: 'cs2', start: async () => {} }));
+    const provider = new LocalDockerProvider({
+      docker: { createContainer: createSpy } as never,
+      secretStoreMountTarget: '/custom/secrets',
+    });
+
+    await provider.run(
+      baseSpec({ env: { AGORA_SECRET_STORE_DIR: '/host/s' } }),
+      baseCtx,
+    );
+
+    const arg = createSpy.mock.calls[0]![0] as {
+      Env: string[];
+      HostConfig?: { Binds?: string[] };
+    };
+    expect(arg.HostConfig?.Binds).toContain('/host/s:/custom/secrets');
+    expect(arg.Env).toContain('AGORA_SECRET_STORE_DIR=/custom/secrets');
+  });
+
+  it('adds no secrets bind or env when AGORA_SECRET_STORE_DIR is unset', async () => {
+    const createSpy = vi.fn(async () => ({ id: 'cs3', start: async () => {} }));
+    const provider = new LocalDockerProvider({
+      docker: { createContainer: createSpy } as never,
+    });
+
+    await provider.run(baseSpec({ env: { FOO: 'bar' } }), baseCtx);
+
+    const arg = createSpy.mock.calls[0]![0] as {
+      Env: string[];
+      HostConfig?: { Binds?: string[] };
+    };
+    expect(arg.Env.some((e) => e.startsWith('AGORA_SECRET_STORE_DIR='))).toBe(false);
+    expect((arg.HostConfig?.Binds ?? []).some((b) => b.includes('/agora/secrets'))).toBe(
+      false,
+    );
+  });
+});
+
 describe('LocalDockerProvider.awaitExit — terminal state collection', () => {
   // Build a docker-stream-multiplexed buffer: [type(1)][0,0,0][size(4 BE)][payload]
   const frame = (type: 1 | 2, payload: string): Buffer => {

@@ -82,6 +82,57 @@ export interface TaskExit {
   providerFailureReason?: string;
 }
 
+/** A secret staged into a {@link SecretStore}. */
+export interface StagedSecret {
+  /**
+   * Opaque, store-specific reference the worker later passes to
+   * {@link SecretStore.resolve}. For the AWS adapter this is a Secrets
+   * Manager ARN; for the local adapter it is an opaque `local-secret://`
+   * URI. Callers treat it as a string and never parse it.
+   */
+  ref: string;
+  /** Effective TTL in seconds; the store auto-expires the secret after this. */
+  ttlSeconds: number;
+}
+
+/** Arguments to {@link SecretStore.stage}. */
+export interface StageSecretArgs {
+  /** Logical name; the store namespaces/sanitizes as needed. */
+  name: string;
+  /** The secret value to stage. */
+  value: string;
+  /** Auto-expiry in seconds. */
+  ttlSeconds: number;
+  /**
+   * Tags for bulk cleanup — e.g. `{ 'agora:dispatchId': '<id>' }` so a
+   * dispatch's per-dispatch secrets can be swept in one
+   * {@link SecretStore.cleanupByTag} call.
+   */
+  tags?: Record<string, string>;
+}
+
+/**
+ * A pluggable secret store (a.k.a. ENVStore). The caller-side SDK stages
+ * inline secrets and the per-dispatch callback HMAC key here at register /
+ * dispatch time; the worker resolves refs back to values at boot.
+ *
+ * Two adapters ship: AWS Secrets Manager (production) and a local
+ * file-backed store (dev / `LocalDockerProvider`). The interface exists so
+ * resolution authority can live entirely in the worker — ALL secret values
+ * (env-bundle and per-dispatch) pass through `resolve`, giving the worker a
+ * single chokepoint to register each value for log redaction before the
+ * sub-agent runs (§7.1).
+ */
+export interface SecretStore {
+  readonly name: string;
+  /** Stage a secret value and return an opaque, resolvable reference. */
+  stage(args: StageSecretArgs): Promise<StagedSecret>;
+  /** Resolve a previously-staged reference back to its secret value. */
+  resolve(ref: string): Promise<string>;
+  /** Delete every secret carrying the given tag. Best-effort; never throws on a miss. */
+  cleanupByTag(tagKey: string, tagValue: string): Promise<void>;
+}
+
 /**
  * A `ComputeProvider` is the runtime-facing surface of a compute backend.
  * `run` is non-blocking and returns a handle; `awaitExit` blocks until

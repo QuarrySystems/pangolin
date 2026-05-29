@@ -73,6 +73,8 @@ export async function loadChannelIfPresent(
   const iterator = iterable[Symbol.asyncIterator]();
 
   let stopped = false;
+  // Fire-and-forget background drain — the promise is intentionally not
+  // awaited or retained; `stopped` (closed over by stop()) ends the loop.
   void (async () => {
     while (!stopped) {
       let next;

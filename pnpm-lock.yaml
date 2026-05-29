@@ -8,12 +8,18 @@ importers:
 
   .:
     devDependencies:
+      '@types/dockerode':
+        specifier: ^3.3.30
+        version: 3.3.47
       '@typescript-eslint/eslint-plugin':
         specifier: ^8.18.2
         version: 8.59.4(@typescript-eslint/parser@8.59.4(eslint@8.57.1)(typescript@5.9.3))(eslint@8.57.1)(typescript@5.9.3)
       '@typescript-eslint/parser':
         specifier: ^8.18.2
         version: 8.59.4(eslint@8.57.1)(typescript@5.9.3)
+      dockerode:
+        specifier: ^4.0.0
+        version: 4.0.12
       eslint:
         specifier: ^8.57.1
         version: 8.57.1
@@ -69,6 +75,9 @@ importers:
       '@quarry-systems/agora-core':
         specifier: workspace:*
         version: link:../agora-core
+      '@quarry-systems/agora-secret-store':
+        specifier: workspace:*
+        version: link:../agora-secret-store
     devDependencies:
       '@quarry-systems/agora-providers-local-docker':
         specifier: workspace:*
@@ -154,6 +163,15 @@ importers:
         specifier: ^4.2.0
         version: 4.2.6
 
+  packages/agora-secret-store:
+    dependencies:
+      '@aws-sdk/client-secrets-manager':
+        specifier: ^3.700.0
+        version: 3.1052.0
+      '@quarry-systems/agora-core':
+        specifier: workspace:*
+        version: link:../agora-core
+
   packages/agora-storage-local:
     dependencies:
       '@quarry-systems/agora-core':
@@ -177,6 +195,9 @@ importers:
       '@quarry-systems/agora-core':
         specifier: workspace:*
         version: link:../agora-core
+      '@quarry-systems/agora-secret-store':
+        specifier: workspace:*
+        version: link:../agora-secret-store
       '@quarry-systems/agora-storage-local':
         specifier: workspace:*
         version: link:../agora-storage-local

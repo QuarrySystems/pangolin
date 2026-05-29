@@ -696,6 +696,27 @@ export type MergeRule =
 
 **Event payloads are deliberately low-sensitivity.** Lifecycle events carry state and low-cardinality identifiers (dispatch id, provider task id, exit code, reason enum, duration, ISO timestamp). They do NOT carry potentially-sensitive content like the rendered prompt, the `question` body from a `needs_input` outcome, captured stdout, or capability file contents. Consumers needing those payloads call `agora_dispatch_describe` (which returns them within the same trust boundary as the original `DispatchResult`). Rationale: events flow to N observers (TelemetryHook, primary callback URL, every notification webhook); the question body might contain filenames, code excerpts, or business logic that doesn't belong in every downstream observer's logs. The `dispatch.failed` event follows the same discipline (`reason` is a closed enum; the longer `detail` lives in `DispatchResult.failure`, not in the event). A future minor version may add an optional `questionPreview: string` (truncated, opt-in) if integrators consistently report wanting a lightweight UX hint without fetching describe; the additive shape preserves the closed-at-six commitment.
 
+### 5.9 SecretStore (ENVStore)
+
+The pluggable backend for secret material. The caller-side SDK *stages* inline secrets and the per-dispatch callback HMAC key here at register/dispatch time; the worker *resolves* refs back to values at boot. Resolution authority lives in the worker — all secret values (env-bundle and per-dispatch) pass through `resolve`, giving the worker a single chokepoint to register each value for log redaction before the sub-agent runs (§7.1).
+
+```typescript
+export interface SecretStore {
+  readonly name: string;
+  stage(args: { name: string; value: string; ttlSeconds: number; tags?: Record<string, string> }): Promise<{ ref: string; ttlSeconds: number }>;
+  resolve(ref: string): Promise<string>;
+  cleanupByTag(tagKey: string, tagValue: string): Promise<void>;   // best-effort
+}
+```
+
+The `ref` is opaque and store-specific (callers never parse it): a Secrets Manager ARN for the AWS adapter, a `local-secret://<id>` URI for the local adapter. Because the ref is path-independent, the local adapter resolves correctly across the host→container boundary — the client and worker each construct a store over their own view of the same (bind-mounted) directory.
+
+**MVP impls** (`@quarry-systems/agora-secret-store`):
+- `AwsSecretStore` — AWS Secrets Manager. `ttlSeconds` is recorded as the `agora:ttlSeconds` tag (Secrets Manager has no native TTL; `cleanupByTag` or a sweeper reclaims). Used with S3 storage / Fargate.
+- `LocalSecretStore` — per-secret files (mode 0600) under a private scratch dir, with sidecar tag metadata for `cleanupByTag`. Used with `file://` storage / `LocalDockerProvider`. The scratch dir MUST NOT be the registry/storage root — unlike the registry (which holds only secret *references*), this store holds plaintext secret *values* on disk.
+
+**Store selection** is by storage scheme: `file://` storage ⇒ `LocalSecretStore`; otherwise `AwsSecretStore`. The client picks the store when staging per-dispatch secrets and, for the local store, passes the scratch dir to the worker via `AGORA_SECRET_STORE_DIR` (§6.1); the worker selects the matching store at boot.
+
 ## 6. Worker contract
 
 The worker is distributed as both `@quarry-systems/agora-worker` (npm) and a published OCI image (`ghcr.io/quarry-systems/agora-worker:<digest>`).
@@ -711,8 +732,10 @@ The worker is distributed as both `@quarry-systems/agora-worker` (npm) and a pub
 | `AGORA_INPUT_JSON` | no | JSON for prompt-template variable substitution. |
 | `AGORA_CALLBACK_URL` | no | HTTPS URL for lifecycle event POSTs. |
 | `AGORA_CALLBACK_TOKEN_REF` | no | Secret ref for the HMAC callback-signing key. Required iff callback URL set. |
+| `AGORA_PER_DISPATCH_SECRET_REFS_JSON` | no | JSON `{ envName: ref }` of per-dispatch secret refs (§4.2). The worker resolves and registers these for redaction itself, rather than the compute layer injecting them ambiently (which would escape redaction). Empty/absent when the dispatch carried no per-dispatch secrets. |
+| `AGORA_SECRET_STORE_DIR` | no | For the local secret store: the in-container directory `LocalSecretStore` resolves `local-secret://` refs from (bind-mounted by `LocalDockerProvider`). Absent for the AWS path. See §5.9. |
 
-Plus integrator-defined vars merged in from env bundles.
+Plus integrator-defined vars merged in from env bundles — but only after the worker→runtime env firewall (§7.9) strips its own control-plane (`AGORA_*`) and ambient AWS credential variables.
 
 ### 6.2 Lifecycle
 
@@ -720,8 +743,8 @@ Plus integrator-defined vars merged in from env bundles.
 2. Fetch subagent, capabilities, env bundles per `AGORA_BUNDLE_REFS_JSON`. **Verify each blob's SHA-256 matches the advertised `contentHash`.** Any mismatch fails the dispatch with `reason: 'integrity-failed'` before runtime invocation.
 3. Emit `dispatch.started` if callback configured.
 4. Overlay capability bundles onto worker filesystem in declared order. The adapter's `agora-needs-input-helper` content is overlaid first (unless `AGORA_DISABLE_NEEDS_INPUT_HELPER=true`). Conflict resolution: paths in `adapter.reservedPaths` use the adapter's `mergeRules`; everything else uses default last-write-wins. Agora-defined manifests (`agora-channel.json`, `agora-setup.sh`, `agora-notifications.json`) have their own merge rules documented in §6.3.
-5. Resolve all secret refs (both env-bundle secrets and per-dispatch `secrets` from §4.2) to real values using the worker's task IAM. Throw `SecretResolutionError` if any ref fails; this fails the dispatch with `reason: 'fetch-failed'`.
-6. Merge env-bundle values + all resolved secrets into process env. On key conflict between an env-bundle secret and a per-dispatch secret, per-dispatch wins (last-write-wins; dispatch is logically "later" than the env bundle it composes with).
+5. Resolve all secret refs to real values via the `SecretStore` (§5.9) — env-bundle secrets (from each env-bundle blob's `secretRefs`) and per-dispatch secrets (from `AGORA_PER_DISPATCH_SECRET_REFS_JSON`, §4.2). Each resolved value is registered with the structured logger so it is redacted from worker logs (§7.1). Throw `SecretResolutionError` if any ref fails; this fails the dispatch with `reason: 'fetch-failed'`.
+6. Merge env into the value handed to the runtime: start from the worker's own `process.env` **with the §7.9 firewall applied** (control-plane `AGORA_*` and ambient AWS credential vars stripped), then overlay env-bundle values + all resolved secrets. On key conflict between an env-bundle secret and a per-dispatch secret, per-dispatch wins (last-write-wins; dispatch is logically "later" than the env bundle it composes with). A firewalled var can be deliberately re-supplied by an env bundle, which is merged on top.
 7. If any capability bundle included `agora-setup.sh`, execute it with the merged env. Bounded by `AGORA_SETUP_TIMEOUT_SECONDS` (default 120). Non-zero exit fails the dispatch.
 8. If any capability bundle includes a `agora-channel.json` manifest naming an adapter present in the worker image, construct the channel adapter (which can now read fully-resolved env vars) and start the channel subscription as a background task.
 9. Invoke `runtimeAdapter.invoke({ systemPrompt, promptTemplate, input, model, workspaceDir }, ctx)`. The adapter renders the prompt, spawns the runtime binary, captures stdout/stderr, detects whether the runtime indicated a needs_input outcome, and returns `RuntimeExit`. The worker treats the runtime call as opaque — it does not interpose on tool calls, does not parse stdout for runtime-specific signals, does not know how the adapter implements prompt rendering or runtime invocation.
@@ -1037,9 +1060,11 @@ These are all deferred (§11): in-flight ask, snapshot-resume, and a future Conv
 
 ### 7.1 The env/secrets split
 
-`values` in env bundles is for visible config. `secrets` is for ARN references or inline values the SDK stages into Secrets Manager. Agora-client validates `values` at register time against credential-shaped patterns (AWS access key prefixes, JWT shape, common bearer-token prefixes). Match throws `CredentialsInEnvError`. Per-bundle opt-out via `allowCredentialPatterns: string[]` for the rare false positive.
+`values` in env bundles is for visible config. `secrets` is for ARN references or inline values the SDK stages via the `SecretStore` (§5.9). Agora-client validates `values` (and capability file contents) at register time against credential-shaped patterns. Match throws `CredentialsInEnvError`. Per-bundle opt-out via `allowCredentialPatterns: string[]` for the rare false positive. The patterns cover AWS access/session-key prefixes, JWT shape, common bearer-token prefixes, GitHub tokens, and the API-key families most likely to be fat-fingered into a Claude Code worker's config: Anthropic (`sk-ant-`), OpenAI (`sk-`), Google (`AIza`), Slack (`xox[baprs]-`), Stripe (`sk_live_`/`rk_live_`), and PEM private-key armor. The scanner is heuristic defense-in-depth, not a guarantee — it raises the floor against the obvious mistakes.
 
-**Inline secrets are NOT part of the env bundle's content hash, and they do NOT live in the registry.** When the integrator passes an inline secret to `env.register()`, the SDK stages it in Secrets Manager (with the auto-computed TTL from §7.6) and stores only the resulting ARN as part of the env bundle's content. The bundle's content hash covers the visible `values` map and the secret REFERENCES (ARNs), not the secret VALUES themselves. A regulated buyer asking "what secret value was used for dispatch X" receives the ARN — they then correlate it against their own Secrets Manager audit trail (CloudTrail, secret rotation history, etc.) for the value's lineage. Agora's audit story stops at the ARN boundary; the secret-value lineage is the integrator's secret-management system's responsibility.
+**Inline secrets are NOT part of the env bundle's content hash, and they do NOT live in the registry.** When the integrator passes an inline secret to `env.register()`, the SDK stages it via the `SecretStore` (Secrets Manager in cloud, a local file store for local-docker — §5.9; with the auto-computed TTL from §7.6) and stores only the resulting REFERENCE as part of the env bundle's content. The bundle's content hash covers the visible `values` map and the secret references, not the secret VALUES themselves. A regulated buyer asking "what secret value was used for dispatch X" receives the ref — they then correlate it against their own secret-store audit trail (CloudTrail, rotation history, etc.) for the value's lineage. Agora's audit story stops at the ref boundary; the secret-value lineage is the integrator's secret-management system's responsibility.
+
+**Secret-value redaction is complete at the worker.** Every secret value the worker resolves — env-bundle secrets *and* per-dispatch secrets — is registered with the structured logger (along with the callback HMAC key) so it is masked (`<redacted:secret>`) in the worker's log stream, including captured setup-script output and truncated failure detail. This is why per-dispatch secret refs travel to the worker via `AGORA_PER_DISPATCH_SECRET_REFS_JSON` (§6.1) and are resolved *by the worker* rather than injected ambiently by the compute layer: ambient injection would put values in the worker's environment that it never sees as secrets and therefore cannot redact.
 
 ### 7.2 Bundle integrity
 
@@ -1083,7 +1108,7 @@ Cross-account scenarios are deferred to v0.2 along with cross-namespace addressi
 
 `AgoraClient.cancel(dispatchId)` is best-effort. The provider's stop semantics apply; for Fargate that's `StopTask` with a SIGTERM grace period. The worker traps SIGTERM, attempts to emit `dispatch.cancelled`, releases channel subscriptions, and exits.
 
-Inline secrets are deleted after `awaitExit` returns regardless of cancellation. The TTL is auto-computed by the SDK from the dispatch's timeout (`(dispatch.timeoutSeconds ?? 7200) + 300` seconds cleanup grace), so integrators don't size it themselves. If the worker fails catastrophically before agora-client can clean up, the TTL ensures Secrets Manager auto-deletes the staged secret. Explicit `ttlSeconds` overrides apply only when integrators need a shorter compliance-driven lifetime.
+Inline secrets are deleted after `awaitExit` returns regardless of cancellation, via the `SecretStore` (§5.9): `cleanupByTag('agora:dispatchId', <id>)` for AWS, or removal of the per-dispatch scratch dir for the local store. The TTL is auto-computed by the SDK from the dispatch's timeout (`(dispatch.timeoutSeconds ?? 7200) + 300` seconds cleanup grace), so integrators don't size it themselves. If the client fails catastrophically before it can clean up, the recorded TTL is the backstop (Secrets Manager auto-deletes the staged secret; the local store's files are short-lived scratch). Explicit `ttlSeconds` overrides apply only when integrators need a shorter compliance-driven lifetime.
 
 ### 7.7 Privileged operations are never reachable through an AI tool surface
 
@@ -1147,6 +1172,19 @@ export interface AgoraClientOptions {
 
 **Why this lives in agora, not in the integrator's database.** The dispatch record is content-addressed to immutable registry artifacts (subagent, capabilities, env bundles). Keeping it adjacent to the registry — same `StorageProvider`, same namespace, same expiry-aware tooling — means the audit story composes from one storage backend. If retention lived in the integrator's database, every integrator would rebuild the same plumbing (object storage + lifecycle policies + expiry semantics + capacity planning). Centralizing it in agora is the smaller burden.
 
+### 7.9 Worker→runtime environment firewall
+
+§7.7 keeps privileged *operations* off the AI surface. This is the complementary control for the worker's *identity*: the env handed to the sub-agent runtime is not the worker's raw `process.env`.
+
+The worker boots with its own environment — the Agora control plane (`AGORA_*`, including `AGORA_CALLBACK_TOKEN_REF`, the bundle refs, the storage URI) and the ambient AWS task-role credential chain it uses to fetch bundles and resolve secrets. Handing that wholesale to the runtime would let a prompt-injected sub-agent (the same threat §7.7 takes seriously) read the callback HMAC reference or — worse — assume the worker's task role to reach other tenants' bundles and secrets.
+
+So before the merge in §6.2 step 6, the worker strips from the base env:
+
+- every `AGORA_*` control-plane variable (the worker has already consumed them), and
+- the ambient AWS credential-vending variables: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_CONTAINER_CREDENTIALS_RELATIVE_URI`, `AWS_CONTAINER_CREDENTIALS_FULL_URI`, `AWS_WEB_IDENTITY_TOKEN_FILE`, `AWS_ROLE_ARN`. (`AWS_REGION`/`AWS_DEFAULT_REGION` are config, not credentials, and survive.)
+
+Everything else the runtime legitimately needs (PATH, HOME, locale, arbitrary user vars) survives. Credentials the sub-agent genuinely requires — including AWS credentials, when that is the deliberate intent — are supplied **explicitly via an env bundle**, which is merged on top of the firewalled base; the sub-agent's authority is thus declared by humans (an env bundle is a deploy-time artifact, §4) rather than inherited ambiently from the worker.
+
 ## 8. Packages and dependency direction
 
 ```
@@ -1164,10 +1202,12 @@ export interface AgoraClientOptions {
    ├── @quarry-systems/agora-providers-local-docker  (depends on agora-core, dockerode)
    ├── @quarry-systems/agora-providers-aws-creds (depends on agora-core, AWS SDK)
    ├── @quarry-systems/agora-storage-s3          (depends on agora-core, AWS SDK)
-   └── @quarry-systems/agora-storage-local       (depends on agora-core)
+   ├── @quarry-systems/agora-storage-local       (depends on agora-core)
+   └── @quarry-systems/agora-secret-store        (SecretStore impls — §5.9; depends on agora-core,
+                                                  AWS SDK; consumed by agora-client + agora-worker)
 ```
 
-Eleven packages in MVP. No package depends on Stoa, Bedrock, RaState, or any other Quarry Systems library. Enforced via package.json + a CI allowlist check.
+Twelve packages in MVP. No package depends on Stoa, Bedrock, RaState, or any other Quarry Systems library. Enforced via package.json + a CI allowlist check.
 
 The published OCI image bundles agora-worker + Claude Code CLI + Node runtime + the storage provider crates the worker needs at runtime (S3, local). Integrators that need provider variants the stock image doesn't include extend it: `FROM ghcr.io/quarry-systems/agora-worker:<digest>; COPY ./my-provider-add-on ./`.
 
@@ -1183,7 +1223,7 @@ To call MVP done, all of the following must ship:
 6. `agora-runtime-claude-code` (RuntimeAdapter implementation): renders prompts via Mustache substitution, spawns `claude --print`, applies adapter-specific merge rules for `.claude/settings.json` + `.claude/skills/<name>/SKILL.md` + `agora-plugins.json`, ships the `agora-needs-input-helper` SKILL.md, detects the sentinel file and reports `needsInputSentinelPath` in `RuntimeExit`.
 7. `agora-providers-fargate` and `agora-providers-local-docker`.
 8. `agora-providers-aws-creds`.
-9. `agora-storage-s3` and `agora-storage-local`.
+9. `agora-storage-s3` and `agora-storage-local`, plus `agora-secret-store` with `AwsSecretStore` + `LocalSecretStore` (§5.9) — the seam through which the client stages inline + per-dispatch secrets and the worker resolves + redaction-registers them.
 10. End-to-end test suite:
    - Register + dispatch (local-docker + local storage); result returned via stdout sink.
    - Register + dispatch (Fargate + S3, live AWS gated behind a CI secret); result returned with `resolved` audit block populated correctly.

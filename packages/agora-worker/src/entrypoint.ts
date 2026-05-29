@@ -42,7 +42,12 @@ import type {
   RuntimeAdapter,
   StorageProvider,
   NotificationConfig,
+  SecretStore,
 } from '@quarry-systems/agora-core';
+import {
+  AwsSecretStore,
+  LocalSecretStore,
+} from '@quarry-systems/agora-secret-store';
 import {
   GetSecretValueCommand,
   SecretsManagerClient,
@@ -62,6 +67,7 @@ import {
 } from './overlay-engine.js';
 import { SecretResolver, SecretResolutionError } from './secret-resolver.js';
 import { mergeEnv, type EnvBundle } from './env-merger.js';
+import { filterRuntimeEnv } from './runtime-env-filter.js';
 import {
   runSetupScriptIfPresent,
   SetupScriptError,
@@ -94,6 +100,12 @@ export interface RunWorkerDeps {
   workspaceDir?: string;
   /** Secrets Manager client (for env-bundle secret resolution). */
   secretsManagerClient?: SecretsManagerClient;
+  /**
+   * SecretStore used to resolve per-dispatch secret refs. Default: an
+   * `AwsSecretStore` over `secretsManagerClient`. Tests / local-docker
+   * inject a `LocalSecretStore` (or a fake).
+   */
+  secretStore?: SecretStore;
   /**
    * Synchronous lifecycle observer. Receives every emitted event before it
    * is dispatched to the LifecycleEmitter / notification webhooks. Exists
@@ -319,17 +331,44 @@ export async function runWorker(
     envBundles.push({ values: def.values ?? {}, secrets: resolvedSecrets });
   }
 
-  // Step 8: merge env. The worker's own process.env is the base — AWS SDK,
-  // PATH, HOME, etc. all need to survive into the child runtime. Per-dispatch
-  // secrets are injected by the compute layer (e.g. Fargate ECS) directly
-  // into the worker's process.env, so they are already present in `env`.
-  const baseEnv: Record<string, string> = {};
-  for (const [k, v] of Object.entries(env)) {
-    if (v !== undefined) baseEnv[k] = v;
+  // Step 7b: resolve per-dispatch secret refs through the SecretStore and
+  // register every value for log redaction (§7.1). Previously per-dispatch
+  // secrets were injected ambiently by the compute layer and never passed
+  // through the worker, so their values escaped the redaction set and could
+  // surface verbatim in worker logs (e.g. an echoing setup script). Routing
+  // them through the worker here closes that gap — and the SecretStore seam
+  // makes it work for the local file store as well as AWS.
+  const secretStore = deps.secretStore ?? defaultSecretStore(cfg, secretsClient);
+  const perDispatchSecrets: Record<string, string> = {};
+  for (const [envName, ref] of Object.entries(cfg.perDispatchSecretRefs)) {
+    let value: string;
+    try {
+      value = await secretStore.resolve(ref);
+    } catch (err) {
+      return failWith(
+        'fetch-failed',
+        `per-dispatch secret ${envName} resolution failed: ${(err as Error).message}`,
+      );
+    }
+    logger.registerSecret(value);
+    perDispatchSecrets[envName] = value;
   }
+
+  // Step 8: merge env. The worker's own process.env seeds the base — PATH,
+  // HOME, locale, AWS_REGION, etc. need to survive into the child runtime —
+  // but `filterRuntimeEnv` first strips the worker control plane (AGORA_*)
+  // and the ambient AWS task-role credential chain (§7.7): a prompt-injected
+  // sub-agent must not inherit the worker's identity or the callback HMAC
+  // key reference. Credentials the sub-agent genuinely needs are supplied
+  // explicitly via an env bundle, which is merged on top of this base.
+  const rawBase: Record<string, string> = {};
+  for (const [k, v] of Object.entries(env)) {
+    if (v !== undefined) rawBase[k] = v;
+  }
+  const baseEnv = filterRuntimeEnv(rawBase);
   const mergedEnv = mergeEnv({
     envBundles,
-    perDispatchSecrets: {},
+    perDispatchSecrets,
     baseEnv,
   });
 
@@ -491,6 +530,26 @@ export async function runWorker(
     at: new Date().toISOString(),
   });
   return runtimeExit.exitCode;
+}
+
+/**
+ * Pick the SecretStore the worker resolves per-dispatch refs through, by
+ * storage scheme. A `file://` storage URI means the dispatch ran locally
+ * (LocalStorageProvider + LocalDockerProvider), so secrets were staged on
+ * disk and bind-mounted in at `secretStoreDir` — resolve them with a
+ * `LocalSecretStore`. Otherwise fall back to AWS Secrets Manager. The
+ * `file://`-without-dir case (no per-dispatch secrets staged locally) also
+ * falls through to AWS, which is harmless because `perDispatchSecretRefs`
+ * is empty and `resolve` is never called.
+ */
+function defaultSecretStore(
+  cfg: WorkerConfig,
+  secretsClient: SecretsManagerClient,
+): SecretStore {
+  if (cfg.storageUri.startsWith('file://') && cfg.secretStoreDir) {
+    return new LocalSecretStore({ dir: cfg.secretStoreDir });
+  }
+  return new AwsSecretStore({ client: secretsClient });
 }
 
 /**

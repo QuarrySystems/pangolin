@@ -138,6 +138,114 @@ describe("assertNoCredentialPattern", () => {
     });
   });
 
+  describe("Anthropic API key (sk-ant-...)", () => {
+    it("throws CredentialsInEnvError on an Anthropic key", () => {
+      const key = "sk-ant-api03-" + "A".repeat(40);
+      expect(() =>
+        assertNoCredentialPattern("values.ANTHROPIC_API_KEY", key),
+      ).toThrow(CredentialsInEnvError);
+    });
+
+    it("reports the anthropic-key pattern name", () => {
+      const key = "sk-ant-api03-" + "A".repeat(40);
+      try {
+        assertNoCredentialPattern("values.ANTHROPIC_API_KEY", key);
+        throw new Error("expected to throw");
+      } catch (err) {
+        expect((err as CredentialsInEnvError).detail).toContain("anthropic-key");
+      }
+    });
+
+    it("does not throw when allowCredentialPatterns names anthropic-key", () => {
+      const key = "sk-ant-api03-" + "A".repeat(40);
+      expect(() =>
+        assertNoCredentialPattern("values.ANTHROPIC_API_KEY", key, {
+          allowCredentialPatterns: ["anthropic-key"],
+        }),
+      ).not.toThrow();
+    });
+  });
+
+  describe("OpenAI API key (sk-...)", () => {
+    it("throws CredentialsInEnvError on an OpenAI legacy key", () => {
+      const key = "sk-" + "T3BlbkFJ".repeat(6); // sk- + 48 alnum
+      expect(() =>
+        assertNoCredentialPattern("values.OPENAI_API_KEY", key),
+      ).toThrow(CredentialsInEnvError);
+    });
+
+    it("reports the openai-key pattern name", () => {
+      const key = "sk-" + "T3BlbkFJ".repeat(6);
+      try {
+        assertNoCredentialPattern("values.OPENAI_API_KEY", key);
+        throw new Error("expected to throw");
+      } catch (err) {
+        expect((err as CredentialsInEnvError).detail).toContain("openai-key");
+      }
+    });
+  });
+
+  describe("Google API key (AIza...)", () => {
+    it("throws CredentialsInEnvError on a Google API key", () => {
+      const key = "AIza" + "B".repeat(35); // 39 chars total
+      expect(() =>
+        assertNoCredentialPattern("values.GOOGLE_API_KEY", key),
+      ).toThrow(CredentialsInEnvError);
+    });
+  });
+
+  describe("Slack token (xox[baprs]-...)", () => {
+    it("throws CredentialsInEnvError on a Slack bot token", () => {
+      const key = "xoxb-" + "1".repeat(24);
+      expect(() =>
+        assertNoCredentialPattern("values.SLACK_TOKEN", key),
+      ).toThrow(CredentialsInEnvError);
+    });
+  });
+
+  describe("Stripe secret key (sk_live_ / rk_live_ / *_test_)", () => {
+    it("throws CredentialsInEnvError on a Stripe live secret key", () => {
+      const key = "sk_live_" + "a".repeat(24);
+      expect(() =>
+        assertNoCredentialPattern("values.STRIPE_KEY", key),
+      ).toThrow(CredentialsInEnvError);
+    });
+
+    it("throws on a Stripe restricted key (rk_live_)", () => {
+      const key = "rk_live_" + "b".repeat(24);
+      expect(() =>
+        assertNoCredentialPattern("values.STRIPE_KEY", key),
+      ).toThrow(CredentialsInEnvError);
+    });
+  });
+
+  describe("PEM private key header", () => {
+    it("throws CredentialsInEnvError on an RSA private key header", () => {
+      const pem =
+        "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----";
+      expect(() =>
+        assertNoCredentialPattern("capability:deploy:id_rsa", pem),
+      ).toThrow(CredentialsInEnvError);
+    });
+
+    it("throws on a generic (PKCS#8) private key header", () => {
+      const pem = "-----BEGIN PRIVATE KEY-----\nMIIE...\n-----END PRIVATE KEY-----";
+      expect(() =>
+        assertNoCredentialPattern("capability:deploy:key.pem", pem),
+      ).toThrow(CredentialsInEnvError);
+    });
+
+    it("reports the private-key pattern name", () => {
+      const pem = "-----BEGIN OPENSSH PRIVATE KEY-----\nb3Blbn...\n";
+      try {
+        assertNoCredentialPattern("capability:deploy:id_ed25519", pem);
+        throw new Error("expected to throw");
+      } catch (err) {
+        expect((err as CredentialsInEnvError).detail).toContain("private-key");
+      }
+    });
+  });
+
   describe("error message", () => {
     it("includes the field name", () => {
       try {

@@ -43,7 +43,6 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 // symlinks at <repo>/node_modules, so we go directly to the source-tree
 // barrels (same convention as the sibling e2e tests).
 import { buildProgram } from '../../packages/agora-cli/src/index.js';
-import { attachDeployCmd } from '../../packages/agora-cli/src/cmd-deploy.js';
 
 // ---------------------------------------------------------------------------
 // Content-aware fake AgoraClient
@@ -186,8 +185,8 @@ function manifestYaml(opts: {
 
 async function runDeploy(fake: FakeClient, manifestPath: string): Promise<void> {
   const ctx = { getClient: async () => fake as any };
+  // buildProgram already wires the deploy command; no separate attach needed.
   const program = buildProgram(ctx);
-  attachDeployCmd(program, ctx);
   await program.parseAsync(['node', 'agora', 'deploy', '--from', manifestPath]);
 }
 

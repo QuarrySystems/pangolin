@@ -38,9 +38,11 @@ describe("agora-worker scaffold shape", () => {
     const quarryDeps = Object.keys(deps).filter((k) =>
       k.startsWith("@quarry-systems/")
     );
-    // Storage providers at boot per spec §5.8
+    // Storage providers at boot per spec §5.8, plus the SecretStore seam
+    // the worker uses to resolve + redact per-dispatch secrets (§7.1).
     const allowed = [
       "@quarry-systems/agora-core",
+      "@quarry-systems/agora-secret-store",
       "@quarry-systems/agora-storage-local",
       "@quarry-systems/agora-storage-s3",
     ];

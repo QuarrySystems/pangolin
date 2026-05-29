@@ -15,6 +15,7 @@ import type {
 } from '@quarry-systems/agora-core';
 import * as secretsManager from '../src/secrets-manager.js';
 import * as callbackHmac from '../src/callback-hmac.js';
+import { LocalSecretStore } from '@quarry-systems/agora-secret-store';
 
 /**
  * In-memory storage stub. `put` indexes the trailing path segment as the
@@ -446,6 +447,104 @@ describe('dispatchWork — secrets + callback', () => {
     // collision: per-dispatch (stager-produced) wins, NOT env-bundle
     expect(refs.GH_TOKEN).not.toBe('arn:env-bundle:gh-token');
     expect(refs.GH_TOKEN).toMatch(/GH_TOKEN-AbCdEf$/);
+  });
+
+  it('passes per-dispatch secret refs to the worker via AGORA_PER_DISPATCH_SECRET_REFS_JSON so the worker resolves+redacts them', async () => {
+    const storage = makeMemoryStorage();
+    storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
+    storage.seed('shared', 'env', 'ns', 'sha256:e', {
+      kind: 'env-bundle',
+      name: 'shared',
+      values: {},
+      secretRefs: { DB: 'arn:env-bundle:db' },
+    });
+    const { compute, runs } = makeCompute();
+    const client = new AgoraClient({
+      namespace: 'ns',
+      compute: { default: compute },
+      credentials: { default: makeCredentials() },
+      storage,
+      targets: { prod: { compute: 'default', credentials: 'default' } },
+    });
+
+    await dispatchWork(
+      client,
+      {
+        subagent: 's',
+        env: 'shared',
+        target: 'prod',
+        secrets: {
+          API_KEY: { arn: 'arn:per-dispatch:api-key' },
+          INLINE_TOK: { inline: 'v' },
+        },
+      },
+      { workerImage: WORKER_IMAGE },
+    );
+
+    const raw = runs[0].spec.env.AGORA_PER_DISPATCH_SECRET_REFS_JSON;
+    expect(raw).toBeTruthy();
+    const refs = JSON.parse(raw);
+    // Per-dispatch refs are present so the worker can resolve + register them.
+    expect(refs.API_KEY).toBe('arn:per-dispatch:api-key');
+    expect(refs.INLINE_TOK).toMatch(/INLINE_TOK-AbCdEf$/);
+    // Env-bundle secrets are NOT in this map — the worker resolves those from
+    // the env-bundle blob itself; duplicating them here would double-resolve.
+    expect(refs.DB).toBeUndefined();
+  });
+
+  it('stages per-dispatch inline secrets via LocalSecretStore (local-secret:// refs + AGORA_SECRET_STORE_DIR) when storage is file://', async () => {
+    const storage = makeMemoryStorage();
+    // Mark this storage as local so dispatchWork routes per-dispatch staging
+    // to the on-disk LocalSecretStore instead of AWS Secrets Manager.
+    (storage as { rootUri?: string }).rootUri = 'file:///tmp/agora-local-store';
+    storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
+
+    let dirAtRun: string | undefined;
+    let refsAtRun: Record<string, string> | undefined;
+    let resolvedAtRun: string | undefined;
+    // Resolve the staged secret inside run() — files still exist there
+    // (the dispatcher cleans the dir only after awaitExit).
+    const compute: ComputeProvider = {
+      name: 'local',
+      async run(spec) {
+        dirAtRun = spec.env.AGORA_SECRET_STORE_DIR;
+        refsAtRun = JSON.parse(spec.env.AGORA_PER_DISPATCH_SECRET_REFS_JSON);
+        const store = new LocalSecretStore({ dir: dirAtRun! });
+        resolvedAtRun = await store.resolve(refsAtRun!.DEPLOY_KEY);
+        return { providerTaskId: 'p-local' };
+      },
+      async awaitExit(): Promise<TaskExit> {
+        return {
+          exitCode: 0,
+          startedAt: new Date(0),
+          finishedAt: new Date(1000),
+          stdout: '',
+          stderr: '',
+        };
+      },
+    };
+    const client = new AgoraClient({
+      namespace: 'ns',
+      compute: { local: compute },
+      credentials: { none: makeCredentials() },
+      storage,
+      targets: { t: { compute: 'local', credentials: 'none' } },
+    });
+
+    await dispatchWork(
+      client,
+      {
+        subagent: 's',
+        target: 't',
+        secrets: { DEPLOY_KEY: { inline: 'LOCAL_SECRET_VAL' } },
+      },
+      { workerImage: WORKER_IMAGE },
+    );
+
+    expect(dirAtRun).toBeTruthy();
+    expect(refsAtRun!.DEPLOY_KEY.startsWith('local-secret://')).toBe(true);
+    // The full round-trip: the worker (here, run()) resolves the staged value.
+    expect(resolvedAtRun).toBe('LOCAL_SECRET_VAL');
   });
 
   it('mints callback HMAC and injects AGORA_CALLBACK_URL + AGORA_CALLBACK_TOKEN_REF when work.callback set', async () => {

@@ -7,11 +7,12 @@
 // integrity failure, happy path with a clean runtime exit, valid
 // needs_input sentinel, and a non-zero runtime exit with no sentinel.
 
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { mkdtemp, rm, writeFile, mkdir, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runWorker, type RunWorkerDeps } from '../src/entrypoint.js';
+import { LocalSecretStore } from '@quarry-systems/agora-secret-store';
 import {
   computeContentHash,
   type StorageProvider,
@@ -248,6 +249,141 @@ describe('runWorker', () => {
     expect(kinds).toContain('dispatch.finished');
     expect(kinds).not.toContain('dispatch.failed');
     expect(kinds).not.toContain('dispatch.needs_input');
+  });
+
+  it('does not leak worker control-plane or ambient AWS credentials into the runtime env', async () => {
+    const h = await setupHarness();
+    cleanupDirs.push(h.workDir, h.adaptersRoot);
+
+    // Seed the worker env with sensitive control-plane + ambient-credential
+    // vars alongside benign ones the sub-agent legitimately needs.
+    h.env.AGORA_CALLBACK_TOKEN_REF = 'arn:aws:secretsmanager:us-east-1:1:secret:hmac';
+    h.env.AWS_SECRET_ACCESS_KEY = 'super-secret-task-role-key';
+    h.env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI = '/v2/credentials/abc';
+    h.env.AWS_REGION = 'us-east-1';
+    h.env.LOG_LEVEL = 'debug';
+
+    let captured: Record<string, string> | undefined;
+    const deps = makeDeps(h);
+    deps.adapter = {
+      name: 'claude-code',
+      reservedPaths: [],
+      invoke: async (_spec, ctx) => {
+        captured = ctx.env;
+        return { exitCode: 0, stdout: '', stderr: '' };
+      },
+    };
+
+    const code = await runWorker(h.env, deps);
+
+    expect(code).toBe(0);
+    expect(captured).toBeDefined();
+    // Worker control plane must not reach the sub-agent.
+    expect(captured).not.toHaveProperty('AGORA_CALLBACK_TOKEN_REF');
+    expect(captured).not.toHaveProperty('AGORA_BUNDLE_REFS_JSON');
+    expect(captured).not.toHaveProperty('AGORA_STORAGE_URI');
+    // Ambient AWS task-role credentials must not be inherited.
+    expect(captured).not.toHaveProperty('AWS_SECRET_ACCESS_KEY');
+    expect(captured).not.toHaveProperty('AWS_CONTAINER_CREDENTIALS_RELATIVE_URI');
+    // Config + benign vars survive.
+    expect(captured!.AWS_REGION).toBe('us-east-1');
+    expect(captured!.LOG_LEVEL).toBe('debug');
+  });
+
+  it('resolves per-dispatch secrets, injects them into the runtime env, and registers them for log redaction', async () => {
+    const h = await setupHarness();
+    cleanupDirs.push(h.workDir, h.adaptersRoot);
+
+    const SECRET_VALUE = 'PER_DISPATCH_VALUE_XYZ';
+    h.env.AGORA_PER_DISPATCH_SECRET_REFS_JSON = JSON.stringify({
+      SECRET_TOKEN: 'ref-1',
+    });
+
+    // Inject a SecretStore that resolves the ref to a known value.
+    const secretStore = {
+      name: 'fake',
+      stage: async () => ({ ref: 'ref-1', ttlSeconds: 1 }),
+      resolve: async (ref: string) =>
+        ref === 'ref-1' ? SECRET_VALUE : (() => { throw new Error('unknown ref'); })(),
+      cleanupByTag: async () => {},
+    };
+
+    let captured: Record<string, string> | undefined;
+    const deps: RunWorkerDeps = {
+      ...makeDeps(h),
+      secretStore,
+      adapter: {
+        name: 'claude-code',
+        reservedPaths: [],
+        invoke: async (_spec, ctx) => {
+          captured = ctx.env;
+          // Non-zero exit whose stderr echoes the secret — the failure path
+          // logs stderr through the redacting StructuredLogger.
+          return { exitCode: 7, stdout: '', stderr: `boom leaked=${SECRET_VALUE}` };
+        },
+      },
+    };
+
+    const writes: string[] = [];
+    const spy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation((chunk: string | Uint8Array): boolean => {
+        writes.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString());
+        return true;
+      });
+    try {
+      await runWorker(h.env, deps);
+    } finally {
+      spy.mockRestore();
+    }
+
+    // Resolution + merge: the secret reached the sub-agent under its env name.
+    expect(captured?.SECRET_TOKEN).toBe(SECRET_VALUE);
+    // Redaction: the worker registered the value, so it never appears raw in
+    // the worker's own log stream (the failure log echoed the stderr).
+    const allLogs = writes.join('');
+    expect(allLogs).not.toContain(SECRET_VALUE);
+    expect(allLogs).toContain('<redacted:secret>');
+  });
+
+  it('auto-selects LocalSecretStore for file:// storage + AGORA_SECRET_STORE_DIR (no injected store)', async () => {
+    const h = await setupHarness();
+    cleanupDirs.push(h.workDir, h.adaptersRoot);
+
+    // Stage a secret on disk via a real LocalSecretStore, as the client would.
+    const secretsDir = await mkdtemp(join(tmpdir(), 'entrypoint-secrets-'));
+    cleanupDirs.push(secretsDir);
+    const staged = await new LocalSecretStore({ dir: secretsDir }).stage({
+      name: 'd-1/DEPLOY_KEY',
+      value: 'LOCAL_DEPLOY_VALUE',
+      ttlSeconds: 60,
+    });
+
+    // file:// storage (harness already uses it) + the dir + the ref.
+    h.env.AGORA_SECRET_STORE_DIR = secretsDir;
+    h.env.AGORA_PER_DISPATCH_SECRET_REFS_JSON = JSON.stringify({
+      DEPLOY_KEY: staged.ref,
+    });
+
+    let captured: Record<string, string> | undefined;
+    // makeDeps injects no secretStore → the entrypoint default must pick
+    // LocalSecretStore because storageUri is file:// and the dir is set.
+    const deps: RunWorkerDeps = {
+      ...makeDeps(h),
+      adapter: {
+        name: 'claude-code',
+        reservedPaths: [],
+        invoke: async (_spec, ctx) => {
+          captured = ctx.env;
+          return { exitCode: 0, stdout: '', stderr: '' };
+        },
+      },
+    };
+
+    const code = await runWorker(h.env, deps);
+
+    expect(code).toBe(0);
+    expect(captured?.DEPLOY_KEY).toBe('LOCAL_DEPLOY_VALUE');
   });
 
   it('emits dispatch.needs_input and exits 0 when sentinel is valid', async () => {

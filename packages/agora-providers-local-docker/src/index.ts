@@ -57,6 +57,15 @@ export interface LocalDockerProviderOpts {
    */
   storageMountTarget?: string;
   /**
+   * In-container mount target for the per-dispatch secret store. When
+   * `spec.env.AGORA_SECRET_STORE_DIR` is set (the client staged per-dispatch
+   * secrets on the host via `LocalSecretStore`), that host directory is
+   * bind-mounted here and the env var is rewritten to this path so the
+   * worker's `LocalSecretStore` resolves refs from inside the container.
+   * Defaults to `/agora/secrets`.
+   */
+  secretStoreMountTarget?: string;
+  /**
    * Additional bind mounts to apply to every container `run()`. Each entry
    * is a Dockerode `Binds` string — `<host>:<container>[:ro]`. Useful for
    * surfacing a pre-built capability bundle directory or custom worker
@@ -80,6 +89,7 @@ export class LocalDockerProvider implements ComputeProvider {
   private readonly graceSeconds: number;
   private readonly autoMountFileStorage: boolean;
   private readonly storageMountTarget: string;
+  private readonly secretStoreMountTarget: string;
   private readonly extraBinds: string[];
 
   constructor(opts: LocalDockerProviderOpts = {}) {
@@ -88,6 +98,7 @@ export class LocalDockerProvider implements ComputeProvider {
     this.graceSeconds = opts.sigtermGraceSeconds ?? 10;
     this.autoMountFileStorage = opts.autoMountFileStorage ?? true;
     this.storageMountTarget = opts.storageMountTarget ?? '/agora/storage';
+    this.secretStoreMountTarget = opts.secretStoreMountTarget ?? '/agora/secrets';
     this.extraBinds = opts.extraBinds ?? [];
   }
 
@@ -141,6 +152,18 @@ export class LocalDockerProvider implements ComputeProvider {
         env.AGORA_STORAGE_URI = `file://${this.storageMountTarget}`;
       }
     }
+
+    // Per-dispatch secret store: the client staged secrets on the host under
+    // AGORA_SECRET_STORE_DIR (a plain path, not a file:// URI). Bind-mount it
+    // in and rewrite the env var so the worker's LocalSecretStore reads from
+    // the in-container path. The refs themselves are path-independent
+    // (`local-secret://<id>`), so only the dir view differs across the mount.
+    const secretDir = env.AGORA_SECRET_STORE_DIR;
+    if (secretDir) {
+      binds.push(`${secretDir}:${this.secretStoreMountTarget}`);
+      env.AGORA_SECRET_STORE_DIR = this.secretStoreMountTarget;
+    }
+
     return { env, binds };
   }
 

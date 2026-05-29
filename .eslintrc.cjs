@@ -14,6 +14,24 @@ module.exports = {
   },
   plugins: ['@typescript-eslint'],
   extends: ['eslint:recommended', 'plugin:@typescript-eslint/recommended'],
+  rules: {
+    // Honor the `_`-prefix convention the codebase already follows for
+    // intentionally-unused params/vars/caught-errors (e.g. `_ctx`, `_client`,
+    // `_event`). Non-prefixed unused identifiers still error.
+    '@typescript-eslint/no-unused-vars': [
+      'error',
+      {
+        argsIgnorePattern: '^_',
+        varsIgnorePattern: '^_',
+        caughtErrorsIgnorePattern: '^_',
+      },
+    ],
+    // The namespaced sub-API installers in agora-client deliberately capture
+    // `const client = this` inside prototype getters (one inner factory is a
+    // non-arrow function that needs the explicit reference). Permit that one
+    // alias name; any other `this` alias still errors.
+    '@typescript-eslint/no-this-alias': ['error', { allowedNames: ['client'] }],
+  },
   env: {
     node: true,
     es2022: true,

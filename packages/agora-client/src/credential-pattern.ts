@@ -17,6 +17,18 @@ const CREDENTIAL_PATTERNS: ReadonlyArray<{ name: string; regex: RegExp }> = [
   },
   { name: "bearer-prefix", regex: /\bBearer\s+[A-Za-z0-9._~+/=-]{20,}\b/ },
   { name: "github-token", regex: /\bgh[pousr]_[A-Za-z0-9]{36}\b/ },
+  // Anthropic keys (`sk-ant-...`) MUST precede the generic OpenAI `sk-`
+  // pattern so the more specific name is reported first. The two are
+  // disjoint anyway — Anthropic keys carry hyphens that break OpenAI's
+  // all-alphanumeric run — but ordering keeps the `detail` precise.
+  { name: "anthropic-key", regex: /\bsk-ant-[A-Za-z0-9-]{16,}/ },
+  { name: "openai-key", regex: /\bsk-[A-Za-z0-9]{20,}\b/ },
+  { name: "google-api-key", regex: /\bAIza[A-Za-z0-9_-]{35}\b/ },
+  { name: "slack-token", regex: /\bxox[baprs]-[A-Za-z0-9-]{10,}/ },
+  { name: "stripe-key", regex: /\b[sr]k_(?:live|test)_[A-Za-z0-9]{16,}\b/ },
+  // PEM private-key armor. The first 16 chars folded into the error are
+  // just the header (`-----BEGIN RSA P`), never key material.
+  { name: "private-key", regex: /-----BEGIN (?:[A-Z0-9]+ )?PRIVATE KEY-----/ },
 ];
 
 export interface CredentialPatternCheckOpts {
