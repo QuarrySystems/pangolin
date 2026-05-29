@@ -66,9 +66,9 @@ export function attachDeployCmd(program: Command, ctx: CliContext): void {
           name: env.name,
           values: env.values,
           // parseManifest validates the SecretRef | InlineSecret discrimination;
-          // cast through `any` because the SDK's secret types live in agora-core
-          // and we deliberately avoid that import in agora-cli.
-          secrets: env.secrets as any,
+          // derive the expected type from the client method instead of importing
+          // the SDK's secret types from agora-core directly.
+          secrets: env.secrets as Parameters<typeof client.env.register>[0]["secrets"],
         });
         console.log(`env ${ref.name}\t${ref.contentHash}`);
       }

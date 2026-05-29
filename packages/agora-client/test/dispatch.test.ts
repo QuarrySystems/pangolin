@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { dispatchWork } from '../src/dispatch.js';
+import { dispatchWork, fireWork } from '../src/dispatch.js';
 import { AgoraClient } from '../src/client.js';
 import type {
   ComputeProvider,
@@ -749,5 +749,96 @@ describe('dispatchWork — provider + telemetry + sink + record', () => {
     const recordUri = `agora://ns/dispatches/${result.dispatchId}/record.json`;
     const parsed = JSON.parse(new TextDecoder().decode(storage.blobs.get(recordUri)!));
     expect(parsed.retentionDays).toBe(90);
+  });
+});
+
+describe('fireWork / reconcile split (D9)', () => {
+  it('fireWork runs the provider once and returns an in-flight handle WITHOUT awaiting exit', async () => {
+    const storage = makeMemoryStorage();
+    storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
+    let awaitExitCalls = 0;
+    const runs: RecordedRun[] = [];
+    const compute: ComputeProvider = {
+      name: 'fire-compute',
+      async run(spec, ctx) {
+        runs.push({ spec, credentials: ctx.credentials });
+        return { providerTaskId: 'prov-fire' };
+      },
+      async awaitExit(): Promise<TaskExit> {
+        awaitExitCalls += 1;
+        return { exitCode: 0, startedAt: new Date(0), finishedAt: new Date(1000), stdout: 'x', stderr: '' };
+      },
+    };
+    const client = new AgoraClient({
+      namespace: 'ns',
+      compute: { default: compute },
+      credentials: { default: makeCredentials() },
+      storage,
+      targets: { prod: { compute: 'default', credentials: 'default' } },
+    });
+
+    const inflight = await fireWork(client, { subagent: 's', target: 'prod' }, { workerImage: WORKER_IMAGE });
+
+    expect(runs).toHaveLength(1);
+    expect(awaitExitCalls).toBe(0); // fire fires; it does NOT await exit
+    expect(inflight.handle.providerTaskId).toBe('prov-fire');
+    expect(inflight.dispatchId).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it('reconcile(exit) builds the result and writes the dispatch record, independently of awaitExit', async () => {
+    const storage = makeMemoryStorage();
+    storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
+    const { compute } = makeCompute();
+    const client = new AgoraClient({
+      namespace: 'ns',
+      compute: { default: compute },
+      credentials: { default: makeCredentials() },
+      storage,
+      targets: { prod: { compute: 'default', credentials: 'default' } },
+    });
+
+    const inflight = await fireWork(client, { subagent: 's', target: 'prod' }, { workerImage: WORKER_IMAGE });
+    const syntheticExit: TaskExit = {
+      exitCode: 3,
+      startedAt: new Date(0),
+      finishedAt: new Date(1000),
+      stdout: 'RECON',
+      stderr: '',
+    };
+    const result = await inflight.reconcile(syntheticExit);
+
+    expect(result.exitCode).toBe(3);
+    expect(result.stdout).toBe('RECON');
+    expect(result.resolved.subagent.contentHash).toBe('sha256:s');
+    const recordUri = `agora://ns/dispatches/${result.dispatchId}/record.json`;
+    expect(storage.blobs.has(recordUri)).toBe(true);
+    const parsed = JSON.parse(new TextDecoder().decode(storage.blobs.get(recordUri)!));
+    expect(parsed.providerTaskId).toBe('prov-1');
+    expect(parsed.target).toBe('prod');
+  });
+
+  it('cleanup() sweeps per-dispatch staged secrets', async () => {
+    const storage = makeMemoryStorage();
+    storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
+    const { compute } = makeCompute();
+    const client = new AgoraClient({
+      namespace: 'ns',
+      compute: { default: compute },
+      credentials: { default: makeCredentials() },
+      storage,
+      targets: { prod: { compute: 'default', credentials: 'default' } },
+    });
+    const cleanupSpy = secretsManager.InlineSecretStager.prototype
+      .cleanup as unknown as ReturnType<typeof vi.fn>;
+
+    const inflight = await fireWork(
+      client,
+      { subagent: 's', target: 'prod', secrets: { TOKEN: { inline: 'x' } } },
+      { workerImage: WORKER_IMAGE },
+    );
+    inflight.cleanup();
+
+    await new Promise((r) => setImmediate(r)); // cleanup is best-effort; flush microtasks
+    expect(cleanupSpy).toHaveBeenCalledWith(inflight.dispatchId);
   });
 });

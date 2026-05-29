@@ -65,7 +65,9 @@ export {
 
 // ── Dispatch ───────────────────────────────────────────────────────────────
 export {
+  fireWork,
   dispatchWork,
+  type InFlightDispatch,
   type ClientDispatchOpts,
 } from './dispatch.js';
 
@@ -181,11 +183,10 @@ Object.defineProperty(AgoraClient.prototype, 'capabilities', {
   configurable: true,
   enumerable: false,
   get(this: AgoraClient): AgoraClientCapabilitiesAPI {
-    const client = this;
     return {
-      register: (opts: RegisterCapabilityOpts) => registerCapability(client, opts),
-      list: () => listCapabilities(client),
-      get: (name: string) => getCapability(client, name),
+      register: (opts: RegisterCapabilityOpts) => registerCapability(this, opts),
+      list: () => listCapabilities(this),
+      get: (name: string) => getCapability(this, name),
     };
   },
 });
@@ -194,13 +195,12 @@ Object.defineProperty(AgoraClient.prototype, 'subagent', {
   configurable: true,
   enumerable: false,
   get(this: AgoraClient): AgoraClientSubagentAPI {
-    const client = this;
     return {
-      register: (opts: RegisterSubagentOpts) => registerSubagent(client, opts),
+      register: (opts: RegisterSubagentOpts) => registerSubagent(this, opts),
       assign: (handle: SubagentHandle, capabilities: Array<string | CapabilityRef>) =>
         handle.assign(capabilities),
-      list: () => listSubagents(client),
-      get: (name: string) => getSubagent(client, name),
+      list: () => listSubagents(this),
+      get: (name: string) => getSubagent(this, name),
     };
   },
 });
@@ -209,11 +209,10 @@ Object.defineProperty(AgoraClient.prototype, 'env', {
   configurable: true,
   enumerable: false,
   get(this: AgoraClient): AgoraClientEnvAPI {
-    const client = this;
     return {
-      register: (opts: RegisterEnvOpts) => registerEnv(client, opts),
-      list: () => listEnvs(client),
-      get: (name: string) => getEnv(client, name),
+      register: (opts: RegisterEnvOpts) => registerEnv(this, opts),
+      list: () => listEnvs(this),
+      get: (name: string) => getEnv(this, name),
     };
   },
 });
@@ -222,21 +221,19 @@ Object.defineProperty(AgoraClient.prototype, 'dispatch', {
   configurable: true,
   enumerable: false,
   get(this: AgoraClient): AgoraClientDispatchFn {
-    const client = this;
     // Build the callable with methods attached. The merged arg shape
     // (DispatchWork & ClientDispatchOpts) lets callers pass everything in
     // one object; we split it into the two parameters dispatchWork expects.
-    const fn = function dispatchFn(
-      workAndOpts: DispatchWork & ClientDispatchOpts,
-    ): Promise<DispatchResult> {
+    // Arrow functions bind `this` lexically (the getter's instance), so no alias.
+    const fn = (workAndOpts: DispatchWork & ClientDispatchOpts): Promise<DispatchResult> => {
       const { workerImage, defaultDispatchTimeoutSeconds, ...work } = workAndOpts;
-      return dispatchWork(client, work as DispatchWork, {
+      return dispatchWork(this, work as DispatchWork, {
         workerImage,
         defaultDispatchTimeoutSeconds,
       });
     };
-    fn.describe = (dispatchId: string) => describeDispatch(client, dispatchId);
-    fn.cancel = (dispatchId: string) => cancelDispatch(client, dispatchId);
+    fn.describe = (dispatchId: string) => describeDispatch(this, dispatchId);
+    fn.cancel = (dispatchId: string) => cancelDispatch(this, dispatchId);
     return fn as unknown as AgoraClientDispatchFn;
   },
 });

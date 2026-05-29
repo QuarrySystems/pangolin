@@ -73,7 +73,7 @@ export async function loadChannelIfPresent(
   const iterator = iterable[Symbol.asyncIterator]();
 
   let stopped = false;
-  const loop = (async () => {
+  void (async () => {
     while (!stopped) {
       let next;
       try {

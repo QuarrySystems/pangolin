@@ -19,7 +19,8 @@
 //      `AGORA_*` env vars per §6.1 plus `AGORA_RUNTIME_ADAPTER`, and
 //      `secretRefs` as the merge of env-bundle secrets + per-dispatch
 //      secrets (per-dispatch precedence on key conflict per §6.2 step 6).
-//   7. Call `provider.run()` then `provider.awaitExit()`.
+//   7. `fireWork` calls `provider.run()`; the returned
+//      `InFlightDispatch.reconcile()` later calls `provider.awaitExit()`.
 //   8. Run `ResultSink.collect()` if set; fall back to a minimal
 //      `DispatchResult` built from the exit otherwise.
 //   9. Write the dispatch record via `writeDispatchRecord` with the
@@ -38,6 +39,8 @@ import {
   type TaskSpec,
   type SecretRef,
   type InlineSecret,
+  type TaskHandle,
+  type TaskExit,
 } from '@quarry-systems/agora-core';
 import type { AgoraClient } from './client.js';
 import { InlineSecretStager } from './secrets-manager.js';
@@ -52,15 +55,36 @@ export interface ClientDispatchOpts {
 }
 
 /**
- * Orchestrate a dispatch end-to-end against an `AgoraClient`. See the file
- * header for the step-by-step flow; the acceptance criteria are encoded in
+ * A dispatch that has been *fired* (provider container started) but not yet
+ * reconciled. Returned by `fireWork`. The orchestrator (D6 fire-and-reconcile)
+ * holds this across ticks; the blocking `dispatchWork` composes it inline.
+ *
+ *   - `awaitExit()`  — block until the provider task exits (synchronous path).
+ *   - `reconcile(exit)` — collect the DispatchResult (sink or minimal) and
+ *                         write the dispatch record. Pure of awaiting.
+ *   - `cleanup()`    — best-effort sweep of per-dispatch staged secrets;
+ *                      never throws (TTL is the fallback).
+ */
+export interface InFlightDispatch {
+  readonly dispatchId: string;
+  readonly handle: TaskHandle;
+  awaitExit(): Promise<TaskExit>;
+  reconcile(exit: TaskExit): Promise<DispatchResult>;
+  cleanup(): void;
+}
+
+/**
+ * Fire a dispatch: resolve refs, stage secrets, mint callback HMAC, select
+ * the target's provider, build the TaskSpec, and call `provider.run()`. Returns
+ * an `InFlightDispatch` seam the caller reconciles when the task exits. See the
+ * file header for the step-by-step flow; the acceptance criteria are encoded in
  * `test/dispatch.test.ts`.
  */
-export async function dispatchWork(
+export async function fireWork(
   client: AgoraClient,
   work: DispatchWork,
   opts: ClientDispatchOpts,
-): Promise<DispatchResult> {
+): Promise<InFlightDispatch> {
   if (work.capabilities && work.addCapabilities) {
     throw new Error(
       'dispatchWork: cannot combine `capabilities` (replace) with `addCapabilities` (append) on the same call',
@@ -194,7 +218,7 @@ export async function dispatchWork(
     dispatchId,
   };
 
-  // 7. Run + await exit.
+  // 7. Run (fire). awaitExit is deferred to the returned InFlightDispatch.
   const handle = await compute.run(taskSpec, { credentials, telemetry: client.telemetry });
   const startTime = Date.now();
   client.telemetry?.emit({
@@ -209,16 +233,13 @@ export async function dispatchWork(
     at: new Date().toISOString(),
   });
 
-  // The awaitExit → sink → record-write trio is wrapped so the stager's
-  // per-dispatch cleanup runs whether or not awaitExit (or anything after
-  // it) throws. The stager's TTL tag is the fallback when cleanup itself
-  // fails; we always swallow cleanup errors so they never propagate over
-  // a successful (or already-failing) dispatch.
-  try {
-    const exit = await compute.awaitExit(handle, {
-      credentials,
-      telemetry: client.telemetry,
-    });
+  // ── fire complete: container is running. Bundle the reconcile/cleanup
+  //    closures so the caller (blocking dispatchWork, or the orchestrator)
+  //    can collect the result whenever the task exits. ────────────────────
+  const awaitExit = (): Promise<TaskExit> =>
+    compute.awaitExit(handle, { credentials, telemetry: client.telemetry });
+
+  const reconcile = async (exit: TaskExit): Promise<DispatchResult> => {
     const durationMs = Date.now() - startTime;
 
     // 8. ResultSink.collect — or fall back to a minimal DispatchResult.
@@ -255,15 +276,37 @@ export async function dispatchWork(
     );
 
     return result;
-  } finally {
-    // 10. Best-effort cleanup of per-dispatch staged secrets. Runs on both
-    //     the success and exception paths so staged secrets are never
-    //     orphaned past their use. The .catch() preserves the
-    //     "never throw from cleanup" contract — failures fall back to the
-    //     stager's TTL tag.
+  };
+
+  // 10. Best-effort cleanup of per-dispatch staged secrets. Never throws —
+  //     the .catch() preserves the "never throw from cleanup" contract; the
+  //     stager's TTL tag is the fallback when cleanup itself fails.
+  const cleanup = (): void => {
     stager.cleanup(dispatchId).catch(() => {
       // intentionally suppressed — see above.
     });
+  };
+
+  return { dispatchId, handle, awaitExit, reconcile, cleanup };
+}
+
+/**
+ * Orchestrate a dispatch end-to-end against an `AgoraClient` (blocking).
+ * Composed from `fireWork` + `awaitExit` + `reconcile`, with best-effort
+ * secret cleanup in `finally`. Behavior is identical to the pre-D9 monolith:
+ * cleanup runs whether or not `awaitExit`/`reconcile` throws.
+ */
+export async function dispatchWork(
+  client: AgoraClient,
+  work: DispatchWork,
+  opts: ClientDispatchOpts,
+): Promise<DispatchResult> {
+  const inflight = await fireWork(client, work, opts);
+  try {
+    const exit = await inflight.awaitExit();
+    return await inflight.reconcile(exit);
+  } finally {
+    inflight.cleanup();
   }
 }
 

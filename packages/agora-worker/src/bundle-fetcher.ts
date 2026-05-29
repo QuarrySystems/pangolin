@@ -52,7 +52,7 @@ export async function constructStorageProvider(
   storageUri: string,
 ): Promise<StorageProvider> {
   if (storageUri.startsWith("s3://")) {
-    let S3StorageProvider: any;
+    let S3StorageProvider: typeof import("@quarry-systems/agora-storage-s3").S3StorageProvider;
     try {
       ({ S3StorageProvider } = await import(
         "@quarry-systems/agora-storage-s3"
@@ -76,7 +76,7 @@ export async function constructStorageProvider(
     return new S3StorageProvider({ bucket, prefix });
   }
   if (storageUri.startsWith("file://") || storageUri.startsWith("/")) {
-    let LocalStorageProvider: any;
+    let LocalStorageProvider: typeof import("@quarry-systems/agora-storage-local").LocalStorageProvider;
     try {
       ({ LocalStorageProvider } = await import(
         "@quarry-systems/agora-storage-local"
