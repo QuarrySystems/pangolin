@@ -9,3 +9,8 @@ export {
   LocalSecretStore,
   type LocalSecretStoreOpts,
 } from "./local-secret-store.js";
+export {
+  storeFromConfig,
+  type SecretStoreKind,
+  type SecretStoreConfig,
+} from "./store-from-config.js";
