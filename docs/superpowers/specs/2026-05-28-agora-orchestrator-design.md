@@ -37,6 +37,10 @@ floats as "likely" or "open", the body carries an inline **Resolved (Dn)** note.
 | **D5** | Submission/query transport | **S3 inbox/outbox (poll)** behind a `SubmissionTransport` seam. Clients write a Run spec to an S3 `submissions/` prefix; the orchestrator polls, ingests, runs, and publishes status + completion records to the outbox. **No inbound networking to the container** (there is no Stoa/CF tunnel to lean on today). An HTTP transport is an additive seam impl, deferred until an ingress exists. |
 | **D6** | Execution model | **Tick-based fire-and-reconcile.** `agora-client.dispatch()` blocks on `awaitExit()` today — fatal for an overnight queue. The orchestrator must NOT loop over blocking dispatch. Each tick: advance ready items, fire dispatches *without blocking*, record each `dispatch_hash`, and reconcile completed dispatches from their records on later ticks. Crash-safe by construction; mirrors the DAG executor's controller-turn loop. |
 | **D7** | Worker output channel | **New `.agora/output.json` sentinel**, schema-validated against `subagentShape.outputSchema`, carrying typed `output` + `intents` + `signals`. Mirrors the existing `.agora/needs_input.json` sentinel. This is the one net-new *worker* mechanism the trunk requires — it is what makes `dev.code-edit → Patch` and `dev.open-pr → Intent` work. |
+| **D8** | Registry model | **Static construction-time maps**, not a dynamic `.register()` registry. The four registries (packs/executors/triggers/interpreters) are `Record<string, Impl>` injected into the `AgoraOrchestrator` constructor and resolved from `agora.config.mjs`, validated fail-fast — identical to how `compute`/`credentials`/`targets` work on `AgoraClient` today (`client.ts:86-99`). No runtime registration API; "duplicate-id rejection" becomes construction-time validation. Aligns with the `agora-inline-secret` constructor-hook follow-up. |
+| **D9** | dispatch-executor reuse | **Split `AgoraClient.dispatch` into internal `fire()` + `reconcile()`.** Existing blocking `dispatch()` becomes `fire()` → `awaitExit()` → `reconcile()`. The `dispatch-executor` *composes* `fire()` + later `reconcile()` (per D6); all ref-resolution / secret-staging / record-writing stays in `agora-client`, not duplicated. This is a real, called-out change to existing `agora-client` code. |
+| **D10** | SubmissionTransport | **Thin layer over the existing `StorageProvider` seam**, not a parallel storage stack. Inbox/outbox = a prefix convention (`submissions/`, `outbox/`) + a poll helper on `agora-storage-s3`/`agora-storage-local`. Local dev and remote S3 both work with zero new storage code. (A distinct HTTP transport remains an additive seam impl, D5.) |
+| **D11** | Contracts home | Orchestrator seams + shared types live **in the new `agora-orchestrator` package** (`src/contracts/`), not in `agora-core`. Keeps `agora-core` minimal — low-level providers/worker stay ignorant of orchestration. Mirrors how `agora-secret-store` holds its own interface. |
 
 **Reserved for Mneme** (see §2): the `Claim` core type is *not* built in the
 trunk. When a second consumer eventually pulls it into the core (most likely a
@@ -73,6 +77,7 @@ This spec defines the architecture in twelve sections:
 10. Operator surface (CLI + MCP) — consolidated logic, thin surfaces
 11. Trap check — what to actually build
 12. Open questions worth pinning
+13. Package layout & convention conformance
 
 Effect tiers (§1) are both their own section and a property on §3/§4/§8. Counted
 once because it's one vocabulary.
@@ -171,7 +176,8 @@ Two fields make packs interoperate: `effectTier` (policy engine reads it) and
 `outputSchema` referencing shared core types (handoff between packs).
 
 Failure modes guarded against:
-- ID collision → pack-prefixed IDs from day one; registry refuses duplicates.
+- ID collision → pack-prefixed IDs from day one; **construction-time validation**
+  rejects duplicates (D8 — static maps, not a dynamic registry).
 - Schema drift → version core types independently; boundary validation fails
   fast.
 
@@ -729,6 +735,93 @@ too long. Decide deliberately when each becomes relevant.
   integration seam: does agora depend on Mneme as a library, exchange `Claim`
   blobs through shared storage, or treat Mneme as a write-impure interpreter
   target (`Intent<mneme.assert>`)? See §2.
+
+---
+
+## 13. Package layout & convention conformance
+
+This section audits the architecture against the agora monorepo's established
+library-separation conventions and records the conformance decisions (D8–D11).
+It is the bridge from "architecturally sound" to "fits how this repo is built."
+
+### 13.1 The conventions (extracted from the current repo)
+
+1. **Seams in a core, impls in siblings.** `agora-core` is interfaces + data
+   types only, with **zero dependencies** (`package.json` deps `{}`). Impl
+   packages (`agora-providers-*`, `agora-storage-*`, `agora-runtime-*`) depend
+   *only* on `agora-core`. Dependency direction is strictly downhill.
+2. **One authority, thin surfaces.** `AgoraClient` owns all dispatch logic;
+   `agora-cli` (`cmd-*.ts`) and `agora-mcp` (`tools.ts`) are pure translation
+   layers that delegate to it, with **no duplicated business logic**. The
+   design's §10.2 "consolidation principle" is this existing pattern, named.
+3. **Injection by static maps, not registries.** `compute`, `credentials`,
+   `targets` are `Record<string, Impl>` passed to the `AgoraClient` constructor,
+   validated fail-fast (`client.ts:86-99`), resolved by name lookup at dispatch
+   (`dispatch.ts:112-128`). There is **no dynamic registry anywhere** in the repo.
+4. **No database.** Storage is strictly content-addressed files behind
+   `StorageProvider`. SQLite is net-new to the repo.
+5. **Naming.** `agora-<role>-<impl>`; tests in a `test/` dir at package root;
+   `vitest`; `tsconfig.json` extends `tsconfig.base.json`; scope
+   `@quarry-systems/*`.
+
+### 13.2 Conformance decisions
+
+- **D8 — Static maps over dynamic registries.** The four registries are
+  constructor-injected `Record<string, Impl>` maps resolved from
+  `agora.config.mjs`, exactly mirroring `AgoraClient`'s `compute`/`credentials`/
+  `targets`. No `.register()` API.
+- **D9 — Reuse via `fire()`/`reconcile()` split in `AgoraClient`.** The blocking
+  `dispatch()` is decomposed so the orchestrator composes the start and collect
+  steps (D6) without duplicating ref-resolution / secret-staging / record-writing.
+- **D10 — `SubmissionTransport` is a thin layer over `StorageProvider`.** Prefix
+  convention + poll helper; no parallel storage stack.
+- **D11 — Orchestrator contracts live in `agora-orchestrator`,** not `agora-core`
+  (which stays the minimal base-substrate seam package).
+
+### 13.3 Proposed package layout (trunk)
+
+```
+packages/
+  agora-core                     unchanged — base substrate seams, zero deps
+  agora-client                   + internal fire()/reconcile() split (D9)
+  agora-orchestrator             NEW. Plays the core+authority role for this layer.
+     src/contracts/              seams + shared types (D11): Executor, Trigger,
+                                 IntentInterpreter, SubagentShape, RunStateStore,
+                                 SubmissionTransport, WorkItem, WorkItemResult,
+                                 Patch, Intent, effect-tier vocabulary
+     src/orchestrator.ts         AgoraOrchestrator — the operations API (B2)
+     src/engine/                 tick loop, dep resolver, lock manager, policy engine
+     src/executors/dispatch.ts   dispatch-executor (composes client fire/reconcile, D9)
+     src/runstate/sqlite.ts      RunStateStore impl (better-sqlite3, D2/D5/B5)
+     src/transport/storage.ts    SubmissionTransport over StorageProvider (D10)
+        deps: agora-core, agora-client, agora-storage-s3, agora-storage-local,
+              better-sqlite3
+  agora-pack-dev                 NEW. SubagentShapes (dev.code-edit, dev.verify)
+                                 + the dev.open-pr IntentInterpreter.
+        deps: agora-orchestrator (only)
+  agora-cli                      + `orch` subcommands (thin, delegate to AgoraOrchestrator)
+  agora-mcp                      + submit/status/watch tools (thin)
+```
+
+Dependency direction stays strictly downhill:
+`agora-pack-dev → agora-orchestrator → agora-client → agora-core`.
+
+### 13.4 SRP judgment call for the trunk
+
+Keep `dispatch-executor`, the SQLite `RunStateStore`, and the storage-backed
+`SubmissionTransport` **as internal modules inside `agora-orchestrator`** for the
+trunk (one impl each → no premature package split). Extract to sibling packages
+(`agora-orchestrator-executors-shell`, `agora-pack-research`, …) only when a
+second impl is pulled — exactly the trap-check discipline of §11, and exactly how
+`agora-storage-s3` sits beside `agora-storage-local` today.
+
+### 13.5 `better-sqlite3` containment
+
+SQLite is the first database in the repo. It is confined to
+`agora-orchestrator/src/runstate/sqlite.ts` behind the `RunStateStore` seam;
+nothing else in the repo gains a DB dependency. `better-sqlite3` (synchronous,
+single-file) is already in use in the sibling **Mneme** project, so it is a known
+quantity on this machine.
 
 ---
 
