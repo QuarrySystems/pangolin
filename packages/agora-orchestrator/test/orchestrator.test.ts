@@ -10,8 +10,8 @@ const run: Run = { id: 'r', queue: 'default', items: [
   { id: 'b', executor: 'fake', inputs: {}, depends_on: ['a'], resourceLocks: [] },
 ] };
 
-function makeOrch(store: SqliteRunStateStore, executors?: Record<string, Executor>) {
-  return new AgoraOrchestrator({ store, executors: executors ?? { fake: fake() }, triggers: { manual: new ManualTrigger() }, queues: { default: { concurrency: 5 } } });
+function makeOrch(store: SqliteRunStateStore, executors?: Record<string, Executor>, maxAttempts?: number) {
+  return new AgoraOrchestrator({ store, executors: executors ?? { fake: fake() }, triggers: { manual: new ManualTrigger() }, queues: { default: { concurrency: 5 } }, maxAttempts });
 }
 
 describe('submitRun attribution', () => {
@@ -65,7 +65,7 @@ describe('AgoraOrchestrator', () => {
       { id: 'b', executor: 'fail', inputs: {}, depends_on: ['a'], resourceLocks: [] },
     ] };
     const store = new SqliteRunStateStore();
-    const o = makeOrch(store, { fail: failExecutor });
+    const o = makeOrch(store, { fail: failExecutor }, 1);
     o.submitRun(failRun);
     await o.tick(); // fires a
     await o.tick(); // reconciles a -> failed

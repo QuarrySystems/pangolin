@@ -9,6 +9,7 @@ export interface AgoraOrchestratorOptions {
   triggers: Record<string, Trigger>;
   queues: Record<string, QueueConfig>;
   defaultQueue?: string; // defaults to 'default'
+  maxAttempts?: number; // defaults to 2 (spec §4)
 }
 
 /** method -> privilege tag (mechanism for the §10.6 CLI/MCP split; surfaces land later). */
@@ -23,11 +24,13 @@ export class AgoraOrchestrator {
   private readonly executors: Record<string, Executor>;
   private readonly triggers: Record<string, Trigger>;
   private readonly defaultQueue: string;
+  private readonly maxAttempts: number;
   constructor(opts: AgoraOrchestratorOptions) {
     this.store = opts.store;
     this.executors = opts.executors;
     this.triggers = opts.triggers;
     this.defaultQueue = opts.defaultQueue ?? 'default';
+    this.maxAttempts = opts.maxAttempts ?? 2;
     if (!opts.queues[this.defaultQueue]) throw new Error(`AgoraOrchestrator: default queue '${this.defaultQueue}' not configured`);
     for (const [name, q] of Object.entries(opts.queues)) this.store.ensureQueue(name, q.concurrency);
   }
@@ -38,7 +41,7 @@ export class AgoraOrchestrator {
     this.store.markReady(trigger.initialReady(run));
     return run.id;
   }
-  async tick(queue?: string) { return tick(this.store, this.executors, queue ?? this.defaultQueue); }
+  async tick(queue?: string) { return tick(this.store, this.executors, queue ?? this.defaultQueue, { maxAttempts: this.maxAttempts }); }
   getStatus(runId?: string): StatusItem[] {
     const items = this.store.getItems(runId);
     const byId = new Map(items.map((i) => [`${i.runId}:${i.id}`, i]));
