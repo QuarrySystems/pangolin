@@ -1,5 +1,5 @@
 ---
-title: agora-offload-v1-pr4-unattended-runner
+title: agora-offload-runner
 created: 2026-05-30
 ---
 
@@ -34,17 +34,21 @@ flowchart TD
 ## Context
 
 Driven by the Agora Offload V1 spec (`docs/superpowers/specs/2026-05-29-agora-offload-v1-design.md`).
-This is **wave 1 of the V1 staging — PR4, "the unattended runner"** (spec §9):
-the `serve` driver + storage-backed `SubmissionTransport` (§1.1.1–1.1.2, D5/D10),
-plus the run-state metadata that retry and attribution need. After this wave a
-client can write a Run to an inbox, the service ingests + drives it to terminal
-unattended, and publishes status to an outbox — **no inbound networking, the
-service is the sole DB owner** (D3).
+This is the **`offload-runner`** wave (spec §9) — the first offload wave, building
+on the merged secret-store unification (PR4a #13 + PR4b #14): the `serve` driver +
+storage-backed `SubmissionTransport` (§1.1.1–1.1.2, D5/D10), plus the run-state
+metadata that retry and attribution need. After this wave a client can write a Run
+to an inbox, the service ingests + drives it to terminal unattended, and publishes
+status to an outbox — **no inbound networking, the service is the sole DB owner** (D3).
+
+> Naming note: the repo's "PR4" is the secret-store unification (#13/#14). The
+> offload waves are content-named (`offload-runner` → `offload-launch`) to avoid
+> colliding with the repo's merge-order PR numbers.
 
 **Explicitly out of this wave (later DAG plans):** sandbox-escape + dispatch
-manifest (PR5), the audit log + `Signer`/`AuditAnchor` seam (PR6), the operator
-CLI/MCP surface (PR7), the `offload-fanout` demo + BSL packaging (PR8). Each is
-additive on this spine.
+manifest (`offload-escape`), the audit log + `Signer`/`AuditAnchor` seam
+(`offload-audit`), the operator CLI/MCP surface (`offload-surface`), the
+`offload-fanout` demo + BSL packaging (`offload-launch`). Each is additive on this spine.
 
 **Scope notes:**
 - *Persistent run-state* (D4) needs no new code — `SqliteRunStateStore` already

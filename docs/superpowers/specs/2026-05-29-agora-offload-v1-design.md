@@ -594,30 +594,31 @@ shipped artifacts.
 
 ## 9. Coordination & sequencing notes
 
-- **Depends on the secret-store unification landing.** The patch-escape upload
-  and the submission transport both lean on the `StorageProvider` + secret-
-  staging paths currently being unified (PR4a, `agora-secret-store`). V1's plan
-  should sequence after that merges to avoid churn against a moving seam. Not a
-  design dependency — a merge-order one.
-- **PR staging (extends orchestrator spec §13.7, which ended at PR3):**
-  - **PR4 — `serve` + `SubmissionTransport`.** Driver loop + storage-backed
-    inbox/outbox + persistent SQLite + startup reconcile-first + actor identity on
-    operations (§6.4). Proves unattended submit→run→complete with no patch yet.
-  - **PR5 — sandbox escape + manifest.** Worker diff-capture + minimal
-    `.agora/output.json` + `result_ref` plumbing, **and** the signed dispatch
-    manifest (§6.2) written on fire. (Manifest and escape share the executor/
-    run-state plumbing, so they land together.)
-  - **PR6 — tamper-evident audit log (§6.3).** Durable Merkle-per-epoch lifecycle
-    persistence + `Signer` seam (`KmsSigner`/`LocalSigner`) + `AuditAnchor` seam
-    (`LocalAnchor` default, `S3ObjectLockAnchor`) + a `verify` routine that prints
-    the guarantee tier. Seam shapes match Mneme verbatim. Encryption-at-rest
-    defaults (§6.6) land here. (`WitnessAnchor`/TSA tier is deferred.)
-  - **PR7 — operator surface.** Operations API consolidation + CLI `cmd-orch`
-    (incl. `audit`, §6.5) + MCP tools + the §10.6 CI allowlist check. Retry/backoff
-    lands here or folds into PR4.
-  - **PR8 — `offload-fanout` example + BSL packaging + docs.** The acceptance demo
-    (incl. the audit-bundle verify + tamper check), license files, README/landing
-    reframe to the security/determinism/auditability edge.
+- **Dependency satisfied — secret-store unification merged** (PR4a #13 + PR4b #14,
+  2026-05-30). The patch-escape upload and the submission transport lean on the
+  now-unified `StorageProvider` + `SecretStore` paths; that seam is stable, so the
+  offload waves below build on current `main` without churn.
+- **Wave staging (content-named to avoid colliding with the repo's merge-order PR
+  numbers; extends the orchestrator spec §13.7, which ended at PR3).** The repo's
+  "PR4" is the secret-store unification above — these offload waves are the *next*
+  PRs after #14:
+  - **`offload-runner`** — `serve` + `SubmissionTransport` driver loop + storage-
+    backed inbox/outbox + persistent SQLite + startup reconcile-first + retry +
+    actor identity (§6.4). Proves unattended submit→run→complete, no patch yet.
+    *(DAG plan authored + audited: `plans/2026-05-30-agora-offload-runner-dag.md`.)*
+  - **`offload-escape`** — worker diff-capture + minimal `.agora/output.json` +
+    `result_ref` plumbing, **and** the signed dispatch manifest (§6.2) on fire.
+    (Manifest + escape share the executor/run-state plumbing, so they land together.)
+  - **`offload-audit`** — tamper-evident audit log (§6.3): Merkle-per-epoch +
+    `Signer` seam (`KmsSigner`/`LocalSigner`) + `AuditAnchor` seam (`LocalAnchor`
+    default, `S3ObjectLockAnchor`) + a `verify` routine (fetch-and-compare, §6.3)
+    that prints the guarantee tier. Seam shapes match Mneme verbatim. Encryption-
+    at-rest defaults (§6.6) land here. (`WitnessAnchor`/TSA tier deferred.)
+  - **`offload-surface`** — operations-API consolidation + CLI `cmd-orch` (incl.
+    `audit`, §6.5) + MCP tools + the §10.6 CI allowlist check.
+  - **`offload-launch`** — `offload-fanout` example + BSL packaging + docs: the
+    acceptance demo (incl. audit-bundle verify + tamper check), license files,
+    README/landing reframe to the security/determinism/auditability edge.
 
 ---
 
