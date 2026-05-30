@@ -346,7 +346,7 @@ describe('runWorker', () => {
     expect(allLogs).toContain('<redacted:secret>');
   });
 
-  it('auto-selects LocalSecretStore for file:// storage + AGORA_SECRET_STORE_DIR (no injected store)', async () => {
+  it('selects LocalSecretStore when AGORA_SECRET_STORE_KIND=local-file (no injected store)', async () => {
     const h = await setupHarness();
     cleanupDirs.push(h.workDir, h.adaptersRoot);
 
@@ -359,7 +359,9 @@ describe('runWorker', () => {
       ttlSeconds: 60,
     });
 
-    // file:// storage (harness already uses it) + the dir + the ref.
+    // Explicit store kind + the dir + the ref. Selection is driven by
+    // AGORA_SECRET_STORE_KIND, not by sniffing the storage URI.
+    h.env.AGORA_SECRET_STORE_KIND = 'local-file';
     h.env.AGORA_SECRET_STORE_DIR = secretsDir;
     h.env.AGORA_PER_DISPATCH_SECRET_REFS_JSON = JSON.stringify({
       DEPLOY_KEY: staged.ref,
@@ -367,7 +369,7 @@ describe('runWorker', () => {
 
     let captured: Record<string, string> | undefined;
     // makeDeps injects no secretStore → the entrypoint default must pick
-    // LocalSecretStore because storageUri is file:// and the dir is set.
+    // LocalSecretStore because AGORA_SECRET_STORE_KIND=local-file is set.
     const deps: RunWorkerDeps = {
       ...makeDeps(h),
       adapter: {
