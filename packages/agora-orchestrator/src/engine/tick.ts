@@ -8,7 +8,12 @@ export async function tick(
   store: RunStateStore,
   executors: Record<string, Executor>,
   queue: string,
+  opts: { maxAttempts?: number; now?: number; backoffMs?: (n: number) => number } = {},
 ): Promise<{ readied: number; fired: number; reconciled: number }> {
+  const maxAttempts = opts.maxAttempts ?? 2;
+  const now = opts.now ?? Date.now();
+  const backoff = opts.backoffMs ?? ((n) => 1000 * 2 ** n);
+
   const queueItems = () => store.getItems().filter((i) => i.queue === queue);
 
   // 1. Ready newly-satisfied items (scoped to this queue).
@@ -22,8 +27,15 @@ export async function tick(
     if (!ex) throw new Error(`tick: no executor registered for '${it.executor}'`);
     const res = await ex.reconcile(it.dispatchHash!);
     if (res) {
-      store.setStatus(it.id, res.status);
-      store.releaseLocks(it.id);
+      if (res.status === 'failed' && store.getAttempts(it.id) + 1 < maxAttempts) {
+        // Retry: bump attempt counter, release locks, requeue with exponential backoff.
+        store.bumpAttempt(it.id);
+        store.releaseLocks(it.id);
+        store.requeue(it.id, now + backoff(store.getAttempts(it.id)));
+      } else {
+        store.setStatus(it.id, res.status);
+        store.releaseLocks(it.id);
+      }
       reconciled++;
     }
   }
@@ -36,8 +48,11 @@ export async function tick(
   }
 
   // 3. Fire ready items within remaining concurrency + lock budget.
+  // Skip items whose nextAttemptAt is still in the future.
   const slots = store.queueConcurrency(queue) - store.runningCount(queue);
-  const ready = store.getItems().filter((i) => i.queue === queue && i.status === 'ready');
+  const ready = store.getItems().filter(
+    (i) => i.queue === queue && i.status === 'ready' && (i.nextAttemptAt ?? 0) <= now,
+  );
   const runnable = selectRunnable(ready, store.heldLockKeys(), Math.max(0, slots));
   let fired = 0;
   for (const it of runnable) {

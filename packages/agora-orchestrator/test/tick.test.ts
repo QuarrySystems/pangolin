@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { tick } from '../src/engine/tick.js';
 import { SqliteRunStateStore } from '../src/runstate/sqlite.js';
 import type { Executor, Run } from '../src/contracts/index.js';
+import { setupOneFiredItem } from './fixtures/executors.js';
 
 // Inline fake Executor (no real executor in PR2): fires immediately, finishes on next reconcile.
 function fakeExecutor(): Executor & { fired: string[] } {
@@ -140,18 +141,70 @@ describe('tick', () => {
     };
 
     // Tick 1: m fires (acquires 'shared'), n is held by the lock
-    const t1 = await tick(store, { fake: ex }, 'default');
+    const t1 = await tick(store, { fake: ex }, 'default', { maxAttempts: 1 });
     expect(t1.fired).toBe(1); // only one fires — lock blocks the second
     const firstFired = firedItems[0]; // either m or n (whichever was selected)
 
     // Tick 2: the running item reconciles → 'failed', lock released; the other item fires
-    const t2 = await tick(store, { fake: ex }, 'default');
+    const t2 = await tick(store, { fake: ex }, 'default', { maxAttempts: 1 });
     expect(t2.reconciled).toBe(1);
     const firstItem = store.getItems('r7').find((i) => i.id === firstFired)!;
-    expect(firstItem.status).toBe('failed'); // failed status set
+    expect(firstItem.status).toBe('failed'); // failed status set (no retry: maxAttempts=1)
     expect(t2.fired).toBe(1); // the other item fires now that lock is released
     expect(firedItems).toHaveLength(2); // both items have fired across the two ticks
 
     store.close();
+  });
+
+  describe('retry with backoff', () => {
+    it('requeues a failed item with attempts remaining instead of failing it', async () => {
+      const { store, executors } = setupOneFiredItem('a'); // item 'a' running, executor reconciles 'failed'
+      await tick(store, executors, 'default', { maxAttempts: 2, now: 1000 });
+      const a = store.getItems().find((i) => i.id === 'a')!;
+      expect(a.status).toBe('ready');
+      expect(a.attempts).toBe(1);
+      expect(a.nextAttemptAt).toBeGreaterThan(1000);
+      store.close();
+    });
+
+    it('terminally fails item when attempts are exhausted', async () => {
+      const { store, executors } = setupOneFiredItem('b');
+      // maxAttempts=1 means 0+1 is NOT < 1, so terminal on first failure
+      await tick(store, executors, 'default', { maxAttempts: 1, now: 1000 });
+      const b = store.getItems().find((i) => i.id === 'b')!;
+      expect(b.status).toBe('failed');
+      store.close();
+    });
+
+    it('does not fire a ready item whose nextAttemptAt is in the future', async () => {
+      const store = new SqliteRunStateStore();
+      store.ensureQueue('default', 5);
+      store.saveRun({ id: 'r8', queue: 'default', items: [
+        { id: 'c', executor: 'fake', inputs: {}, depends_on: [], resourceLocks: [] },
+      ] });
+      store.markReady(['c']);
+      // Simulate item having been requeued with a future nextAttemptAt
+      store.requeue('c', 9999999);
+
+      const ex = fakeExecutor();
+      const t = await tick(store, { fake: ex }, 'default', { now: 1000 });
+      expect(t.fired).toBe(0); // should not fire — nextAttemptAt is in the future
+      store.close();
+    });
+
+    it('fires a ready item whose nextAttemptAt is in the past', async () => {
+      const store = new SqliteRunStateStore();
+      store.ensureQueue('default', 5);
+      store.saveRun({ id: 'r9', queue: 'default', items: [
+        { id: 'd', executor: 'fake', inputs: {}, depends_on: [], resourceLocks: [] },
+      ] });
+      store.markReady(['d']);
+      store.requeue('d', 500); // nextAttemptAt in the past relative to now=1000
+
+      const ex = fakeExecutor();
+      const t = await tick(store, { fake: ex }, 'default', { now: 1000 });
+      expect(t.fired).toBe(1); // nextAttemptAt <= now, so it fires
+      store.close();
+    });
   });
 });
