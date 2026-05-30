@@ -34,9 +34,10 @@
 //     a worker.
 //
 // Test 1 uses a mock SecretStore injected via makeClient's `secretStore`
-// option. Test 2 uses a duck-typed fake stager (no class import needed)
-// injected via env.register's `stager:` option. Neither test imports
-// InlineSecretStager.
+// option. Test 2 uses the same in-memory mock SecretStore injected via
+// makeClient's `secretStore` option, and passes `secretStore: 'aws'` to
+// env.register (the key makeClient registers the injected store under).
+// Neither test imports InlineSecretStager.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { SecretStore, StageSecretArgs, StagedSecret } from '../../packages/agora-core/dist/index.js';
@@ -208,29 +209,19 @@ describe('E2E: inline secret lifecycle (§7.6)', () => {
   it(
     'env.register with inline secret stores ref, not inline value, in the bundle blob (hermetic)',
     async () => {
-      // Duck-typed fake stager that records staged calls and returns the
-      // { arn, ttlSeconds } shape expected by env-register.ts (which calls
-      // InlineSecretStager.stage() internally but accepts any duck-typed
-      // object via its `stager?: Pick<InlineSecretStager, 'stage'>` option).
-      // No InlineSecretStager import needed — only structural compatibility.
-      const stagedByFaker: Array<{ name: string; value: string; ref: string }> = [];
-      const FAKE_NAME_PREFIX = 'agora/inline';
+      // Use the in-memory mock SecretStore (defined above) so env.register
+      // stages inline secrets into our fake map instead of calling AWS.
+      // The new API (PR4b) requires the store to be named in `secretStores`
+      // on the client and referenced by name via `env.register({ secretStore:
+      // '<name>' })`. The old `stager:` option no longer exists.
+      const { store: mockStore, staged } = makeMockSecretStore();
 
-      // The return shape `{ arn, ttlSeconds }` matches StageInlineSecretResult
-      // from secrets-manager.ts — env-register.ts destructures `{ arn }` from
-      // the stager's return value to populate secretRefs.
-      const fakeStager = {
-        async stage(args: {
-          dispatchId: string;
-          envName: string;
-          inline: { inline: string; ttlSeconds?: number };
-        }): Promise<{ arn: string; ttlSeconds: number }> {
-          const name = `${FAKE_NAME_PREFIX}/${args.dispatchId}/${args.envName}`;
-          const arn = `arn:fake:${name}`;
-          stagedByFaker.push({ name, value: args.inline.inline, ref: arn });
-          return { arn, ttlSeconds: args.inline.ttlSeconds ?? 7500 };
-        },
-      };
+      // Wrap `stage` in a spy so we can assert call count and call args.
+      const originalStage = mockStore.stage.bind(mockStore);
+      const stageSpy = vi.fn(
+        (args: StageSecretArgs): Promise<StagedSecret> => originalStage(args),
+      );
+      const spiedStore: SecretStore = { ...mockStore, stage: stageSpy };
 
       // We need to observe the EXACT bytes that `env.register` passes to
       // `storage.put` for the env-bundle blob, to verify the §7.1
@@ -244,9 +235,11 @@ describe('E2E: inline secret lifecycle (§7.6)', () => {
       // independent of any storage-side validation that may or may not let
       // the write land — exactly the right surface for a §7.1 contract test.
       const root = storageRoot();
+      // Inject the mock store under the key "local" so no AWS call is made.
       const client = makeClient({
         namespace: 'inline-secret',
         storageRoot: root,
+        secretStore: spiedStore,
       });
       const putCalls: Array<{ uri: string; bytes: Uint8Array }> = [];
       const realPut = client.storage.put.bind(client.storage);
@@ -272,24 +265,26 @@ describe('E2E: inline secret lifecycle (§7.6)', () => {
       );
 
       const SECRET = 'super-secret-do-not-store-' + Date.now();
+      // Pass `secretStore: 'aws'` — makeClient registers the injected store
+      // under the key 'aws' in `secretStores`. No `stager:` option (removed).
       const envRef = await client.env.register({
         name: 'with-inline',
         values: { LOG_LEVEL: 'info' },
         secrets: { GH_TOKEN: { inline: SECRET } },
-        stager: fakeStager as never,
+        secretStore: 'aws',
       });
 
-      // The fake stager was called exactly once — for the GH_TOKEN inline
-      // secret. The deterministic staged-secret name follows env-register's
-      // convention: `agora/inline/env-<envName>/<key>`.
-      expect(stagedByFaker).toHaveLength(1);
-      const stagedEntry = stagedByFaker[0]!;
-      expect(stagedEntry.name).toBe('agora/inline/env-with-inline/GH_TOKEN');
-      expect(stagedEntry.value).toBe(SECRET);
+      // The mock store's `stage` was called exactly once — for the GH_TOKEN
+      // inline secret. env-register derives the deterministic name:
+      // `agora/inline/env-<envName>/<key>`.
+      expect(stageSpy).toHaveBeenCalledTimes(1);
+      const stageArgs = stageSpy.mock.calls[0]![0] as StageSecretArgs;
+      expect(stageArgs.name).toBe('agora/inline/env-with-inline/GH_TOKEN');
+      expect(stageArgs.value).toBe(SECRET);
 
-      // The fake ref is `arn:fake:<name>`.
-      const stagedRef = stagedEntry.ref;
-      expect(stagedRef).toBe(`arn:fake:agora/inline/env-with-inline/GH_TOKEN`);
+      // The mock store returns `mock-ref:<name>` as the opaque ref.
+      const stagedRef = `mock-ref:agora/inline/env-with-inline/GH_TOKEN`;
+      expect(staged.has(stagedRef)).toBe(true);
 
       // The env-register flow called `storage.put` once with the env-bundle
       // blob bytes. Extract those bytes and assert on them directly.
