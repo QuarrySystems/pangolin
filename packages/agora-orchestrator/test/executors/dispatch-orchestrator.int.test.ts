@@ -139,7 +139,7 @@ function makeFakeStore(): { store: SecretStore; staged: string[]; cleaned: strin
 describe('AgoraOrchestrator + DispatchExecutor', () => {
   it('drives a 1-item run to done across two ticks', async () => {
     const { compute, resolveExit } = makeDeferredCompute();
-    const fake = makeFakeStore();
+    const { store: secretStore } = makeFakeStore();
     const storage = makeMemoryStorage();
     storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
     const client = new AgoraClient({
@@ -148,7 +148,7 @@ describe('AgoraOrchestrator + DispatchExecutor', () => {
       credentials: { default: makeCredentials() },
       storage,
       targets: { prod: { compute: 'default', credentials: 'default', secretStore: 'local' } },
-      secretStores: { local: fake.store },
+      secretStores: { local: secretStore },
     });
 
     const store = new SqliteRunStateStore();
@@ -203,7 +203,7 @@ describe('AgoraOrchestrator + DispatchExecutor', () => {
 
   it('drives a 1-item run to failed when exit code is non-zero', async () => {
     const { compute, resolveExit } = makeDeferredCompute();
-    const fake = makeFakeStore();
+    const { store: secretStore } = makeFakeStore();
     const storage = makeMemoryStorage();
     storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
     const client = new AgoraClient({
@@ -212,7 +212,7 @@ describe('AgoraOrchestrator + DispatchExecutor', () => {
       credentials: { default: makeCredentials() },
       storage,
       targets: { prod: { compute: 'default', credentials: 'default', secretStore: 'local' } },
-      secretStores: { local: fake.store },
+      secretStores: { local: secretStore },
     });
 
     const store = new SqliteRunStateStore();

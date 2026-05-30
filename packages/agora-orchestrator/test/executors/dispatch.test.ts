@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { AgoraClient } from '@quarry-systems/agora-client'; // barrel import installs prototype getters
 import type {
   ComputeProvider,
