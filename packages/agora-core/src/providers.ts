@@ -125,6 +125,12 @@ export interface StageSecretArgs {
  */
 export interface SecretStore {
   readonly name: string;
+  /**
+   * For file-backed stores, the host directory holding staged secret files.
+   * The dispatcher reads this to emit AGORA_SECRET_STORE_DIR for the provider
+   * bind-mount. Undefined for stores with no on-disk directory (e.g. AWS).
+   */
+  readonly dir?: string;
   /** Stage a secret value and return an opaque, resolvable reference. */
   stage(args: StageSecretArgs): Promise<StagedSecret>;
   /** Resolve a previously-staged reference back to its secret value. */

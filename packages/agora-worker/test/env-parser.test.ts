@@ -216,4 +216,24 @@ describe("parseWorkerEnv", () => {
       expect(cfg.storageUri).toBe("s3://bucket/prefix");
     });
   });
+
+  describe("secret store kind", () => {
+    it("defaults secretStoreKind to aws-secrets-manager when unset", () => {
+      const cfg = parseWorkerEnv({ ...baseEnv() });
+      expect(cfg.secretStoreKind).toBe("aws-secrets-manager");
+    });
+    it("reads local-file from AGORA_SECRET_STORE_KIND", () => {
+      const cfg = parseWorkerEnv({ ...baseEnv(), AGORA_SECRET_STORE_KIND: "local-file" });
+      expect(cfg.secretStoreKind).toBe("local-file");
+    });
+    it("accepts explicit aws-secrets-manager and round-trips correctly", () => {
+      const cfg = parseWorkerEnv({ ...baseEnv(), AGORA_SECRET_STORE_KIND: "aws-secrets-manager" });
+      expect(cfg.secretStoreKind).toBe("aws-secrets-manager");
+    });
+    it("throws with a clear message when AGORA_SECRET_STORE_KIND is unrecognized", () => {
+      expect(() =>
+        parseWorkerEnv({ ...baseEnv(), AGORA_SECRET_STORE_KIND: "typo-value" }),
+      ).toThrow(/AGORA_SECRET_STORE_KIND/);
+    });
+  });
 });

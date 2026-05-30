@@ -80,6 +80,11 @@ describe("LocalSecretStore", () => {
     expect(new LocalSecretStore({ dir }).name).toBe("local-file");
   });
 
+  it("exposes its dir for bind-mount emission", () => {
+    const store = new LocalSecretStore({ dir: "/tmp/agora-secrets" });
+    expect(store.dir).toBe("/tmp/agora-secrets");
+  });
+
   it("does not leave the plaintext value in a predictable shared file at dir root", async () => {
     // Sanity: the value lives in a per-secret file, not smeared into a
     // single shared index that could be accidentally surfaced.

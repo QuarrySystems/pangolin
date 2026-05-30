@@ -9,10 +9,11 @@
 //      `capabilities` REPLACES the subagent's assigned set;
 //      `addCapabilities` APPENDS to it (override on conflict). Combining
 //      both throws.
-//   3. Stage per-dispatch inline secrets via `InlineSecretStager.stage`
-//      (TTL flows from `work.timeoutSeconds`). ARN-form secrets pass
-//      through unchanged. The result is `Record<envName, ARN>`.
-//   4. If `work.callback` is set, mint a per-dispatch HMAC key.
+//   3. Stage per-dispatch inline secrets via the target's injected
+//      `SecretStore`. `SecretRef`-form secrets pass through unchanged.
+//      The result is `Record<envName, ref>`.
+//   4. If `work.callback` is set, mint a per-dispatch HMAC key via the
+//      target's store.
 //   5. Resolve provider credentials and select the target's
 //      `ComputeProvider`.
 //   6. Build the `TaskSpec` — image from `opts.workerImage`, the seven
@@ -25,14 +26,10 @@
 //      `DispatchResult` built from the exit otherwise.
 //   9. Write the dispatch record via `writeDispatchRecord` with the
 //      resolved retention days.
-//  10. Best-effort cleanup of per-dispatch staged secrets (TTL is the
-//      fallback if cleanup fails).
+//  10. Best-effort cleanup of per-dispatch staged secrets via
+//      `store.cleanupByTag` (TTL is the fallback if cleanup fails).
 
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { LocalSecretStore } from '@quarry-systems/agora-secret-store';
 import {
   buildAgoraUri,
   type DispatchWork,
@@ -47,7 +44,7 @@ import {
   type TaskExit,
 } from '@quarry-systems/agora-core';
 import type { AgoraClient } from './client.js';
-import { InlineSecretStager, computeInlineSecretTtl } from './secrets-manager.js';
+import { computeInlineSecretTtl } from './secret-ttl.js';
 import { mintCallbackHmac } from './callback-hmac.js';
 import { writeDispatchRecord } from './retention.js';
 
@@ -108,67 +105,54 @@ export async function fireWork(
     work.addCapabilities,
   );
 
-  // 2. Stage per-dispatch inline secrets into the store that matches the
-  //    deployment: AWS Secrets Manager for cloud storage, an on-disk
-  //    LocalSecretStore for `file://` storage (local-docker). The local
-  //    branch closes the functional gap where per-dispatch secrets were
-  //    silently dropped locally — the staged dir is bind-mounted into the
-  //    worker container by LocalDockerProvider and resolved there.
-  const storageRootUri =
-    (client.storage as unknown as { rootUri?: string }).rootUri ?? '';
-  const isLocalStorage = storageRootUri.startsWith('file://');
-
-  const awsStager = isLocalStorage ? undefined : new InlineSecretStager();
-  let localSecretsDir: string | undefined;
-  let localStore: LocalSecretStore | undefined;
-
-  const perDispatchSecretArns: Record<string, string> = {};
-  for (const [envName, entry] of Object.entries(work.secrets ?? {})) {
-    if (isSecretRef(entry)) {
-      perDispatchSecretArns[envName] = entry.arn;
-      continue;
-    }
-    if (isLocalStorage) {
-      if (!localStore) {
-        localSecretsDir = await mkdtemp(join(tmpdir(), 'agora-secrets-'));
-        localStore = new LocalSecretStore({ dir: localSecretsDir });
-      }
-      const { ref } = await localStore.stage({
-        name: `${dispatchId}/${envName}`,
-        value: entry.inline,
-        ttlSeconds: computeInlineSecretTtl({
-          explicit: entry.ttlSeconds,
-          dispatchTimeoutSeconds: effectiveTimeoutSeconds,
-        }),
-        tags: { 'agora:dispatchId': dispatchId },
-      });
-      perDispatchSecretArns[envName] = ref;
-    } else {
-      const { arn } = await awsStager!.stage({
-        dispatchId,
-        envName,
-        inline: entry,
-        dispatchTimeoutSeconds: effectiveTimeoutSeconds,
-      });
-      perDispatchSecretArns[envName] = arn;
-    }
-  }
-
-  // 3. Mint callback HMAC iff a callback URL is configured.
-  let callbackTokenArn: string | undefined;
-  if (work.callback) {
-    const minted = await mintCallbackHmac({
-      dispatchId,
-      dispatchTimeoutSeconds: effectiveTimeoutSeconds,
-    });
-    callbackTokenArn = minted.arn;
-  }
-
-  // 4. Resolve provider credentials + select compute.
+  // 2. Resolve the target's injected SecretStore. The store is used to
+  //    stage per-dispatch inline secrets and the callback HMAC key.
+  //    A missing store is only an error if the dispatch actually needs one.
   const targetCfg = client.targets[work.target];
   if (!targetCfg) {
     throw new Error(`dispatchWork: unknown target ${work.target}`);
   }
+  const store = targetCfg.secretStore ? client.secretStores[targetCfg.secretStore] : undefined;
+  const needsStore =
+    Object.values(work.secrets ?? {}).some((e) => !isSecretRef(e)) || !!work.callback;
+  if (needsStore && !store) {
+    throw new Error(
+      `dispatchWork: target ${work.target} stages secrets but has no secretStore configured`,
+    );
+  }
+
+  // 3. Stage per-dispatch inline secrets via the injected store.
+  //    SecretRef-form entries pass through with their `ref` unchanged.
+  const perDispatchSecretRefs: Record<string, string> = {};
+  for (const [envName, entry] of Object.entries(work.secrets ?? {})) {
+    if (isSecretRef(entry)) {
+      perDispatchSecretRefs[envName] = entry.ref;
+      continue;
+    }
+    const { ref } = await store!.stage({
+      name: `${dispatchId}/${envName}`,
+      value: entry.inline,
+      ttlSeconds: computeInlineSecretTtl({
+        explicit: entry.ttlSeconds,
+        dispatchTimeoutSeconds: effectiveTimeoutSeconds,
+      }),
+      tags: { 'agora:dispatchId': dispatchId },
+    });
+    perDispatchSecretRefs[envName] = ref;
+  }
+
+  // 4. Mint callback HMAC iff a callback URL is configured.
+  let callbackTokenRef: string | undefined;
+  if (work.callback) {
+    const minted = await mintCallbackHmac({
+      store: store!,
+      dispatchId,
+      dispatchTimeoutSeconds: effectiveTimeoutSeconds,
+    });
+    callbackTokenRef = minted.ref;
+  }
+
+  // 5. Resolve provider credentials + select compute.
   const credentialProvider = client.credentials[targetCfg.credentials];
   if (!credentialProvider) {
     throw new Error(
@@ -183,7 +167,7 @@ export async function fireWork(
   }
   const credentials = await credentialProvider.resolve();
 
-  // 5. Build TaskSpec.env — bundle-ref descriptors + the seven AGORA_* vars
+  // 6. Build TaskSpec.env — bundle-ref descriptors + the seven AGORA_* vars
   //    from §6.1. `callback` injects two extras when configured.
   const bundleRefs = {
     subagent: {
@@ -227,27 +211,29 @@ export async function fireWork(
     // layer injecting them as ambient env that escapes redaction. Only the
     // per-dispatch map goes here; env-bundle secrets are resolved by the
     // worker from the env-bundle blob to avoid double-resolution.
-    AGORA_PER_DISPATCH_SECRET_REFS_JSON: JSON.stringify(perDispatchSecretArns),
+    AGORA_PER_DISPATCH_SECRET_REFS_JSON: JSON.stringify(perDispatchSecretRefs),
   };
-  // For the local store, tell the worker (via the LocalDockerProvider's
-  // bind-mount rewrite) which directory to resolve `local-secret://` refs
-  // from. Absent for the AWS path.
-  if (localSecretsDir) {
-    envVars.AGORA_SECRET_STORE_DIR = localSecretsDir;
+  // Emit the store kind and (when set) the on-disk directory so the provider
+  // can bind-mount it into the worker container.
+  if (store) {
+    envVars.AGORA_SECRET_STORE_KIND = store.name;
+    if (store.dir) {
+      envVars.AGORA_SECRET_STORE_DIR = store.dir;
+    }
   }
   if (work.callback) {
     envVars.AGORA_CALLBACK_URL = work.callback.url;
-    // mintCallbackHmac ran above iff work.callback was set, so callbackTokenArn
+    // mintCallbackHmac ran above iff work.callback was set, so callbackTokenRef
     // is non-undefined here by construction.
-    envVars.AGORA_CALLBACK_TOKEN_REF = callbackTokenArn!;
+    envVars.AGORA_CALLBACK_TOKEN_REF = callbackTokenRef!;
   }
 
-  // 6. Merge env-bundle secrets + per-dispatch secrets. Per-dispatch wins on
+  // 7. Merge env-bundle secrets + per-dispatch secrets. Per-dispatch wins on
   //    collision per §6.2 step 6 — this is enforced HERE (client-side).
   const envBundleSecretRefs = await flattenEnvBundleSecrets(client, resolvedEnv);
   const secretRefs: Record<string, string> = {
     ...envBundleSecretRefs,
-    ...perDispatchSecretArns,
+    ...perDispatchSecretRefs,
   };
 
   const taskSpec: TaskSpec = {
@@ -261,7 +247,7 @@ export async function fireWork(
     dispatchId,
   };
 
-  // 7. Run (fire). awaitExit is deferred to the returned InFlightDispatch.
+  // 8. Run (fire). awaitExit is deferred to the returned InFlightDispatch.
   const handle = await compute.run(taskSpec, { credentials, telemetry: client.telemetry });
   const startTime = Date.now();
   client.telemetry?.emit({
@@ -285,7 +271,7 @@ export async function fireWork(
   const reconcile = async (exit: TaskExit): Promise<DispatchResult> => {
     const durationMs = Date.now() - startTime;
 
-    // 8. ResultSink.collect — or fall back to a minimal DispatchResult.
+    // 9. ResultSink.collect — or fall back to a minimal DispatchResult.
     const sink = client.resultSink;
     const result: DispatchResult = sink
       ? await sink.collect(handle, exit, {
@@ -310,7 +296,7 @@ export async function fireWork(
           },
         };
 
-    // 9. Write the dispatch record (storage-side retention enforcement).
+    // 10. Write the dispatch record (storage-side retention enforcement).
     await writeDispatchRecord(
       client,
       dispatchId,
@@ -321,20 +307,15 @@ export async function fireWork(
     return result;
   };
 
-  // 10. Best-effort cleanup of per-dispatch staged secrets. Never throws —
+  // 11. Best-effort cleanup of per-dispatch staged secrets. Never throws —
   //     the .catch() preserves the "never throw from cleanup" contract.
-  //     AWS path: the stager's TTL tag is the fallback. Local path: remove the
-  //     on-disk staging dir (a failed rm leaves only short-lived local files,
-  //     never a leaked cloud secret). Runs on success and on throw (finally).
+  //     The injected store's cleanupByTag sweeps by dispatch-id tag; TTL is
+  //     the fallback if cleanup fails or no store is configured. Runs on
+  //     success and on throw (finally).
   const cleanup = (): void => {
-    awsStager?.cleanup(dispatchId).catch(() => {
+    store?.cleanupByTag('agora:dispatchId', dispatchId).catch(() => {
       // intentionally suppressed — see above.
     });
-    if (localSecretsDir) {
-      rm(localSecretsDir, { recursive: true, force: true }).catch(() => {
-        // intentionally suppressed — see above.
-      });
-    }
   };
 
   return { dispatchId, handle, awaitExit, reconcile, cleanup };
@@ -362,7 +343,7 @@ export async function dispatchWork(
 
 /** Type guard for the `SecretRef | InlineSecret` discriminated union. */
 function isSecretRef(v: SecretRef | InlineSecret): v is SecretRef {
-  return 'arn' in v;
+  return 'ref' in v;
 }
 
 /**
@@ -457,7 +438,7 @@ async function resolveCapabilityRefs(
   client: AgoraClient,
   refs: Array<string | CapabilityRef>,
 ): Promise<CapabilityRef[]> {
-  const out: CapabilityRef[] = [];
+  const out: CapabilityRef[]= [];
   for (const r of refs) {
     if (typeof r === 'string') {
       const baseUri = buildAgoraUri({

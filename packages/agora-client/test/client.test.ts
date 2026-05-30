@@ -116,4 +116,62 @@ describe('AgoraClient', () => {
     expect(client.retention.defaultDays).toBe(30);
     expect(client.retention.maxDays).toBe(2555);
   });
+
+  it('rejects a target naming an undefined secretStore', () => {
+    expect(
+      () =>
+        new AgoraClient({
+          namespace: 'n',
+          storage: fakeStorage,
+          compute: { c: fakeCompute },
+          credentials: { cr: fakeCreds },
+          targets: {
+            prod: { compute: 'c', credentials: 'cr', secretStore: 'missing' },
+          },
+        }),
+    ).toThrow(/unknown secretStore missing/);
+  });
+
+  it('accepts a target naming a secretStore that exists in secretStores', () => {
+    const fakeStore: any = { name: 'fake-store' };
+    expect(
+      () =>
+        new AgoraClient({
+          namespace: 'n',
+          storage: fakeStorage,
+          compute: { c: fakeCompute },
+          credentials: { cr: fakeCreds },
+          targets: {
+            prod: { compute: 'c', credentials: 'cr', secretStore: 'myStore' },
+          },
+          secretStores: { myStore: fakeStore },
+        }),
+    ).not.toThrow();
+  });
+
+  it('exposes secretStores as a readonly field', () => {
+    const fakeStore: any = { name: 'fake-store' };
+    const client = new AgoraClient({
+      namespace: 'n',
+      storage: fakeStorage,
+      compute: { c: fakeCompute },
+      credentials: { cr: fakeCreds },
+      targets: {
+        prod: { compute: 'c', credentials: 'cr', secretStore: 'myStore' },
+      },
+      secretStores: { myStore: fakeStore },
+    });
+    expect(client.secretStores['myStore']).toBe(fakeStore);
+  });
+
+  it('defaults secretStores to empty object when omitted', () => {
+    const client = new AgoraClient({
+      namespace: 'my-org',
+      compute: {},
+      credentials: {},
+      storage: fakeStorage,
+      targets: {},
+    });
+    expect(client.secretStores).toEqual({});
+  });
 });

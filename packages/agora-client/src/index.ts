@@ -32,7 +32,6 @@ export {
 export {
   mintCallbackHmac,
   signCallback,
-  type HmacMintOpts,
 } from './callback-hmac.js';
 
 // ── Capabilities registration ──────────────────────────────────────────────

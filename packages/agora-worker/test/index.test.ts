@@ -1,4 +1,77 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
+import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { runWorker, type RunWorkerDeps } from "../src/entrypoint.js";
+import {
+  computeContentHash,
+  type StorageProvider,
+  type RuntimeAdapter,
+  type SecretStore,
+} from "@quarry-systems/agora-core";
+
+// ---------------------------------------------------------------------------
+// Shared helpers (copied from entrypoint.test.ts to avoid cross-file import)
+// ---------------------------------------------------------------------------
+
+class FakeStorage implements StorageProvider {
+  readonly name = "fake";
+  private blobs = new Map<string, Uint8Array>();
+
+  set(uri: string, bytes: Uint8Array): this {
+    this.blobs.set(uri, bytes);
+    return this;
+  }
+
+  async put(): Promise<{ contentHash: string }> {
+    throw new Error("not used");
+  }
+
+  async get(uri: string): Promise<Uint8Array> {
+    const v = this.blobs.get(uri);
+    if (!v) throw new Error(`fake storage: missing ${uri}`);
+    return v;
+  }
+
+  async resolveLatest(): Promise<null> {
+    return null;
+  }
+
+  async list(): Promise<[]> {
+    return [];
+  }
+}
+
+function packBundle(
+  name: string,
+  files: Record<string, Uint8Array>,
+): Uint8Array {
+  const paths = Object.keys(files).sort();
+  const entries = paths.map((path) => ({ path, size: files[path]!.byteLength }));
+  const headerBytes = new TextEncoder().encode(
+    JSON.stringify({ name, entries }) + "\n",
+  );
+  const total =
+    headerBytes.byteLength +
+    paths.reduce((acc, p) => acc + files[p]!.byteLength, 0);
+  const out = new Uint8Array(total);
+  let offset = 0;
+  out.set(headerBytes, 0);
+  offset += headerBytes.byteLength;
+  for (const p of paths) {
+    out.set(files[p]!, offset);
+    offset += files[p]!.byteLength;
+  }
+  return out;
+}
+
+function asJsonBytes(obj: unknown): Uint8Array {
+  return new TextEncoder().encode(JSON.stringify(obj));
+}
+
+// ---------------------------------------------------------------------------
+// Index exports
+// ---------------------------------------------------------------------------
 
 describe("agora-worker index exports", () => {
   it("exports runWorker", async () => {
@@ -25,13 +98,10 @@ describe("agora-worker index exports", () => {
     expect(typeof StructuredLogger).toBe("function");
   });
 
-  it("exports SecretResolver and SecretResolutionError", async () => {
-    const { SecretResolver, SecretResolutionError } = await import(
-      "../src/index.js"
-    );
-    expect(SecretResolver).toBeDefined();
-    expect(SecretResolutionError).toBeDefined();
-    expect(typeof SecretResolver).toBe("function");
+  it("does NOT export SecretResolver or SecretResolutionError", async () => {
+    const module = await import("../src/index.js");
+    expect((module as Record<string, unknown>).SecretResolver).toBeUndefined();
+    expect((module as Record<string, unknown>).SecretResolutionError).toBeUndefined();
   });
 
   it("exports mergeEnv", async () => {
@@ -106,5 +176,134 @@ describe("agora-worker index exports", () => {
     // Just verify the module exports without errors
     const module = await import("../src/index.js");
     expect(module).toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Integration: env-bundle + callback secrets through injected SecretStore
+// ---------------------------------------------------------------------------
+
+describe("worker lifecycle (SecretStore integration)", () => {
+  const cleanupDirs: string[] = [];
+
+  afterEach(async () => {
+    for (const d of cleanupDirs) {
+      await rm(d, { recursive: true, force: true });
+    }
+    cleanupDirs.length = 0;
+  });
+
+  it("resolves env-bundle and callback secrets through the injected SecretStore and redacts them", async () => {
+    // --- Setup workspace + adapters ---
+    const workDir = await mkdtemp(join(tmpdir(), "idx-test-work-"));
+    const adaptersRoot = await mkdtemp(join(tmpdir(), "idx-test-adapters-"));
+    cleanupDirs.push(workDir, adaptersRoot);
+
+    const adapterDir = join(adaptersRoot, "claude-code");
+    await mkdir(adapterDir, { recursive: true });
+    await writeFile(
+      join(adapterDir, "index.js"),
+      `export default function () {
+         return {
+           name: "claude-code",
+           reservedPaths: [],
+           invoke: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
+         };
+       };\n`,
+      "utf-8",
+    );
+
+    // --- Build storage with subagent + capability bundle + env bundle ---
+    const subagentDef = { name: "alpha", systemPrompt: "do work" };
+    const subagentUri = "agora://ns/subagent/alpha/sha256:s";
+    const subagentHash = computeContentHash(subagentDef);
+
+    const capFiles = { "README.md": new TextEncoder().encode("hello\n") };
+    const capBytes = packBundle("cap-a", capFiles);
+    const capUri = "agora://ns/capability/cap-a/sha256:c";
+    const capHash = computeContentHash(capBytes);
+
+    // An env bundle that carries both static values and a secret ref.
+    const envDef = {
+      values: { STATIC_VAR: "static-value" },
+      secretRefs: { API_KEY: "ref-for-api-key" },
+    };
+    const envBytes = asJsonBytes(envDef);
+    const envUri = "agora://ns/env/env-a/sha256:e";
+    // Env bundles are hashed via canonical JSON of the parsed object (not raw
+    // bytes), matching bundle-fetcher's verifyContentHash(def, ...) logic.
+    const envHash = computeContentHash(envDef);
+
+    const storage = new FakeStorage();
+    storage.set(subagentUri, asJsonBytes(subagentDef));
+    storage.set(capUri, capBytes);
+    storage.set(envUri, envBytes);
+
+    const bundleRefs = {
+      subagent: { uri: subagentUri, contentHash: subagentHash },
+      capabilities: [{ uri: capUri, contentHash: capHash }],
+      env: [{ uri: envUri, contentHash: envHash }],
+    };
+
+    // Worker env: callback is configured + one env bundle with a secret ref.
+    const env: Record<string, string> = {
+      AGORA_DISPATCH_ID: "d-idx-1",
+      AGORA_NAMESPACE: "ns",
+      AGORA_STORAGE_URI: "file:///fake",
+      AGORA_BUNDLE_REFS_JSON: JSON.stringify(bundleRefs),
+      AGORA_RUNTIME_ADAPTER: "claude-code",
+      AGORA_CALLBACK_URL: "http://localhost:9999/cb",
+      AGORA_CALLBACK_TOKEN_REF: "ref-for-hmac-key",
+    };
+
+    // Track every ref resolved via the injected store.
+    const resolved: string[] = [];
+    const HMAC_KEY_VALUE = "hmac-key-secret-value";
+    const API_KEY_VALUE = "api-key-secret-value";
+
+    const store: SecretStore = {
+      name: "fake",
+      resolve: async (ref: string) => {
+        resolved.push(ref);
+        if (ref === "ref-for-hmac-key") return HMAC_KEY_VALUE;
+        if (ref === "ref-for-api-key") return API_KEY_VALUE;
+        throw new Error(`unknown ref: ${ref}`);
+      },
+      stage: async () => ({ ref: "x", ttlSeconds: 1 }),
+      cleanupByTag: async () => {},
+    };
+
+    let capturedEnv: Record<string, string> | undefined;
+    const adapter: RuntimeAdapter = {
+      name: "claude-code",
+      reservedPaths: [],
+      invoke: async (_spec, ctx) => {
+        capturedEnv = ctx.env;
+        return { exitCode: 0, stdout: "", stderr: "" };
+      },
+    };
+
+    const deps: RunWorkerDeps = {
+      storage,
+      adapter,
+      adaptersRoot,
+      workspaceDir: workDir,
+      secretStore: store,
+      fetchImpl: async () => new Response(null, { status: 204 }),
+    };
+
+    const code = await runWorker(env, deps);
+
+    expect(code).toBe(0);
+
+    // Both secret refs were routed through the store.
+    expect(resolved).toContain("ref-for-hmac-key");
+    expect(resolved).toContain("ref-for-api-key");
+
+    // The HMAC key and API key must have been registered for redaction
+    // (StructuredLogger.registerSecret). We verify the static env var still
+    // made it through, and that env-bundle resolved values are injected.
+    expect(capturedEnv?.STATIC_VAR).toBe("static-value");
+    expect(capturedEnv?.API_KEY).toBe(API_KEY_VALUE);
   });
 });

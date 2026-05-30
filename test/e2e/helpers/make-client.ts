@@ -4,12 +4,21 @@
 // wired the same way: `LocalDockerProvider` on the `local-docker` slot,
 // `NoopCredentialProvider` on the `none` slot, `LocalStorageProvider`
 // rooted at a per-test scratch directory (see `useTempStorageRoot`), and
-// a single `local` target binding the two.
+// a single `local` target binding the two. An `AwsSecretStore` is
+// registered under the `'aws'` key and the `local` target's `secretStore`
+// is set to `'aws'` so per-dispatch inline secrets and callback HMAC keys
+// are staged to (and resolved from) AWS Secrets Manager automatically.
 //
 // `dockerOpts` is forwarded verbatim to `LocalDockerProvider` so individual
 // tests can inject a stub Docker instance (`{ docker: fakeDocker }`) or
 // opt into the `allowUnpinnedImage` escape hatch when exercising the
 // digest-pinning contract negatively.
+//
+// `secretStore` overrides the default `AwsSecretStore` so tests that need
+// to intercept secret staging can inject a mock without changing other
+// construction details. Tests that do NOT exercise secrets call
+// `makeClient()` unchanged; the wired store is present but only invoked
+// when a dispatch actually stages inline secrets or a callback HMAC key.
 //
 // Workspace packages are not declared as dependencies of the repo-root
 // manifest, so — matching the existing root-level E2E test — we import
@@ -26,6 +35,8 @@ import {
   LocalDockerProvider,
   type LocalDockerProviderOpts,
 } from '../../../packages/agora-providers-local-docker/dist/index.js';
+import { AwsSecretStore } from '../../../packages/agora-secret-store/dist/index.js';
+import type { SecretStore } from '../../../packages/agora-core/dist/index.js';
 
 export interface MakeClientOpts {
   /** `AgoraClient.namespace` — keep distinct per suite to isolate storage. */
@@ -34,15 +45,24 @@ export interface MakeClientOpts {
   storageRoot: string;
   /** Forwarded to `LocalDockerProvider`. Optional; defaults to `{}`. */
   dockerOpts?: LocalDockerProviderOpts;
+  /**
+   * Override the SecretStore registered under the `'aws'` key on the
+   * `local` target. Defaults to `new AwsSecretStore()` (ambient credential
+   * chain). Tests that need to intercept secret staging inject a mock here
+   * so no real Secrets Manager calls are made.
+   */
+  secretStore?: SecretStore;
 }
 
 export function makeClient(opts: MakeClientOpts): AgoraClient {
+  const store: SecretStore = opts.secretStore ?? new AwsSecretStore();
   return new AgoraClient({
     namespace: opts.namespace,
     compute: { 'local-docker': new LocalDockerProvider(opts.dockerOpts ?? {}) },
     credentials: { none: new NoopCredentialProvider() },
     storage: new LocalStorageProvider({ rootDir: opts.storageRoot }),
-    targets: { local: { compute: 'local-docker', credentials: 'none' } },
+    targets: { local: { compute: 'local-docker', credentials: 'none', secretStore: 'aws' } },
+    secretStores: { aws: store },
     resultSink: new StdoutResultSink(),
   });
 }

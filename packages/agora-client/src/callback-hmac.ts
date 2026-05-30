@@ -1,42 +1,31 @@
 import { randomBytes, createHmac } from 'node:crypto';
-import {
-  SecretsManagerClient,
-  CreateSecretCommand,
-} from '@aws-sdk/client-secrets-manager';
-
-export interface HmacMintOpts {
-  client?: SecretsManagerClient;
-  namePrefix?: string;
-}
+import type { SecretStore } from '@quarry-systems/agora-core';
 
 /**
- * Mint a per-dispatch HMAC key, stage it in Secrets Manager with a TTL
- * matching the dispatch's expected duration plus a 5-minute buffer, and
- * return the ARN plus the effective ttlSeconds.
+ * Mint a per-dispatch HMAC key, stage it in the injected SecretStore with a
+ * TTL matching the dispatch's expected duration plus a 5-minute buffer, and
+ * return the opaque ref plus the effective ttlSeconds.
  *
- * The worker fetches the key by ARN (passed as `AGORA_CALLBACK_TOKEN_REF`)
+ * The worker fetches the key by ref (passed as `AGORA_CALLBACK_TOKEN_REF`)
  * and uses {@link signCallback} to sign every callback POST so that the
  * client and worker compute identical signatures (§7.3).
  */
-export async function mintCallbackHmac(
-  opts: HmacMintOpts & { dispatchId: string; dispatchTimeoutSeconds?: number },
-): Promise<{ arn: string; ttlSeconds: number }> {
-  const client = opts.client ?? new SecretsManagerClient({});
+export async function mintCallbackHmac(opts: {
+  store: SecretStore;
+  dispatchId: string;
+  dispatchTimeoutSeconds?: number;
+  namePrefix?: string;
+}): Promise<{ ref: string; ttlSeconds: number }> {
   const namePrefix = opts.namePrefix ?? 'agora/callback-hmac';
   const ttlSeconds = (opts.dispatchTimeoutSeconds ?? 7200) + 300;
   const key = randomBytes(32).toString('hex');
-  const res = await client.send(
-    new CreateSecretCommand({
-      Name: `${namePrefix}/${opts.dispatchId}`,
-      SecretString: key,
-      Tags: [
-        { Key: 'agora:dispatchId', Value: opts.dispatchId },
-        { Key: 'agora:ttlSeconds', Value: String(ttlSeconds) },
-      ],
-    }),
-  );
-  if (!res.ARN) throw new Error(`HMAC secret mint returned no ARN`);
-  return { arn: res.ARN, ttlSeconds };
+  const { ref } = await opts.store.stage({
+    name: `${namePrefix}/${opts.dispatchId}`,
+    value: key,
+    ttlSeconds,
+    tags: { 'agora:dispatchId': opts.dispatchId },
+  });
+  return { ref, ttlSeconds };
 }
 
 /**

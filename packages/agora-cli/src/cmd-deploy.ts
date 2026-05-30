@@ -7,7 +7,7 @@
 //   2. subagents — each entry is forwarded to `client.subagent.register()`;
 //      subagents may reference capabilities registered in phase 1.
 //   3. envs — each entry is forwarded to `client.env.register()`; secrets
-//      pass through unchanged (the discriminated `SecretRef | InlineSecret`
+//      pass through unchanged (the discriminated `{ ref } | InlineSecret`
 //      shape is already validated by `parseManifest`).
 //
 // Re-registration is implicit via the SDK's content-addressed register path,
@@ -65,7 +65,7 @@ export function attachDeployCmd(program: Command, ctx: CliContext): void {
         const ref = await client.env.register({
           name: env.name,
           values: env.values,
-          // parseManifest validates the SecretRef | InlineSecret discrimination;
+          // parseManifest validates the { ref } | InlineSecret discrimination;
           // derive the expected type from the client method instead of importing
           // the SDK's secret types from agora-core directly.
           secrets: env.secrets as Parameters<typeof client.env.register>[0]["secrets"],

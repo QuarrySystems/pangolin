@@ -21,7 +21,7 @@ export interface SubagentDecl {
 export interface EnvDecl {
   name: string;
   values?: Record<string, string>;
-  secrets?: Record<string, { arn: string } | { inline: string; ttlSeconds?: number }>;
+  secrets?: Record<string, { ref: string } | { inline: string; ttlSeconds?: number }>;
 }
 
 export interface AgoraManifest {

@@ -16,29 +16,14 @@ import {
   ListSecretsCommand,
 } from '@aws-sdk/client-secrets-manager';
 import type { InlineSecret } from '@quarry-systems/agora-core';
+import { computeInlineSecretTtl } from './secret-ttl.js';
+
+export { computeInlineSecretTtl } from './secret-ttl.js';
 
 export interface InlineSecretStagerOpts {
   client?: SecretsManagerClient;
   /** Prefix for staged secret names (defaults to 'agora/inline'). */
   namePrefix?: string;
-}
-
-/**
- * Compute the TTL for a staged inline secret per §7.6.
- *
- * Precedence:
- *   1. `explicit` (the caller-supplied `InlineSecret.ttlSeconds`) wins if set.
- *   2. Otherwise: `(dispatchTimeoutSeconds ?? 7200) + 300`.
- *
- * `explicit: 0` is honored as a deliberate zero TTL — callers that want the
- * auto-formula should omit the field rather than pass 0.
- */
-export function computeInlineSecretTtl(opts: {
-  explicit?: number;
-  dispatchTimeoutSeconds?: number;
-}): number {
-  if (opts.explicit !== undefined) return opts.explicit;
-  return (opts.dispatchTimeoutSeconds ?? 7200) + 300;
 }
 
 export interface StageInlineSecretArgs {

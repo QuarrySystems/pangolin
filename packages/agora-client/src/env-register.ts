@@ -8,17 +8,18 @@
 //     is forwarded to the scanner verbatim.
 //   - Inline secrets (`{inline: ...}`) are staged via `InlineSecretStager`
 //     (env-scoped, not dispatch-scoped — env bundles are reused across
-//     dispatches). The resulting ARN is recorded in the bundle; the inline
+//     dispatches). The resulting ref is recorded in the bundle; the inline
 //     value is NEVER written to storage (§7.1 paragraph 2).
-//   - ARN-form secrets (`{arn: ...}`) pass through unchanged.
+//   - Ref-form secrets (`{ref: ...}`) pass through unchanged.
 //   - The content hash covers `(values, secret refs)` — never the inline
-//     secret values themselves. For ARN-form secrets the ref is the ARN
-//     itself; for inline secrets the ref is the DETERMINISTIC staged-secret
-//     NAME (`${namePrefix}/env-${opts.name}/${secretKey}`), NOT the AWS-
-//     returned ARN. Using the deterministic name keeps the hash stable
-//     across calls so the idempotency check fires BEFORE any AWS staging —
-//     otherwise the second call would crash with `ResourceExistsException`
-//     or get back a fresh ARN that breaks hash equality.
+//     secret values themselves. For ref-form secrets the ref is the opaque
+//     ref string itself; for inline secrets the ref is the DETERMINISTIC
+//     staged-secret NAME (`${namePrefix}/env-${opts.name}/${secretKey}`),
+//     NOT the AWS-returned ref. Using the deterministic name keeps the hash
+//     stable across calls so the idempotency check fires BEFORE any AWS
+//     staging — otherwise the second call would crash with
+//     `ResourceExistsException` or get back a fresh ref that breaks hash
+//     equality.
 //   - If the latest registration for this logical name already matches the
 //     computed content hash, the existing `EnvRef` is returned without
 //     issuing a duplicate put AND without invoking the stager at all.
@@ -49,10 +50,10 @@ export interface RegisterEnvOpts extends CredentialPatternCheckOpts {
    */
   values?: Record<string, string>;
   /**
-   * Secret references. Each entry is either an already-registered ARN
-   * (`{arn: ...}`) or an inline value (`{inline: ...}`) that will be staged
+   * Secret references. Each entry is either an already-registered opaque ref
+   * (`{ref: ...}`) or an inline value (`{inline: ...}`) that will be staged
    * into Secrets Manager. The inline value never crosses into the registered
-   * bundle — only the resulting ARN does.
+   * bundle — only the resulting ref does.
    */
   secrets?: Record<string, SecretRef | InlineSecret>;
   /**
@@ -64,11 +65,11 @@ export interface RegisterEnvOpts extends CredentialPatternCheckOpts {
 }
 
 /**
- * Type guard: an entry is an ARN-form secret iff it has an `arn` field.
+ * Type guard: an entry is a ref-form secret iff it has a `ref` field.
  * The two-shape `SecretRef | InlineSecret` discriminates on this field.
  */
 function isSecretRef(v: SecretRef | InlineSecret): v is SecretRef {
-  return 'arn' in v;
+  return 'ref' in v;
 }
 
 /**
@@ -123,7 +124,7 @@ export async function registerEnv(
   //    any AWS Secrets Manager call.
   //
   //    The contract: the hash is a function of (values + secret IDENTITY),
-  //    where "identity" is the ARN for arn-form refs and the deterministic
+  //    where "identity" is the ref for ref-form entries and the deterministic
   //    staged name for inline refs. Inline VALUES are never folded in —
   //    see §7.1 paragraph 2.
   const secrets = opts.secrets ?? {};
@@ -131,7 +132,7 @@ export async function registerEnv(
   const inlineSecretKeys: string[] = [];
   for (const [key, entry] of Object.entries(secrets)) {
     if (isSecretRef(entry)) {
-      secretRefs[key] = entry.arn;
+      secretRefs[key] = entry.ref;
     } else {
       secretRefs[key] = inlineSecretPlaceholder(opts.name, key);
       inlineSecretKeys.push(key);

@@ -163,13 +163,13 @@ describe('registerEnv', () => {
     expect(storage.blobs.has(pinnedUri)).toBe(true);
   });
 
-  it('passes ARN-form secrets through unchanged (no stage call)', async () => {
+  it('passes through an opaque ref-form secret unchanged (no stage call)', async () => {
     const client = makeClient(makeMemoryStorage());
     const stager = makeFakeStager();
-    const arn = 'arn:aws:secretsmanager:us-east-1:123:secret:preexisting';
+    const secretRef = 'arn:aws:secretsmanager:us-east-1:123:secret:preexisting';
     const ref = await registerEnv(client, {
       name: 'prod',
-      secrets: { GH_TOKEN: { arn } },
+      secrets: { GH_TOKEN: { ref: secretRef } },
       stager: stager as unknown as InlineSecretStager,
     });
     expect(ref.contentHash).toMatch(/^sha256:[0-9a-f]+$/);
@@ -229,18 +229,18 @@ describe('registerEnv', () => {
     expect(refA.contentHash).toBe(refB.contentHash);
   });
 
-  it('content hash differs when secret ARNs differ', async () => {
+  it('content hash differs when secret refs differ', async () => {
     const client1 = makeClient(makeMemoryStorage());
     const client2 = makeClient(makeMemoryStorage());
 
     const refA = await registerEnv(client1, {
       name: 'prod',
-      secrets: { GH_TOKEN: { arn: 'arn:one' } },
+      secrets: { GH_TOKEN: { ref: 'arn:one' } },
       stager: makeFakeStager() as unknown as InlineSecretStager,
     });
     const refB = await registerEnv(client2, {
       name: 'prod',
-      secrets: { GH_TOKEN: { arn: 'arn:two' } },
+      secrets: { GH_TOKEN: { ref: 'arn:two' } },
       stager: makeFakeStager() as unknown as InlineSecretStager,
     });
 
@@ -273,14 +273,14 @@ describe('registerEnv', () => {
     const first = await registerEnv(client, {
       name: 'prod',
       values: { LOG_LEVEL: 'info' },
-      secrets: { GH_TOKEN: { arn: 'arn:fixed' } },
+      secrets: { GH_TOKEN: { ref: 'arn:fixed' } },
       stager: makeFakeStager() as unknown as InlineSecretStager,
     });
     const blobCountAfterFirst = storage.blobs.size;
     const second = await registerEnv(client, {
       name: 'prod',
       values: { LOG_LEVEL: 'info' },
-      secrets: { GH_TOKEN: { arn: 'arn:fixed' } },
+      secrets: { GH_TOKEN: { ref: 'arn:fixed' } },
       stager: makeFakeStager() as unknown as InlineSecretStager,
     });
 

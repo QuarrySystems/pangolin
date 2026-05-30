@@ -37,7 +37,7 @@ interface SecretMeta {
 
 export class LocalSecretStore implements SecretStore {
   readonly name = "local-file";
-  private readonly dir: string;
+  readonly dir: string;
 
   constructor(opts: LocalSecretStoreOpts) {
     this.dir = opts.dir;

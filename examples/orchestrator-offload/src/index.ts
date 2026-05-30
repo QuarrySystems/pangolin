@@ -24,6 +24,7 @@ import {
 } from '@quarry-systems/agora-client';
 import { LocalStorageProvider } from '@quarry-systems/agora-storage-local';
 import { LocalDockerProvider } from '@quarry-systems/agora-providers-local-docker';
+import { LocalSecretStore } from '@quarry-systems/agora-secret-store';
 import {
   AgoraOrchestrator,
   SqliteRunStateStore,
@@ -45,6 +46,11 @@ async function main(): Promise<void> {
   }
 
   const storageRoot = await mkdtemp(join(tmpdir(), 'agora-offload-'));
+  // Stable per-host secret store dir: fixed path so the LocalDockerProvider can
+  // reliably bind-mount it into the container across ticks. Not a mkdtemp so
+  // the dir survives between the fire() call and the worker reading from it.
+  const secretStoreDir = join(tmpdir(), 'agora-offload-secrets');
+  const secretStore = new LocalSecretStore({ dir: secretStoreDir });
   const store = new SqliteRunStateStore(); // :memory: — single-process orchestrator
 
   try {
@@ -54,7 +60,8 @@ async function main(): Promise<void> {
       compute: { 'local-docker': new LocalDockerProvider({ allowUnpinnedImage: true }) },
       credentials: { none: new NoopCredentialProvider() },
       storage: new LocalStorageProvider({ rootDir: storageRoot }),
-      targets: { local: { compute: 'local-docker', credentials: 'none' } },
+      secretStores: { local: secretStore },
+      targets: { local: { compute: 'local-docker', credentials: 'none', secretStore: 'local' } },
       resultSink: new StdoutResultSink(),
     });
 
