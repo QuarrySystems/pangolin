@@ -70,6 +70,31 @@ is intentionally one vertical slice (the `subagentShape` field is inert without 
 resolver) rather than split into a stub contract task (#5). Cross-task imports use
 direct module paths; the barrels are wired last by `task-contracts-barrel`.
 
+## Forward debt — transitional scaffolding to retire/enforce later
+
+PR5 deliberately lands placeholders and inert fields that **must not be forgotten**.
+Each is marked at its site and tracked here so a later PR (or a `/lint` pass) can
+find it:
+
+- **`WORKER_IMAGE = "sha256:PLACEHOLDER"` in `dev.ts`** — the dev shapes' `capability.imageDigest`
+  is a stub. **Must be pinned to the real worker image digest before any dev shape is
+  actually dispatched.** Leave a `// TODO(PR6): pin real worker image digest` at the site.
+- **`effectTierPolicy` is read but discarded (`void`)** — the tick reads the tier and
+  throws the policy away. This is a no-op placeholder for the real **policy enforcement**
+  (read-impure → pre-dispatch snapshot; write-impure → intent gating) that lands in
+  **PR6+**. Mark `// TODO(PR6): enforce EffectPolicy (snapshot/gate), don't discard`.
+- **`outputSchema` is declared but never enforced** — inert until the `.agora/output.json`
+  worker sentinel validates worker output against it (D7 → **PR6**). The field exists only
+  to be wired then; flag it so it isn't mistaken for live validation.
+- **Inconsistent failure modes in `tick`** — PR5 makes shape/input failures *fail-the-item*,
+  but the pre-existing unknown-**executor** path still `throw`s (left out of scope). These
+  two philosophies should be **reconciled** in a follow-up (either both fail-the-item, or
+  document why a missing-executor config error is fatal while a bad-input data error is not).
+- **Optional `subagentShape` / `packs` is a migration affordance, not a permanent design** —
+  once shaped, validated work is the norm, evaluate **deprecating un-shaped (executor-only,
+  unvalidated) dispatch** so every WorkItem carries a shape. Until then the optionality keeps
+  existing call sites working; revisit when the dev pack has real consumers.
+
 ## Tasks
 
 ## Task: add zod dependency
@@ -373,7 +398,7 @@ import { patchSchema, intentSchema } from "../contracts/core-types.js";
 import type { SubagentShape } from "../contracts/subagent-shape.js";
 import { PackRegistry } from "./registry.js";
 
-const WORKER_IMAGE = "sha256:PLACEHOLDER"; // pin to the real worker image digest
+const WORKER_IMAGE = "sha256:PLACEHOLDER"; // TODO(PR6): pin the real worker image digest before dev shapes are dispatched
 
 export const devCodeEdit: SubagentShape = {
   id: "dev.code-edit",
@@ -464,7 +489,7 @@ export interface WorkItem {
 //     if (!shape) { store.setStatus(it.id, 'failed'); continue; }              // unknown shape → fail item
 //     const parsed = shape.inputSchema.safeParse(it.inputs);
 //     if (!parsed.success) { store.setStatus(it.id, 'failed'); continue; }     // bad input → fail item
-//     void effectTierPolicy(shape.effectTier);   // read the tier (PR5: surfaced, enforcement is PR6+)
+//     void effectTierPolicy(shape.effectTier);   // TODO(PR6): enforce EffectPolicy (snapshot/gate) — currently read + discarded
 //   }
 // Items WITHOUT a subagentShape fire exactly as before. The unknown-EXECUTOR throw is left unchanged (out of scope).
 // orchestrator.ts: AgoraOrchestratorOptions gains an optional `packs?: PackRegistry`; the orchestrator stores it
