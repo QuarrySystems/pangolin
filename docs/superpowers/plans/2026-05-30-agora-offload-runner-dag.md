@@ -5,12 +5,12 @@ created: 2026-05-30
 
 ```mermaid
 flowchart TD
-    task-submission-transport-contract["task-submission-transport-contract: SubmissionTransport seam<br/>files: packages/agora-orchestrator/src/contracts/submission-transport.ts +1 more"]
-    task-runstate-fields["task-runstate-fields: run-state item metadata<br/>files: packages/agora-orchestrator/src/contracts/runstate-store.ts +3 more"]
-    task-test-fixtures["task-test-fixtures: shared fake executors<br/>files: packages/agora-orchestrator/test/fixtures/executors.ts +1 more"]
-    task-storage-transport["task-storage-transport: storage-backed transport<br/>files: packages/agora-orchestrator/src/transport/storage-transport.ts +1 more"]
-    task-orchestrator-actor["task-orchestrator-actor: thread actor through submitRun<br/>files: packages/agora-orchestrator/src/orchestrator.ts +1 more"]
-    task-retry["task-retry: retry with backoff<br/>files: packages/agora-orchestrator/src/engine/tick.ts +1 more"]
+    task-submission-transport-contract["task-submission-transport-contract: SubmissionTransport seam<br/>files: packages/agora-orchestrator/src/contracts/submission-transport.ts +1 more"]:::done
+    task-runstate-fields["task-runstate-fields: run-state item metadata<br/>files: packages/agora-orchestrator/src/contracts/runstate-store.ts +3 more"]:::done
+    task-test-fixtures["task-test-fixtures: shared fake executors<br/>files: packages/agora-orchestrator/test/fixtures/executors.ts +1 more"]:::done
+    task-storage-transport["task-storage-transport: storage-backed transport<br/>files: packages/agora-orchestrator/src/transport/storage-transport.ts +1 more"]:::running
+    task-orchestrator-actor["task-orchestrator-actor: thread actor through submitRun<br/>files: packages/agora-orchestrator/src/orchestrator.ts +1 more"]:::running
+    task-retry["task-retry: retry with backoff<br/>files: packages/agora-orchestrator/src/engine/tick.ts +1 more"]:::running
     task-serve-driver["task-serve-driver: serve driver loop<br/>files: packages/agora-orchestrator/src/serve/driver.ts +1 more"]
     task-package-exports["task-package-exports: package exports<br/>files: packages/agora-orchestrator/src/index.ts"]
 
@@ -70,7 +70,7 @@ depends_on: []
 files:
   - packages/agora-orchestrator/src/contracts/submission-transport.ts
   - packages/agora-orchestrator/src/contracts/index.ts
-status: pending
+status: done
 ```
 
 Define the `SubmissionTransport` seam (spec §1.1.2, D5/D10): clients write a Run +
@@ -145,7 +145,7 @@ files:
   - packages/agora-orchestrator/src/contracts/types.ts
   - packages/agora-orchestrator/src/runstate/sqlite.ts
   - packages/agora-orchestrator/test/runstate-sqlite.test.ts
-status: pending
+status: done
 ```
 
 Extend run-state with the per-item fields retry and attribution need: `actor`
@@ -229,7 +229,7 @@ depends_on: []
 files:
   - packages/agora-orchestrator/test/fixtures/executors.ts
   - packages/agora-orchestrator/test/fixtures/executors.test.ts
-status: pending
+status: done
 ```
 
 One owner for the fake `Executor`s the retry and serve tests both need, so they
@@ -299,7 +299,7 @@ depends_on: [task-submission-transport-contract]
 files:
   - packages/agora-orchestrator/src/transport/storage-transport.ts
   - packages/agora-orchestrator/test/storage-transport.test.ts
-status: pending
+status: running
 ```
 
 Implement `SubmissionTransport` over the existing `StorageProvider` seam (D10) —
@@ -415,7 +415,7 @@ depends_on: [task-runstate-fields]
 files:
   - packages/agora-orchestrator/src/orchestrator.ts
   - packages/agora-orchestrator/test/orchestrator.test.ts
-status: pending
+status: running
 ```
 
 Make `submitRun` accept the submitter `actor` and pass it to `store.saveRun`, so
@@ -473,7 +473,7 @@ depends_on: [task-runstate-fields, task-test-fixtures]
 files:
   - packages/agora-orchestrator/src/engine/tick.ts
   - packages/agora-orchestrator/test/tick.test.ts
-status: pending
+status: running
 ```
 
 When a reconcile returns `failed` and the item has attempts remaining, requeue it
