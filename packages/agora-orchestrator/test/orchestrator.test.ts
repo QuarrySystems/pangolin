@@ -14,6 +14,23 @@ function makeOrch(store: SqliteRunStateStore, executors?: Record<string, Executo
   return new AgoraOrchestrator({ store, executors: executors ?? { fake: fake() }, triggers: { manual: new ManualTrigger() }, queues: { default: { concurrency: 5 } } });
 }
 
+describe('submitRun attribution', () => {
+  it('records the submitter actor and exposes runId on status', () => {
+    const store = new SqliteRunStateStore();
+    const orch = new AgoraOrchestrator({ store, executors: {}, triggers: { manual: new ManualTrigger() }, queues: { default: { concurrency: 1 } } });
+    orch.submitRun({ id: 'r', queue: 'default', items: [ { id: 'a', executor: 'x', inputs: {}, depends_on: [], resourceLocks: [] } ] }, 'agent:claude');
+    expect(store.getActor('a')).toBe('agent:claude');
+    expect(orch.getStatus().find((s) => s.id === 'a')?.runId).toBe('r');
+  });
+  it('submitRun without actor still works', () => {
+    const store = new SqliteRunStateStore();
+    const orch = new AgoraOrchestrator({ store, executors: {}, triggers: { manual: new ManualTrigger() }, queues: { default: { concurrency: 1 } } });
+    orch.submitRun({ id: 'r2', queue: 'default', items: [ { id: 'b', executor: 'x', inputs: {}, depends_on: [], resourceLocks: [] } ] });
+    expect(store.getActor('b')).toBeUndefined();
+    expect(orch.getStatus().find((s) => s.id === 'b')?.runId).toBe('r2');
+  });
+});
+
 describe('AgoraOrchestrator', () => {
   it('throws if the default queue is not configured', () => {
     expect(() => new AgoraOrchestrator({ store: new SqliteRunStateStore(), executors: {}, triggers: {}, queues: {} })).toThrow(/default queue/);

@@ -16,7 +16,7 @@ export const PRIVILEGE = {
   submitRun: 'client', getStatus: 'client', tick: 'service',
 } as const;
 
-export interface StatusItem { id: string; status: string; blockedBy: string[]; }
+export interface StatusItem { id: string; runId: string; status: string; blockedBy: string[]; }
 
 export class AgoraOrchestrator {
   private readonly store: RunStateStore;
@@ -31,10 +31,10 @@ export class AgoraOrchestrator {
     if (!opts.queues[this.defaultQueue]) throw new Error(`AgoraOrchestrator: default queue '${this.defaultQueue}' not configured`);
     for (const [name, q] of Object.entries(opts.queues)) this.store.ensureQueue(name, q.concurrency);
   }
-  submitRun(run: Run): string {
+  submitRun(run: Run, actor?: string): string {
     const trigger = this.triggers['manual'];
     if (!trigger) throw new Error("AgoraOrchestrator: no 'manual' trigger registered");
-    this.store.saveRun(run);
+    this.store.saveRun(run, actor);
     this.store.markReady(trigger.initialReady(run));
     return run.id;
   }
@@ -43,7 +43,7 @@ export class AgoraOrchestrator {
     const items = this.store.getItems(runId);
     const byId = new Map(items.map((i) => [`${i.runId}:${i.id}`, i]));
     return items.map((i: ItemState) => ({
-      id: i.id, status: i.status,
+      id: i.id, runId: i.runId, status: i.status,
       blockedBy: i.depends_on.filter((d) => byId.get(`${i.runId}:${d}`)?.status !== 'done'),
     }));
   }
