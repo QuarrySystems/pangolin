@@ -6,14 +6,15 @@ created: 2026-05-30
 ```mermaid
 flowchart TD
     task-zod-dep["task-zod-dep: add zod<br/>files: packages/agora-orchestrator/package.json +1 more"]
-    task-core-types["task-core-types: Patch + Intent<br/>files: agora-orchestrator/src/contracts/core-types.ts +1 more"]
+    task-core-types["task-core-types: Patch + Intent (zod source)<br/>files: agora-orchestrator/src/contracts/core-types.ts +1 more"]
     task-effect-policy["task-effect-policy: effectTierPolicy<br/>files: agora-orchestrator/src/contracts/effect-policy.ts +1 more"]
-    task-subagent-shape["task-subagent-shape: SubagentShape contract<br/>files: agora-orchestrator/src/contracts/subagent-shape.ts +1 more"]
+    task-subagent-shape["task-subagent-shape: SubagentShape contract<br/>files: agora-orchestrator/src/contracts/subagent-shape.ts +2 more"]
     task-packs-registry["task-packs-registry: static shape registry<br/>files: agora-orchestrator/src/packs/registry.ts +1 more"]
     task-dev-pack["task-dev-pack: dev.code-edit + dev.verify<br/>files: agora-orchestrator/src/packs/dev.ts +1 more"]
-    task-workitem-shape-resolution["task-workitem-shape-resolution: resolve+validate at tick<br/>files: agora-orchestrator/src/contracts/types.ts +3 more"]
+    task-workitem-shape-resolution["task-workitem-shape-resolution: resolve+validate at tick<br/>files: agora-orchestrator/src/contracts/types.ts +4 more"]
     task-contracts-barrel["task-contracts-barrel: export new surface<br/>files: agora-orchestrator/src/contracts/index.ts +1 more"]
 
+    task-zod-dep --> task-core-types
     task-zod-dep --> task-subagent-shape
     task-subagent-shape --> task-packs-registry
     task-zod-dep --> task-dev-pack
@@ -52,15 +53,22 @@ underneath is now solid (PR4a/PR4b merged).
 - `WorkItem` gains an optional `subagentShape` id; the **tick resolves the shape, validates `inputs` against `inputSchema` at the boundary, and reads `effectTier`**.
 - **effectTier is declared on every shape, validated at registration, and read by the policy engine** (`effectTierPolicy`) — the user-requested fold-in.
 
-**Decisions baked in (flag on review if you disagree):**
-- **Schema lib = `zod`** (the spec allows "Zod/JSON Schema"; zod is the TS-idiomatic pick). Added as an `agora-orchestrator` dependency.
-- **Input validated, output declared-not-enforced.** `outputSchema` lives on the shape, but enforcement via the `.agora/output.json` sentinel is **D7 → PR6**. PR5 validates the *input* side at dispatch.
-- **`effectTierPolicy` is a pure classifier** (`tier → { cacheable, needsSnapshot, gated }`) that the resolver *reads*. Actual snapshotting / intent-gating *enforcement* is PR6+ — PR5 surfaces the classification, it doesn't act on it yet.
-- **`WorkItem.subagentShape` is optional** — existing executor-only items keep working untouched; resolution+validation only engage when a shape id is present.
-- **`Patch` + `Intent` only** enter core types now (§11; `Claim` reserved for Mneme; `Document`/`FileRef` wait for a second consumer).
-- **Executors stay mechanism-only** — no shape/pack logic leaks into `dispatch-executor`; resolution+validation live in the tick/orchestrator layer.
+**Decisions (resolved):**
+- **Schema lib = `zod`.** The spec allows "Zod/JSON Schema"; zod is the TS-idiomatic pick. It is **net-new to the monorepo** (used nowhere today) — a conscious choice to adopt a schema lib. Added as an `agora-orchestrator` dependency.
+- **Single source of truth for shared shapes.** `core-types.ts` defines the zod schemas (`patchSchema`, `intentSchema`) and derives the TS types via `z.infer`; packs import the schemas — never re-inline them (DRY).
+- **Input validated, output declared-not-enforced.** `outputSchema` lives on the shape, but enforcement via `.agora/output.json` is **D7 → PR6**. PR5 validates the *input* side.
+- **Invalid input / unknown shape FAILS THE ITEM, not the tick.** The orchestrator is a long-running service (D3); a malformed `WorkItem` marks *that item* `failed` with a reason and the tick keeps going — it never throws out of the tick loop.
+- **`effectTierPolicy` is read, not enforced** in PR5 — surfaces `{ cacheable, needsSnapshot, gated }`; snapshot/intent-gating enforcement is PR6+.
+- **`WorkItem.subagentShape` + the `packs` registry are OPTIONAL** on `tick()` and `AgoraOrchestratorOptions` — existing executor-only items and orchestrator constructions are untouched; resolution engages only when a shape id is present.
+- **`Patch` + `Intent` only** enter core types now (§11; `Claim` reserved for Mneme; `Document`/`FileRef` await a second consumer).
+- **Executors stay mechanism-only** — resolution/validation live in the tick/orchestrator layer, never inside `dispatch-executor`.
 
-**Cross-task imports** use direct module paths (e.g. `../contracts/subagent-shape.js`); the barrels (`contracts/index.ts`, `src/index.ts`) are wired last by `task-contracts-barrel` for external consumers only.
+**Audit revisions (2026-05-30):** folded in DRY single-source schemas (#1), the
+grep'd tick/orchestrator consumer cascade + corrected test paths (#2), fail-the-item
+error handling (#3), and a shared test fixture (#4). `task-workitem-shape-resolution`
+is intentionally one vertical slice (the `subagentShape` field is inert without its
+resolver) rather than split into a stub contract task (#5). Cross-task imports use
+direct module paths; the barrels are wired last by `task-contracts-barrel`.
 
 ## Tasks
 
@@ -77,12 +85,13 @@ is_wiring_task: true
 ```
 
 Add `zod` as an `agora-orchestrator` dependency so SubagentShape can hold typed
-input/output schemas and the tick can validate inputs at the boundary.
+input/output schemas, `core-types` can be the single zod source, and the tick can
+validate inputs at the boundary. zod is currently used nowhere in the monorepo.
 
 ## Acceptance criteria
 
-- `zod` (`^3` range matching any existing workspace usage) is in `packages/agora-orchestrator/package.json` dependencies.
-- `pnpm install` succeeds; `pnpm-lock.yaml` updated with the new edge only.
+- `zod` (`^3`) is in `packages/agora-orchestrator/package.json` dependencies.
+- `pnpm install` succeeds; `pnpm-lock.yaml` gains the new edge only.
 - `pnpm --filter @quarry-systems/agora-orchestrator typecheck` still passes (no usage yet).
 
 Test file: none (dependency wiring; verified by the consuming tasks' builds).
@@ -91,7 +100,7 @@ Test file: none (dependency wiring; verified by the consuming tasks' builds).
 
 ```yaml
 id: task-core-types
-depends_on: []
+depends_on: [task-zod-dep]
 files:
   - packages/agora-orchestrator/src/contracts/core-types.ts
   - packages/agora-orchestrator/test/core-types.test.ts
@@ -100,41 +109,46 @@ status: pending
 
 The narrow-waist shared types packs interop through (spec §2). Trunk builds only
 `Patch` (a unified diff against a declared base commit) and `Intent` (a structured
-side-effect proposal: `kind` + `payload`). Plain TS interfaces — no zod needed.
+side-effect proposal). **The zod schema is the single source of truth**; the TS
+types are derived via `z.infer` so packs and validators can never drift.
 
 ## Implementation
 
 ```typescript
 // packages/agora-orchestrator/src/contracts/core-types.ts
+import { z } from "zod";
+
 /** A unified diff against a declared base commit hash. */
-export interface Patch {
-  baseCommit: string;       // commit hash the diff applies against
-  diff: string;             // unified-diff text
-}
+export const patchSchema = z.object({
+  baseCommit: z.string(),   // commit hash the diff applies against
+  diff: z.string(),         // unified-diff text
+});
+export type Patch = z.infer<typeof patchSchema>;
 
 /** A structured proposal for a side effect; realized later by an IntentInterpreter (write-impure). */
-export interface Intent {
-  kind: string;             // e.g. "open-pr", "post-comment"
-  payload: Record<string, unknown>;
-}
+export const intentSchema = z.object({
+  kind: z.string(),                 // e.g. "open-pr", "post-comment"
+  payload: z.record(z.unknown()),
+});
+export type Intent = z.infer<typeof intentSchema>;
 ```
 
 ```typescript
 // packages/agora-orchestrator/test/core-types.test.ts
-import type { Patch, Intent } from "../src/contracts/core-types.js";
-it("Patch and Intent have the documented shape", () => {
+import { patchSchema, intentSchema, type Patch } from "../src/contracts/core-types.js";
+it("patchSchema is the source of truth and the type is inferred from it", () => {
   const p: Patch = { baseCommit: "abc123", diff: "--- a\n+++ b\n" };
-  const i: Intent = { kind: "open-pr", payload: { title: "x" } };
-  expect(p.baseCommit).toBe("abc123");
-  expect(i.kind).toBe("open-pr");
+  expect(patchSchema.safeParse(p).success).toBe(true);
+  expect(patchSchema.safeParse({ baseCommit: 1, diff: "x" }).success).toBe(false);
+  expect(intentSchema.safeParse({ kind: "open-pr", payload: {} }).success).toBe(true);
 });
 ```
 
 ## Acceptance criteria
 
-- `Patch` (`baseCommit`, `diff`) and `Intent` (`kind`, `payload`) are exported from `core-types.ts`.
+- `patchSchema`/`intentSchema` (zod) and the `z.infer`-derived `Patch`/`Intent` types are exported from `core-types.ts` — types are NOT hand-written separately from the schemas.
 - No other core types are added (Claim/Document/FileRef deferred per §2).
-- `agora-orchestrator` typechecks.
+- Valid values parse; malformed values fail `safeParse`.
 
 Test file: `packages/agora-orchestrator/test/core-types.test.ts`.
 
@@ -186,7 +200,7 @@ it("classifies each tier", () => {
 
 ## Acceptance criteria
 
-- `effectTierPolicy(tier)` returns the documented `EffectPolicy` for each of the three tiers (exhaustive switch; a missing case is a compile error).
+- `effectTierPolicy(tier)` returns the documented `EffectPolicy` for each tier (exhaustive switch; a missing case is a compile error).
 - Pure function — no I/O, deterministic.
 
 Test file: `packages/agora-orchestrator/test/effect-policy.test.ts`.
@@ -199,12 +213,15 @@ depends_on: [task-zod-dep]
 files:
   - packages/agora-orchestrator/src/contracts/subagent-shape.ts
   - packages/agora-orchestrator/test/subagent-shape.test.ts
+  - packages/agora-orchestrator/test/support/make-shape.ts
 status: pending
 ```
 
 The pack-contributed declaration of what work can be done (spec §3). Holds typed
-zod schemas for input/output, the effect tier (read by the policy engine), and
-the capability descriptor. Includes a `validateShape` guard the registry uses.
+zod schemas for input/output, the effect tier (read by the policy engine), and the
+capability descriptor. Includes a `validateShape` guard the registry uses. Also
+owns the shared `make-shape.ts` test fixture (imported by the registry + dev tests)
+so the `SubagentShape` fixture isn't hand-rebuilt in three places (DRY).
 
 ## Implementation
 
@@ -239,23 +256,37 @@ export function validateShape(s: SubagentShape): void {
 ```
 
 ```typescript
-// packages/agora-orchestrator/test/subagent-shape.test.ts
+// packages/agora-orchestrator/test/support/make-shape.ts  (shared fixture; imported by registry + dev tests)
 import { z } from "zod";
-import { validateShape, type SubagentShape } from "../src/contracts/subagent-shape.js";
-const base: SubagentShape = { id: "dev.x", effectTier: "pure", inputSchema: z.object({}), outputSchema: z.object({}), capability: { imageDigest: "sha256:1", permissions: {}, contextShape: "" } };
+import type { SubagentShape } from "../../src/contracts/subagent-shape.js";
+
+export function makeShape(over: Partial<SubagentShape> = {}): SubagentShape {
+  return {
+    id: "dev.x", effectTier: "pure",
+    inputSchema: z.object({}), outputSchema: z.object({}),
+    capability: { imageDigest: "sha256:1", permissions: {}, contextShape: "" },
+    ...over,
+  };
+}
+```
+
+```typescript
+// packages/agora-orchestrator/test/subagent-shape.test.ts
+import { validateShape } from "../src/contracts/subagent-shape.js";
+import { makeShape } from "./support/make-shape.js";
 it("rejects an unprefixed id", () => {
-  expect(() => validateShape({ ...base, id: "noprefix" })).toThrow(/<pack>\.<name>/);
+  expect(() => validateShape(makeShape({ id: "noprefix" }))).toThrow(/<pack>\.<name>/);
 });
 it("requires capability.imageDigest", () => {
-  expect(() => validateShape({ ...base, capability: { ...base.capability, imageDigest: "" } })).toThrow(/imageDigest/);
+  expect(() => validateShape(makeShape({ capability: { imageDigest: "", permissions: {}, contextShape: "" } }))).toThrow(/imageDigest/);
 });
 ```
 
 ## Acceptance criteria
 
 - `SubagentShape` + `Capability` interfaces exported; `inputSchema`/`outputSchema` are `z.ZodType`.
-- `validateShape` rejects: non `<pack>.<name>` ids, invalid `effectTier`, missing `capability.imageDigest`.
-- A well-formed shape passes `validateShape` without throwing.
+- `validateShape` rejects: non `<pack>.<name>` ids, invalid `effectTier`, missing `capability.imageDigest`; a well-formed shape passes.
+- `test/support/make-shape.ts` exports a `makeShape(overrides)` fixture used by this task's test (and consumed by the registry + dev tests).
 
 Test file: `packages/agora-orchestrator/test/subagent-shape.test.ts`.
 
@@ -297,13 +328,12 @@ export class PackRegistry {
 ```typescript
 // packages/agora-orchestrator/test/packs/registry.test.ts
 import { PackRegistry } from "../../src/packs/registry.js";
-import { z } from "zod";
-const mk = (id: string) => ({ id, effectTier: "pure" as const, inputSchema: z.object({}), outputSchema: z.object({}), capability: { imageDigest: "sha256:1", permissions: {}, contextShape: "" } });
+import { makeShape } from "../support/make-shape.js";
 it("rejects duplicate ids at construction", () => {
-  expect(() => new PackRegistry([mk("dev.a"), mk("dev.a")])).toThrow(/duplicate shape id dev\.a/);
+  expect(() => new PackRegistry([makeShape({ id: "dev.a" }), makeShape({ id: "dev.a" })])).toThrow(/duplicate shape id dev\.a/);
 });
 it("resolves a registered shape by id", () => {
-  const r = new PackRegistry([mk("dev.a")]);
+  const r = new PackRegistry([makeShape({ id: "dev.a" })]);
   expect(r.get("dev.a")?.id).toBe("dev.a");
   expect(r.has("dev.b")).toBe(false);
 });
@@ -331,13 +361,15 @@ status: pending
 The first concrete pack: `dev.code-edit` (write-impure — emits a `Patch`/`Intent`)
 and `dev.verify` (read-impure — runs checks against a snapshot). Demonstrates
 shapes carrying effect tiers + core-type-referencing schemas, registered through
-`PackRegistry`.
+`PackRegistry`. **Imports `patchSchema`/`intentSchema` from `core-types`** — never
+re-inlines the patch shape (DRY single source).
 
 ## Implementation
 
 ```typescript
 // packages/agora-orchestrator/src/packs/dev.ts
 import { z } from "zod";
+import { patchSchema, intentSchema } from "../contracts/core-types.js";
 import type { SubagentShape } from "../contracts/subagent-shape.js";
 import { PackRegistry } from "./registry.js";
 
@@ -347,14 +379,14 @@ export const devCodeEdit: SubagentShape = {
   id: "dev.code-edit",
   effectTier: "write-impure",
   inputSchema: z.object({ baseCommit: z.string(), instructions: z.string() }),
-  outputSchema: z.object({ patch: z.object({ baseCommit: z.string(), diff: z.string() }), intents: z.array(z.object({ kind: z.string(), payload: z.record(z.unknown()) })).optional() }),
+  outputSchema: z.object({ patch: patchSchema, intents: z.array(intentSchema).optional() }),
   capability: { imageDigest: WORKER_IMAGE, permissions: {}, contextShape: "repo worktree at baseCommit" },
 };
 
 export const devVerify: SubagentShape = {
   id: "dev.verify",
   effectTier: "read-impure",
-  inputSchema: z.object({ patch: z.object({ baseCommit: z.string(), diff: z.string() }) }),
+  inputSchema: z.object({ patch: patchSchema }),
   outputSchema: z.object({ passed: z.boolean(), report: z.string() }),
   capability: { imageDigest: WORKER_IMAGE, permissions: {}, contextShape: "repo snapshot + patch applied" },
 };
@@ -378,13 +410,13 @@ it("dev shapes declare effect tiers and register without collision", () => {
 
 ## Acceptance criteria
 
-- `dev.code-edit` (write-impure) + `dev.verify` (read-impure) exported, each with zod input/output schemas; `code-edit`'s output references the `Patch`/`Intent` shapes.
+- `dev.code-edit` (write-impure) + `dev.verify` (read-impure) exported; each has zod input/output schemas; `code-edit`'s output uses the imported `patchSchema`/`intentSchema` (no re-inlined patch shape).
 - `devPack` registers through `PackRegistry` with no id collision.
 - The shapes' `inputSchema` accepts valid input and rejects malformed input (safeParse).
 
 Test file: `packages/agora-orchestrator/test/packs/dev.test.ts`.
 
-## Task: resolve + validate shape at tick
+## Task: wire shape resolution into the tick
 
 ```yaml
 id: task-workitem-shape-resolution
@@ -393,20 +425,24 @@ files:
   - packages/agora-orchestrator/src/contracts/types.ts
   - packages/agora-orchestrator/src/engine/tick.ts
   - packages/agora-orchestrator/src/orchestrator.ts
-  - packages/agora-orchestrator/test/engine/tick.test.ts
+  - packages/agora-orchestrator/test/tick.test.ts
+  - packages/agora-orchestrator/test/orchestrator.test.ts
 status: pending
 ```
 
 Wire the spine in: `WorkItem` gains an optional `subagentShape` id; when set, the
-tick resolves it via the `PackRegistry`, validates `item.inputs` against the
-shape's `inputSchema` BEFORE firing (fail-fast at the boundary), and reads
-`effectTier` through `effectTierPolicy`. Executor-only items (no `subagentShape`)
-are unaffected — executors stay mechanism-only.
+tick resolves it via the (optional) `PackRegistry`, validates `item.inputs` against
+the shape's `inputSchema` BEFORE acquiring locks/firing, and reads `effectTier`
+through `effectTierPolicy`. A resolution/validation failure **marks that item
+`failed` with a reason and continues the tick** — it does NOT throw (D3: a malformed
+item must not crash the queue). One deliberate vertical slice: the `subagentShape`
+field is inert without its resolver, so the contract bump + engine wiring land
+together rather than as a stub contract task.
 
 ## Implementation
 
 ```typescript
-// packages/agora-orchestrator/src/contracts/types.ts  (additive field)
+// packages/agora-orchestrator/src/contracts/types.ts  (additive optional field)
 export interface WorkItem {
   id: string;
   executor: string;
@@ -419,28 +455,30 @@ export interface WorkItem {
 ```
 
 ```typescript
-// packages/agora-orchestrator/src/engine/tick.ts  (resolution + validation before fire)
-// tick() gains a `packs: PackRegistry` parameter (threaded from orchestrator.ts).
-// In the fire loop, before `ex.fire(it)`:
+// packages/agora-orchestrator/src/engine/tick.ts  (OPTIONAL packs param; fail-the-item, not throw)
+// Signature gains an optional trailing param so existing callers `tick(store, executors, queue)` still compile:
+//   tick(store, executors, queue, packs?: PackRegistry)
+// In the fire loop, BEFORE store.acquireLocks(...) for an item with a subagentShape:
 //   if (it.subagentShape) {
-//     const shape = packs.get(it.subagentShape);
-//     if (!shape) throw new Error(`tick: no shape registered for '${it.subagentShape}'`);
+//     const shape = packs?.get(it.subagentShape);
+//     if (!shape) { store.setStatus(it.id, 'failed'); continue; }              // unknown shape → fail item
 //     const parsed = shape.inputSchema.safeParse(it.inputs);
-//     if (!parsed.success) throw new Error(`tick: inputs for ${it.id} fail ${shape.id} inputSchema: ${parsed.error.message}`);
-//     const policy = effectTierPolicy(shape.effectTier);   // read the tier (PR5: surfaced, not yet enforced)
-//     // policy is available for future snapshot/gate enforcement (PR6+); log/attach as observability.
+//     if (!parsed.success) { store.setStatus(it.id, 'failed'); continue; }     // bad input → fail item
+//     void effectTierPolicy(shape.effectTier);   // read the tier (PR5: surfaced, enforcement is PR6+)
 //   }
-// orchestrator.ts passes its PackRegistry into tick(); existing executor-only items skip the block.
+// Items WITHOUT a subagentShape fire exactly as before. The unknown-EXECUTOR throw is left unchanged (out of scope).
+// orchestrator.ts: AgoraOrchestratorOptions gains an optional `packs?: PackRegistry`; the orchestrator stores it
+// and passes it as the 4th arg to tick(). Omitting packs keeps every existing construction working.
 ```
 
 ## Acceptance criteria
 
 - `WorkItem.subagentShape?: string` added (optional — existing items unaffected; `ItemState`/sqlite round-trip the field when present).
-- `tick` accepts a `PackRegistry` and, for items with a `subagentShape`, resolves it (unknown id throws) and validates `inputs` against `inputSchema` before `fire` (invalid input throws, item not fired).
-- The resolved shape's `effectTier` is read via `effectTierPolicy` and surfaced (return/observability); no snapshot/gate enforcement yet.
-- Items without a `subagentShape` fire exactly as before (regression-tested).
+- `tick` accepts an OPTIONAL `packs: PackRegistry`; existing `tick(store, executors, queue)` calls still compile and behave identically.
+- For an item with a `subagentShape`: unknown shape id OR input failing `inputSchema` marks the item `failed` (terminal) and the tick continues — **no throw out of the tick**. A valid item resolves, reads `effectTier` via `effectTierPolicy`, and fires.
+- `AgoraOrchestratorOptions` gains an optional `packs`; the orchestrator threads it into `tick`. Existing orchestrator/tick/executor tests pass unchanged; new tests cover the fail-item and happy paths.
 
-Test file: `packages/agora-orchestrator/test/engine/tick.test.ts`.
+Test file: `packages/agora-orchestrator/test/tick.test.ts`.
 
 ## Task: export the new pack/shape surface
 
@@ -454,14 +492,15 @@ status: pending
 is_wiring_task: true
 ```
 
-Wire the new surface into the package barrels so external consumers (CLI, MCP,
-future packs) can import it: `SubagentShape`/`Capability`/`validateShape`, `Patch`/`Intent`,
-`effectTierPolicy`/`EffectPolicy`, `PackRegistry`, and the `dev` pack.
+Wire the new surface into the package barrels (matching the existing pattern:
+`contracts/index.ts` does `export * from './<file>.js'`; `src/index.ts` re-exports
+`contracts/index.js` plus named concrete exports). Adds the contract modules +
+`PackRegistry` + the `dev` pack so external consumers (CLI, MCP, future packs) can import them.
 
 ## Acceptance criteria
 
-- `contracts/index.ts` re-exports the new contract symbols (`SubagentShape`, `Capability`, `validateShape`, `Patch`, `Intent`, `EffectPolicy`, `effectTierPolicy`).
-- `src/index.ts` re-exports `PackRegistry` and the `dev` pack (`devPack`/`devCodeEdit`/`devVerify`).
+- `contracts/index.ts` adds `export * from './core-types.js'`, `'./subagent-shape.js'`, `'./effect-policy.js'`.
+- `src/index.ts` named-exports `PackRegistry` and the `dev` pack (`devPack`/`devCodeEdit`/`devVerify`/`devRegistry`).
 - `pnpm --filter @quarry-systems/agora-orchestrator typecheck` + `test` are green; no import cycle introduced.
 
-Test file: `packages/agora-orchestrator/test/index.test.ts` (existing — confirms the new exports resolve via the barrel; extend if present, else a minimal import smoke test).
+Test file: `packages/agora-orchestrator/test/index.test.ts` (existing — extend to confirm the new exports resolve via the barrel).
