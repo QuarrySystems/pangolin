@@ -5,12 +5,12 @@ created: 2026-05-30
 
 ```mermaid
 flowchart TD
-    task-envregister-store["task-envregister-store: env.register via named store<br/>files: packages/agora-client/src/env-register.ts +1 more"]
-    task-store-mismatch-check["task-store-mismatch-check: dispatch-time kind check<br/>files: packages/agora-client/src/errors.ts +2 more"]
-    task-delete-inline-stager["task-delete-inline-stager: delete InlineSecretStager<br/>files: packages/agora-client/src/secrets-manager.ts +2 more"]
-    task-orchestrator-test-migration["task-orchestrator-test-migration: stub via injected store<br/>files: agora-orchestrator/test/executors/dispatch.test.ts +1 more"]
-    task-remove-effective-storekind["task-remove-effective-storekind: worker trusts kind<br/>files: packages/agora-worker/src/entrypoint.ts +1 more"]
-    task-local-envbundle-battletest["task-local-envbundle-battletest: local env-bundle e2e<br/>files: test/e2e/local-envbundle-secret.test.ts"]
+    task-envregister-store["task-envregister-store: env.register via named store<br/>files: packages/agora-client/src/env-register.ts +2 more"]:::done
+    task-store-mismatch-check["task-store-mismatch-check: dispatch-time kind check<br/>files: packages/agora-client/src/errors.ts +2 more"]:::done
+    task-delete-inline-stager["task-delete-inline-stager: delete InlineSecretStager<br/>files: packages/agora-client/src/secrets-manager.ts +2 more"]:::done
+    task-orchestrator-test-migration["task-orchestrator-test-migration: stub via injected store<br/>files: agora-orchestrator/test/executors/dispatch.test.ts +1 more"]:::done
+    task-remove-effective-storekind["task-remove-effective-storekind: worker trusts kind<br/>files: packages/agora-worker/src/entrypoint.ts +2 more"]:::done
+    task-local-envbundle-battletest["task-local-envbundle-battletest: local env-bundle e2e<br/>files: test/e2e/local-envbundle-secret.test.ts"]:::done
 
     task-envregister-store --> task-store-mismatch-check
     task-envregister-store --> task-delete-inline-stager
@@ -74,7 +74,8 @@ depends_on: []
 files:
   - packages/agora-client/src/env-register.ts
   - packages/agora-client/test/env-register.test.ts
-status: pending
+  - packages/agora-client/test/integration.test.ts
+status: done
 ```
 
 Migrate `registerEnv` off `InlineSecretStager` onto the caller-named store:
@@ -147,7 +148,7 @@ files:
   - packages/agora-client/src/errors.ts
   - packages/agora-client/src/dispatch.ts
   - packages/agora-client/test/dispatch.test.ts
-status: pending
+status: done
 ```
 
 Fail loud at dispatch time when an env bundle's recorded store kind doesn't match
@@ -204,7 +205,7 @@ files:
   - packages/agora-client/src/secrets-manager.ts
   - packages/agora-client/test/secrets-manager.test.ts
   - packages/agora-client/src/index.ts
-status: pending
+status: done
 is_wiring_task: true
 ```
 
@@ -234,7 +235,7 @@ depends_on: [task-envregister-store, task-delete-inline-stager]
 files:
   - packages/agora-orchestrator/test/executors/dispatch.test.ts
   - packages/agora-orchestrator/test/executors/dispatch-orchestrator.int.test.ts
-status: pending
+status: done
 ```
 
 Both orchestrator executor tests stub AWS by spying on
@@ -285,7 +286,8 @@ depends_on: []
 files:
   - packages/agora-worker/src/entrypoint.ts
   - packages/agora-worker/test/index.test.ts
-status: pending
+  - packages/agora-worker/test/entrypoint.test.ts
+status: done
 ```
 
 Remove the PR4a `effectiveStoreKind` shim (the `file://` + `secretStoreDir`
@@ -334,7 +336,7 @@ id: task-local-envbundle-battletest
 depends_on: [task-envregister-store, task-store-mismatch-check, task-delete-inline-stager, task-remove-effective-storekind]
 files:
   - test/e2e/local-envbundle-secret.test.ts
-status: pending
+status: done
 ```
 
 The headline proof: register an env bundle carrying an inline secret against a
