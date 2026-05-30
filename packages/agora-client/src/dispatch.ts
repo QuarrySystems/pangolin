@@ -42,11 +42,13 @@ import {
   type InlineSecret,
   type TaskHandle,
   type TaskExit,
+  type SecretStore,
 } from '@quarry-systems/agora-core';
 import type { AgoraClient } from './client.js';
 import { computeInlineSecretTtl } from './secret-ttl.js';
 import { mintCallbackHmac } from './callback-hmac.js';
 import { writeDispatchRecord } from './retention.js';
+import { SecretStoreMismatchError } from './errors.js';
 
 export interface ClientDispatchOpts {
   /** Worker image (digest-pinned) the provider should run. */
@@ -230,7 +232,7 @@ export async function fireWork(
 
   // 7. Merge env-bundle secrets + per-dispatch secrets. Per-dispatch wins on
   //    collision per §6.2 step 6 — this is enforced HERE (client-side).
-  const envBundleSecretRefs = await flattenEnvBundleSecrets(client, resolvedEnv);
+  const envBundleSecretRefs = await flattenEnvBundleSecrets(client, resolvedEnv, store);
   const secretRefs: Record<string, string> = {
     ...envBundleSecretRefs,
     ...perDispatchSecretRefs,
@@ -533,10 +535,15 @@ async function readSubagentCapabilities(
  * `secretRefs: Record<envName, ARN>` map into a single record. Later
  * bundles override earlier on key collision (callers list bundles in
  * priority order).
+ *
+ * Throws `SecretStoreMismatchError` when a bundle's recorded `store` kind
+ * differs from `targetStore?.name`. Bundles with no recorded `store` field
+ * (values-only / ref-only / legacy) skip the check.
  */
 async function flattenEnvBundleSecrets(
   client: AgoraClient,
   envs: EnvRef[],
+  targetStore: SecretStore | undefined,
 ): Promise<Record<string, string>> {
   const out: Record<string, string> = {};
   for (const env of envs) {
@@ -562,7 +569,15 @@ async function flattenEnvBundleSecrets(
       continue;
     }
     if (!parsed || typeof parsed !== 'object') continue;
-    const refs = (parsed as { secretRefs?: unknown }).secretRefs;
+    const def = parsed as { secretRefs?: unknown; store?: unknown };
+    // Guard: if the bundle recorded which store kind it was staged for,
+    // verify it matches the dispatch target's store. Bundles with no
+    // recorded `store` field (values-only / ref-only / legacy) skip the check.
+    const bundleKind = typeof def.store === 'string' ? def.store : undefined;
+    if (bundleKind !== undefined && bundleKind !== targetStore?.name) {
+      throw new SecretStoreMismatchError(env.name, bundleKind, targetStore?.name);
+    }
+    const refs = def.secretRefs;
     if (!refs || typeof refs !== 'object') continue;
     for (const [k, v] of Object.entries(refs as Record<string, unknown>)) {
       if (typeof v === 'string') out[k] = v;

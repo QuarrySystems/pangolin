@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { dispatchWork, fireWork } from '../src/dispatch.js';
+import { SecretStoreMismatchError } from '../src/errors.js';
 import { AgoraClient } from '../src/client.js';
 import type {
   ComputeProvider,
@@ -1010,5 +1011,120 @@ describe('fireWork / reconcile split (D9)', () => {
     expect(cleanupCalls).toHaveLength(1);
     expect(cleanupCalls[0].tagKey).toBe('agora:dispatchId');
     expect(cleanupCalls[0].tagValue).toBe(inflight.dispatchId);
+  });
+});
+
+describe('dispatchWork — store kind mismatch', () => {
+  it('throws SecretStoreMismatchError when a bundle\'s store kind != the target store kind', async () => {
+    const storage = makeMemoryStorage();
+    storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
+    // Bundle was staged with store kind "local-file"
+    storage.seed('localBundle', 'env', 'ns', 'sha256:lb', {
+      kind: 'env-bundle',
+      name: 'localBundle',
+      store: 'local-file',
+      secretRefs: { DB_PASS: 'file:///secrets/db' },
+    });
+    // Target's store is "aws-secrets-manager"
+    const { store } = makeStore({ name: 'aws-secrets-manager' });
+    const { compute } = makeCompute();
+    const client = new AgoraClient({
+      namespace: 'ns',
+      compute: { default: compute },
+      credentials: { default: makeCredentials() },
+      storage,
+      targets: { awsTarget: { compute: 'default', credentials: 'default', secretStore: 'aws' } },
+      secretStores: { aws: store },
+    });
+
+    await expect(
+      fireWork(client, { target: 'awsTarget', subagent: 's', env: 'localBundle' }, { workerImage: WORKER_IMAGE }),
+    ).rejects.toThrow(/staged for store kind "local-file"/);
+  });
+
+  it('throws a SecretStoreMismatchError with correct bundle name and kinds', async () => {
+    const storage = makeMemoryStorage();
+    storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
+    storage.seed('myBundle', 'env', 'ns', 'sha256:mb', {
+      kind: 'env-bundle',
+      name: 'myBundle',
+      store: 'local-file',
+      secretRefs: {},
+    });
+    const { store } = makeStore({ name: 'aws-secrets-manager' });
+    const { compute } = makeCompute();
+    const client = new AgoraClient({
+      namespace: 'ns',
+      compute: { default: compute },
+      credentials: { default: makeCredentials() },
+      storage,
+      targets: { awsTarget: { compute: 'default', credentials: 'default', secretStore: 'aws' } },
+      secretStores: { aws: store },
+    });
+
+    let caughtError: unknown;
+    try {
+      await fireWork(client, { target: 'awsTarget', subagent: 's', env: 'myBundle' }, { workerImage: WORKER_IMAGE });
+    } catch (e) {
+      caughtError = e;
+    }
+    expect(caughtError).toBeInstanceOf(SecretStoreMismatchError);
+    const err = caughtError as SecretStoreMismatchError;
+    expect(err.bundle).toBe('myBundle');
+    expect(err.bundleKind).toBe('local-file');
+    expect(err.targetKind).toBe('aws-secrets-manager');
+  });
+
+  it('dispatches normally when a bundle has no recorded store kind (values-only / legacy)', async () => {
+    const storage = makeMemoryStorage();
+    storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
+    // Bundle has no store field — legacy / values-only
+    storage.seed('legacyBundle', 'env', 'ns', 'sha256:lg', {
+      kind: 'env-bundle',
+      name: 'legacyBundle',
+      secretRefs: { DB: 'arn:aws:secretsmanager:us-east-1:123:secret:db' },
+    });
+    const { store } = makeStore({ name: 'aws-secrets-manager' });
+    const { compute } = makeCompute();
+    const client = new AgoraClient({
+      namespace: 'ns',
+      compute: { default: compute },
+      credentials: { default: makeCredentials() },
+      storage,
+      targets: { awsTarget: { compute: 'default', credentials: 'default', secretStore: 'aws' } },
+      secretStores: { aws: store },
+    });
+
+    // Should NOT throw even though target uses aws-secrets-manager
+    await expect(
+      fireWork(client, { target: 'awsTarget', subagent: 's', env: 'legacyBundle' }, { workerImage: WORKER_IMAGE }),
+    ).resolves.toBeDefined();
+  });
+
+  it('dispatches normally when a bundle\'s store kind matches the target store kind', async () => {
+    const storage = makeMemoryStorage();
+    storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
+    // Bundle recorded with same store kind as the target
+    storage.seed('awsBundle', 'env', 'ns', 'sha256:ab', {
+      kind: 'env-bundle',
+      name: 'awsBundle',
+      store: 'aws-secrets-manager',
+      secretRefs: { DB: 'arn:aws:secretsmanager:us-east-1:123:secret:db' },
+    });
+    const { store } = makeStore({ name: 'aws-secrets-manager' });
+    const { compute } = makeCompute();
+    const client = new AgoraClient({
+      namespace: 'ns',
+      compute: { default: compute },
+      credentials: { default: makeCredentials() },
+      storage,
+      targets: { awsTarget: { compute: 'default', credentials: 'default', secretStore: 'aws' } },
+      secretStores: { aws: store },
+    });
+
+    // Should NOT throw — kinds match
+    await expect(
+      fireWork(client, { target: 'awsTarget', subagent: 's', env: 'awsBundle' }, { workerImage: WORKER_IMAGE }),
+    ).resolves.toBeDefined();
   });
 });
