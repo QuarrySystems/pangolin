@@ -59,8 +59,10 @@ and (self-hosted) real regulated data. Three legs:
    manifest (what subagent, what capabilities, what env, what worker image
    digest, what model + params — all by hash). Reproducible *environment and
    inputs*. (Honest bound: §6.1 — agent *output* is recorded, not reproducible.)
-3. **Auditability.** A durable, **hash-chained, tamper-evident** record of every
-   run, exportable as a verifiable evidence bundle (`agora orch audit`).
+3. **Auditability.** A durable, **Merkle-rooted** record of every run, anchored
+   for **tamper-evidence** through a pluggable seam (detection-only without an
+   external anchor; genuinely tamper-evident with one — §6.3), exportable as a
+   verifiable evidence bundle (`agora orch audit`).
 
 Resting underneath: **safe parallelism** — the resource-lock primitive (disjoint
 locks fan out, overlapping locks serialize) lets multiple agents edit one
@@ -92,7 +94,7 @@ never "compliant," "certified," or "reproducible AI output." See §6.
 |---|---|---|
 | **V1-D1** | Scope depth | **Lean runner + patch escape.** Build the engine surface (serve, submission transport, retry, operator CLI/MCP) plus a *minimal* sandbox-escape (a patch artifact). Defer the typed-output→`Intent`→`IntentInterpreter`→`open-pr`→`approve` pipeline, the `dev` pack, cost budgets, and effect-tier enforcement to **V1.1**. The deferred layer is a strict superset of what V1 ships, so it accretes without refactor. |
 | **V1-D2** | License | **Business Source License 1.1 (`BUSL-1.1`).** Whole offload stack is source-available and self-hostable; the Additional Use Grant permits all use **except offering Agora as a hosted/managed orchestration service.** Change Date = **4 years** from first publish; Change License = **Apache-2.0**. No architectural cost — the §10.6 `client`/`service` privilege split already marks the commercial boundary (the future hosted multi-tenant control plane is the `service` side). Self-host is also the **compliance model** (§6.7): regulated data never leaves the customer's account. |
-| **V1-D3** | Compliance edge | **Folded into V1, not fast-followed.** The technical controls that constitute the edge — signed dispatch manifest, tamper-evident hash-chained audit log, actor identity on every operation, `agora orch audit` evidence export, and encryption-at-rest by default — are **V1 acceptance gates** (§6). Deferred: certification/process, BYOK-KMS, full role-based RBAC, hosted-V2 BAAs, the Bedrock runtime adapter. The claim is **"compliance-ready,"** never "compliant/certified" (§6.1). |
+| **V1-D3** | Compliance edge | **Folded into V1, not fast-followed.** The technical controls that constitute the edge — signed dispatch manifest, Merkle-rooted audit log with a **pluggable tamper-evidence anchor** (`AuditAnchor` seam), actor identity on every operation, `agora orch audit` evidence export, and encryption-at-rest by default — are **V1 acceptance gates** (§6). Deferred: certification/process, BYOK-KMS, full role-based RBAC, hosted-V2 BAAs, the Bedrock runtime adapter. The claim is **"compliance-ready,"** never "compliant/certified" (§6.1). |
 | **V1-D4** | Executor scope | **Executor-agnostic engine, AI flagship, one executor in V1.** The engine, audit format, and operations API carry nothing AI-specific. V1 builds *only* the AI `DispatchExecutor`, but the **dispatch manifest is executor-polymorphic** (§6.2) and copy positions Agora as an execution engine, not an AI tool. Additional executors (`command`/shell, batch, http, human-approval) are additive branches pulled by real tasks (§1.3). Rationale: positioning is free and the manifest schema is expensive to migrate once signed history exists — so lock the shape now, build the breadth later. |
 
 ---
@@ -132,7 +134,8 @@ never "compliant," "certified," or "reproducible AI output." See §6.
 7. **The `default` queue** as the one registered queue, concurrency configured at
    construction. Named queues stay a contract, not a feature (§10.7).
 8. **Compliance & audit controls (the edge, V1-D3)** — signed dispatch
-   **manifest** (§6.2), durable **hash-chained tamper-evident audit log** (§6.3),
+   **manifest** (§6.2), durable **Merkle-rooted audit log + pluggable `AuditAnchor`
+   tamper-evidence seam** (§6.3),
    **actor identity** on every operation (§6.4), the `agora orch audit` evidence
    **export** (§6.5), and **encryption-at-rest by default** with patch artifacts
    treated as sensitive data (§6.6). These are acceptance gates, not polish. See §6.
@@ -196,8 +199,10 @@ agora-orchestrator (existing pkg)
       submission-transport.ts[NEW] SubmissionTransport seam (contract)
       storage-transport.ts   [NEW] storage-backed inbox/outbox impl (D10)
     audit/
-      manifest.ts            [NEW] build/hash/sign the dispatch manifest (§6.2)
-      audit-log.ts           [NEW] hash-chained append + verify (§6.3)
+      manifest.ts            [NEW] build/hash the dispatch manifest (§6.2)
+      audit-log.ts           [NEW] Merkle-per-epoch append + verify (§6.3)
+      signer.ts              [NEW] Signer seam + KmsSigner/LocalSigner (§6.3)
+      anchor.ts              [NEW] AuditAnchor seam + LocalAnchor/S3ObjectLockAnchor (§6.3)
     operations-api.ts        [NEW] single source of business logic + privilege tags + actor capture (§6.4)
 
 agora-cli (existing pkg)
@@ -374,19 +379,61 @@ them out of the audit trail, so a manifest is safe to hand an auditor.
 ### 6.3 Tamper-evident audit log
 
 The worker already emits a lifecycle event stream (`worker.boot`,
-`dispatch.started`, `needs_input`, `dispatch.finished`, `dispatch.failed`). V1:
+`dispatch.started`, `needs_input`, `dispatch.finished`, `dispatch.failed`). V1
+turns that stream into a verifiable record in three layers — and crucially,
+**the trust anchor is a pluggable seam (`AuditAnchor`), not a hard dependency**,
+so an operator who doesn't need external immutability isn't forced to run it.
 
-1. **Persists** it durably to storage, content-addressed, joined to the run-state
-   row — not just stdout.
-2. **Hash-chains** entries: each entry carries the hash of the prior, so any
-   deletion or edit breaks the chain. Provider-agnostic (local FS and S3 alike).
-   The chain head per run is recorded in run-state.
-3. **Optionally anchors** the chain on WORM storage (S3 Object Lock) on the remote
-   stack — defense-in-depth, not the primary mechanism.
+**The distinction that drives the design: detection ≠ evidence.** A hash chain
+(or Merkle tree) alone only *detects* tampering — an attacker who controls the
+store can mutate entries and recompute the whole structure *and* its head. Real
+tamper-*evidence* requires anchoring the head where the writer cannot silently
+rewrite it. So:
 
-Verifying an export = recompute the chain and compare heads. This is the
-difference between "we have logs" and "we can *prove* the logs weren't altered" —
-the auditability edge.
+1. **Structure (always on, in-engine).** Entries are persisted durably,
+   content-addressed, joined to the run-state row, and accumulated into a
+   **Merkle tree per anchoring epoch** (epoch = run-completion for agora). The
+   epoch root summarizes every entry; inclusion proofs are cheap. This layer
+   gives *detection*, provider-agnostic, with no external dependency.
+2. **Signature (composable `Signer` seam).** The epoch root is signed before
+   anchoring — `KmsSigner` (asymmetric key in KMS; private half never leaves it;
+   every sign call is CloudTrail-logged) for production, `LocalSigner`/none for
+   dev. A DB-only attacker without the key can't forge a valid root;
+   non-repudiation, and key *use* is itself audited.
+3. **Anchor (pluggable `AuditAnchor` seam).** The signed root goes to an external
+   sink the app *cannot silently rewrite*. This is the load-bearing tamper-
+   *evidence* layer, and it is an adapter precisely so deployments pick their
+   assurance tier:
+
+   | `AuditAnchor` adapter | `guarantee` | What it buys |
+   |---|---|---|
+   | `LocalAnchor` (default) | `detect` | Root + head in the same store. Catches accidental/clumsy mutation; **not** evidence against an attacker who controls the DB. Dev / low-assurance. |
+   | `S3ObjectLockAnchor` | `external-immutable` | Signed root → S3 Object Lock **compliance mode** (versioned; *not even account-root* can delete before retention) in the customer's own account — a different trust domain from the app DB. The real tamper-evidence tier. |
+   | `WitnessAnchor` (deferred) | `witnessed` | Also pushes the root to a cross-org witness (RFC 3161 TSA / transparency log) for customers who won't trust even their own WORM admin. Additive. |
+
+**Why a seam, not a requirement (matches D8).** The engine *always* builds the
+Merkle structure; *where the root anchors* — and therefore the strength of the
+guarantee — is injected at construction, exactly like compute/storage/
+credentials. No deployment is forced onto S3 Object Lock; the strong path is a
+one-line swap and is first-class. **The `AuditAnchor` + `Signer` contracts are
+shared with Mneme verbatim** (same methods, same `guarantee` levels) — the
+platform's two halves anchor identically, and an implementer learns one model.
+(Not shared *code* yet — agora takes no Quarry-lib deps, D11 — but identical
+*shape*, a candidate for the eventual extracted substrate.)
+
+**Honesty is enforced by the seam, not by discipline alone.** Every `AuditAnchor`
+declares its `guarantee`, and `agora orch audit` (§6.5) **prints the anchor in
+force and its guarantee on the verification report.** The product's *claim* is
+scoped to the configured anchor: **"tamper-evident"** is licensed only at
+`external-immutable` (or `witnessed`); at `detect` the honest word is
+**"tamper-detecting."** Copy MUST NOT call a `detect`-tier deployment tamper-
+evident (ties to §6.1 / V1-D3). An auditor reads the guarantee off the bundle,
+not off the marketing.
+
+**Verification** = recompute each epoch's Merkle root from its entries → it must
+equal a signed root the `AuditAnchor` returns → the signature must verify. Tamper
+anywhere before the last anchored epoch yields a mismatch; a *missing* expected
+anchor is itself detectable; anchoring cadence bounds the rewritable window.
 
 ### 6.4 Actor identity on every operation
 
@@ -398,11 +445,15 @@ when. Required for SOC2 access-review evidence.
 ### 6.5 `agora orch audit <run-id>` — the exportable evidence bundle
 
 One command produces a verifiable bundle for an auditor or incident review:
-per-item manifests (§6.2) + the hash-chained event log (§6.3) + `result_ref`s +
-outcomes + retry history + actors + a **verification report** (chain intact,
-manifest hashes match). This is the demoable compliance artifact and the single
-most persuasive asset for a security buyer. Client-side, read-only; CLI-only (not
-MCP — auditing is an operator action, not an AI-loop action).
+per-item manifests (§6.2) + the Merkle-rooted event log and its anchor
+receipt(s) (§6.3) + `result_ref`s +
+outcomes + retry history + actors + a **verification report** (Merkle roots match
+their entries, roots match the anchored/signed roots, signatures verify, manifest
+hashes match) that **names the `AuditAnchor` in force and its `guarantee` tier**
+(§6.3) — so the report itself states whether this run is *tamper-evident* or only
+*tamper-detecting*. This is the demoable compliance artifact and the single most
+persuasive asset for a security buyer. Client-side, read-only; CLI-only (not MCP —
+auditing is an operator action, not an AI-loop action).
 
 ### 6.6 Encryption & data sensitivity
 
@@ -447,16 +498,23 @@ each supported runtime before publishing HIPAA guidance.
 - On completion, **each edit item exposes a `result_ref`**; fetching it yields a
   reviewable patch. The verify item's exit code gates the run.
 - `agora orch audit <run-id>` emits an evidence bundle whose **verification report
-  passes** — every manifest hash matches and the audit chain is intact — and that
-  bundle contains **no secret values** (refs only). Tampering with any persisted
-  audit entry makes verification fail. (The edge, demonstrated.)
+  passes** — every manifest hash matches, each epoch's Merkle root recomputes and
+  matches its signed/anchored root, signatures verify — the report **names the
+  anchor and its guarantee tier**, and the bundle contains **no secret values**
+  (refs only). Mutating any persisted entry makes verification fail. On the local
+  stack the demo runs `LocalAnchor` and the report honestly reads
+  **tamper-detecting**; the Fargate+S3 parity run uses `S3ObjectLockAnchor` and
+  reads **tamper-evident**, *and a DB-side tamper is caught by mismatch against the
+  Object-Lock-anchored root the attacker cannot rewrite.* (The edge, demonstrated —
+  and honestly labeled per tier.)
 
 **V1 is "done" when:** that example runs green against the local Docker stack end
 to end; the same `plan.json` + config runs against the Fargate + S3 stack with
-only target/storage swapped (local→prod parity); the MCP `submit`/`status`/
+only target/storage/anchor swapped (local→prod parity); the MCP `submit`/`status`/
 `watch` tools drive the same run from inside a Claude Code session, while the CI
 allowlist check proves no privileged method is MCP-reachable; **and the audit
-bundle verifies (and fails on tamper).**
+bundle verifies, names its guarantee tier, and the `external-immutable` run
+survives a DB-side tamper attempt.**
 
 ---
 
@@ -500,9 +558,11 @@ shipped artifacts.
     `.agora/output.json` + `result_ref` plumbing, **and** the signed dispatch
     manifest (§6.2) written on fire. (Manifest and escape share the executor/
     run-state plumbing, so they land together.)
-  - **PR6 — tamper-evident audit log (§6.3).** Durable, hash-chained lifecycle
-    persistence + chain-head in run-state + a `verify` routine. Encryption-at-rest
-    defaults (§6.6) land here.
+  - **PR6 — tamper-evident audit log (§6.3).** Durable Merkle-per-epoch lifecycle
+    persistence + `Signer` seam (`KmsSigner`/`LocalSigner`) + `AuditAnchor` seam
+    (`LocalAnchor` default, `S3ObjectLockAnchor`) + a `verify` routine that prints
+    the guarantee tier. Seam shapes match Mneme verbatim. Encryption-at-rest
+    defaults (§6.6) land here. (`WitnessAnchor`/TSA tier is deferred.)
   - **PR7 — operator surface.** Operations API consolidation + CLI `cmd-orch`
     (incl. `audit`, §6.5) + MCP tools + the §10.6 CI allowlist check. Retry/backoff
     lands here or folds into PR4.
@@ -524,8 +584,15 @@ shipped artifacts.
 - **No secret values in any manifest, audit entry, or exported bundle** — refs
   only; add a test that greps an export for known secret material and fails on a
   hit.
-- **Audit chain verifies, and a deliberately mutated entry fails verification** —
-  prove tamper-evidence with a test, not just an assertion.
+- **Audit verifies end-to-end, and a deliberately mutated entry fails** — prove it
+  with a test: recompute Merkle root → match anchored/signed root → verify
+  signature. Include a test where the DB is mutated but the `external-immutable`
+  anchor's root is not, and verification correctly fails.
+- **The `guarantee` claim is never overstated** — assert in a test that a bundle
+  produced under `LocalAnchor` reports `tamper-detecting`, and copy/UX never label
+  a `detect`-tier run "tamper-evident" (§6.3).
+- **`AuditAnchor` + `Signer` seam shapes match Mneme's** — same method names and
+  `guarantee` levels, so the platform halves stay consistent.
 - `SubmissionTransport` and `RunStateStore` stay behind their seams so S3→HTTP
   and SQLite→networked-DB remain additive swaps.
 - No deferred-layer (Intent/interpreter/pack/budget/cron/RBAC/BYOK) code leaks
