@@ -163,6 +163,14 @@ never "compliant," "certified," or "reproducible AI output." See §6.
     item — but it is not a V1 gate.
 - Effect-tier *enforcement* (the vocabulary stays a typed property; nothing
   reads it for policy yet).
+- **Authorization policy — implementor-owned, deferred.** agora is mechanism, not
+  policy: it ships the enforcement points and identity *primitives* (§6.4 `actor`,
+  the §10.6 capability split — both *mechanism*, not authz), and will later expose
+  an `Authorizer` seam the *implementor* fills with their own policy. V1 ships
+  **none** (single operator, D6 "whoever launched"). agora never owns roles,
+  sharing, or who-can-do-what — that's the implementor's. Cheap to add later: the
+  operations API (§10.2) is already the single chokepoint where an `Authorizer`
+  would be called.
 - **Compliance deepening (V1 ships the controls; these extend them):** customer-
   managed keys (BYOK/KMS), full role-based RBAC (V1 has the privilege split +
   actor identity, not roles), automated retention/purge policy, SIEM/log-export
