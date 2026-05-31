@@ -5,9 +5,9 @@ created: 2026-05-31
 
 ```mermaid
 flowchart TD
-    task-run-scoped-ids["task-run-scoped-ids: namespace item ids by run<br/>files: src/orchestrator.ts +1"]
-    task-deadletter-ingest["task-deadletter-ingest: quarantine poison submissions<br/>files: src/serve/driver.ts +4"]
-    task-commit-xproc["task-commit-xproc: commit cross-process integration tests<br/>files: test/cross-process +2"]
+    task-run-scoped-ids["task-run-scoped-ids: namespace item ids by run<br/>files: src/orchestrator.ts +1"]:::done
+    task-deadletter-ingest["task-deadletter-ingest: quarantine poison submissions<br/>files: src/serve/driver.ts +4"]:::done
+    task-commit-xproc["task-commit-xproc: commit cross-process integration tests<br/>files: test/cross-process +2"]:::done
 
     task-run-scoped-ids --> task-commit-xproc
     task-deadletter-ingest --> task-commit-xproc
@@ -39,7 +39,7 @@ depends_on: []
 files:
   - packages/agora-orchestrator/src/orchestrator.ts
   - packages/agora-orchestrator/test/orchestrator.test.ts
-status: pending
+status: done
 ```
 
 Make item ids run-scoped internally so two runs can share natural item ids. The
@@ -107,7 +107,7 @@ files:
   - packages/agora-orchestrator/test/storage-transport.test.ts
   - packages/agora-orchestrator/src/serve/driver.ts
   - packages/agora-orchestrator/test/serve-driver.test.ts
-status: pending
+status: done
 ```
 
 Stop a submission that always fails ingest from livelocking the daemon. Add a
@@ -172,7 +172,7 @@ files:
   - packages/agora-orchestrator/test/cross-process/serve-daemon.mjs
   - packages/agora-orchestrator/vitest.xproc.config.ts
   - packages/agora-orchestrator/package.json
-status: pending
+status: done
 ```
 
 Commit the 3 cross-process scenarios as a real integration suite, run via a dedicated
