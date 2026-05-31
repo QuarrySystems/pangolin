@@ -33,6 +33,8 @@ export interface ItemState extends WorkItem {
   queue: string;
   status: RunStatus;
   dispatchHash?: string;
+  /** Set when status is failed/skipped: why it failed or was cascaded. */
+  reason?: string;
 }
 
 /** Terminal-ish result for one item (skeleton — intents/signals/audit deferred). */

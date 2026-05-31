@@ -187,4 +187,29 @@ describe('SqliteRunStateStore', () => {
     expect(items[0].subagentShape).toBeUndefined();
     s.close();
   });
+
+  it('persists and round-trips a failure reason on setStatus', () => {
+    const s = new SqliteRunStateStore();
+    s.saveRun({ id: 'r-reason', queue: 'default', items: [
+      { id: 'item-reason', executor: 'fake', inputs: {}, depends_on: [], resourceLocks: [] },
+    ] });
+    s.setStatus('item-reason', 'failed', 'inputs failed dev.code-edit schema');
+    const items = s.getItems('r-reason');
+    expect(items).toHaveLength(1);
+    expect(items[0].status).toBe('failed');
+    expect(items[0].reason).toBe('inputs failed dev.code-edit schema');
+    s.close();
+  });
+
+  it('setStatus without a reason leaves reason undefined (not null)', () => {
+    const s = new SqliteRunStateStore();
+    s.saveRun({ id: 'r-noreason', queue: 'default', items: [
+      { id: 'item-noreason', executor: 'fake', inputs: {}, depends_on: [], resourceLocks: [] },
+    ] });
+    s.setStatus('item-noreason', 'done');
+    const items = s.getItems('r-noreason');
+    expect(items).toHaveLength(1);
+    expect(items[0].reason).toBeUndefined();
+    s.close();
+  });
 });

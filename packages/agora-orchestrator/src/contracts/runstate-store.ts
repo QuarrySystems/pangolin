@@ -9,7 +9,7 @@ export interface RunStateStore {
   saveRun(run: Run): void;
   markReady(itemIds: string[]): void;
   setRunning(itemId: string, dispatchHash: string): void;
-  setStatus(itemId: string, status: TerminalStatus): void;
+  setStatus(itemId: string, status: TerminalStatus, reason?: string): void;
   getItems(runId?: string): ItemState[];
   runningCount(queue: string): number;
   queueConcurrency(queue: string): number;

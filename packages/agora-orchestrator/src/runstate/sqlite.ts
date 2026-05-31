@@ -20,6 +20,7 @@ interface ItemRow {
   status: RunStatus;
   dispatch_hash: string | null;
   subagent_shape: string | null;
+  reason: string | null;
 }
 
 const SCHEMA = `
@@ -27,7 +28,7 @@ CREATE TABLE IF NOT EXISTS queues (name TEXT PRIMARY KEY, concurrency INTEGER NO
 CREATE TABLE IF NOT EXISTS items (
   id TEXT PRIMARY KEY, run_id TEXT NOT NULL, queue TEXT NOT NULL, executor TEXT NOT NULL,
   inputs TEXT NOT NULL, depends_on TEXT NOT NULL, resource_locks TEXT NOT NULL,
-  status TEXT NOT NULL, dispatch_hash TEXT, subagent_shape TEXT
+  status TEXT NOT NULL, dispatch_hash TEXT, subagent_shape TEXT, reason TEXT
 );
 CREATE TABLE IF NOT EXISTS locks (key TEXT PRIMARY KEY, item_id TEXT NOT NULL);
 `;
@@ -53,7 +54,7 @@ export class SqliteRunStateStore implements RunStateStore {
     const tx = this.db.transaction((r: Run) => {
       for (const it of r.items)
         this.db.prepare(
-          'INSERT INTO items(id,run_id,queue,executor,inputs,depends_on,resource_locks,status,dispatch_hash,subagent_shape) VALUES(?,?,?,?,?,?,?,?,NULL,?)',
+          'INSERT INTO items(id,run_id,queue,executor,inputs,depends_on,resource_locks,status,dispatch_hash,subagent_shape,reason) VALUES(?,?,?,?,?,?,?,?,NULL,?,NULL)',
         ).run(it.id, r.id, r.queue, it.executor,
               JSON.stringify(it.inputs), JSON.stringify(it.depends_on),
               JSON.stringify(it.resourceLocks), 'pending',
@@ -76,8 +77,8 @@ export class SqliteRunStateStore implements RunStateStore {
       .run(dispatchHash, itemId);
   }
 
-  setStatus(itemId: string, status: TerminalStatus): void {
-    this.db.prepare('UPDATE items SET status=? WHERE id=?').run(status, itemId);
+  setStatus(itemId: string, status: TerminalStatus, reason?: string): void {
+    this.db.prepare('UPDATE items SET status=?, reason=? WHERE id=?').run(status, reason ?? null, itemId);
   }
 
   getItems(runId?: string): ItemState[] {
@@ -142,5 +143,6 @@ export class SqliteRunStateStore implements RunStateStore {
     status: r.status,
     dispatchHash: r.dispatch_hash ?? undefined,
     subagentShape: r.subagent_shape ?? undefined,
+    reason: r.reason ?? undefined,
   });
 }
