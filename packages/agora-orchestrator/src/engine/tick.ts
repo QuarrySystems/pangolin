@@ -1,6 +1,6 @@
 // packages/agora-orchestrator/src/engine/tick.ts
 import type { Executor, RunStateStore } from '../contracts/index.js';
-import { computeNewlyReady } from './dep-resolver.js';
+import { computeNewlyReady, transitiveDependents } from './dep-resolver.js';
 import { selectRunnable } from './lock-manager.js';
 
 /** Advance one queue by a single tick. Returns counts for observability/tests. */
@@ -35,6 +35,16 @@ export async function tick(
       } else {
         store.setStatus(it.id, res.status);
         store.releaseLocks(it.id);
+        // Terminal failure: cascade skips to all transitive dependents that are still pending/ready.
+        if (res.status === 'failed') {
+          const NON_TERMINAL = new Set(['pending', 'ready']);
+          for (const depId of transitiveDependents(store.getItems(), [it.id])) {
+            const dep = store.getItems().find((i) => i.id === depId);
+            if (dep && NON_TERMINAL.has(dep.status)) {
+              store.setStatus(depId, 'skipped');
+            }
+          }
+        }
       }
       reconciled++;
     }

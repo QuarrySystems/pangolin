@@ -156,6 +156,63 @@ describe('tick', () => {
     store.close();
   });
 
+  describe('skip cascade on terminal failure', () => {
+    it('multi-hop cascade: a→b→c — when a fails terminally, b and c both become skipped', async () => {
+      const store = new SqliteRunStateStore();
+      store.ensureQueue('default', 5);
+      store.saveRun({ id: 'rc', queue: 'default', items: [
+        { id: 'a', executor: 'fail', inputs: {}, depends_on: [], resourceLocks: [] },
+        { id: 'b', executor: 'fail', inputs: {}, depends_on: ['a'], resourceLocks: [] },
+        { id: 'c', executor: 'fail', inputs: {}, depends_on: ['b'], resourceLocks: [] },
+      ] });
+      store.markReady(['a']);
+
+      const ex: Executor = {
+        id: 'fail',
+        async fire(i) { return { dispatchHash: `h-${i.id}` }; },
+        async reconcile() { return { status: 'failed' as const }; },
+      };
+
+      // Tick 1: a fires
+      const t1 = await tick(store, { fail: ex }, 'default', { maxAttempts: 1 });
+      expect(t1.fired).toBe(1);
+
+      // Tick 2: a reconciles → failed (terminal); b and c should be skipped
+      await tick(store, { fail: ex }, 'default', { maxAttempts: 1 });
+      const items = store.getItems('rc');
+      expect(items.find((i) => i.id === 'a')!.status).toBe('failed');
+      expect(items.find((i) => i.id === 'b')!.status).toBe('skipped');
+      expect(items.find((i) => i.id === 'c')!.status).toBe('skipped');
+      store.close();
+    });
+
+    it('retry path does NOT cascade — item with remaining attempts requeues without marking dependents skipped', async () => {
+      const store = new SqliteRunStateStore();
+      store.ensureQueue('default', 5);
+      store.saveRun({ id: 'rr', queue: 'default', items: [
+        { id: 'a', executor: 'fail', inputs: {}, depends_on: [], resourceLocks: [] },
+        { id: 'b', executor: 'fail', inputs: {}, depends_on: ['a'], resourceLocks: [] },
+      ] });
+      store.markReady(['a']);
+
+      const ex: Executor = {
+        id: 'fail',
+        async fire(i) { return { dispatchHash: `h-${i.id}` }; },
+        async reconcile() { return { status: 'failed' as const }; },
+      };
+
+      // Tick 1: a fires
+      await tick(store, { fail: ex }, 'default', { maxAttempts: 2 });
+
+      // Tick 2: a reconciles → failed but maxAttempts=2 means it requeues (not terminal)
+      await tick(store, { fail: ex }, 'default', { maxAttempts: 2, now: 0 });
+      const items = store.getItems('rr');
+      expect(items.find((i) => i.id === 'a')!.status).toBe('ready'); // requeued
+      expect(items.find((i) => i.id === 'b')!.status).toBe('pending'); // not skipped
+      store.close();
+    });
+  });
+
   describe('retry with backoff', () => {
     it('requeues a failed item with attempts remaining instead of failing it', async () => {
       const { store, executors } = setupOneFiredItem('a'); // item 'a' running, executor reconciles 'failed'

@@ -54,7 +54,7 @@ describe('AgoraOrchestrator', () => {
     expect(statuses).toEqual(['done', 'done']);
     store.close();
   });
-  it('a failed dependency permanently blocks dependents — b stays blocked when a fails', async () => {
+  it('a terminally-failed dependency cascades to dependents — b becomes skipped when a fails', async () => {
     const failExecutor: Executor = {
       id: 'fail',
       async fire(i) { return { dispatchHash: `h-${i.id}` }; },
@@ -68,10 +68,10 @@ describe('AgoraOrchestrator', () => {
     const o = makeOrch(store, { fail: failExecutor }, 1);
     o.submitRun(failRun);
     await o.tick(); // fires a
-    await o.tick(); // reconciles a -> failed
+    await o.tick(); // reconciles a -> failed, cascades b -> skipped
     const st = o.getStatus('r');
     expect(st.find((s) => s.id === 'a')!.status).toBe('failed');
-    expect(st.find((s) => s.id === 'b')!.blockedBy).toEqual(['a']); // b still blocked
+    expect(st.find((s) => s.id === 'b')!.status).toBe('skipped'); // b is skipped, not pending
     store.close();
   });
 });
