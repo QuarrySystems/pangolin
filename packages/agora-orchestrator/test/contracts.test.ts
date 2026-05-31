@@ -13,6 +13,15 @@ describe('contracts', () => {
   });
 });
 
+it('a minimal fire(item)-only executor still type-checks', () => {
+  const minimal: Executor = {
+    id: 'min',
+    async fire(_item) { return { dispatchHash: 'h2' }; },
+    async reconcile() { return { status: 'done' }; },
+  };
+  expect(minimal.id).toBe('min');
+});
+
 it('a minimal executor satisfies the extended fire signature', async () => {
   const seen: FireContext[] = [];
   const ex: Executor = {
