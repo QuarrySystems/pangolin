@@ -119,8 +119,13 @@ describe('serve driver', () => {
       queue: 'default',
       items: [{ id: 'b', executor: 'x', inputs: {}, depends_on: [], resourceLocks: [] }],
     });
-    // Manually fire item so it's running
-    await orch.tick('default'); // fires b
+    // Manually fire item so it's running (but NOT yet reconciled to done)
+    await orch.tick('default'); // fires b → b is now 'running'
+
+    // Assert b is not yet done before serve starts
+    const beforeStatuses = orch.getStatus('run-2');
+    const beforeB = beforeStatuses.find((s) => s.id === 'b');
+    expect(beforeB?.status).not.toBe('done');
 
     const transport = makeFakeTransport([]);
     const ac = new AbortController();
@@ -133,6 +138,56 @@ describe('serve driver', () => {
     const statuses = orch.getStatus('run-2');
     const itemB = statuses.find((s) => s.id === 'b');
     expect(itemB?.status).toBe('done');
+
+    store.close();
+  });
+
+  it('does not leak abort listeners over multiple sleep calls', async () => {
+    const store = new SqliteRunStateStore();
+    const orch = new AgoraOrchestrator({
+      store,
+      executors: { x: immediateExecutor() },
+      triggers: { manual: new ManualTrigger() },
+      queues: { default: { concurrency: 5 } },
+    });
+
+    const transport = makeFakeTransport([]);
+    const ac = new AbortController();
+
+    // Track active abort listeners using a Set of references.
+    // When the timer fires and explicitly calls removeEventListener, the set shrinks.
+    // When { once: true } auto-removes on abort, the set also shrinks via our hook.
+    const activeAbortListeners = new Set<EventListenerOrEventListenerObject>();
+    const originalAdd = ac.signal.addEventListener.bind(ac.signal);
+    const originalRemove = ac.signal.removeEventListener.bind(ac.signal);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ac.signal as any).addEventListener = (type: string, listener: EventListenerOrEventListenerObject, options?: unknown) => {
+      if (type === 'abort') activeAbortListeners.add(listener);
+      return (originalAdd as Function)(type, listener, options);
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ac.signal as any).removeEventListener = (type: string, listener: EventListenerOrEventListenerObject, options?: unknown) => {
+      if (type === 'abort') activeAbortListeners.delete(listener);
+      return (originalRemove as Function)(type, listener, options);
+    };
+
+    // Run a few loop iterations with a short interval, then abort
+    const servePromise = serve({
+      orchestrator: orch,
+      transport,
+      tickIntervalMs: 5,
+      signal: ac.signal,
+    });
+
+    // Let at least 3 iterations complete via timer (no abort yet)
+    await new Promise((r) => setTimeout(r, 50));
+
+    // At this point, timer-completed sleeps must have removed their listeners.
+    // Only the currently-in-flight sleep should have 1 active listener (or 0 if between sleeps).
+    expect(activeAbortListeners.size).toBeLessThanOrEqual(1);
+
+    ac.abort();
+    await servePromise;
 
     store.close();
   });

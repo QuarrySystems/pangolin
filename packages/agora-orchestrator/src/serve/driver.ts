@@ -14,15 +14,12 @@ export interface ServeOptions {
 /** Resolves after `ms` milliseconds, or immediately if the signal is already aborted or fires. */
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
-    if (signal?.aborted) {
+    if (signal?.aborted) { resolve(); return; }
+    const onAbort = () => { clearTimeout(timer); resolve(); };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
       resolve();
-      return;
-    }
-    const timer = setTimeout(resolve, ms);
-    const onAbort = () => {
-      clearTimeout(timer);
-      resolve();
-    };
+    }, ms);
     signal?.addEventListener('abort', onAbort, { once: true });
   });
 }
