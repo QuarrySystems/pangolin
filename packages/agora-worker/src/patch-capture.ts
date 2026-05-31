@@ -75,15 +75,24 @@ function git(dir: string, args: string[]): Promise<string> {
     child.stdout.on('data', (chunk: Buffer) => stdoutChunks.push(chunk));
     child.stderr.on('data', (chunk: Buffer) => stderrChunks.push(chunk));
 
-    child.on('error', reject);
+    let settled = false;
+    const settle = (fn: () => void) => {
+      if (!settled) {
+        settled = true;
+        fn();
+      }
+    };
 
-    child.on('exit', (code) => {
+    child.on('error', (err) => settle(() => reject(err)));
+
+    child.on('exit', (code, signal) => settle(() => {
       if (code === 0) {
         resolve(Buffer.concat(stdoutChunks).toString('utf8'));
-      } else {
-        const stderr = Buffer.concat(stderrChunks).toString('utf8');
-        reject(new Error(`git ${args.join(' ')} exited ${code}: ${stderr}`));
+        return;
       }
-    });
+      const stderr = Buffer.concat(stderrChunks).toString('utf8');
+      const reason = signal ? `killed by ${signal}` : `exited ${code}`;
+      reject(new Error(`git ${args.join(' ')} ${reason}: ${stderr}`));
+    }));
   });
 }
