@@ -276,11 +276,9 @@ describe('runWorker', () => {
     cleanupDirs.push(h.workDir, h.adaptersRoot);
     h.setRuntimeExit({ exitCode: 0, stdout: '', stderr: '' });
 
-    // Make storage.put throw so the escape path fails
+    // Make storage.put throw so the escape upload fails (logged as escape.failed)
     const throws: FakeStorage = h.storage as unknown as FakeStorage;
-    const origPut = throws.put.bind(throws);
     throws.put = async (uri: string) => {
-      // Allow the initial get() calls but make put() fail
       throw new Error('storage unavailable');
     };
 
@@ -297,7 +295,6 @@ describe('runWorker', () => {
       code = await runWorker(h.env, makeDeps(h));
     } finally {
       spy.mockRestore();
-      throws.put = origPut;
     }
 
     // Escape failure must NOT change exit code or terminal event
