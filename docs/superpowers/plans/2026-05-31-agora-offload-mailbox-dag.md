@@ -5,10 +5,10 @@ created: 2026-05-31
 
 ```mermaid
 flowchart TD
-    task-mailbox-seam["task-mailbox-seam: MailboxStore + LocalDirMailbox<br/>files: src/contracts/mailbox.ts +3"]
-    task-submitrun-idempotent["task-submitrun-idempotent: submitRun no-op on known runId<br/>files: src/orchestrator.ts +1"]
-    task-transport-rewire["task-transport-rewire: transport onto MailboxStore + ack + migrate<br/>files: src/transport/storage-transport.ts +4"]
-    task-serve-ack["task-serve-ack: serve acks after ingest<br/>files: src/serve/driver.ts +1"]
+    task-mailbox-seam["task-mailbox-seam: MailboxStore + LocalDirMailbox<br/>files: src/contracts/mailbox.ts +3"]:::done
+    task-submitrun-idempotent["task-submitrun-idempotent: submitRun no-op on known runId<br/>files: src/orchestrator.ts +1"]:::done
+    task-transport-rewire["task-transport-rewire: transport onto MailboxStore + ack + migrate<br/>files: src/transport/storage-transport.ts +4"]:::done
+    task-serve-ack["task-serve-ack: serve acks after ingest<br/>files: src/serve/driver.ts +1"]:::done
 
     task-mailbox-seam --> task-transport-rewire
     task-submitrun-idempotent --> task-transport-rewire
@@ -51,7 +51,7 @@ files:
   - packages/agora-orchestrator/src/contracts/index.ts
   - packages/agora-orchestrator/src/mailbox/local-dir.ts
   - packages/agora-orchestrator/test/mailbox/local-dir.test.ts
-status: pending
+status: done
 ```
 
 Add the `MailboxStore` seam (mutable, name-addressed key→bytes + prefix list +
@@ -114,7 +114,7 @@ depends_on: []
 files:
   - packages/agora-orchestrator/src/orchestrator.ts
   - packages/agora-orchestrator/test/orchestrator.test.ts
-status: pending
+status: done
 ```
 
 Make `submitRun` a no-op for a run id already in the store, so a message
@@ -157,7 +157,7 @@ files:
   - packages/agora-orchestrator/test/storage-transport.test.ts
   - packages/agora-orchestrator/src/index.ts
   - packages/agora-orchestrator/test/pressure-runner.test.ts
-status: pending
+status: done
 ```
 
 Rewire the transport from `StorageProvider` to `MailboxStore`, rename it
@@ -228,7 +228,8 @@ depends_on: [task-transport-rewire]
 files:
   - packages/agora-orchestrator/src/serve/driver.ts
   - packages/agora-orchestrator/test/serve-driver.test.ts
-status: pending
+  - packages/agora-orchestrator/test/pressure-runner.test.ts
+status: done
 ```
 
 Make `serve` call `transport.ack(env.run.id)` after a successful `submitRun`, so an
