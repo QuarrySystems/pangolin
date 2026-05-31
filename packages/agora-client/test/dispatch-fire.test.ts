@@ -5,6 +5,7 @@ import type {
   CredentialProvider,
   StorageProvider,
   TaskExit,
+  SecretStore,
 } from '@quarry-systems/agora-core';
 
 /**
@@ -85,6 +86,33 @@ function makeCredentials(): CredentialProvider {
   };
 }
 
+/**
+ * Build a minimal in-memory SecretStore stub. `staged` records every call
+ * to `stage` for assertion. `stage()` returns `store-ref://<name>` as the ref.
+ */
+function makeStore(opts: { name?: string; dir?: string } = {}): {
+  store: SecretStore;
+  staged: Array<{ name: string; value: string; ttlSeconds: number }>;
+} {
+  const staged: Array<{ name: string; value: string; ttlSeconds: number }> = [];
+  const store: SecretStore = {
+    name: opts.name ?? 'test-store',
+    dir: opts.dir,
+    async stage(args) {
+      staged.push({ name: args.name, value: args.value, ttlSeconds: args.ttlSeconds });
+      return { ref: `store-ref://${args.name}`, ttlSeconds: args.ttlSeconds };
+    },
+    async resolve(ref: string) {
+      const entry = staged.find((s) => `store-ref://${s.name}` === ref);
+      return entry?.value ?? '';
+    },
+    async cleanupByTag(_tagKey: string, _tagValue: string) {
+      // no-op
+    },
+  };
+  return { store, staged };
+}
+
 beforeEach(() => {
   vi.restoreAllMocks();
 });
@@ -157,24 +185,38 @@ describe('client.dispatch.fire', () => {
       },
     };
 
+    const { store } = makeStore({ name: 'test-store' });
+
     const client = new AgoraClient({
       namespace: 'ns',
       compute: { default: compute },
       credentials: { default: makeCredentials() },
       storage,
-      targets: { prod: { compute: 'default', credentials: 'default' } },
+      targets: { prod: { compute: 'default', credentials: 'default', secretStore: 's' } },
+      secretStores: { s: store },
     });
 
+    const INLINE_VALUE = 'super-secret-value';
     const flight = await client.dispatch.fire({
       subagent: 's',
       target: 'prod',
       workerImage: 'ghcr.io/x/worker@sha256:abc',
+      secrets: { MY_KEY: { inline: INLINE_VALUE } },
     });
 
     expect(flight.resolved.workerImage).toBe('ghcr.io/x/worker@sha256:abc');
     expect(flight.resolved.subagent.contentHash).toMatch(/^sha256:/);
     expect(Array.isArray(flight.resolved.capabilities)).toBe(true);
     expect(Array.isArray(flight.resolved.env)).toBe(true);
+
+    // The secret was staged — MY_KEY should appear as a store ref, not the raw value.
+    const myKeyRef = flight.resolved.secretRefs['MY_KEY'];
+    expect(typeof myKeyRef).toBe('string');
+    // The ref must match what the store's stage() returned (contains the env name).
+    expect(myKeyRef).toMatch(/MY_KEY$/);
+    // The inline value must NEVER appear as the ref — the no-leak guarantee is load-bearing.
+    expect(myKeyRef).not.toBe(INLINE_VALUE);
+    // All secret ref values must be strings (general invariant).
     for (const ref of Object.values(flight.resolved.secretRefs)) {
       expect(typeof ref).toBe('string');
     }
