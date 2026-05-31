@@ -10,8 +10,6 @@ export type { AgoraOrchestratorOptions, QueueConfig, StatusItem } from './orches
 export { DispatchExecutor } from './executors/dispatch.js';
 export type { DispatchExecutorOptions } from './executors/dispatch.js';
 export { MailboxSubmissionTransport } from './transport/storage-transport.js';
-/** @deprecated Use MailboxSubmissionTransport instead. */
-export { MailboxSubmissionTransport as StorageSubmissionTransport } from './transport/storage-transport.js';
 export { LocalDirMailbox } from './mailbox/local-dir.js';
 export { serve } from './serve/driver.js';
 export type { ServeOptions } from './serve/driver.js';

@@ -1,4 +1,5 @@
 import { mkdir, readdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import type { Dirent } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { MailboxStore } from '../contracts/index.js';
 
@@ -40,7 +41,7 @@ function pathToKey(root: string, filePath: string): string {
 
 /** Recursively yield all file paths under a directory. */
 async function* walkFiles(dir: string): AsyncGenerator<string> {
-  let entries: Awaited<ReturnType<typeof readdir>>;
+  let entries: Dirent<string>[];
   try {
     entries = await readdir(dir, { withFileTypes: true });
   } catch (err: unknown) {
