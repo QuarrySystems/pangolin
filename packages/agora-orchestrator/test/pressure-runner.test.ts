@@ -150,7 +150,7 @@ describe('offload-runner pressure tests', () => {
     const rerunCompleted = midDone.filter((id) => (obs2.fireCounts[id] ?? 0) > 0);  // completed-in-p1 items refired in p2?
     // eslint-disable-next-line no-console
     console.log('[S3] doneInProcess1=', midDone, 'reIngestedOnRestart=', reIngested.length, 'recompletedWork=', rerunCompleted, 'FINAL=', final);
-    expect(reIngested.length).toBe(1);          // submission re-polled on restart (no ack yet); submitRun is idempotent so no duplicate execution
+    expect(reIngested.length).toBe(0);          // submission was acked (deleted) by process 1 after ingest; process 2 finds nothing in the inbox
     expect(midDone).toContain('t0');            // pre-crash completion is durable
     expect(rerunCompleted).toEqual([]);         // recoverStranded only touches 'running' items; t0 (done pre-crash) is NOT re-run
     expect(final.t1).toBe('done');              // recoverStranded re-dispatched t1; it completed after restart

@@ -39,6 +39,7 @@ export async function serve(opts: ServeOptions): Promise<void> {
     try {
       for (const env of await opts.transport.pollInbox()) {
         opts.orchestrator.submitRun(env.run, env.actor);
+        await opts.transport.ack(env.run.id);      // consume it
       }
       await opts.orchestrator.tick(queue);
 

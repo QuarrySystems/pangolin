@@ -4,11 +4,13 @@ import type { SubmissionEnvelope, SubmissionTransport, OutboxRecord } from '../s
 import { serve } from '../src/serve/driver.js';
 import { immediateExecutor } from './fixtures/executors.js';
 
-function makeFakeTransport(envelopes: SubmissionEnvelope[]): SubmissionTransport & { published: OutboxRecord[] } {
+function makeFakeTransport(envelopes: SubmissionEnvelope[]): SubmissionTransport & { published: OutboxRecord[]; ackedIds: string[] } {
   let called = false;
   const published: OutboxRecord[] = [];
+  const ackedIds: string[] = [];
   return {
     published,
+    ackedIds,
     async submit() { return ''; },
     async pollInbox() {
       if (!called) {
@@ -17,6 +19,7 @@ function makeFakeTransport(envelopes: SubmissionEnvelope[]): SubmissionTransport
       }
       return [];
     },
+    async ack(runId) { ackedIds.push(runId); },
     async publish(rec) { published.push(rec); },
     async readOutbox() { return []; },
   };
@@ -30,6 +33,7 @@ function makeThrowingTransport(): SubmissionTransport & { published: OutboxRecor
     publishCallCount: 0,
     async submit() { return ''; },
     async pollInbox() { return []; },
+    async ack(_runId) { /* no-op stub */ },
     async publish(rec) {
       publishCallCount++;
       // Access via closure so the outer ref stays in sync
@@ -326,6 +330,49 @@ describe('serve driver', () => {
     await servePromise;
 
     expect(isDone).toBe(true);
+
+    store.close();
+  });
+
+  it('acks each ingested run exactly once, right after submitRun', async () => {
+    const store = new SqliteRunStateStore();
+    const orch = new AgoraOrchestrator({
+      store,
+      executors: { x: immediateExecutor() },
+      triggers: { manual: new ManualTrigger() },
+      queues: { default: { concurrency: 5 } },
+    });
+
+    const run = {
+      id: 'run-ack',
+      queue: 'default',
+      items: [{ id: 'ack-a', executor: 'x', inputs: {}, depends_on: [], resourceLocks: [] }],
+    };
+    const env: SubmissionEnvelope = { run, actor: 'human:test', submittedAt: new Date().toISOString() };
+    const transport = makeFakeTransport([env]);
+
+    const ac = new AbortController();
+    const servePromise = serve({
+      orchestrator: orch,
+      transport,
+      queue: 'default',
+      tickIntervalMs: 5,
+      signal: ac.signal,
+    });
+
+    // Wait until the item is done
+    const start = Date.now();
+    while (Date.now() - start < 2000) {
+      const statuses = orch.getStatus('run-ack');
+      if (statuses.find((s) => s.id === 'ack-a')?.status === 'done') break;
+      await new Promise((r) => setTimeout(r, 10));
+    }
+
+    ac.abort();
+    await servePromise;
+
+    // ack must have been called exactly once with the run's id
+    expect(transport.ackedIds).toEqual(['run-ack']);
 
     store.close();
   });
