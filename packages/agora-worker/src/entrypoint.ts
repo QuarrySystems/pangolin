@@ -76,6 +76,8 @@ import {
 } from './notifications.js';
 import { LifecycleEmitter } from './lifecycle.js';
 import { StructuredLogger } from './logger.js';
+import { captureBaseline, type WorkspaceBaseline } from './patch-capture.js';
+import { escapeWorkspace } from './output-sentinel.js';
 
 /**
  * Injection seam for tests. Every field is optional; production callers
@@ -393,6 +395,11 @@ export async function runWorker(
     );
   }
 
+  // Capture workspace baseline BEFORE the adapter runs (post-overlay, post-setup).
+  // Best-effort: captureBaseline never throws; it returns { unavailable: true }
+  // when git is not available so the escape path degrades gracefully.
+  const baseline: WorkspaceBaseline = await captureBaseline(workspaceDir);
+
   // Step 10: start the channel subscription (background; fire and forget).
   let channel: ChannelHandle | null = null;
   try {
@@ -489,6 +496,24 @@ export async function runWorker(
 
   // Step 14: terminal lifecycle event + exit code.
   if (runtimeExit.exitCode === 0) {
+    // Escape: best-effort patch capture + sentinel upload. A failure here
+    // logs escape.failed but must NOT change the exit code or terminal event.
+    try {
+      await escapeWorkspace({
+        workspaceDir,
+        storage,
+        namespace: cfg.namespace,
+        dispatchId: cfg.dispatchId,
+        baseline,
+      });
+    } catch (err) {
+      logger.log({
+        kind: 'escape.failed',
+        dispatchId: cfg.dispatchId,
+        detail: (err as Error).message,
+      });
+    }
+
     await emit({
       kind: 'dispatch.finished',
       dispatchId: cfg.dispatchId,
