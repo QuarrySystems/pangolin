@@ -15,6 +15,7 @@ import { runWorker, type RunWorkerDeps } from '../src/entrypoint.js';
 import { LocalSecretStore } from '@quarry-systems/agora-secret-store';
 import {
   computeContentHash,
+  buildDispatchRecordUri,
   type StorageProvider,
   type RuntimeAdapter,
   type RuntimeExit,
@@ -23,8 +24,8 @@ import {
 
 /**
  * Minimal in-memory storage provider. Keyed by URI; returns the bytes
- * registered via `set()`. The worker only calls `get()` on the storage
- * provider during boot, so the rest of the surface is stubbed.
+ * registered via `set()`. Now functional for `put()` so the escape path
+ * can store the sentinel and (optionally) the patch artifact.
  */
 class FakeStorage implements StorageProvider {
   readonly name = 'fake';
@@ -35,8 +36,9 @@ class FakeStorage implements StorageProvider {
     return this;
   }
 
-  async put(): Promise<{ contentHash: string }> {
-    throw new Error('not used in entrypoint tests');
+  async put(uri: string, contents: Uint8Array): Promise<{ contentHash: string }> {
+    this.blobs.set(uri, contents);
+    return { contentHash: computeContentHash(contents) };
   }
 
   async get(uri: string): Promise<Uint8Array> {
@@ -51,6 +53,15 @@ class FakeStorage implements StorageProvider {
 
   async list(): Promise<[]> {
     return [];
+  }
+
+  async resolveByHash(): Promise<null> {
+    return null;
+  }
+
+  /** Test helper: check if a URI was put to storage. */
+  has(uri: string): boolean {
+    return this.blobs.has(uri);
   }
 }
 
@@ -249,6 +260,52 @@ describe('runWorker', () => {
     expect(kinds).toContain('dispatch.finished');
     expect(kinds).not.toContain('dispatch.failed');
     expect(kinds).not.toContain('dispatch.needs_input');
+
+    // Escape: the dispatch-record sentinel was uploaded (best-effort; may be
+    // absent if git is unavailable in CI, so we only assert if it was written).
+    const sentinelUri = buildDispatchRecordUri('ns', 'd-1', 'output.json');
+    if (h.storage.has(sentinelUri)) {
+      const sentinelBytes = await h.storage.get(sentinelUri);
+      const parsed = JSON.parse(new TextDecoder().decode(sentinelBytes));
+      expect(parsed.schemaVersion).toBe(1);
+    }
+  });
+
+  it('logs escape.failed but still emits dispatch.finished and returns 0 when escape throws', async () => {
+    const h = await setupHarness();
+    cleanupDirs.push(h.workDir, h.adaptersRoot);
+    h.setRuntimeExit({ exitCode: 0, stdout: '', stderr: '' });
+
+    // Make storage.put throw so the escape upload fails (logged as escape.failed)
+    const throws: FakeStorage = h.storage as unknown as FakeStorage;
+    throws.put = async (uri: string) => {
+      throw new Error('storage unavailable');
+    };
+
+    const writes: string[] = [];
+    const spy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation((chunk: string | Uint8Array): boolean => {
+        writes.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString());
+        return true;
+      });
+
+    let code: number;
+    try {
+      code = await runWorker(h.env, makeDeps(h));
+    } finally {
+      spy.mockRestore();
+    }
+
+    // Escape failure must NOT change exit code or terminal event
+    expect(code!).toBe(0);
+    const kinds = h.events.map((e) => e.kind);
+    expect(kinds).toContain('dispatch.finished');
+    expect(kinds).not.toContain('dispatch.failed');
+
+    // escape.failed was logged
+    const allLogs = writes.join('');
+    expect(allLogs).toContain('escape.failed');
   });
 
   it('does not leak worker control-plane or ambient AWS credentials into the runtime env', async () => {

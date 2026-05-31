@@ -29,9 +29,11 @@ function makeMemStore(concurrency = 5): RunStateStore & { items: Map<string, Ite
   return {
     items,
     ensureQueue(name, c) { queues.set(name, c); },
-    saveRun(run: Run) {
+    saveRun(run: Run, _actor?: string, submittedAt?: string) {
       for (const it of run.items) {
-        items.set(it.id, { ...it, runId: run.id, queue: run.queue, status: 'pending' });
+        items.set(it.id, { ...it, runId: run.id, queue: run.queue, status: 'pending',
+          ...(_actor !== undefined ? { actor: _actor } : {}),
+          ...(submittedAt !== undefined ? { submittedAt } : {}) });
       }
     },
     markReady(ids: string[]) {
@@ -75,6 +77,14 @@ function makeMemStore(concurrency = 5): RunStateStore & { items: Map<string, Ite
     requeue(id: string, notBeforeMs: number): void {
       const it = items.get(id);
       if (it) items.set(id, { ...it, status: 'ready', nextAttemptAt: notBeforeMs });
+    },
+    setResultRef(id: string, ref: string): void {
+      const it = items.get(id);
+      if (it) items.set(id, { ...it, resultRef: ref });
+    },
+    setManifestRef(id: string, ref: string): void {
+      const it = items.get(id);
+      if (it) items.set(id, { ...it, manifestRef: ref });
     },
     close() { /* no-op */ },
   };

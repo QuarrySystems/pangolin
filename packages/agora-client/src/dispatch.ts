@@ -71,6 +71,15 @@ export interface ClientDispatchOpts {
 export interface InFlightDispatch {
   readonly dispatchId: string;
   readonly handle: TaskHandle;
+  /** Resolved inputs + environment for this dispatch — content-addressed refs
+   *  and secret REFERENCES only (no values). Used to build the audit manifest. */
+  readonly resolved: {
+    subagent: SubagentRef;
+    capabilities: CapabilityRef[];
+    env: EnvRef[];
+    secretRefs: Record<string, string>; // envName -> ref (references, never values)
+    workerImage: string;
+  };
   awaitExit(): Promise<TaskExit>;
   reconcile(exit: TaskExit): Promise<DispatchResult>;
   cleanup(): void;
@@ -320,7 +329,20 @@ export async function fireWork(
     });
   };
 
-  return { dispatchId, handle, awaitExit, reconcile, cleanup };
+  return {
+    dispatchId,
+    handle,
+    resolved: {
+      subagent: resolvedSubagent,
+      capabilities: resolvedCapabilities,
+      env: resolvedEnv,
+      secretRefs,
+      workerImage: opts.workerImage,
+    },
+    awaitExit,
+    reconcile,
+    cleanup,
+  };
 }
 
 /**

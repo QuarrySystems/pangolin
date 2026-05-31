@@ -41,6 +41,12 @@ export interface ItemState extends WorkItem {
   attempts?: number;
   /** Epoch ms; the item is not fired before this (backoff gate). Absent === fire now. */
   nextAttemptAt?: number;
+  /** Opaque escape artifact ref (e.g. patch URI). Never interpreted by the store. */
+  resultRef?: string;
+  /** Opaque dispatch-manifest ref. Never interpreted by the store. */
+  manifestRef?: string;
+  /** ISO-8601 submission time (if recorded). Never interpreted by the store. */
+  submittedAt?: string;
 }
 
 /** Terminal-ish result for one item (skeleton — intents/signals/audit deferred). */

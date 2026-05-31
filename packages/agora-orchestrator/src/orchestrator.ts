@@ -26,7 +26,10 @@ export const PRIVILEGE = {
   submitRun: 'client', getStatus: 'client', tick: 'service',
 } as const;
 
-export interface StatusItem { id: string; runId: string; status: string; blockedBy: string[]; }
+export interface StatusItem {
+  id: string; runId: string; status: string; blockedBy: string[];
+  resultRef?: string; manifestRef?: string;
+}
 
 export class AgoraOrchestrator {
   private readonly store: RunStateStore;
@@ -45,7 +48,7 @@ export class AgoraOrchestrator {
     if (!opts.queues[this.defaultQueue]) throw new Error(`AgoraOrchestrator: default queue '${this.defaultQueue}' not configured`);
     for (const [name, q] of Object.entries(opts.queues)) this.store.ensureQueue(name, q.concurrency);
   }
-  submitRun(run: Run, actor?: string): string {
+  submitRun(run: Run, actor?: string, submittedAt?: string): string {
     if (this.store.getItems(run.id).length > 0) return run.id; // already ingested — idempotent no-op
     const trigger = this.triggers['manual'];
     if (!trigger) throw new Error("AgoraOrchestrator: no 'manual' trigger registered");
@@ -59,7 +62,7 @@ export class AgoraOrchestrator {
         depends_on: it.depends_on.map((d) => ns(run.id, d)),
       })),
     };
-    this.store.saveRun(nsRun, actor);
+    this.store.saveRun(nsRun, actor, submittedAt);
     this.store.markReady(trigger.initialReady(nsRun));
     return run.id;
   }
@@ -69,7 +72,7 @@ export class AgoraOrchestrator {
     const wrappedExecutors: Record<string, Executor> = Object.fromEntries(
       Object.entries(this.executors).map(([k, ex]) => [k, {
         id: ex.id,
-        fire: (item) => ex.fire({ ...item, id: deNs(item.id), depends_on: item.depends_on.map(deNs) }),
+        fire: (item, ctx) => ex.fire({ ...item, id: deNs(item.id), depends_on: item.depends_on.map(deNs) }, ctx),
         reconcile: ex.reconcile.bind(ex),
       }]),
     );
@@ -97,6 +100,8 @@ export class AgoraOrchestrator {
       blockedBy: i.depends_on
         .filter((d) => byId.get(`${i.runId}:${d}`)?.status !== 'done')
         .map((d) => deNs(d)),
+      ...(i.resultRef !== undefined ? { resultRef: i.resultRef } : {}),
+      ...(i.manifestRef !== undefined ? { manifestRef: i.manifestRef } : {}),
     }));
   }
 }

@@ -6,7 +6,7 @@ import type { ItemState, Run, TerminalStatus } from './types.js';
  */
 export interface RunStateStore {
   ensureQueue(name: string, concurrency: number): void;
-  saveRun(run: Run, actor?: string): void;
+  saveRun(run: Run, actor?: string, submittedAt?: string): void;
   markReady(itemIds: string[]): void;
   setRunning(itemId: string, dispatchHash: string): void;
   setStatus(itemId: string, status: TerminalStatus, reason?: string): void;
@@ -21,5 +21,7 @@ export interface RunStateStore {
   getAttempts(itemId: string): number;      // absent reads as 0
   bumpAttempt(itemId: string): void;        // attempts += 1
   requeue(itemId: string, notBeforeMs: number): void; // status -> 'ready', nextAttemptAt = notBeforeMs
+  setResultRef(itemId: string, ref: string): void;    // persist opaque result artifact ref
+  setManifestRef(itemId: string, ref: string): void;  // persist opaque dispatch-manifest ref
   close(): void;
 }

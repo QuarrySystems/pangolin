@@ -8,8 +8,9 @@ import type {
   TaskExit,
   TaskHandle,
 } from '@quarry-systems/agora-core';
+import { buildDispatchRecordUri } from '@quarry-systems/agora-core';
 import { DispatchExecutor } from '../../src/executors/dispatch.js';
-import type { WorkItem } from '../../src/contracts/index.js';
+import type { WorkItem, FireContext } from '../../src/contracts/index.js';
 
 // ---------------------------------------------------------------------------
 // In-memory storage stub (copied from agora-client/test/dispatch.test.ts)
@@ -372,5 +373,269 @@ describe('DispatchExecutor', () => {
     resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
     await new Promise((r) => setImmediate(r));
     expect((await executor.reconcile(dispatchHash))?.status).toBe('done');
+  });
+
+  // -------------------------------------------------------------------------
+  // New tests for manifest-write (V1-D4)
+  // -------------------------------------------------------------------------
+
+  it('fire writes a content-addressed manifest and returns its ref', async () => {
+    const { compute, resolveExit } = makeDeferredCompute();
+    const storage = makeMemoryStorage();
+    storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
+    const client = new AgoraClient({
+      namespace: 'ns',
+      compute: { default: compute },
+      credentials: { default: makeCredentials() },
+      storage,
+      targets: { prod: { compute: 'default', credentials: 'default' } },
+    });
+    const executor = new DispatchExecutor({ client, target: 'prod', workerImage: 'img:v1' });
+
+    const ctx: FireContext = { runId: 'r1', actor: 'human:brett' };
+    const { dispatchHash, manifestRef } = await executor.fire(baseItem, ctx);
+
+    // manifestRef should be a pinned agora:// URI
+    expect(manifestRef).toMatch(/^agora:\/\/ns\/manifest\/[^/]+\/sha256:[0-9a-f]{64}$/);
+
+    // The stored blob should parse back as a manifest with our fields
+    const stored = JSON.parse(new TextDecoder().decode(await storage.get(manifestRef!)));
+    expect(stored.runId).toBe('r1');
+    expect(stored.executor).toBe('dispatch');
+    expect(stored.actor).toBe('human:brett');
+    expect(stored.executorManifest.workerImage).toBe('img:v1');
+
+    // Verify schemaVersion present
+    expect(stored.schemaVersion).toBe(1);
+
+    // dispatchHash still present
+    expect(dispatchHash).toMatch(/^[0-9a-f-]{36}$/);
+
+    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+  });
+
+  it('manifest does not contain secret values — only refs', async () => {
+    const fake = makeFakeStore();
+    const { compute, resolveExit } = makeDeferredCompute();
+    const storage = makeMemoryStorage();
+    storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
+    const client = new AgoraClient({
+      namespace: 'ns',
+      compute: { default: compute },
+      credentials: { default: makeCredentials() },
+      storage,
+      targets: { prod: { compute: 'default', credentials: 'default', secretStore: 'local' } },
+      secretStores: { local: fake.store },
+    });
+    const executor = new DispatchExecutor({
+      client,
+      target: 'prod',
+      workerImage: 'img:v1',
+      secrets: { MY_SECRET: { inline: 'super-secret-value' } },
+    });
+
+    const { manifestRef } = await executor.fire(baseItem, { runId: 'r1', actor: 'agent:x' });
+    expect(manifestRef).toBeDefined();
+
+    const storedJson = new TextDecoder().decode(await storage.get(manifestRef!));
+    // The actual secret value must not appear in the manifest
+    expect(storedJson).not.toContain('super-secret-value');
+    // The manifest should contain a ref (local-secret://)
+    expect(storedJson).toContain('local-secret://');
+
+    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+  });
+
+  it('fire without ctx uses empty strings and still returns manifestRef', async () => {
+    const { compute, resolveExit } = makeDeferredCompute();
+    const { executor, client } = makeSetup(compute);
+    const storage = (client as AgoraClient & { storage: ReturnType<typeof makeMemoryStorage> }).storage as ReturnType<typeof makeMemoryStorage>;
+
+    const { dispatchHash, manifestRef } = await executor.fire(baseItem);
+    expect(typeof dispatchHash).toBe('string');
+    expect(manifestRef).toMatch(/^agora:\/\//);
+
+    const stored = JSON.parse(new TextDecoder().decode(await storage.get(manifestRef!)));
+    expect(stored.runId).toBe('');
+    expect(stored.actor).toBe('');
+    expect(stored.submittedAt).toBeUndefined();
+
+    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+  });
+
+  it('storage put failure during manifest write is swallowed — fire returns dispatchHash without throw', async () => {
+    const { compute, resolveExit } = makeDeferredCompute();
+
+    // Build a storage that throws on put
+    const baseStorage = makeMemoryStorage();
+    baseStorage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
+    const throwingStorage: StorageProvider = {
+      ...baseStorage,
+      async put(_uri: string, _contents: Uint8Array) {
+        throw new Error('storage exploded');
+      },
+    };
+
+    const client = new AgoraClient({
+      namespace: 'ns',
+      compute: { default: compute },
+      credentials: { default: makeCredentials() },
+      storage: throwingStorage,
+      targets: { prod: { compute: 'default', credentials: 'default' } },
+    });
+    const executor = new DispatchExecutor({ client, target: 'prod', workerImage: 'img' });
+
+    // fire should not throw even though storage.put throws — the try-catch swallows the manifest error
+    const result = await executor.fire(baseItem, { runId: 'r2', actor: 'human:x' });
+
+    // dispatchHash is still returned
+    expect(result.dispatchHash).toMatch(/^[0-9a-f-]{36}$/);
+    // manifestRef is undefined because put failed
+    expect(result.manifestRef).toBeUndefined();
+
+    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+  });
+
+  it('reconcile of a done dispatch reads patchRef from sentinel and returns it as resultRef', async () => {
+    const { compute, resolveExit } = makeDeferredCompute();
+    const storage = makeMemoryStorage();
+    storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
+    const client = new AgoraClient({
+      namespace: 'ns',
+      compute: { default: compute },
+      credentials: { default: makeCredentials() },
+      storage,
+      targets: { prod: { compute: 'default', credentials: 'default' } },
+    });
+    const executor = new DispatchExecutor({ client, target: 'prod', workerImage: 'img' });
+
+    const { dispatchHash } = await executor.fire(baseItem);
+
+    // Seed the output sentinel at the dispatch-record URI
+    const sentinelUri = buildDispatchRecordUri('ns', dispatchHash, 'output.json');
+    const patchRef = 'agora://ns/artifact/out/sha256:' + 'a'.repeat(64);
+    await storage.put(sentinelUri, new TextEncoder().encode(JSON.stringify({ schemaVersion: 1, patchRef })));
+
+    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+    await new Promise((r) => setImmediate(r));
+
+    const res = await executor.reconcile(dispatchHash);
+    expect(res?.status).toBe('done');
+    expect(res?.resultRef).toBe(patchRef);
+  });
+
+  it('reconcile of a done dispatch with no sentinel yields resultRef undefined, no throw', async () => {
+    const { compute, resolveExit } = makeDeferredCompute();
+    const storage = makeMemoryStorage();
+    storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
+    const client = new AgoraClient({
+      namespace: 'ns',
+      compute: { default: compute },
+      credentials: { default: makeCredentials() },
+      storage,
+      targets: { prod: { compute: 'default', credentials: 'default' } },
+    });
+    const executor = new DispatchExecutor({ client, target: 'prod', workerImage: 'img' });
+
+    const { dispatchHash } = await executor.fire(baseItem);
+
+    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+    await new Promise((r) => setImmediate(r));
+
+    // reconcile should NOT throw and should return { status: 'done', resultRef: undefined }
+    const res = await executor.reconcile(dispatchHash);
+    expect(res?.status).toBe('done');
+    expect(res?.resultRef).toBeUndefined();
+  });
+
+  it('reconcile of a done dispatch with missing patchRef in sentinel yields resultRef undefined', async () => {
+    const { compute, resolveExit } = makeDeferredCompute();
+    const storage = makeMemoryStorage();
+    storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
+    const client = new AgoraClient({
+      namespace: 'ns',
+      compute: { default: compute },
+      credentials: { default: makeCredentials() },
+      storage,
+      targets: { prod: { compute: 'default', credentials: 'default' } },
+    });
+    const executor = new DispatchExecutor({ client, target: 'prod', workerImage: 'img' });
+
+    const { dispatchHash } = await executor.fire(baseItem);
+
+    // Sentinel with no patchRef field
+    const sentinelUri = buildDispatchRecordUri('ns', dispatchHash, 'output.json');
+    await storage.put(sentinelUri, new TextEncoder().encode(JSON.stringify({ schemaVersion: 1 })));
+
+    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+    await new Promise((r) => setImmediate(r));
+
+    const res = await executor.reconcile(dispatchHash);
+    expect(res?.status).toBe('done');
+    expect(res?.resultRef).toBeUndefined();
+  });
+
+  it('model best-effort: subagent with model field populates executorManifest.model.id', async () => {
+    const { compute, resolveExit } = makeDeferredCompute();
+    const storage = makeMemoryStorage();
+    // Seed a subagent that has a model field
+    storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's', model: 'claude-3-5-sonnet', capabilities: [] });
+    const client = new AgoraClient({
+      namespace: 'ns',
+      compute: { default: compute },
+      credentials: { default: makeCredentials() },
+      storage,
+      targets: { prod: { compute: 'default', credentials: 'default' } },
+    });
+    const executor = new DispatchExecutor({ client, target: 'prod', workerImage: 'img' });
+
+    const { manifestRef } = await executor.fire(baseItem, { runId: 'r1', actor: 'human:x' });
+    expect(manifestRef).toBeDefined();
+
+    const stored = JSON.parse(new TextDecoder().decode(await storage.get(manifestRef!)));
+    expect(stored.executorManifest.model.id).toBe('claude-3-5-sonnet');
+
+    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+  });
+
+  it('model best-effort: unreadable subagent blob yields model { id: empty string } without failing fire', async () => {
+    const { compute, resolveExit } = makeDeferredCompute();
+    // Use a storage where get throws for the subagent pinned URI but resolveLatest works.
+    // resolveModel catches the throw and returns { id: '', temperature: 0, maxTokens: 0 }.
+    // The manifest IS still written (put works) and manifestRef is set.
+    const storage = makeMemoryStorage();
+    storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
+    const origGet = storage.get.bind(storage);
+    const throwingGetStorage: StorageProvider = {
+      ...storage,
+      async get(uri: string) {
+        if (uri.includes('/subagent/s/sha256:s')) {
+          throw new Error('subagent blob missing');
+        }
+        return origGet(uri);
+      },
+    };
+    const client = new AgoraClient({
+      namespace: 'ns',
+      compute: { default: compute },
+      credentials: { default: makeCredentials() },
+      storage: throwingGetStorage,
+      targets: { prod: { compute: 'default', credentials: 'default' } },
+    });
+    const executor = new DispatchExecutor({ client, target: 'prod', workerImage: 'img' });
+
+    // fire should NOT throw — resolveModel catches the error and uses zero-model
+    const result = await executor.fire(baseItem, { runId: 'r1', actor: 'human:x' });
+
+    // dispatchHash is always returned
+    expect(result.dispatchHash).toMatch(/^[0-9a-f-]{36}$/);
+    // manifestRef may or may not be set (put works, so it should be set with zero model)
+    // The key invariant: fire returns without throwing
+    if (result.manifestRef) {
+      const stored = JSON.parse(new TextDecoder().decode(await storage.get(result.manifestRef)));
+      expect(stored.executorManifest.model.id).toBe('');
+    }
+
+    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
   });
 });

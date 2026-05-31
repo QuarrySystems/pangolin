@@ -42,6 +42,7 @@ export async function tick(
         store.requeue(it.id, now + backoff(store.getAttempts(it.id)));
       } else {
         store.setStatus(it.id, res.status, res.status === 'failed' ? 'executor reported failed' : undefined);
+        if (res.status === 'done' && res.resultRef) store.setResultRef(it.id, res.resultRef);
         store.releaseLocks(it.id);
       }
       reconciled++;
@@ -88,8 +89,11 @@ export async function tick(
       continue;
     }
     try {
-      const { dispatchHash } = await ex.fire(it);
+      const { dispatchHash, manifestRef } = await ex.fire(it, {
+        runId: it.runId, actor: it.actor, submittedAt: it.submittedAt,
+      });
       store.setRunning(it.id, dispatchHash);
+      if (manifestRef) store.setManifestRef(it.id, manifestRef);
       fired++;
     } catch (err) {
       store.releaseLocks(it.id);
