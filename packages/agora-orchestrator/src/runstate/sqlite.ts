@@ -19,6 +19,7 @@ interface ItemRow {
   resource_locks: string;
   status: RunStatus;
   dispatch_hash: string | null;
+  subagent_shape: string | null;
 }
 
 const SCHEMA = `
@@ -26,7 +27,7 @@ CREATE TABLE IF NOT EXISTS queues (name TEXT PRIMARY KEY, concurrency INTEGER NO
 CREATE TABLE IF NOT EXISTS items (
   id TEXT PRIMARY KEY, run_id TEXT NOT NULL, queue TEXT NOT NULL, executor TEXT NOT NULL,
   inputs TEXT NOT NULL, depends_on TEXT NOT NULL, resource_locks TEXT NOT NULL,
-  status TEXT NOT NULL, dispatch_hash TEXT
+  status TEXT NOT NULL, dispatch_hash TEXT, subagent_shape TEXT
 );
 CREATE TABLE IF NOT EXISTS locks (key TEXT PRIMARY KEY, item_id TEXT NOT NULL);
 `;
@@ -52,10 +53,11 @@ export class SqliteRunStateStore implements RunStateStore {
     const tx = this.db.transaction((r: Run) => {
       for (const it of r.items)
         this.db.prepare(
-          'INSERT INTO items(id,run_id,queue,executor,inputs,depends_on,resource_locks,status,dispatch_hash) VALUES(?,?,?,?,?,?,?,?,NULL)',
+          'INSERT INTO items(id,run_id,queue,executor,inputs,depends_on,resource_locks,status,dispatch_hash,subagent_shape) VALUES(?,?,?,?,?,?,?,?,NULL,?)',
         ).run(it.id, r.id, r.queue, it.executor,
               JSON.stringify(it.inputs), JSON.stringify(it.depends_on),
-              JSON.stringify(it.resourceLocks), 'pending');
+              JSON.stringify(it.resourceLocks), 'pending',
+              it.subagentShape ?? null);
     });
     tx(run);
   }
@@ -139,5 +141,6 @@ export class SqliteRunStateStore implements RunStateStore {
     resourceLocks: JSON.parse(r.resource_locks),
     status: r.status,
     dispatchHash: r.dispatch_hash ?? undefined,
+    subagentShape: r.subagent_shape ?? undefined,
   });
 }

@@ -155,4 +155,36 @@ describe('SqliteRunStateStore', () => {
     expect(s.queueConcurrency('nonexistent')).toBe(0);
     s.close();
   });
+
+  it('round-trips subagentShape: set value is preserved', () => {
+    const s = new SqliteRunStateStore();
+    const shapeRun: Run = {
+      id: 'r-shape',
+      queue: 'default',
+      items: [
+        { id: 'item-with-shape', executor: 'fake', inputs: {}, depends_on: [], resourceLocks: [], subagentShape: 'dev.code-edit' },
+      ],
+    };
+    s.saveRun(shapeRun);
+    const items = s.getItems('r-shape');
+    expect(items).toHaveLength(1);
+    expect(items[0].subagentShape).toBe('dev.code-edit');
+    s.close();
+  });
+
+  it('round-trips subagentShape: unset field comes back as undefined (not null)', () => {
+    const s = new SqliteRunStateStore();
+    const noShapeRun: Run = {
+      id: 'r-noshape',
+      queue: 'default',
+      items: [
+        { id: 'item-no-shape', executor: 'fake', inputs: {}, depends_on: [], resourceLocks: [] },
+      ],
+    };
+    s.saveRun(noShapeRun);
+    const items = s.getItems('r-noshape');
+    expect(items).toHaveLength(1);
+    expect(items[0].subagentShape).toBeUndefined();
+    s.close();
+  });
 });
