@@ -222,6 +222,7 @@ describe('AgoraOrchestrator + DispatchExecutor', () => {
       executors: { dispatch: executor },
       triggers: { manual: new ManualTrigger() },
       queues: { default: { concurrency: 5 } },
+      maxAttempts: 1,
     });
 
     const run: Run = {

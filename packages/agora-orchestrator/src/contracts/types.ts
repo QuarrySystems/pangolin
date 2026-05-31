@@ -35,6 +35,12 @@ export interface ItemState extends WorkItem {
   dispatchHash?: string;
   /** Set when status is failed/skipped: why it failed or was cascaded. */
   reason?: string;
+  /** Submitter identity (mechanism, not authz). */
+  actor?: string;
+  /** Retry counter; absent reads as 0. */
+  attempts?: number;
+  /** Epoch ms; the item is not fired before this (backoff gate). Absent === fire now. */
+  nextAttemptAt?: number;
 }
 
 /** Terminal-ish result for one item (skeleton — intents/signals/audit deferred). */

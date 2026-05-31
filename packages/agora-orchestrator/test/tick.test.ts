@@ -66,6 +66,16 @@ function makeMemStore(concurrency = 5): RunStateStore & { items: Map<string, Ite
     releaseLocks(itemId: string): void {
       for (const [k, v] of locks) { if (v === itemId) locks.delete(k); }
     },
+    getActor(id: string): string | undefined { return items.get(id)?.actor; },
+    getAttempts(id: string): number { return items.get(id)?.attempts ?? 0; },
+    bumpAttempt(id: string): void {
+      const it = items.get(id);
+      if (it) items.set(id, { ...it, attempts: (it.attempts ?? 0) + 1 });
+    },
+    requeue(id: string, notBeforeMs: number): void {
+      const it = items.get(id);
+      if (it) items.set(id, { ...it, status: 'ready', nextAttemptAt: notBeforeMs });
+    },
     close() { /* no-op */ },
   };
 }
@@ -404,5 +414,92 @@ describe('tick', () => {
     const badInputItem = store.getItems('rh3').find((i) => i.id === 'bad-input')!;
     expect(badInputItem.status).toBe('failed');
     expect(badInputItem.reason).toMatch(/schema|inputs/i);
+  });
+});
+
+// An executor that always reports `failed` on reconcile (drives the retry/cascade paths).
+function failingExecutor(): Executor {
+  return {
+    id: 'fail',
+    async fire(item) { return { dispatchHash: `h-${item.id}` }; },
+    async reconcile() { return { status: 'failed' as const }; },
+  };
+}
+
+describe('tick — retry with backoff', () => {
+  it('requeues a failed item (with attempts remaining) instead of failing it', async () => {
+    const store = new SqliteRunStateStore();
+    store.ensureQueue('default', 5);
+    store.saveRun({ id: 'rr1', queue: 'default', items: [
+      { id: 'a', executor: 'fail', inputs: {}, depends_on: [], resourceLocks: [] },
+    ] });
+    store.markReady(['a']);
+    const ex = failingExecutor();
+    await tick(store, { fail: ex }, 'default', undefined, { maxAttempts: 2, now: 1000 }); // fire a
+    await tick(store, { fail: ex }, 'default', undefined, { maxAttempts: 2, now: 1000 }); // reconcile -> failed -> requeue
+    const a = store.getItems('rr1').find((i) => i.id === 'a')!;
+    expect(a.status).toBe('ready');                 // requeued, not terminally failed
+    expect(a.attempts).toBe(1);
+    expect(a.nextAttemptAt).toBeGreaterThan(1000);  // backoff gate set in the future
+    store.close();
+  });
+
+  it('terminally fails an item once attempts are exhausted', async () => {
+    const store = new SqliteRunStateStore();
+    store.ensureQueue('default', 5);
+    store.saveRun({ id: 'rr2', queue: 'default', items: [
+      { id: 'a', executor: 'fail', inputs: {}, depends_on: [], resourceLocks: [] },
+    ] });
+    store.markReady(['a']);
+    const ex = failingExecutor();
+    await tick(store, { fail: ex }, 'default', undefined, { maxAttempts: 1, now: 1000 }); // fire
+    await tick(store, { fail: ex }, 'default', undefined, { maxAttempts: 1, now: 1000 }); // reconcile -> failed (terminal)
+    expect(store.getItems('rr2').find((i) => i.id === 'a')!.status).toBe('failed');
+    store.close();
+  });
+
+  it('does not fire a requeued item whose nextAttemptAt is still in the future', async () => {
+    const store = new SqliteRunStateStore();
+    store.ensureQueue('default', 5);
+    store.saveRun({ id: 'rr3', queue: 'default', items: [
+      { id: 'a', executor: 'fake', inputs: {}, depends_on: [], resourceLocks: [] },
+    ] });
+    store.markReady(['a']);
+    store.requeue('a', 9_999_999); // gate far in the future
+    const ex = fakeExecutor();
+    const t = await tick(store, { fake: ex }, 'default', undefined, { now: 1000 });
+    expect(t.fired).toBe(0);
+    store.close();
+  });
+
+  it('fires a requeued item whose nextAttemptAt has passed', async () => {
+    const store = new SqliteRunStateStore();
+    store.ensureQueue('default', 5);
+    store.saveRun({ id: 'rr4', queue: 'default', items: [
+      { id: 'a', executor: 'fake', inputs: {}, depends_on: [], resourceLocks: [] },
+    ] });
+    store.markReady(['a']);
+    store.requeue('a', 500); // gate in the past
+    const ex = fakeExecutor();
+    const t = await tick(store, { fake: ex }, 'default', undefined, { now: 1000 });
+    expect(t.fired).toBe(1);
+    store.close();
+  });
+
+  it('does NOT cascade dependents while a failed item still has retries left', async () => {
+    const store = new SqliteRunStateStore();
+    store.ensureQueue('default', 5);
+    store.saveRun({ id: 'rr5', queue: 'default', items: [
+      { id: 'a', executor: 'fail', inputs: {}, depends_on: [], resourceLocks: [] },
+      { id: 'b', executor: 'fail', inputs: {}, depends_on: ['a'], resourceLocks: [] },
+    ] });
+    store.markReady(['a']);
+    const ex = failingExecutor();
+    await tick(store, { fail: ex }, 'default', undefined, { maxAttempts: 2, now: 1000 }); // fire a
+    await tick(store, { fail: ex }, 'default', undefined, { maxAttempts: 2, now: 1000 }); // a fails -> requeued
+    const items = store.getItems('rr5');
+    expect(items.find((i) => i.id === 'a')!.status).toBe('ready');   // requeued
+    expect(items.find((i) => i.id === 'b')!.status).toBe('pending'); // NOT skipped
+    store.close();
   });
 });

@@ -11,3 +11,7 @@ export { DispatchExecutor } from './executors/dispatch.js';
 export type { DispatchExecutorOptions } from './executors/dispatch.js';
 export { PackRegistry } from './packs/registry.js';
 export { devPack, devCodeEdit, devVerify, devRegistry } from './packs/dev.js';
+export { MailboxSubmissionTransport } from './transport/storage-transport.js';
+export { LocalDirMailbox } from './mailbox/local-dir.js';
+export { serve } from './serve/driver.js';
+export type { ServeOptions } from './serve/driver.js';

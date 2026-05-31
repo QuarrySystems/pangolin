@@ -2,6 +2,36 @@ import { describe, it, expect } from 'vitest';
 import { SqliteRunStateStore } from '../src/runstate/sqlite.js';
 import type { Run } from '../src/contracts/index.js';
 
+describe('run-state metadata', () => {
+  it('stamps actor and starts attempts at zero', () => {
+    const s = new SqliteRunStateStore(); s.ensureQueue('default', 1);
+    s.saveRun({ id: 'r', queue: 'default', items: [
+      { id: 'a', executor: 'x', inputs: {}, depends_on: [], resourceLocks: [] } ] }, 'human:brett');
+    expect(s.getActor('a')).toBe('human:brett');
+    expect(s.getAttempts('a')).toBe(0);
+    s.bumpAttempt('a'); expect(s.getAttempts('a')).toBe(1);
+  });
+  it('round-trips an item saved without the new fields (backward compat)', () => {
+    const s = new SqliteRunStateStore(); s.ensureQueue('default', 1);
+    s.saveRun({ id: 'r', queue: 'default', items: [
+      { id: 'a', executor: 'x', inputs: {}, depends_on: [], resourceLocks: [] } ] }); // no actor
+    const item = s.getItems().find((i) => i.id === 'a')!;
+    expect(item.actor).toBeUndefined();
+    expect(item.attempts ?? 0).toBe(0);
+    expect(item.nextAttemptAt).toBeUndefined();
+  });
+  it('requeue sets status to ready and stamps nextAttemptAt', () => {
+    const s = new SqliteRunStateStore(); s.ensureQueue('default', 1);
+    s.saveRun({ id: 'r', queue: 'default', items: [
+      { id: 'a', executor: 'x', inputs: {}, depends_on: [], resourceLocks: [] } ] });
+    const t = Date.now() + 5000;
+    s.requeue('a', t);
+    const item = s.getItems().find((i) => i.id === 'a')!;
+    expect(item.status).toBe('ready');
+    expect(item.nextAttemptAt).toBe(t);
+  });
+});
+
 const run: Run = { id: 'r1', queue: 'default', items: [
   { id: 'a', executor: 'fake', inputs: {}, depends_on: [], resourceLocks: ['f.ts'] },
 ] };
