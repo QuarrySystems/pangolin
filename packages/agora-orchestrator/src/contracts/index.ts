@@ -7,3 +7,4 @@ export * from './subagent-shape.js';
 export * from './effect-policy.js';
 export * from './submission-transport.js';
 export * from './mailbox.js';
+export * from './manifest.js';

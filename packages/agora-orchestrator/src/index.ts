@@ -15,3 +15,6 @@ export { MailboxSubmissionTransport } from './transport/storage-transport.js';
 export { LocalDirMailbox } from './mailbox/local-dir.js';
 export { serve } from './serve/driver.js';
 export type { ServeOptions } from './serve/driver.js';
+export { buildManifest } from './audit/manifest.js';
+export type { BuildManifestInput } from './audit/manifest.js';
+export type { DispatchManifest, DispatchExecutorManifest, ManifestSignature } from './contracts/manifest.js';
