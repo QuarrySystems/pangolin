@@ -5,8 +5,13 @@ import type { MailboxStore } from '../contracts/index.js';
 /**
  * Characters illegal in Windows filenames that must be percent-encoded in each
  * path segment. We leave '/' alone — it stays the directory delimiter.
+ *
+ * '%' itself is included so that the encoding is injective: a literal '%3A' in
+ * a key is stored as '%253A', which cannot collide with ':' stored as '%3A'.
+ * Without '%' in this set, decodeURIComponent in decodeSegment would also throw
+ * on a malformed '%XX' sequence when round-tripping through list().
  */
-const ENCODE_RE = /[<>:"|?*\x00-\x1f\\]/g;
+const ENCODE_RE = /[%<>:"|?*\x00-\x1f\\]/g;
 
 function encodeSegment(segment: string): string {
   return segment.replace(ENCODE_RE, (ch) => {
@@ -72,7 +77,12 @@ export class LocalDirMailbox implements MailboxStore {
     const tmpPath = `${target}.${this.counter++}.tmp`;
     await mkdir(dirname(target), { recursive: true });
     await writeFile(tmpPath, bytes);
-    await rename(tmpPath, target);
+    try {
+      await rename(tmpPath, target);
+    } catch (err) {
+      await unlink(tmpPath).catch(() => {});
+      throw err;
+    }
   }
 
   async get(key: string): Promise<Uint8Array | null> {
@@ -87,10 +97,15 @@ export class LocalDirMailbox implements MailboxStore {
   }
 
   async list(prefix: string): Promise<string[]> {
+    // Normalise the prefix so matching is segment-boundary-safe:
+    // a key matches iff it IS the prefix exactly OR it starts with
+    // the prefix followed by '/'.  This prevents 'out' from matching
+    // 'outbox/...' when the caller intended a directory scope.
+    const dirPrefix = prefix.endsWith('/') ? prefix : prefix + '/';
     const results: string[] = [];
     for await (const filePath of walkFiles(this.root)) {
       const logicalKey = pathToKey(this.root, filePath);
-      if (logicalKey.startsWith(prefix)) {
+      if (logicalKey === prefix || logicalKey.startsWith(dirPrefix)) {
         results.push(logicalKey);
       }
     }
