@@ -1,6 +1,9 @@
 import type { AgoraClient, InFlightDispatch } from '@quarry-systems/agora-client';
 import type { DispatchWork } from '@quarry-systems/agora-core';
-import type { Executor, ExecutionResult, WorkItem } from '../contracts/index.js';
+import { buildAgoraUri, buildDispatchRecordUri, computeContentHash } from '@quarry-systems/agora-core';
+import type { Executor, ExecutionResult, FireContext, WorkItem } from '../contracts/index.js';
+import { buildManifest } from '../audit/manifest.js';
+import type { DispatchExecutorManifest } from '../contracts/manifest.js';
 
 export interface DispatchExecutorOptions {
   /** A fully-wired AgoraClient (namespace, compute, credentials, storage). */
@@ -35,11 +38,14 @@ export class DispatchExecutor implements Executor {
 
   constructor(private readonly opts: DispatchExecutorOptions) {}
 
-  async fire(item: WorkItem): Promise<{ dispatchHash: string }> {
+  async fire(item: WorkItem, ctx?: FireContext): Promise<{ dispatchHash: string; manifestRef?: string }> {
     const subagent = item.inputs.subagent;
     if (typeof subagent !== 'string' || subagent.length === 0) {
       throw new Error(`DispatchExecutor: WorkItem '${item.id}' is missing a string inputs.subagent`);
     }
+    // Container starts HERE. Anything that throws BEFORE this is a clean pre-start
+    // failure. Anything AFTER must NOT throw, or tick fails the item without
+    // recording the dispatchHash and the running container is orphaned.
     const flight = await this.opts.client.dispatch.fire({
       subagent,
       env: item.inputs.env as string | string[] | undefined,
@@ -55,7 +61,40 @@ export class DispatchExecutor implements Executor {
       (error) => { entry.settled = { kind: 'error', error }; },
     );
     this.inflight.set(flight.dispatchId, entry);
-    return { dispatchHash: flight.dispatchId };
+
+    let manifestRef: string | undefined;
+    try {
+      const r = flight.resolved; // { subagent, capabilities, env, secretRefs, workerImage }
+      const model = await this.resolveModel(r.subagent);
+      const executorManifest: DispatchExecutorManifest = {
+        subagent: { name: r.subagent.name, contentHash: r.subagent.contentHash },
+        capabilities: r.capabilities.map((c) => ({ name: c.name, contentHash: c.contentHash })),
+        env: r.env.map((e) => ({ name: e.name, contentHash: e.contentHash })),
+        workerImage: r.workerImage,
+        model,
+      };
+      const { bytes } = buildManifest({
+        runId: ctx?.runId ?? '',
+        itemId: item.id,
+        executor: this.id,
+        executorManifest,
+        secretRefs: Object.values(r.secretRefs),
+        actor: ctx?.actor ?? '',
+        firedAt: new Date().toISOString(),
+        submittedAt: ctx?.submittedAt,
+      });
+      // Content-address: compute hash FIRST, build pinned URI, put to it (mirrors
+      // subagent-register.ts — round-trips on real LocalStorageProvider AND on the
+      // in-memory test stub which stores by exact URI).
+      const ns = this.opts.client.namespace;
+      const contentHash = computeContentHash(bytes);
+      manifestRef = buildAgoraUri({ namespace: ns, type: 'manifest', name: flight.dispatchId, contentHash });
+      await this.opts.client.storage.put(manifestRef, bytes);
+    } catch {
+      manifestRef = undefined; // best-effort; do NOT rethrow (container already running)
+    }
+
+    return { dispatchHash: flight.dispatchId, manifestRef };
   }
 
   async reconcile(dispatchHash: string): Promise<ExecutionResult | null> {
@@ -68,6 +107,52 @@ export class DispatchExecutor implements Executor {
     }
     const result = await entry.inflight.reconcile(entry.settled.exit);
     entry.inflight.cleanup();
-    return { status: result.exitCode === 0 ? 'done' : 'failed', output: result };
+    const status = result.exitCode === 0 ? 'done' : 'failed';
+    if (status === 'done') {
+      const resultRef = await this.readPatchRef(dispatchHash);
+      return { status, output: result, resultRef };
+    }
+    return { status, output: result };
+  }
+
+  /**
+   * Best-effort: read the patchRef from the dispatch output sentinel.
+   * NEVER throws — any failure returns undefined.
+   */
+  private async readPatchRef(dispatchId: string): Promise<string | undefined> {
+    try {
+      const ns = this.opts.client.namespace;
+      const bytes = await this.opts.client.storage.get(
+        buildDispatchRecordUri(ns, dispatchId, 'output.json'),
+      );
+      const sentinel = JSON.parse(new TextDecoder().decode(bytes));
+      return typeof sentinel.patchRef === 'string' ? sentinel.patchRef : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Best-effort: fetch the subagent blob and extract the model field.
+   * NEVER throws — any failure returns the zero-value model.
+   */
+  private async resolveModel(
+    subagentRef: { name: string; contentHash: string },
+  ): Promise<{ id: string; temperature: number; maxTokens: number }> {
+    const zero = { id: '', temperature: 0, maxTokens: 0 };
+    try {
+      const ns = this.opts.client.namespace;
+      const uri = buildAgoraUri({
+        namespace: ns,
+        type: 'subagent',
+        name: subagentRef.name,
+        contentHash: subagentRef.contentHash,
+      });
+      const bytes = await this.opts.client.storage.get(uri);
+      const def = JSON.parse(new TextDecoder().decode(bytes)) as { model?: unknown };
+      return { id: typeof def.model === 'string' ? def.model : '', temperature: 0, maxTokens: 0 };
+    } catch {
+      return zero;
+    }
   }
 }
