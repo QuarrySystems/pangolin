@@ -2,7 +2,7 @@
 import type { Executor, RunStateStore } from '../contracts/index.js';
 import { effectTierPolicy } from '../contracts/effect-policy.js';
 import type { PackRegistry } from '../packs/registry.js';
-import { computeNewlyReady } from './dep-resolver.js';
+import { computeNewlyReady, computeSkipped } from './dep-resolver.js';
 import { selectRunnable } from './lock-manager.js';
 
 /** Advance one queue by a single tick. Returns counts for observability/tests. */
@@ -22,7 +22,11 @@ export async function tick(
   let reconciled = 0;
   for (const it of store.getItems().filter((i) => i.queue === queue && i.status === 'running')) {
     const ex = executors[it.executor];
-    if (!ex) throw new Error(`tick: no executor registered for '${it.executor}'`);
+    if (!ex) {
+      store.setStatus(it.id, 'failed', `no executor registered for '${it.executor}'`);
+      store.releaseLocks(it.id);
+      continue;
+    }
     const res = await ex.reconcile(it.dispatchHash!);
     if (res) {
       store.setStatus(it.id, res.status);
@@ -48,13 +52,13 @@ export async function tick(
     if (it.subagentShape) {
       const shape = packs?.get(it.subagentShape);
       if (!shape) {
-        store.setStatus(it.id, 'failed');
+        store.setStatus(it.id, 'failed', `unknown subagentShape '${it.subagentShape}'`);
         store.releaseLocks(it.id);
         continue;
       }
       const parsed = shape.inputSchema.safeParse(it.inputs);
       if (!parsed.success) {
-        store.setStatus(it.id, 'failed');
+        store.setStatus(it.id, 'failed', `inputs failed ${shape.id} schema`);
         store.releaseLocks(it.id);
         continue;
       }
@@ -62,10 +66,25 @@ export async function tick(
     }
     if (!store.acquireLocks(it.id, it.resourceLocks)) continue;
     const ex = executors[it.executor];
-    if (!ex) throw new Error(`tick: no executor registered for '${it.executor}'`);
-    const { dispatchHash } = await ex.fire(it);
-    store.setRunning(it.id, dispatchHash);
-    fired++;
+    if (!ex) {
+      store.setStatus(it.id, 'failed', `no executor registered for '${it.executor}'`);
+      store.releaseLocks(it.id);
+      continue;
+    }
+    try {
+      const { dispatchHash } = await ex.fire(it);
+      store.setRunning(it.id, dispatchHash);
+      fired++;
+    } catch (err) {
+      store.releaseLocks(it.id);
+      store.setStatus(it.id, 'failed', `fire failed: ${(err as Error).message}`);
+    }
   }
+
+  // 4. Cascade: mark pending dependents of failed/skipped items as skipped.
+  for (const id of computeSkipped(queueItems())) {
+    store.setStatus(id, 'skipped', 'dependency failed or skipped');
+  }
+
   return { readied: newlyReady.length + moreReady.length, fired, reconciled };
 }
