@@ -5,9 +5,9 @@ created: 2026-05-30
 
 ```mermaid
 flowchart TD
-    task-cascade-skip["task-cascade-skip: failure cascade + settle<br/>files: agora-orchestrator/src/engine/dep-resolver.ts +2 more"]
-    task-status-reason["task-status-reason: setStatus(reason)<br/>files: agora-orchestrator/src/contracts/runstate-store.ts +3 more"]
-    task-tick-hardening["task-tick-hardening: fail-item + try/catch + cascade<br/>files: agora-orchestrator/src/engine/tick.ts +1 more"]
+    task-cascade-skip["task-cascade-skip: failure cascade + settle<br/>files: agora-orchestrator/src/engine/dep-resolver.ts +2 more"]:::done
+    task-status-reason["task-status-reason: setStatus(reason)<br/>files: agora-orchestrator/src/contracts/runstate-store.ts +3 more"]:::done
+    task-tick-hardening["task-tick-hardening: fail-item + try/catch + cascade<br/>files: agora-orchestrator/src/engine/tick.ts +1 more"]:::done
 
     task-cascade-skip --> task-tick-hardening
     task-status-reason --> task-tick-hardening
@@ -67,7 +67,7 @@ files:
   - packages/agora-orchestrator/src/engine/dep-resolver.ts
   - packages/agora-orchestrator/src/index.ts
   - packages/agora-orchestrator/test/dep-resolver.test.ts
-status: pending
+status: done
 ```
 
 Add the failure-cascade + run-settle helpers next to `computeNewlyReady`. A
@@ -136,7 +136,7 @@ files:
   - packages/agora-orchestrator/src/contracts/types.ts
   - packages/agora-orchestrator/src/runstate/sqlite.ts
   - packages/agora-orchestrator/test/runstate-sqlite.test.ts
-status: pending
+status: done
 ```
 
 Make terminal status diagnosable: `setStatus` gains an OPTIONAL `reason`, persisted
@@ -187,7 +187,7 @@ depends_on: [task-cascade-skip, task-status-reason]
 files:
   - packages/agora-orchestrator/src/engine/tick.ts
   - packages/agora-orchestrator/test/tick.test.ts
-status: pending
+status: done
 ```
 
 Make the tick survive every scenario the pressure-test broke: a missing executor or
