@@ -107,7 +107,7 @@ describe('offload-runner pressure tests', () => {
     expect(iv('verify').start).toBeGreaterThanOrEqual(Math.max(...[...edits, ...shared].map((e) => iv(e.id).end)) - 1); // verify ran after deps
   });
 
-  it('SCENARIO 2: flaky item recovers, always-failing item exhausts attempts and holds its dependent, independent branch still completes', async () => {
+  it('SCENARIO 2: flaky item recovers, always-failing item exhausts attempts and cascades skip to its dependent, independent branch still completes', async () => {
     const root = tmp('agora-pt2-'); const obs = newObs();
     const store = new SqliteRunStateStore(join(root, 'state.db'));
     const transport = new StorageSubmissionTransport(fileStorage(join(root, 'store')));
@@ -127,7 +127,7 @@ describe('offload-runner pressure tests', () => {
     const p = serve({ orchestrator: orch, transport, tickIntervalMs: 5, signal: ac.signal, now: () => Date.now() });
     await driveUntil(() => {
       const s = Object.fromEntries(orch.getStatus().map((x) => [x.id, x.status]));
-      return s.flaky === 'done' && s.doomed === 'failed' && s.indep === 'done';
+      return s.flaky === 'done' && s.doomed === 'failed' && s.indep === 'done' && s['after-doomed'] === 'skipped';
     });
     ac.abort(); await p;
     const s = Object.fromEntries(orch.getStatus().map((x) => [x.id, x.status]));
@@ -138,12 +138,12 @@ describe('offload-runner pressure tests', () => {
     expect(s.doomed).toBe('failed');               // exhausted maxAttempts
     expect(obs.fireCounts.doomed).toBe(2);         // 2 attempts then terminal
     expect(s.indep).toBe('done');                  // independent branch unaffected (keep-going)
-    expect(s['after-doomed']).not.toBe('done');    // dependent of a failed item never ran
+    expect(s['after-doomed']).toBe('skipped');      // skip-cascade: dependent of a failed item is skipped
     // eslint-disable-next-line no-console
     console.log('[S2] dependent-of-failed final status =', s['after-doomed']);
   });
 
-  it('SCENARIO 3: survives a crash + restart on the same DB and storage without re-running completed work', async () => {
+  it('SCENARIO 3: survives a crash + restart on the same DB and storage; recoverStranded re-dispatches the in-flight item and the run completes without re-running pre-crash completed work', async () => {
     const root = tmp('agora-pt3-'); const dbPath = join(root, 'state.db'); const storeDir = join(root, 'store');
     // t1 is deliberately long so it is GUARANTEED in-flight at the crash; t2 depends on it.
     const run: Run = { id: 'run3', queue: 'default', items: [
@@ -174,8 +174,8 @@ describe('offload-runner pressure tests', () => {
     const reIngested = await transport2.pollInbox();    // must be empty: run already claimed by process 1
     const ac2 = new AbortController();
     const p2 = serve({ orchestrator: orch2, transport: transport2, tickIntervalMs: 5, signal: ac2.signal });
-    // pre-hardening, t1 stays 'running' and t2 'pending' forever, so this never settles -> times out (expected)
-    await driveUntil(() => orch2.getStatus().every((s) => s.status !== 'pending' && s.status !== 'ready'), 1200);
+    // recoverStranded (called at serve startup) re-dispatches t1; the run now completes fully
+    await driveUntil(() => orch2.getStatus().every((s) => s.status === 'done'), 2500);
     ac2.abort(); await p2;
     const final = Object.fromEntries(orch2.getStatus().map((s) => [s.id, s.status]));
     const rerunCompleted = midDone.filter((id) => (obs2.fireCounts[id] ?? 0) > 0);  // completed-in-p1 items refired in p2?
@@ -183,10 +183,9 @@ describe('offload-runner pressure tests', () => {
     console.log('[S3] doneInProcess1=', midDone, 'reIngestedOnRestart=', reIngested.length, 'recompletedWork=', rerunCompleted, 'FINAL=', final);
     expect(reIngested.length).toBe(0);          // idempotent ingest: no duplicate submission
     expect(midDone).toContain('t0');            // pre-crash completion is durable
-    expect(rerunCompleted).toEqual([]);         // no completed item was re-executed
-    // PRE-HARDENING LIMITATION (task-pressure-proof flips these once recoverStranded lands):
-    expect(final.t1).toBe('running');           // item in-flight at crash is stranded
-    expect(Object.values(final).every((s) => s === 'done')).toBe(false); // run does NOT complete
+    expect(rerunCompleted).toEqual([]);         // recoverStranded only touches 'running' items; t0 (done pre-crash) is NOT re-run
+    expect(final.t1).toBe('done');              // recoverStranded re-dispatched t1; it completed after restart
+    expect(Object.values(final).every((s) => s === 'done')).toBe(true); // run completes fully after crash+restart
     store2.close();
   });
 });
