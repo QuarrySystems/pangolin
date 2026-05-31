@@ -242,4 +242,29 @@ describe('SqliteRunStateStore', () => {
     expect(items[0].reason).toBeUndefined();
     s.close();
   });
+
+  it('persists and reads back result_ref, manifest_ref and submitted_at', () => {
+    const store = new SqliteRunStateStore();
+    store.ensureQueue('default', 1);
+    store.saveRun({ id: 'r1', queue: 'default', items: [
+      { id: 'a', executor: 'x', inputs: {}, depends_on: [], resourceLocks: [] }] },
+      'human:brett', '2026-05-31T00:00:00.000Z');
+    store.setResultRef('a', 'agora://ns/artifact/a/sha256:deadbeef');
+    store.setManifestRef('a', 'agora://ns/manifest/a/sha256:cafe');
+    const it = store.getItems('r1').find((i) => i.id === 'a')!;
+    expect(it.resultRef).toBe('agora://ns/artifact/a/sha256:deadbeef');
+    expect(it.manifestRef).toBe('agora://ns/manifest/a/sha256:cafe');
+    expect(it.submittedAt).toBe('2026-05-31T00:00:00.000Z');
+  });
+
+  it('saveRun without submittedAt stores NULL — reads back as undefined', () => {
+    const store = new SqliteRunStateStore();
+    store.ensureQueue('default', 1);
+    store.saveRun({ id: 'r-nosub', queue: 'default', items: [
+      { id: 'b', executor: 'x', inputs: {}, depends_on: [], resourceLocks: [] }] });
+    const it = store.getItems('r-nosub').find((i) => i.id === 'b')!;
+    expect(it.submittedAt).toBeUndefined();
+    expect(it.resultRef).toBeUndefined();
+    expect(it.manifestRef).toBeUndefined();
+  });
 });
