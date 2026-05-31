@@ -76,6 +76,17 @@ describe('AgoraOrchestrator', () => {
   });
 });
 
+describe('submitRun idempotency', () => {
+  it('submitRun is idempotent for an already-ingested run', () => {
+    const store = new SqliteRunStateStore();
+    const orch = new AgoraOrchestrator({ store, executors: {}, triggers: { manual: new ManualTrigger() }, queues: { default: { concurrency: 1 } } });
+    const run = { id: 'r', queue: 'default', items: [ { id: 'a', executor: 'x', inputs: {}, depends_on: [], resourceLocks: [] } ] };
+    orch.submitRun(run, 'human:b');
+    orch.submitRun(run, 'human:b');           // re-delivery
+    expect(store.getItems('r').length).toBe(1);   // not duplicated
+  });
+});
+
 describe('recoverStranded', () => {
   it('requeues a running item to ready with bumped attempts and nextAttemptAt=now, returns count 1', () => {
     const store = new SqliteRunStateStore();

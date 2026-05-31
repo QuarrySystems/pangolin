@@ -35,6 +35,7 @@ export class AgoraOrchestrator {
     for (const [name, q] of Object.entries(opts.queues)) this.store.ensureQueue(name, q.concurrency);
   }
   submitRun(run: Run, actor?: string): string {
+    if (this.store.getItems(run.id).length > 0) return run.id; // already ingested — idempotent no-op
     const trigger = this.triggers['manual'];
     if (!trigger) throw new Error("AgoraOrchestrator: no 'manual' trigger registered");
     this.store.saveRun(run, actor);
