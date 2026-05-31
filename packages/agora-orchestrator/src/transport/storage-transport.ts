@@ -7,9 +7,10 @@ const dec = (b: Uint8Array) => JSON.parse(new TextDecoder().decode(b));
 export class StorageSubmissionTransport implements SubmissionTransport {
   constructor(private readonly storage: StorageProvider, private readonly ns = 'orchestrator') {}
 
+  private seq = 0;
   private inbox = (id: string) => `${this.ns}/submissions/${id}.json`;
   private claimed = (id: string) => `${this.ns}/submissions/${id}.claimed`;
-  private outbox = (id: string, at: string) => `${this.ns}/outbox/${id}/${at}.json`;
+  private outbox = (id: string) => `${this.ns}/outbox/${id}/${String(++this.seq).padStart(12, '0')}.json`;
 
   async submit(env: SubmissionEnvelope): Promise<string> {
     try {
@@ -34,11 +35,13 @@ export class StorageSubmissionTransport implements SubmissionTransport {
   }
 
   async publish(rec: OutboxRecord): Promise<void> {
-    await this.storage.put(this.outbox(rec.runId, rec.at), enc(rec));
+    await this.storage.put(this.outbox(rec.runId), enc(rec));
   }
 
   async readOutbox(runId: string): Promise<OutboxRecord[]> {
     const entries = await this.storage.list(`${this.ns}/outbox/${runId}/`);
+    // Sort by URI so lexicographic order of the padded counter gives publish order.
+    entries.sort((a, b) => a.uri.localeCompare(b.uri));
     const out: OutboxRecord[] = [];
     for (const e of entries) {
       const body = await this.storage.get(e.uri);
