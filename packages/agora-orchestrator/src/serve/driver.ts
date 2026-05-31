@@ -38,8 +38,13 @@ export async function serve(opts: ServeOptions): Promise<void> {
   while (!opts.signal?.aborted) {
     try {
       for (const env of await opts.transport.pollInbox()) {
-        opts.orchestrator.submitRun(env.run, env.actor);
-        await opts.transport.ack(env.run.id);      // consume it
+        try {
+          opts.orchestrator.submitRun(env.run, env.actor);
+          await opts.transport.ack(env.run.id);      // consume it
+        } catch (err) {
+          opts.onError?.(err);
+          await opts.transport.deadLetter(env.run.id);   // poison -> dead-letter, NOT infinite re-poll
+        }
       }
       await opts.orchestrator.tick(queue);
 

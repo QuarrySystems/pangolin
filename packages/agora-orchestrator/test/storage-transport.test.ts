@@ -111,4 +111,31 @@ describe('mailbox submission transport', () => {
     expect(outboxPuts[0]).toMatch(/^[\w.\-/]+$/);
     expect(outboxPuts[0]).not.toContain(':');
   });
+
+  it('deadLetter moves submission to dead/ prefix and removes from inbox', async () => {
+    const mbox = memMailbox();
+    const t = new MailboxSubmissionTransport(mbox);
+    await t.submit({ run: { id: 'r-dead', queue: 'default', items: [] }, actor: 'human:b', submittedAt: '2026-05-30T00:00:00Z' });
+    // Confirm it's in inbox before dead-lettering
+    const before = await t.pollInbox();
+    expect(before.map((e) => e.run.id)).toContain('r-dead');
+    // Dead-letter it
+    await t.deadLetter('r-dead');
+    // Inbox should no longer return it
+    const after = await t.pollInbox();
+    expect(after.map((e) => e.run.id)).not.toContain('r-dead');
+    // dead/<runId>.json key must exist in the mailbox
+    const deadBytes = await mbox.get('orchestrator/dead/r-dead.json');
+    expect(deadBytes).not.toBeNull();
+  });
+
+  it('deadLetter is a no-op when the inbox entry does not exist (idempotent)', async () => {
+    const mbox = memMailbox();
+    const t = new MailboxSubmissionTransport(mbox);
+    // Should not throw even if no inbox entry exists
+    await expect(t.deadLetter('nonexistent')).resolves.toBeUndefined();
+    // And the dead key should not have been written (get returns null)
+    const deadBytes = await mbox.get('orchestrator/dead/nonexistent.json');
+    expect(deadBytes).toBeNull();
+  });
 });

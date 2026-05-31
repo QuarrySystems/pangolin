@@ -4,13 +4,15 @@ import type { SubmissionEnvelope, SubmissionTransport, OutboxRecord } from '../s
 import { serve } from '../src/serve/driver.js';
 import { immediateExecutor } from './fixtures/executors.js';
 
-function makeFakeTransport(envelopes: SubmissionEnvelope[]): SubmissionTransport & { published: OutboxRecord[]; ackedIds: string[] } {
+function makeFakeTransport(envelopes: SubmissionEnvelope[]): SubmissionTransport & { published: OutboxRecord[]; ackedIds: string[]; deadLettered: string[] } {
   let called = false;
   const published: OutboxRecord[] = [];
   const ackedIds: string[] = [];
+  const deadLettered: string[] = [];
   return {
     published,
     ackedIds,
+    deadLettered,
     async submit() { return ''; },
     async pollInbox() {
       if (!called) {
@@ -20,6 +22,7 @@ function makeFakeTransport(envelopes: SubmissionEnvelope[]): SubmissionTransport
       return [];
     },
     async ack(runId) { ackedIds.push(runId); },
+    async deadLetter(runId) { deadLettered.push(runId); },
     async publish(rec) { published.push(rec); },
     async readOutbox() { return []; },
   };
@@ -34,6 +37,7 @@ function makeThrowingTransport(): SubmissionTransport & { published: OutboxRecor
     async submit() { return ''; },
     async pollInbox() { return []; },
     async ack(_runId) { /* no-op stub */ },
+    async deadLetter(_runId) { /* no-op stub */ },
     async publish(rec) {
       publishCallCount++;
       // Access via closure so the outer ref stays in sync
@@ -43,6 +47,29 @@ function makeThrowingTransport(): SubmissionTransport & { published: OutboxRecor
       }
       published.push(rec);
     },
+    async readOutbox() { return []; },
+  };
+}
+
+/** Transport that returns one poisoned envelope then never again, records dead-letter calls. */
+function makePoisonTransport(env: SubmissionEnvelope): SubmissionTransport & { deadLettered: string[]; ackedIds: string[] } {
+  let called = false;
+  const deadLettered: string[] = [];
+  const ackedIds: string[] = [];
+  return {
+    deadLettered,
+    ackedIds,
+    async submit() { return ''; },
+    async pollInbox() {
+      if (!called) {
+        called = true;
+        return [env];
+      }
+      return [];
+    },
+    async ack(runId) { ackedIds.push(runId); },
+    async deadLetter(runId) { deadLettered.push(runId); },
+    async publish() { /* no-op */ },
     async readOutbox() { return []; },
   };
 }
@@ -373,6 +400,103 @@ describe('serve driver', () => {
 
     // ack must have been called exactly once with the run's id
     expect(transport.ackedIds).toEqual(['run-ack']);
+
+    store.close();
+  });
+
+  it('poison submitRun: dead-letters the envelope and invokes onError, does NOT ack', async () => {
+    // An orchestrator that rejects every submitRun
+    const store = new SqliteRunStateStore();
+    const orch = new AgoraOrchestrator({
+      store,
+      executors: { x: immediateExecutor() },
+      triggers: { manual: new ManualTrigger() },
+      queues: { default: { concurrency: 5 } },
+    });
+    // Override submitRun to always throw
+    const origSubmit = orch.submitRun.bind(orch);
+    let firstCall = true;
+    orch.submitRun = (...args) => {
+      if (firstCall) {
+        firstCall = false;
+        throw new Error('ingest failed: unknown queue');
+      }
+      return origSubmit(...args);
+    };
+
+    const poisonRun = {
+      id: 'run-poison',
+      queue: 'default',
+      items: [{ id: 'p1', executor: 'x', inputs: {}, depends_on: [], resourceLocks: [] }],
+    };
+    const poisonEnv: SubmissionEnvelope = { run: poisonRun, actor: 'human:test', submittedAt: new Date().toISOString() };
+    const transport = makePoisonTransport(poisonEnv);
+
+    const errors: unknown[] = [];
+    const ac = new AbortController();
+
+    const servePromise = serve({
+      orchestrator: orch,
+      transport,
+      queue: 'default',
+      tickIntervalMs: 5,
+      signal: ac.signal,
+      onError: (err) => errors.push(err),
+    });
+
+    // Wait a couple ticks so the first poll is processed
+    await new Promise((r) => setTimeout(r, 80));
+    ac.abort();
+    await servePromise;
+
+    // Must have been dead-lettered, NOT acked
+    expect(transport.deadLettered).toContain('run-poison');
+    expect(transport.ackedIds).not.toContain('run-poison');
+    // onError must have been called
+    expect(errors.length).toBeGreaterThan(0);
+    expect((errors[0] as Error).message).toBe('ingest failed: unknown queue');
+
+    store.close();
+  });
+
+  it('healthy submission still ingests and acks when a previous run was dead-lettered', async () => {
+    const store = new SqliteRunStateStore();
+    const orch = new AgoraOrchestrator({
+      store,
+      executors: { x: immediateExecutor() },
+      triggers: { manual: new ManualTrigger() },
+      queues: { default: { concurrency: 5 } },
+    });
+
+    const goodRun = {
+      id: 'run-good',
+      queue: 'default',
+      items: [{ id: 'g1', executor: 'x', inputs: {}, depends_on: [], resourceLocks: [] }],
+    };
+    const goodEnv: SubmissionEnvelope = { run: goodRun, actor: 'human:test', submittedAt: new Date().toISOString() };
+    const transport = makeFakeTransport([goodEnv]);
+
+    const ac = new AbortController();
+    const servePromise = serve({
+      orchestrator: orch,
+      transport,
+      queue: 'default',
+      tickIntervalMs: 5,
+      signal: ac.signal,
+    });
+
+    // Wait until item is done
+    const start = Date.now();
+    while (Date.now() - start < 2000) {
+      const statuses = orch.getStatus('run-good');
+      if (statuses.find((s) => s.id === 'g1')?.status === 'done') break;
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    ac.abort();
+    await servePromise;
+
+    expect(transport.ackedIds).toContain('run-good');
+    expect(transport.deadLettered).not.toContain('run-good');
 
     store.close();
   });

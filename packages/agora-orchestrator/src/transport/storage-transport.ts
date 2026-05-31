@@ -7,6 +7,7 @@ export class MailboxSubmissionTransport implements SubmissionTransport {
   private seq = 0;
   constructor(private readonly mbox: MailboxStore, private readonly ns = 'orchestrator') {}
   private inbox = (id: string) => `${this.ns}/submissions/${id}.json`;
+  private dead = (id: string) => `${this.ns}/dead/${id}.json`;
   private outbox = (id: string) => `${this.ns}/outbox/${id}/${String(++this.seq).padStart(12, '0')}.json`;
   async submit(env: SubmissionEnvelope): Promise<string> {
     try { await this.mbox.put(this.inbox(env.run.id), enc(env)); return env.run.id; }
@@ -19,6 +20,11 @@ export class MailboxSubmissionTransport implements SubmissionTransport {
     return out;
   }
   async ack(runId: string): Promise<void> { await this.mbox.delete(this.inbox(runId)); }
+  async deadLetter(runId: string): Promise<void> {
+    const b = await this.mbox.get(this.inbox(runId));
+    if (b) await this.mbox.put(this.dead(runId), b);
+    await this.mbox.delete(this.inbox(runId));
+  }
   async publish(rec: OutboxRecord): Promise<void> { await this.mbox.put(this.outbox(rec.runId), enc(rec)); }
   async readOutbox(runId: string): Promise<OutboxRecord[]> {
     const keys = (await this.mbox.list(`${this.ns}/outbox/${runId}/`)).sort();
