@@ -54,6 +54,7 @@ export default defineConfig({
         {
           label: 'Explanation',
           items: [
+            { slug: 'explanation/project-status-roadmap' },
             { slug: 'explanation/architecture-overview' },
             { slug: 'explanation/how-offload-runs' },
             { slug: 'explanation/sandboxing-ai-agents' },
