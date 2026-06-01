@@ -34,9 +34,9 @@ export function attachOrchCmd(program: Command, ctx: OrchCapableCliContext): voi
     console.log(JSON.stringify(rec ?? null, null, 2));
   });
 
-  o.command('watch <run-id>').option('--interval <ms>', 'poll interval', '2000').action(async (runId, opts) => {
+  o.command('watch <run-id>').action(async (runId) => {
     const api = new OperationsApi(await ctx.getOrchContext());
-    for await (const rec of api.watch(runId, { intervalMs: Number(opts.interval) })) {
+    for await (const rec of api.watch(runId)) {
       console.log(JSON.stringify(rec));   // render each status update until terminal
     }
   });
@@ -53,7 +53,7 @@ export function attachOrchCmd(program: Command, ctx: OrchCapableCliContext): voi
     if (!bundle.report.intact) process.exitCode = 1;   // audit failure → nonzero exit
   });
 
-  o.command('serve').option('--queue <name>').action(async () => {
+  o.command('serve').action(async () => {
     const oc = await ctx.getOrchContext();
     if (!oc.runService) throw new Error('agora orch serve: agora.config `orch` export provides no runService');
     const ac = new AbortController();
