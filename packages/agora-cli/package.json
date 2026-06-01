@@ -1,6 +1,7 @@
 {
   "name": "@quarry-systems/agora-cli",
   "version": "0.0.0",
+  "license": "BUSL-1.1",
   "private": true,
   "description": "CLI for agora — implementation lands in DAG 2.",
   "main": "dist/index.js",

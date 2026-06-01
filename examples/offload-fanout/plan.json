@@ -1,0 +1,34 @@
+{
+  "id": "fanout-1",
+  "queue": "default",
+  "items": [
+    {
+      "id": "edit-alpha",
+      "executor": "dispatch",
+      "inputs": { "subagent": "code-edit", "workerInput": { "file": "alpha.ts" } },
+      "depends_on": [],
+      "resourceLocks": ["fixture/alpha.ts"]
+    },
+    {
+      "id": "edit-beta",
+      "executor": "dispatch",
+      "inputs": { "subagent": "code-edit", "workerInput": { "file": "beta.ts" } },
+      "depends_on": [],
+      "resourceLocks": ["fixture/beta.ts"]
+    },
+    {
+      "id": "edit-shared",
+      "executor": "dispatch",
+      "inputs": { "subagent": "code-edit", "workerInput": { "file": "shared.ts" } },
+      "depends_on": [],
+      "resourceLocks": ["fixture/shared.ts"]
+    },
+    {
+      "id": "verify",
+      "executor": "dispatch",
+      "inputs": { "subagent": "verify" },
+      "depends_on": ["edit-alpha", "edit-beta", "edit-shared"],
+      "resourceLocks": []
+    }
+  ]
+}

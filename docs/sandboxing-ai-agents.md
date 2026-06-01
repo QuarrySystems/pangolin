@@ -53,4 +53,6 @@ This is v0.1. Today agora enforces access by **grant-scoping + operator-only con
 
 ## If you run agents
 
+agora is **source-available** under the Business Source License 1.1 (BSL) — self-host it, read it, build on it; you just can't resell it as a hosted service. (BSL ≠ OSI-approved free software — see LICENSING.md for the exact terms.)
+
 If you're running autonomous or long-running agents and you've felt the *"this thing has way too much access and I can't prove what it did"* itch — I'd genuinely like to set agora up around your agent, for free, and hear where it falls short. [contact / repo]

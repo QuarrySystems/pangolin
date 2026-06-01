@@ -1,6 +1,7 @@
 {
   "name": "agora",
   "version": "0.0.0",
+  "license": "BUSL-1.1",
   "private": true,
   "description": "Agora monorepo (implementation in progress).",
   "packageManager": "pnpm@9.15.4",

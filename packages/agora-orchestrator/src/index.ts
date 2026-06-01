@@ -21,3 +21,8 @@ export type { DispatchManifest, DispatchExecutorManifest, ManifestSignature } fr
 export { OperationsApi } from './operations-api.js';
 export type { OperationsApiDeps } from './operations-api.js';
 export { assembleBundle } from './audit/bundle.js';
+export { AuditLog } from './audit/audit-log.js';
+export { LocalAnchor, S3ObjectLockAnchor } from './audit/anchor.js';
+export type { S3LockClient } from './audit/anchor.js';
+export { createLocalSigner, NoneSigner, verifyEd25519 } from './audit/signer.js';
+export { verify } from './audit/verify.js';

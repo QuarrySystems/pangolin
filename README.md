@@ -1,12 +1,22 @@
 # agora
 
+> Secure, deterministic, auditable execution of AI agents — submit a DAG of tasks, fan out safely across an isolated, credential-sealed worker pool, and get back a reviewable patch artifact and a verifiable audit trail of exactly what ran — tamper-detecting by default, tamper-evident at the external-immutable (S3 Object Lock) tier.
+
 A registry-backed dispatch SDK for sub-agent compute workloads. Integrators
 register **capabilities**, **subagents**, and **env bundles** once at deploy
 time, then **dispatch** against them at run time — the same code path
 running locally against Docker as in production against Fargate + S3.
 Provider seams (compute, credentials, storage, secret store, channel,
 result sink) keep the registry shape and dispatch contract identical
-across environments.
+across environments. The orchestrator layer adds a DAG planner on top:
+disjoint file-locks fan out in parallel; shared locks serialize; each
+finished task yields a reviewable patch (`result_ref`); the whole run
+produces a tamper-evident audit trail — verifiable at the
+external-immutable tier (S3 Object Lock), tamper-detecting on the local
+default path.
+
+agora is **source-available** under the Business Source License 1.1 — see
+[LICENSE](./LICENSE) and [LICENSING.md](./LICENSING.md).
 
 ## Install
 
@@ -46,6 +56,27 @@ console.log(result.stdout);
 The full runnable version (with mkdtemp + cleanup, comments, and a
 Fargate + S3 production variant) lives at
 [`examples/hello-world/`](examples/hello-world/).
+
+## Offload
+
+The orchestrator surfaces as the `agora orch` subcommand. A `plan.json`
+describes a DAG of agent tasks with `depends_on`, resource `locks`, and
+per-task subagent/env/target bindings. Disjoint file-locks fan out in
+parallel; shared locks serialize automatically. Each finished task drops a
+reviewable patch artifact (`result_ref`). The run produces a tamper-evident
+audit bundle — verifiable at the external-immutable tier (S3 Object Lock),
+tamper-detecting on the local path.
+
+```sh
+agora orch serve              # long-running driver (sole DB owner)
+agora orch submit plan.json   # non-blocking; prints a run id
+agora orch watch <run-id>     # follow the run to completion
+agora orch audit <run-id>     # exportable evidence bundle (verifies; names the guarantee tier)
+```
+
+See [`examples/offload-fanout/`](examples/offload-fanout/) for the runnable
+demo — a three-task fan-out plan that exercises parallel locks, patch
+artifacts, and the audit command end-to-end.
 
 ## What's in this repo
 
@@ -188,4 +219,5 @@ pnpm -r run build       # build every package
 
 ## License
 
-See [`LICENSE`](LICENSE).
+agora is **source-available** under the Business Source License 1.1 — see
+[LICENSE](./LICENSE) and [LICENSING.md](./LICENSING.md).
