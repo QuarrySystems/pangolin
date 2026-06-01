@@ -85,6 +85,21 @@ three edits, so the orchestrator holds it back until every edit reaches `done` â
 it is the DAG gate. For the full field-by-field shape, see the
 [plan.json reference](/agora/reference/plan-json/).
 
+```mermaid
+flowchart TD
+  alpha["edit-alpha<br/>lock: fixture/alpha.ts"]
+  beta["edit-beta<br/>lock: fixture/beta.ts"]
+  shared["edit-shared<br/>lock: fixture/shared.ts"]
+  verify["verify<br/>(no locks)"]
+  alpha --> verify
+  beta --> verify
+  shared --> verify
+```
+
+The three `edit-*` nodes have disjoint `resourceLocks`, so they fan out in
+parallel (gated only by the queue's `concurrency: 2`); `verify` `depends_on` all
+three and holds no locks, so it serializes after every edit reaches `done`.
+
 ## Run it
 
 ### 1. Start the daemon

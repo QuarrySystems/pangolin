@@ -42,6 +42,28 @@ The assembled `AuditBundle` the CLI emits carries the manifests, the audit log
 values themselves), and a `VerificationReport` that names the anchor and the
 guarantee tier.
 
+The whole pipeline — from hash-linked entries to the tier the anchor decides —
+looks like this:
+
+```mermaid
+flowchart TD
+  e0["entry 0<br/>entryHash = sha256(canon ‖ prevHash='')"]
+  e1["entry 1<br/>entryHash = sha256(canon ‖ prevHash)"]
+  e2["entry n<br/>entryHash = sha256(canon ‖ prevHash)"]
+  e0 --> e1 --> e2
+  e2 --> root["Merkle root<br/>(merkleRoot over entryHash leaves)"]
+  root --> sig["ed25519 signature<br/>(signer signs the root)"]
+  sig --> anchor{"anchor.guarantee"}
+  anchor -->|"LocalAnchor<br/>guarantee = detect (rank 0)"| local["claim: tamper-detecting<br/>(default — root in same store as log)"]
+  anchor -->|"S3ObjectLockAnchor<br/>guarantee = external-immutable (rank 1)"| s3["claim: tamper-evident<br/>(root in S3 Object Lock COMPLIANCE)"]
+  anchor -.->|"witnessed (rank 2)<br/>reserved — no WitnessAnchor ships"| witness["(not implemented)"]
+```
+
+The `claim` is never asserted by the anchor directly: `verify` derives
+`tamper-evident` only when `GUARANTEE_RANK[g] >= GUARANTEE_RANK['external-immutable']`
+**and** every check passed; any failure collapses the claim back to
+`tamper-detecting`, so the local tier is never labelled tamper-evident.
+
 ## What verification actually checks
 
 `verify(runId, …)` does not trust a stored verdict; it recomputes everything and

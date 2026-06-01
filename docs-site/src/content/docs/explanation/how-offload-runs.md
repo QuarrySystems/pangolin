@@ -114,6 +114,32 @@ concurrent dispatches without holding a thread per item, and it is the seam that
 makes local→remote a config swap: the executor decides *how* a dispatch is fired
 and polled.
 
+Pulling the four phases together, a single item walks the `RunStatus` lattice
+(`pending → ready → running` then a terminal status) like this:
+
+```mermaid
+stateDiagram-v2
+  [*] --> pending
+  pending --> ready: deps all done<br/>(computeNewlyReady)
+  pending --> skipped: a dep failed/skipped/cancelled<br/>(computeSkipped cascade)
+  ready --> running: fire() — lock-compatible<br/>& slot free & nextAttemptAt ≤ now
+  running --> done: reconcile() → done<br/>(release locks, record resultRef)
+  running --> ready: reconcile() → failed<br/>& attempts+1 < maxAttempts<br/>requeue at now + backoff(n)
+  running --> failed: reconcile() → failed<br/>& attempts exhausted
+  ready --> cancelled: cancel
+  pending --> cancelled: cancel
+  done --> [*]
+  failed --> [*]
+  skipped --> [*]
+  cancelled --> [*]
+```
+
+The `running → ready` edge is the retry loop: a failed reconcile with attempts
+remaining releases locks and requeues behind the `nextAttemptAt` backoff gate
+(`backoff(n) = 1000 * 2 ** n` ms); only when `attempts + 1 < maxAttempts` is
+false does the item go terminally `failed` and let the next tick's cascade
+`skipped`-mark its dependents.
+
 ### Retry, skip-cascade, and settling
 
 A `failed` reconcile with attempts remaining (default `maxAttempts: 2`) does not go

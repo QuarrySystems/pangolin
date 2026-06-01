@@ -63,6 +63,36 @@ the orchestrator can attribute failures.
 The vocabulary is intentionally closed. Future kinds would require an ADR
 amendment (see [ADR-0004 — lifecycle vocabulary closed at six](/agora/explanation/decisions/0004-lifecycle-vocabulary-closed-at-six/)).
 
+Ordered across the worker's steps, the six events and the four
+`dispatch.failed` reason branch points look like this:
+
+```mermaid
+stateDiagram-v2
+  [*] --> dispatch_accepted: orchestrator validated names + resolved refs
+  dispatch_accepted --> dispatch_started: step 5 — worker booted, adapter loaded
+  dispatch_started --> dispatch_finished: step 14 — adapter exit 0, no sentinel
+  dispatch_started --> dispatch_needs_input: step 13 — valid needs_input sentinel
+  dispatch_started --> dispatch_cancelled: cancelled by caller
+  dispatch_started --> dispatch_failed: reason → (below)
+  state dispatch_failed {
+    [*] --> integrity_failed: step 3 — bundle sha256 mismatch / overlay
+    [*] --> fetch_failed: step 4 / 7 — secret ref resolution failed
+    [*] --> worker_failed: step 1b/2/9/13 — storage/adapter/setup/sentinel
+    [*] --> provider_failed: step 11 — runtime adapter exited non-zero, no sentinel
+  }
+  dispatch_finished --> [*]
+  dispatch_needs_input --> [*]
+  dispatch_cancelled --> [*]
+  dispatch_failed --> [*]
+```
+
+The diagram follows the code (`packages/agora-worker/src/entrypoint.ts`):
+`fetch-failed` covers both the step-4 callback-HMAC-key resolution and the
+step-7 env-bundle secret resolution, and `worker-failed` is the catch-all for
+several infra steps (storage construction 1b, adapter load 2, setup-script 9,
+and a malformed/oversized needs_input sentinel 13) — the single-step mappings in
+the table above are the most common case for each reason, not the only one.
+
 ## What `dispatch.failed.reason` means
 
 | Reason | Maps to | What it means |

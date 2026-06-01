@@ -44,13 +44,31 @@ shipped in #24).
   remain a contract, not yet a feature.
 - **Compliance & audit controls (the edge)** — signed dispatch manifest,
   Merkle-rooted audit log with a pluggable `AuditAnchor` tamper-evidence seam,
-  actor identity on every operation, `agora orch audit` evidence export, and
-  encryption-at-rest by default. The claim is **"compliance-ready," never
-  "compliant" or "certified."**
+  actor identity on every operation, and `agora orch audit` evidence export.
+  **Encryption-at-rest on S3 writes is agora-set** — `S3StorageProvider` takes an
+  `encryption` option to set server-side encryption (SSE-S3, or customer-managed
+  SSE-KMS via `{ mode: 'aws:kms', kmsKeyId }`); when unset it inherits the bucket
+  default (no-downgrade). Other at-rest layers — the SQLite run-state volume and
+  staged secrets — remain **substrate-provided** (encrypted EBS/EFS). The claim is
+  **"compliance-ready," never "compliant" or "certified."**
 - **Headline demo** — [`examples/offload-fanout`](examples/offload-fanout/):
   one `submit` exercising locks + deps + concurrency + isolation + patch escape,
   producing a verifiable audit bundle.
 - **BSL packaging** — root `LICENSE`, `BUSL-1.1` in every package, `LICENSING.md`.
+- **Typed-subagent substrate (scaffolded, not yet operational)** — the
+  `SubagentShape` contract, the `PackRegistry`, construction-time shape
+  validation, and the `dev` pack's `dev.code-edit` / `dev.verify` shapes ship as
+  code; the engine resolves a `WorkItem.subagentShape` and validates its `inputs`
+  against the shape's schema. **It is not yet dispatchable** — the dev shapes carry
+  a placeholder worker-image digest and their `outputSchema` is declared but not
+  enforced. Making it runnable is V1.1 work (below). Today, V1 runs **plain
+  registered subagents** named in `WorkItem.inputs`.
+- **Effect-tier policy (computed, not enforced)** — the `EffectTier` vocabulary
+  (`pure` / `read-impure` / `write-impure`) *and* the `effectTierPolicy()`
+  derivation (`cacheable` / `needsSnapshot` / `gated`) ship as code, and the engine
+  computes the policy for each item — but the result is currently **discarded**
+  (`tick.ts`: `void effectTierPolicy(…)`, `// TODO(PR6)`). Nothing caches, snapshots,
+  or gates on it yet. Acting on it is V1.1 (below).
 
 ### Known gap in V1
 
@@ -74,22 +92,33 @@ V1 ships.
   `serve` + manual `submit` already delivers *unattended* offload (submit once,
   walk away); `cron` adds *recurring*. **This is the first item to pull into
   V1.1.**
-- **Full typed output** — `outputSchema` validation, `output` data products,
-  `intents`, `signals` (the complete `output.json` contract).
+- **Operationalize the `dev` pack** — the `dev.code-edit` / `dev.verify` shapes and
+  the `PackRegistry` already exist in code (see "Now"), but the shapes are **not
+  dispatchable yet**: pin the real worker-image digest (currently a `PLACEHOLDER`)
+  and enforce each shape's `outputSchema` via `.agora/output.json`.
+- **Full typed output (enforcement)** — the worker **already writes**
+  `.agora/output.json` (a fixed `{schemaVersion, patchRef, summary}` sentinel) and
+  the executor reads `patchRef` from it to surface `result_ref` — that path is live.
+  Deferred: validating the sentinel against each shape's `outputSchema`, and the
+  richer `output` / `intents` / `signals` products (the types exist; nothing
+  enforces or consumes them yet).
 - **The autonomous-PR layer** — `Intent` / `IntentInterpreter`, the `dev.open-pr`
   interpreter, the auto-merge-test-only / human-approve policy, and the CLI
-  `approve` verb. This is the "lean-runner cut" deferred from V1.
-- **The `dev` pack** — `code-edit` / `verify` subagent shapes. (V1 names plain
-  registered subagents in `WorkItem.inputs`.)
+  `approve` verb. The `Intent` *type* exists; no interpreter ships yet. This is the
+  "lean-runner cut" deferred from V1.
 - **Cost accounting / budget enforcement.**
-- **Effect-tier enforcement** — the vocabulary already exists as a typed property;
-  V1.1 makes policy read it.
+- **Effect-tier enforcement** — the vocabulary and the `effectTierPolicy()`
+  derivation already ship and are computed per item (see "Now"), but the result is
+  discarded. V1.1 makes the engine *act* on it: cache `pure` work, snapshot live
+  state before `read-impure`, gate `write-impure` intents through interpreter policy.
 - **`Authorizer` seam** — an implementor-filled authorization policy. agora ships
   the chokepoint (the operations API) and identity primitives (`actor`, the
   client/service privilege split); it never owns roles. V1 is single-operator
   ("whoever launched").
-- **Compliance deepening** — customer-managed keys (BYOK/KMS), full role-based
-  RBAC, automated retention/purge policy, SIEM/log-export integrations, and a
+- **Compliance deepening** — extend customer-managed encryption **beyond S3
+  objects** (S3 SSE/SSE-KMS already ships; deferred: envelope-encrypted staged
+  secrets + encrypted run-state), full role-based RBAC, automated retention/purge
+  policy, SIEM/log-export integrations, and a
   **Bedrock-backed `RuntimeAdapter`** (keeps the model call inside a customer's
   AWS BAA boundary). All additive via existing seams. The SOC2 audit / HIPAA risk
   assessment themselves are organizational process, not software.

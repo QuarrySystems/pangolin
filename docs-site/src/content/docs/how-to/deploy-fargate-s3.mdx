@@ -89,6 +89,11 @@ override) is set on the `S3Client` you inject via `client`. Object Lock on the
 artifact bucket, if you want it, is bucket-level AWS configuration that the
 provider neither requires nor manages — content-addressed blobs are already
 dedup-keyed by hash, but immutability there is your bucket policy, not agora's.
+
+Server-side **encryption**, however, *is* set by the provider when you pass the
+`encryption` option (`{ mode: 'AES256' }` or customer-managed
+`{ mode: 'aws:kms', kmsKeyId }`) — see the config below. Omit it to inherit the
+bucket default (no-downgrade).
 </Aside>
 
 **The tamper-evidence tier is a separate seam.** Object Lock that agora actively
@@ -179,6 +184,10 @@ const client = new AgoraClient({
     bucket: 'my-org-agora-artifacts',
     client: s3,
     // prefix: 'agora',   // optional
+    // Set server-side encryption on every object agora writes. Omit to inherit
+    // the bucket default (SSE-S3, on by default since 2023). For customer-managed
+    // keys: encryption: { mode: 'aws:kms', kmsKeyId: 'arn:aws:kms:...:key/...' }
+    encryption: { mode: 'AES256' },
   }),
   targets: { prod: { compute: 'fargate', credentials: 'aws' } },
   resultSink: new StdoutResultSink(),
