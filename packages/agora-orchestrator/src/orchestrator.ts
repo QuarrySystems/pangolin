@@ -1,6 +1,7 @@
 // packages/agora-orchestrator/src/orchestrator.ts
 import type { Executor, ItemState, Run, RunStateStore, Trigger } from './contracts/index.js';
 import type { PackRegistry } from './packs/registry.js';
+import type { AuditLog } from './audit/audit-log.js';
 import { tick } from './engine/tick.js';
 
 /** Namespace separator — U+001F UNIT SEPARATOR (not a valid item-id char in practice). */
@@ -19,6 +20,7 @@ export interface AgoraOrchestratorOptions {
   defaultQueue?: string; // defaults to 'default'
   maxAttempts?: number; // defaults to 2 (spec §4)
   packs?: PackRegistry;
+  auditLog?: AuditLog;
 }
 
 /** method -> privilege tag (mechanism for the §10.6 CLI/MCP split; surfaces land later). */
@@ -31,6 +33,8 @@ export interface StatusItem {
   resultRef?: string; manifestRef?: string;
 }
 
+const TERMINAL_STATUSES = new Set(['done', 'failed', 'skipped']);
+
 export class AgoraOrchestrator {
   private readonly store: RunStateStore;
   private readonly executors: Record<string, Executor>;
@@ -38,6 +42,7 @@ export class AgoraOrchestrator {
   private readonly defaultQueue: string;
   private readonly maxAttempts: number;
   private readonly packs: PackRegistry | undefined;
+  private readonly auditLog: AuditLog | undefined;
   constructor(opts: AgoraOrchestratorOptions) {
     this.store = opts.store;
     this.executors = opts.executors;
@@ -45,6 +50,7 @@ export class AgoraOrchestrator {
     this.defaultQueue = opts.defaultQueue ?? 'default';
     this.maxAttempts = opts.maxAttempts ?? 2;
     this.packs = opts.packs;
+    this.auditLog = opts.auditLog;
     if (!opts.queues[this.defaultQueue]) throw new Error(`AgoraOrchestrator: default queue '${this.defaultQueue}' not configured`);
     for (const [name, q] of Object.entries(opts.queues)) this.store.ensureQueue(name, q.concurrency);
   }
@@ -64,6 +70,7 @@ export class AgoraOrchestrator {
     };
     this.store.saveRun(nsRun, actor, submittedAt);
     this.store.markReady(trigger.initialReady(nsRun));
+    this.auditLog?.append({ kind: 'run.submitted', runId: run.id, actor, at: new Date().toISOString() });
     return run.id;
   }
   async tick(queue?: string) {
@@ -76,7 +83,32 @@ export class AgoraOrchestrator {
         reconcile: ex.reconcile.bind(ex),
       }]),
     );
-    return tick(this.store, wrappedExecutors, queue ?? this.defaultQueue, this.packs, { maxAttempts: this.maxAttempts });
+    const q = queue ?? this.defaultQueue;
+    const result = await tick(this.store, wrappedExecutors, q, this.packs, {
+      maxAttempts: this.maxAttempts,
+      auditLog: this.auditLog,
+      denamespace: deNs,
+    });
+
+    // Seal any run whose all items are now terminal and whose epoch has not yet been sealed.
+    if (this.auditLog) {
+      const allItems = this.store.getItems();
+      // Collect distinct runIds present in this queue.
+      const runIds = new Set(allItems.filter((i) => i.queue === q).map((i) => i.runId));
+      const at = new Date().toISOString();
+      for (const runId of runIds) {
+        // Check the seal guard first (avoids getItems call when already sealed).
+        const auditStore = this.store as unknown as { getAuditRoot(epochId: string): unknown };
+        if (typeof auditStore.getAuditRoot === 'function' && auditStore.getAuditRoot(runId) !== undefined) continue;
+        // All items for this run (across all queues — a run may span queues in theory, but in practice it's one queue).
+        const runItems = allItems.filter((i) => i.runId === runId);
+        if (runItems.length > 0 && runItems.every((i) => TERMINAL_STATUSES.has(i.status))) {
+          this.auditLog.append({ kind: 'run.completed', runId, at });
+          await this.auditLog.sealEpoch(runId);
+        }
+      }
+    }
+    return result;
   }
   /** Crash recovery: re-ready items left `running` by a crashed process so the run can progress.
    *  A stranded dispatch can't be reconciled by a fresh executor, so we treat it as a consumed
