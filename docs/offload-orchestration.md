@@ -243,6 +243,7 @@ AWS BAA boundary (the Bedrock `RuntimeAdapter` is additive, deferred).
 
 ## See also
 
+- [Architecture overview](architecture-overview.md) — one rendered diagram of the whole agora process (this orchestrated path shown alongside single `dispatch`, the sandbox, and the audit spine).
 - [`examples/offload-fanout/`](../examples/offload-fanout) — the runnable §7 demo.
 - [Orchestrator architecture spec](superpowers/specs/2026-05-28-agora-orchestrator-design.md) — registries, queues/deps/locks, the operations-API consolidation.
 - [Offload V1 delivery spec](superpowers/specs/2026-05-29-agora-offload-v1-design.md) — the shipped V1 slice, the audit/compliance edge, and the honesty constraints.

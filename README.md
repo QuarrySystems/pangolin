@@ -143,6 +143,13 @@ Extension + deployment:
 
 ## Architecture
 
+> For the **end-to-end runtime process** (register → CLI/MCP surfaces + the
+> §10.6 privilege boundary → `dispatch` vs `orch` → worker sandbox → patch escape
+> → tamper-evident audit), see the
+> [Architecture overview](docs/architecture-overview.md) — one rendered diagram
+> of the whole flow. The graph below is the complementary **package dependency**
+> view.
+
 The package dependency graph (§8 of the spec). `agora-core` is the
 types-only sink; every arrow flows toward it:
 
