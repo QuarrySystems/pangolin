@@ -12,22 +12,32 @@
 //   agora_subagents_list     → client.subagent.list()
 //   agora_envs_list          → client.env.list()
 //
+// Plus three CLIENT orchestrator tools (pure translators over OperationsApi):
+//
+//   agora_orchestrator_submit → orch.submit(plan, actor)
+//   agora_orchestrator_status → orch.status(runId)
+//   agora_orchestrator_watch  → orch.watch(runId, { signal }) with bounded wait
+//
 // Deliberately ABSENT from this surface (deploy-time privileged operations
-// excluded by §7.7):
+// excluded by §7.7, and privileged/service/CLI-only orch operations):
 //   - any `agora_*_register`
 //   - any `agora_*_assign`
+//   - agora_orchestrator_cancel (privileged)
+//   - agora_orchestrator_audit  (service-only)
+//   - agora_orchestrator_serve  (CLI-only)
 // The CI check in `task-ci-mcp-tool-allowlist` enforces this architecturally;
 // the names in `AGORA_TOOL_NAMES` are load-bearing for that check.
 
 import type { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import type { AgoraClient } from '@quarry-systems/agora-client';
+import type { OperationsApi, Run } from '@quarry-systems/agora-orchestrator';
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 
 /**
- * The exact six tool names this server exposes, in declaration order.
+ * The exact nine tool names this server exposes, in declaration order.
  * Frozen `as const` so downstream code (and the CI allowlist check) can
  * rely on the literal tuple shape.
  */
@@ -38,9 +48,23 @@ export const AGORA_TOOL_NAMES = [
   'agora_capabilities_list',
   'agora_subagents_list',
   'agora_envs_list',
+  'agora_orchestrator_submit',
+  'agora_orchestrator_status',
+  'agora_orchestrator_watch',
 ] as const;
 
 export type AgoraToolName = (typeof AGORA_TOOL_NAMES)[number];
+
+/**
+ * Maps each orchestrator tool name to its OperationsApi method name.
+ * The CI gate intersects this with PRIVILEGE to verify only client-side
+ * orch tools are exposed. Only orch tools need entries here.
+ */
+export const AGORA_TOOL_METHODS: Record<string, string> = {
+  agora_orchestrator_submit: 'submit',
+  agora_orchestrator_status: 'status',
+  agora_orchestrator_watch: 'watch',
+};
 
 /**
  * Tool descriptor list returned from `tools/list`. Each entry carries a
@@ -181,16 +205,83 @@ const TOOL_DESCRIPTORS = [
       additionalProperties: false,
     },
   },
+  {
+    name: 'agora_orchestrator_submit',
+    description:
+      'Submit a Run plan to the orchestrator. Returns the run id string. ' +
+      'Requires the `orch` export in agora.config to be configured.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        plan: {
+          type: 'object',
+          description: 'The Run plan object (id, queue, items[]).',
+        },
+        actor: {
+          type: 'string',
+          description: 'Submitter identity string. Defaults to "agent:mcp" if omitted.',
+        },
+      },
+      required: ['plan'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'agora_orchestrator_status',
+    description:
+      'Return the latest status OutboxRecord for a run id. ' +
+      'Requires the `orch` export in agora.config to be configured.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        runId: {
+          type: 'string',
+          description: 'The run id to query.',
+        },
+      },
+      required: ['runId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'agora_orchestrator_watch',
+    description:
+      'Poll and wait for a run to reach a terminal state. Returns the last OutboxRecord seen. ' +
+      'Bounded by timeoutMs (default 25000ms). ' +
+      'Requires the `orch` export in agora.config to be configured.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        runId: {
+          type: 'string',
+          description: 'The run id to watch.',
+        },
+        timeoutMs: {
+          type: 'number',
+          description: 'Maximum milliseconds to wait. Defaults to 25000.',
+        },
+      },
+      required: ['runId'],
+      additionalProperties: false,
+    },
+  },
 ];
 
+const ORCH_NOT_CONFIGURED =
+  'orchestrator surface not configured (no `orch` export in agora.config)';
+
 /**
- * Register the six run-time agora tools on `server`, wiring each to the
- * matching `AgoraClient` method. Errors thrown by client methods are caught
- * and returned as `{ content, isError: true }` responses per the MCP SDK
- * contract — we surface `err.message` only, never `err.stack`, so internal
- * paths and trace frames do not leak to the orchestrator.
+ * Register the nine run-time agora tools on `server`, wiring each to the
+ * matching `AgoraClient` method or `OperationsApi` method. Errors thrown by
+ * client methods are caught and returned as `{ content, isError: true }`
+ * responses per the MCP SDK contract — we surface `err.message` only, never
+ * `err.stack`, so internal paths and trace frames do not leak to the
+ * orchestrator.
+ *
+ * The optional third parameter `orch` wires the three orchestrator tools.
+ * When absent, those tools return a clear not-configured isError response.
  */
-export function registerAgoraTools(server: Server, client: AgoraClient): void {
+export function registerAgoraTools(server: Server, client: AgoraClient, orch?: OperationsApi): void {
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: TOOL_DESCRIPTORS,
   }));
@@ -243,6 +334,67 @@ export function registerAgoraTools(server: Server, client: AgoraClient): void {
           const result = await client.env.list();
           return {
             content: [{ type: 'text', text: JSON.stringify(result) }],
+          };
+        }
+        case 'agora_orchestrator_submit': {
+          if (!orch) {
+            return {
+              content: [{ type: 'text', text: ORCH_NOT_CONFIGURED }],
+              isError: true,
+            };
+          }
+          const runId = await orch.submit(argsObj.plan as Run, (argsObj.actor as string) ?? 'agent:mcp');
+          return {
+            content: [{ type: 'text', text: runId }],
+          };
+        }
+        case 'agora_orchestrator_status': {
+          if (!orch) {
+            return {
+              content: [{ type: 'text', text: ORCH_NOT_CONFIGURED }],
+              isError: true,
+            };
+          }
+          const runId = requireString(argsObj, 'runId');
+          const record = await orch.status(runId);
+          return {
+            content: [{ type: 'text', text: JSON.stringify(record) }],
+          };
+        }
+        case 'agora_orchestrator_watch': {
+          if (!orch) {
+            return {
+              content: [{ type: 'text', text: ORCH_NOT_CONFIGURED }],
+              isError: true,
+            };
+          }
+          const runId = requireString(argsObj, 'runId');
+          const timeoutMs = typeof argsObj.timeoutMs === 'number' ? argsObj.timeoutMs : 25000;
+
+          // Bound the watch with an AbortSignal so the tool always returns
+          // within timeoutMs. Polling/terminal logic lives in OperationsApi.
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), timeoutMs);
+          let lastRecord: unknown = undefined;
+          try {
+            for await (const record of orch.watch(runId, { signal: controller.signal })) {
+              lastRecord = record;
+            }
+          } catch (err: unknown) {
+            // AbortError from the signal is expected at timeout — ignore it.
+            const name = err instanceof Error ? err.name : '';
+            if (name !== 'AbortError') {
+              throw err;
+            }
+          } finally {
+            clearTimeout(timer);
+          }
+          // If no record was yielded before timeout, fall back to status.
+          if (lastRecord === undefined) {
+            lastRecord = await orch.status(runId);
+          }
+          return {
+            content: [{ type: 'text', text: JSON.stringify(lastRecord) }],
           };
         }
         default:

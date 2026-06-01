@@ -4,8 +4,8 @@ import type { WorkItem } from '../src/contracts/index.js';
 import type { Executor, FireContext } from '../src/contracts/index.js';
 
 describe('contracts', () => {
-  it('RUN_STATUSES covers the six lifecycle states', () => {
-    expect([...RUN_STATUSES]).toEqual(['pending', 'ready', 'running', 'done', 'failed', 'skipped']);
+  it('RUN_STATUSES covers the seven lifecycle states', () => {
+    expect([...RUN_STATUSES]).toEqual(['pending', 'ready', 'running', 'done', 'failed', 'skipped', 'cancelled']);
   });
   it('WorkItem shape compiles', () => {
     const w: WorkItem = { id: 'a', executor: 'fake', inputs: {}, depends_on: [], resourceLocks: [] };

@@ -18,6 +18,7 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import type { AgoraClient } from '@quarry-systems/agora-client';
+import type { OperationsApi } from '@quarry-systems/agora-orchestrator';
 import { registerAgoraTools } from './tools.js';
 
 /**
@@ -29,6 +30,9 @@ import { registerAgoraTools } from './tools.js';
 export interface RunServerOpts {
   /** AgoraClient instance the tools wrap. */
   client: AgoraClient;
+  /** Optional OperationsApi for the three orchestrator client tools. When absent,
+   *  those tools return a clear not-configured isError response. */
+  orch?: OperationsApi;
   /** Override the server name; defaults to `'agora-mcp'`. */
   name?: string;
   /** Override the server version; defaults to `'0.1.0'`. */
@@ -36,7 +40,7 @@ export interface RunServerOpts {
 }
 
 /**
- * Construct the MCP `Server`, register the six run-time agora tools, and
+ * Construct the MCP `Server`, register the nine run-time agora tools, and
  * connect it to a `StdioServerTransport`. Resolves once the transport is
  * ready (i.e., listening on stdin/stdout); the returned promise does NOT
  * await server shutdown — long-running lifetime is owned by the transport
@@ -47,7 +51,7 @@ export async function runServer(opts: RunServerOpts): Promise<void> {
     { name: opts.name ?? 'agora-mcp', version: opts.version ?? '0.1.0' },
     { capabilities: { tools: {} } },
   );
-  registerAgoraTools(server, opts.client);
+  registerAgoraTools(server, opts.client, opts.orch);
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }

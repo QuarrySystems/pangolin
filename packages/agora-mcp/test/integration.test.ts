@@ -3,7 +3,7 @@
 // These exercise the MCP `Server`'s in-process request-handler map directly:
 // we never spin up a stdio transport (that's `task-e2e-mcp-tool-surface`'s job
 // against the real MCP client SDK). Here we verify that:
-//   1. ListTools advertises exactly the six tool names exported as the
+//   1. ListTools advertises exactly the nine tool names exported as the
 //      `AGORA_TOOL_NAMES` allowlist;
 //   2. No `agora_*_register` / `agora_*_assign` deploy-time tools leak;
 //   3. Each CallTool name dispatches to the matching `AgoraClient` method
@@ -13,7 +13,10 @@
 //      `name`, `contentHash`, `registeredAt`) — never file contents, secret
 //      values, or prompt bodies;
 //   5. An unknown tool name produces the MCP-SDK `{ content, isError: true }`
-//      error response rather than throwing.
+//      error response rather than throwing;
+//   6. The three orchestrator tools (submit/status/watch) call through to
+//      OperationsApi when provided, or return a clear not-configured isError
+//      when absent.
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import {
@@ -22,6 +25,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { describe, it, expect, vi } from 'vitest';
 import { AGORA_TOOL_NAMES, registerAgoraTools } from '../src/tools.js';
+import type { OperationsApi, OutboxRecord } from '@quarry-systems/agora-orchestrator';
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -79,7 +83,37 @@ function makeFakeClient() {
   };
 }
 
-/** Build a server with the six tools registered. */
+/**
+ * Build a fake OperationsApi with vi.fn() methods for submit, status, watch.
+ */
+function makeFakeOrch(overrides?: Partial<OperationsApi>): OperationsApi {
+  const statusRecord: OutboxRecord = {
+    runId: 'run-1',
+    kind: 'status',
+    body: { status: 'done' },
+    at: '2026-01-01T00:00:00.000Z',
+  };
+
+  const submitFn = vi.fn(async (_run: unknown, _actor: string) => 'run-1');
+  const statusFn = vi.fn(async (_runId: string) => statusRecord);
+  // watch returns an async generator that yields one record then stops
+  const watchFn = vi.fn(async function* (_runId: string, _opts?: unknown) {
+    yield statusRecord;
+  });
+  const cancelFn = vi.fn(async (_target: string, _actor: string) => {});
+  const auditFn = vi.fn(async (_runId: string) => ({}));
+
+  return {
+    submit: submitFn,
+    status: statusFn,
+    watch: watchFn,
+    cancel: cancelFn,
+    audit: auditFn,
+    ...overrides,
+  } as unknown as OperationsApi;
+}
+
+/** Build a server with the six tools registered (no orch). */
 function makeServerWith(fake: ReturnType<typeof makeFakeClient>): Server {
   const server = new Server(
     { name: 'test', version: '0.0.0' },
@@ -89,6 +123,16 @@ function makeServerWith(fake: ReturnType<typeof makeFakeClient>): Server {
   // exercised here; the cast is necessary because vi.fn() return types do
   // not carry the full agora-core type tree.
   registerAgoraTools(server, fake as never);
+  return server;
+}
+
+/** Build a server with all nine tools registered (with orch). */
+function makeServerWithOrch(fake: ReturnType<typeof makeFakeClient>, fakeOrch: OperationsApi): Server {
+  const server = new Server(
+    { name: 'test', version: '0.0.0' },
+    { capabilities: { tools: {} } },
+  );
+  registerAgoraTools(server, fake as never, fakeOrch);
   return server;
 }
 
@@ -133,11 +177,11 @@ async function callTool(
 // ---------------------------------------------------------------------------
 
 describe('agora-mcp registerAgoraTools — ListTools', () => {
-  it('registers exactly six tools matching AGORA_TOOL_NAMES', async () => {
+  it('registers exactly nine tools matching AGORA_TOOL_NAMES', async () => {
     const server = makeServerWith(makeFakeClient());
     const tools = await listTools(server);
     expect(tools.map((t) => t.name).sort()).toEqual([...AGORA_TOOL_NAMES].sort());
-    expect(tools).toHaveLength(6);
+    expect(tools).toHaveLength(9);
   });
 
   it('exposes no tool matching agora_*_register or agora_*_assign', async () => {
@@ -322,5 +366,109 @@ describe('agora-mcp registerAgoraTools — error path', () => {
     expect(res.isError).toBe(true);
     expect(res.content[0].text).toMatch(/dispatchId/);
     expect(fake.dispatch.describe).not.toHaveBeenCalled();
+  });
+});
+
+describe('agora-mcp registerAgoraTools — orchestrator tools (not configured)', () => {
+  it('agora_orchestrator_submit returns isError when orch not provided', async () => {
+    const fake = makeFakeClient();
+    const server = makeServerWith(fake);
+    const res = await callTool(server, 'agora_orchestrator_submit', { plan: { id: 'r1', queue: 'q', items: [] } });
+    expect(res.isError).toBe(true);
+    expect(res.content[0].text).toContain('not configured');
+  });
+
+  it('agora_orchestrator_status returns isError when orch not provided', async () => {
+    const fake = makeFakeClient();
+    const server = makeServerWith(fake);
+    const res = await callTool(server, 'agora_orchestrator_status', { runId: 'r1' });
+    expect(res.isError).toBe(true);
+    expect(res.content[0].text).toContain('not configured');
+  });
+
+  it('agora_orchestrator_watch returns isError when orch not provided', async () => {
+    const fake = makeFakeClient();
+    const server = makeServerWith(fake);
+    const res = await callTool(server, 'agora_orchestrator_watch', { runId: 'r1' });
+    expect(res.isError).toBe(true);
+    expect(res.content[0].text).toContain('not configured');
+  });
+});
+
+describe('agora-mcp registerAgoraTools — orchestrator tools (configured)', () => {
+  it('agora_orchestrator_submit calls orch.submit with plan and default actor', async () => {
+    const fake = makeFakeClient();
+    const fakeOrch = makeFakeOrch();
+    const server = makeServerWithOrch(fake, fakeOrch);
+    const plan = { id: 'run-1', queue: 'q', items: [] };
+    const res = await callTool(server, 'agora_orchestrator_submit', { plan });
+
+    expect(fakeOrch.submit).toHaveBeenCalledTimes(1);
+    expect(fakeOrch.submit).toHaveBeenCalledWith(plan, 'agent:mcp');
+    expect(res.isError).toBeFalsy();
+    expect(res.content[0].text).toBe('run-1');
+  });
+
+  it('agora_orchestrator_submit uses provided actor', async () => {
+    const fake = makeFakeClient();
+    const fakeOrch = makeFakeOrch();
+    const server = makeServerWithOrch(fake, fakeOrch);
+    const plan = { id: 'run-2', queue: 'q', items: [] };
+    await callTool(server, 'agora_orchestrator_submit', { plan, actor: 'agent:custom' });
+
+    expect(fakeOrch.submit).toHaveBeenCalledWith(plan, 'agent:custom');
+  });
+
+  it('agora_orchestrator_status calls orch.status with runId', async () => {
+    const fake = makeFakeClient();
+    const fakeOrch = makeFakeOrch();
+    const server = makeServerWithOrch(fake, fakeOrch);
+    const res = await callTool(server, 'agora_orchestrator_status', { runId: 'run-1' });
+
+    expect(fakeOrch.status).toHaveBeenCalledTimes(1);
+    expect(fakeOrch.status).toHaveBeenCalledWith('run-1');
+    expect(res.isError).toBeFalsy();
+    const parsed = JSON.parse(res.content[0].text);
+    expect(parsed.runId).toBe('run-1');
+  });
+
+  it('agora_orchestrator_status returns isError when runId missing', async () => {
+    const fake = makeFakeClient();
+    const fakeOrch = makeFakeOrch();
+    const server = makeServerWithOrch(fake, fakeOrch);
+    const res = await callTool(server, 'agora_orchestrator_status', {});
+    expect(res.isError).toBe(true);
+    expect(res.content[0].text).toMatch(/runId/);
+  });
+
+  it('agora_orchestrator_watch calls orch.watch and returns last record', async () => {
+    const fake = makeFakeClient();
+    const fakeOrch = makeFakeOrch();
+    const server = makeServerWithOrch(fake, fakeOrch);
+    const res = await callTool(server, 'agora_orchestrator_watch', { runId: 'run-1', timeoutMs: 5000 });
+
+    expect(fakeOrch.watch).toHaveBeenCalledTimes(1);
+    expect(fakeOrch.watch).toHaveBeenCalledWith('run-1', expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(res.isError).toBeFalsy();
+    const parsed = JSON.parse(res.content[0].text);
+    expect(parsed.runId).toBe('run-1');
+  });
+
+  it('agora_orchestrator_watch falls back to status when watch yields nothing', async () => {
+    const fake = makeFakeClient();
+    // Override watch to yield nothing (simulate timeout before any record)
+    const fakeOrch = makeFakeOrch({
+      watch: vi.fn(async function* (_runId: string, _opts?: unknown) {
+        // yields nothing — simulates abort before any records
+      }) as unknown as OperationsApi['watch'],
+    });
+    const server = makeServerWithOrch(fake, fakeOrch);
+    const res = await callTool(server, 'agora_orchestrator_watch', { runId: 'run-1', timeoutMs: 100 });
+
+    // Should have called status as fallback
+    expect(fakeOrch.status).toHaveBeenCalledWith('run-1');
+    expect(res.isError).toBeFalsy();
+    const parsed = JSON.parse(res.content[0].text);
+    expect(parsed.runId).toBe('run-1');
   });
 });

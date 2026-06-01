@@ -17,7 +17,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@quarry-systems/agora-client": "workspace:*",
-    "@quarry-systems/agora-core": "workspace:*"
-  },
-  "devDependencies": {}
+    "@quarry-systems/agora-core": "workspace:*",
+    "@quarry-systems/agora-orchestrator": "workspace:^"
+  }
 }

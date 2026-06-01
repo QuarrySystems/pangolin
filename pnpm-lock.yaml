@@ -85,6 +85,9 @@ importers:
       '@quarry-systems/agora-client':
         specifier: workspace:*
         version: link:../agora-client
+      '@quarry-systems/agora-orchestrator':
+        specifier: workspace:*
+        version: link:../agora-orchestrator
       commander:
         specifier: ^12.0.0
         version: 12.1.0
@@ -130,6 +133,9 @@ importers:
       '@quarry-systems/agora-core':
         specifier: workspace:*
         version: link:../agora-core
+      '@quarry-systems/agora-orchestrator':
+        specifier: workspace:^
+        version: link:../agora-orchestrator
 
   packages/agora-orchestrator:
     dependencies:

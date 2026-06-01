@@ -7,8 +7,24 @@ export interface SubmissionEnvelope {
   submittedAt: string;  // ISO-8601
 }
 
-export const OUTBOX_KINDS = ['status', 'completed'] as const;
+export const OUTBOX_KINDS = ['status', 'completed', 'audit'] as const;
 export type OutboxKind = (typeof OUTBOX_KINDS)[number];
+
+/** A privileged control request (cancel in V1). Identity-stamped, never authz. */
+export interface ControlEnvelope {
+  kind: 'cancel';
+  target: string;       // run-id or item-id
+  actor: string;        // "human:<id>" — recorded on the audit entry
+  at: string;           // ISO-8601
+}
+
+/** Optional capability a transport MAY also implement — the cancel path. Kept
+ *  separate from SubmissionTransport so existing impls/fakes are unaffected. */
+export interface ControlChannel {
+  control(env: ControlEnvelope): Promise<void>;          // client → control inbox
+  pollControl(): Promise<ControlEnvelope[]>;             // service: claim control requests
+  ackControl(target: string): Promise<void>;             // service: consume one
+}
 
 export interface OutboxRecord {
   runId: string;

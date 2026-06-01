@@ -108,7 +108,14 @@ function makeFakeClient(): FakeClient {
 }
 
 function buildAll(fakeClient: FakeClient) {
-  const ctx = { getClient: async () => fakeClient as any };
+  const ctx = {
+    getClient: async () => fakeClient as any,
+    // Minimal stub: satisfies the required field; throws lazily if any orch
+    // verb is actually invoked (none of these integration tests exercise orch).
+    getOrchContext: async (): Promise<import('../src/cmd-orch.js').OrchContext> => {
+      throw new Error('orch not configured in integration test ctx');
+    },
+  };
   // buildProgram now wires every attach*Cmd internally (since the index.ts
   // bin fix); the explicit per-command attaches that used to live here
   // would now double-register and commander throws.
@@ -129,11 +136,11 @@ describe('agora-cli integration', () => {
     vi.restoreAllMocks();
   });
 
-  it('composes the full subcommand surface (capabilities, subagent, env, dispatch, deploy)', () => {
+  it('composes the full subcommand surface (capabilities, subagent, env, dispatch, deploy, orch)', () => {
     const fake = makeFakeClient();
     const program = buildAll(fake);
     const names = program.commands.map((c) => c.name()).sort();
-    expect(names).toEqual(['capabilities', 'deploy', 'dispatch', 'env', 'subagent']);
+    expect(names).toEqual(['capabilities', 'deploy', 'dispatch', 'env', 'orch', 'subagent']);
   });
 
   it('dispatch run forwards --subagent, --target, and parsed --input JSON to client.dispatch', async () => {

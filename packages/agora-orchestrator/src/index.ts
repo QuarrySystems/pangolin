@@ -18,3 +18,6 @@ export type { ServeOptions } from './serve/driver.js';
 export { buildManifest } from './audit/manifest.js';
 export type { BuildManifestInput } from './audit/manifest.js';
 export type { DispatchManifest, DispatchExecutorManifest, ManifestSignature } from './contracts/manifest.js';
+export { OperationsApi } from './operations-api.js';
+export type { OperationsApiDeps } from './operations-api.js';
+export { assembleBundle } from './audit/bundle.js';

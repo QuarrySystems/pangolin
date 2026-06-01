@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@quarry-systems/agora-client": "workspace:*",
+    "@quarry-systems/agora-orchestrator": "workspace:*",
     "commander": "^12.0.0",
     "yaml": "^2.0.0"
   },

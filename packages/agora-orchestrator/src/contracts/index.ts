@@ -9,3 +9,4 @@ export * from './submission-transport.js';
 export * from './mailbox.js';
 export * from './manifest.js';
 export * from './audit.js';
+export * from './privilege.js';

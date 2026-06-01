@@ -1,8 +1,8 @@
-export const RUN_STATUSES = ['pending', 'ready', 'running', 'done', 'failed', 'skipped'] as const;
+export const RUN_STATUSES = ['pending', 'ready', 'running', 'done', 'failed', 'skipped', 'cancelled'] as const;
 export type RunStatus = (typeof RUN_STATUSES)[number];
 
 /** The subset of RunStatus an item can hold once it stops moving. */
-export type TerminalStatus = 'done' | 'failed' | 'skipped';
+export type TerminalStatus = 'done' | 'failed' | 'skipped' | 'cancelled';
 
 export type EffectTier = 'pure' | 'read-impure' | 'write-impure';
 
