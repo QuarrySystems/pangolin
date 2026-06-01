@@ -1,5 +1,6 @@
 // Cross-system byte-parity: Guarantee/GUARANTEE_RANK/Signature/AnchorReceipt/AnchoredRoot/Signer/AuditAnchor
 // are verbatim from Mneme src/audit/types.ts.
+import type { DispatchManifest } from './manifest.js';
 export type Guarantee = "detect" | "external-immutable" | "witnessed";
 
 /** Rank used by the report to license the "tamper-evident" claim only at >= external-immutable. */
@@ -43,4 +44,27 @@ export interface AuditStore {
   getAuditChainHead(runId: string): string;            // last entryHash, or '' if none
   putAuditRoot(root: AnchoredRoot): void;
   getAuditRoot(epochId: string): AnchoredRoot | undefined;
+}
+
+/** Per-item outcome row carried in an audit export — references only, never values. */
+export interface AuditItemOutcome {
+  id: string; status: string; attempts?: number; actor?: string;
+  resultRef?: string; manifestRef?: string;
+}
+
+/** Refs-only audit export the service publishes to the outbox on epoch seal (§6.5). */
+export interface AuditExport {
+  runId: string;
+  entries: AuditEntryRow[];
+  root: AnchoredRoot | undefined;   // undefined when the run never sealed
+  items: AuditItemOutcome[];
+}
+
+/** The assembled, verifiable §6.5 evidence bundle the CLI emits. */
+export interface AuditBundle {
+  runId: string;
+  manifests: DispatchManifest[];
+  auditLog: { entries: AuditEntryRow[]; root: AnchoredRoot | undefined };
+  items: AuditItemOutcome[];
+  report: VerificationReport;       // names the anchor + guarantee tier
 }
