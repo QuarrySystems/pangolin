@@ -44,9 +44,12 @@ shipped in #24).
   remain a contract, not yet a feature.
 - **Compliance & audit controls (the edge)** — signed dispatch manifest,
   Merkle-rooted audit log with a pluggable `AuditAnchor` tamper-evidence seam,
-  actor identity on every operation, `agora orch audit` evidence export, and
-  encryption-at-rest by default. The claim is **"compliance-ready," never
-  "compliant" or "certified."**
+  actor identity on every operation, and `agora orch audit` evidence export.
+  **Encryption-at-rest is delegated to the deployment substrate** (S3 default
+  bucket encryption, encrypted EBS/EFS volumes) — agora ships no application-layer
+  encryption today; application-/customer-managed encryption (BYOK/KMS) is a V1.1
+  item (below). The claim is **"compliance-ready," never "compliant" or
+  "certified."**
 - **Headline demo** — [`examples/offload-fanout`](examples/offload-fanout/):
   one `submit` exercising locks + deps + concurrency + isolation + patch escape,
   producing a verifiable audit bundle.
@@ -92,10 +95,12 @@ V1 ships.
   the `PackRegistry` already exist in code (see "Now"), but the shapes are **not
   dispatchable yet**: pin the real worker-image digest (currently a `PLACEHOLDER`)
   and enforce each shape's `outputSchema` via `.agora/output.json`.
-- **Full typed output (enforcement)** — the `output.json` contract *types* exist
-  (`outputSchema` on `SubagentShape`, the `patch` / `intent` schemas), but
-  `.agora/output.json` validation, `output` data products, `intents`, and `signals`
-  are not yet enforced end-to-end.
+- **Full typed output (enforcement)** — the worker **already writes**
+  `.agora/output.json` (a fixed `{schemaVersion, patchRef, summary}` sentinel) and
+  the executor reads `patchRef` from it to surface `result_ref` — that path is live.
+  Deferred: validating the sentinel against each shape's `outputSchema`, and the
+  richer `output` / `intents` / `signals` products (the types exist; nothing
+  enforces or consumes them yet).
 - **The autonomous-PR layer** — `Intent` / `IntentInterpreter`, the `dev.open-pr`
   interpreter, the auto-merge-test-only / human-approve policy, and the CLI
   `approve` verb. The `Intent` *type* exists; no interpreter ships yet. This is the
@@ -109,8 +114,10 @@ V1 ships.
   the chokepoint (the operations API) and identity primitives (`actor`, the
   client/service privilege split); it never owns roles. V1 is single-operator
   ("whoever launched").
-- **Compliance deepening** — customer-managed keys (BYOK/KMS), full role-based
-  RBAC, automated retention/purge policy, SIEM/log-export integrations, and a
+- **Compliance deepening** — **application-/customer-managed encryption-at-rest**
+  (set `ServerSideEncryption` on S3 puts; BYOK/KMS; envelope-encrypted secrets +
+  patch artifacts — today at-rest encryption is substrate-provided only), full
+  role-based RBAC, automated retention/purge policy, SIEM/log-export integrations, and a
   **Bedrock-backed `RuntimeAdapter`** (keeps the model call inside a customer's
   AWS BAA boundary). All additive via existing seams. The SOC2 audit / HIPAA risk
   assessment themselves are organizational process, not software.
