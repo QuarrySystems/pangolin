@@ -1,10 +1,27 @@
 {
   "name": "@quarry-systems/agora-orchestrator",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "license": "BUSL-1.1",
-  "private": true,
+  "description": "Orchestrator-engine (codename agora-offload) — named queues, depends_on resolution, resource locks, a fire-and-reconcile tick loop, and SQLite run-state behind pluggable Executor/Trigger seams.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/QuarrySystems/agora.git",
+    "directory": "packages/agora-orchestrator"
+  },
+  "homepage": "https://quarrysystems.github.io/agora",
+  "bugs": {
+    "url": "https://github.com/QuarrySystems/agora/issues"
+  },
   "scripts": {
     "lint": "eslint src --ext .ts",
     "test": "vitest run",

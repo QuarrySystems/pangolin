@@ -1,11 +1,27 @@
 {
   "name": "@quarry-systems/agora-cli",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "license": "BUSL-1.1",
-  "private": true,
-  "description": "CLI for agora — implementation lands in DAG 2.",
+  "description": "The agora binary — a thin CLI over AgoraClient that resolves agora.config.{ts,js,mjs} and dispatches to subcommands.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/QuarrySystems/agora.git",
+    "directory": "packages/agora-cli"
+  },
+  "homepage": "https://quarrysystems.github.io/agora",
+  "bugs": {
+    "url": "https://github.com/QuarrySystems/agora/issues"
+  },
   "bin": {
     "agora": "dist/index.js"
   },
