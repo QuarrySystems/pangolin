@@ -6,7 +6,7 @@
 // separate processes are unsupported and will corrupt run-state.
 //
 import Database from 'better-sqlite3';
-import type { ItemState, Run, RunStateStore, RunStatus, TerminalStatus } from '../contracts/index.js';
+import type { AnchoredRoot, AuditEntryRow, AuditStore, ItemState, Run, RunStateStore, RunStatus, TerminalStatus } from '../contracts/index.js';
 
 /** Shape of a row in the `items` table (column names are snake_case). */
 interface ItemRow {
@@ -39,6 +39,16 @@ CREATE TABLE IF NOT EXISTS items (
   result_ref TEXT, manifest_ref TEXT, submitted_at TEXT
 );
 CREATE TABLE IF NOT EXISTS locks (key TEXT PRIMARY KEY, item_id TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS audit_entries (
+  run_id TEXT NOT NULL, seq INTEGER NOT NULL, kind TEXT NOT NULL,
+  item_id TEXT, status TEXT, actor TEXT, manifest_ref TEXT, result_ref TEXT,
+  at TEXT NOT NULL, entry_hash TEXT NOT NULL, prev_hash TEXT NOT NULL,
+  PRIMARY KEY (run_id, seq));
+CREATE TABLE IF NOT EXISTS audit_roots (
+  epoch_id TEXT PRIMARY KEY, root BLOB NOT NULL,
+  sig_alg TEXT, sig_bytes BLOB, sig_keyref TEXT,
+  anchor_id TEXT NOT NULL, guarantee TEXT NOT NULL, receipt_at INTEGER NOT NULL,
+  locator TEXT, anchored_at TEXT NOT NULL);
 `;
 
 /** Columns added after the initial release — bring a pre-existing db up to date. */
@@ -53,7 +63,7 @@ const MIGRATIONS: ReadonlyArray<readonly [string, string]> = [
   ['submitted_at', 'TEXT'],
 ];
 
-export class SqliteRunStateStore implements RunStateStore {
+export class SqliteRunStateStore implements RunStateStore, AuditStore {
   private db: Database.Database;
 
   constructor(path = ':memory:') {
@@ -188,6 +198,109 @@ export class SqliteRunStateStore implements RunStateStore {
 
   setManifestRef(itemId: string, ref: string): void {
     this.db.prepare('UPDATE items SET manifest_ref=? WHERE id=?').run(ref, itemId);
+  }
+
+  // ── AuditStore ────────────────────────────────────────────────────────────
+
+  appendAuditEntry(r: AuditEntryRow): void {
+    this.db.prepare(
+      `INSERT INTO audit_entries
+        (run_id,seq,kind,item_id,status,actor,manifest_ref,result_ref,at,entry_hash,prev_hash)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)`
+    ).run(
+      r.runId, r.seq, r.kind,
+      r.itemId ?? null, r.status ?? null, r.actor ?? null,
+      r.manifestRef ?? null, r.resultRef ?? null,
+      r.at, r.entryHash, r.prevHash,
+    );
+  }
+
+  getAuditEntries(runId: string): AuditEntryRow[] {
+    interface AuditEntryDbRow {
+      run_id: string; seq: number; kind: string;
+      item_id: string | null; status: string | null; actor: string | null;
+      manifest_ref: string | null; result_ref: string | null;
+      at: string; entry_hash: string; prev_hash: string;
+    }
+    const rows = this.db.prepare(
+      'SELECT * FROM audit_entries WHERE run_id=? ORDER BY seq'
+    ).all(runId) as AuditEntryDbRow[];
+    return rows.map((row): AuditEntryRow => {
+      const entry: AuditEntryRow = {
+        runId: row.run_id,
+        seq: row.seq,
+        kind: row.kind as AuditEntryRow['kind'],
+        at: row.at,
+        entryHash: row.entry_hash,
+        prevHash: row.prev_hash,
+      };
+      if (row.item_id !== null) entry.itemId = row.item_id;
+      if (row.status !== null) entry.status = row.status;
+      if (row.actor !== null) entry.actor = row.actor;
+      if (row.manifest_ref !== null) entry.manifestRef = row.manifest_ref;
+      if (row.result_ref !== null) entry.resultRef = row.result_ref;
+      return entry;
+    });
+  }
+
+  getAuditChainHead(runId: string): string {
+    const row = this.db.prepare(
+      'SELECT entry_hash FROM audit_entries WHERE run_id=? ORDER BY seq DESC LIMIT 1'
+    ).get(runId) as { entry_hash: string } | undefined;
+    return row?.entry_hash ?? '';
+  }
+
+  putAuditRoot(root: AnchoredRoot): void {
+    this.db.prepare(
+      `INSERT OR REPLACE INTO audit_roots
+        (epoch_id, root, sig_alg, sig_bytes, sig_keyref,
+         anchor_id, guarantee, receipt_at, locator, anchored_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?)`
+    ).run(
+      root.epochId,
+      Buffer.from(root.root),
+      root.signature?.alg ?? null,
+      root.signature ? Buffer.from(root.signature.bytes) : null,
+      root.signature?.keyRef ?? null,
+      root.receipt.anchorId,
+      root.receipt.guarantee,
+      root.receipt.at,
+      root.receipt.locator ?? null,
+      new Date().toISOString(),
+    );
+  }
+
+  getAuditRoot(epochId: string): AnchoredRoot | undefined {
+    interface AuditRootDbRow {
+      epoch_id: string; root: Buffer;
+      sig_alg: string | null; sig_bytes: Buffer | null; sig_keyref: string | null;
+      anchor_id: string; guarantee: string; receipt_at: number;
+      locator: string | null; anchored_at: string;
+    }
+    const row = this.db.prepare(
+      'SELECT * FROM audit_roots WHERE epoch_id=?'
+    ).get(epochId) as AuditRootDbRow | undefined;
+    if (!row) return undefined;
+
+    const result: AnchoredRoot = {
+      epochId: row.epoch_id,
+      root: new Uint8Array(row.root),
+      receipt: {
+        anchorId: row.anchor_id,
+        epochId: row.epoch_id,
+        guarantee: row.guarantee as AnchoredRoot['receipt']['guarantee'],
+        at: row.receipt_at,
+      },
+    };
+    if (row.locator !== null) result.receipt.locator = row.locator;
+    if (row.sig_alg !== null && row.sig_bytes !== null) {
+      result.signature = {
+        alg: row.sig_alg,
+        bytes: new Uint8Array(row.sig_bytes),
+      };
+      if (row.sig_keyref !== null) result.signature.keyRef = row.sig_keyref;
+    }
+    return result;
   }
 
   close(): void {
