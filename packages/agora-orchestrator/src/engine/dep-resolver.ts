@@ -16,7 +16,7 @@ export function computeSkipped(items: ItemState[]): string[] {
   return items
     .filter((i) => i.status === 'pending' && i.depends_on.some((d) => {
       const s = status.get(d);
-      return s === 'failed' || s === 'skipped';
+      return s === 'failed' || s === 'skipped' || s === 'cancelled';
     }))
     .map((i) => i.id);
 }

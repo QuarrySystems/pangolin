@@ -24,16 +24,14 @@ export interface AgoraOrchestratorOptions {
 }
 
 /** method -> privilege tag (mechanism for the §10.6 CLI/MCP split; surfaces land later). */
-export const PRIVILEGE = {
-  submitRun: 'client', getStatus: 'client', tick: 'service',
-} as const;
+export { PRIVILEGE } from './contracts/privilege.js';
 
 export interface StatusItem {
   id: string; runId: string; status: string; blockedBy: string[];
   resultRef?: string; manifestRef?: string;
 }
 
-const TERMINAL_STATUSES = new Set(['done', 'failed', 'skipped']);
+const TERMINAL_STATUSES = new Set(['done', 'failed', 'skipped', 'cancelled']);
 
 export class AgoraOrchestrator {
   private readonly store: RunStateStore;
@@ -133,6 +131,30 @@ export class AgoraOrchestrator {
     }
     return stranded.length;
   }
+  /** Operator cancel (privileged): stop a run. pending|ready → cancelled + locks released;
+   *  running items reconcile naturally (no force-kill). Dependents cascade to `skipped`
+   *  on the next tick via the existing computeSkipped path — no cascade duplicated here. */
+  cancelRun(runId: string, actor?: string): void {
+    for (const it of this.store.getItems(runId)) {
+      if (it.status === 'pending' || it.status === 'ready') {
+        this.store.releaseLocks(it.id);
+        this.store.setStatus(it.id, 'cancelled', 'operator cancelled');
+      }
+    }
+    try { this.auditLog?.append({ kind: 'run.cancelled', runId, actor, at: new Date().toISOString() }); } catch { /* best-effort */ }
+  }
+
+  /** Cancel a single item within a run (logical id). Same per-item logic + audit. */
+  cancelItem(runId: string, itemId: string, actor?: string): void {
+    const nsId = ns(runId, itemId);
+    const it = this.store.getItems(runId).find((i) => i.id === nsId);
+    if (it && (it.status === 'pending' || it.status === 'ready')) {
+      this.store.releaseLocks(it.id);
+      this.store.setStatus(it.id, 'cancelled', 'operator cancelled');
+    }
+    try { this.auditLog?.append({ kind: 'run.cancelled', runId, actor, at: new Date().toISOString() }); } catch { /* best-effort */ }
+  }
+
   getStatus(runId?: string): StatusItem[] {
     const items = this.store.getItems(runId);
     // Internal lookup uses namespaced ids (as stored); output is de-namespaced.
