@@ -187,9 +187,13 @@ this to `.mcp.json` (or `~/.claude/settings.json` for global):
 
 No `env:` block — the server inherits the shell that launched Claude Code,
 including `ANTHROPIC_API_KEY` and any `DOCKER_HOST` you set for cross-machine
-dispatch. Reload Claude Code; you should see six `agora_*` tools
-(`agora_dispatch`, `agora_dispatch_describe`, `agora_dispatch_cancel`, plus three
-`*_list` reads that currently throw `NOT_IMPLEMENTED` — a known limitation).
+dispatch. Reload Claude Code; you should see nine `agora_*` tools — the dispatch
+verbs (`agora_dispatch`, `agora_dispatch_describe`, `agora_dispatch_cancel`), the
+registry reads (`agora_capabilities_list`, `agora_subagents_list`,
+`agora_envs_list`), and the orchestrator verbs (`agora_orchestrator_submit`,
+`agora_orchestrator_status`, `agora_orchestrator_watch`). The privileged
+`register` / `assign` operations are deliberately absent — see
+[The privilege boundary](/agora/explanation/privilege-boundary/).
 
 ## Next steps
 

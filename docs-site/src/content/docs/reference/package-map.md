@@ -25,7 +25,7 @@ every other package depends on it and nothing else by default.
 | `agora-storage-s3` | `StorageProvider` backed by S3. Content-addressed object layout, integrity-verified on read. Production target. |
 | `agora-storage-local` | `StorageProvider` backed by the local filesystem. Pairs with `agora-providers-local-docker` for the local stack. |
 | `agora-secret-store` | `SecretStore` seam plus impls — `InlineSecretStager` (AWS Secrets Manager) and `LocalSecretStore` (on-disk staging). `agora-client` also depends on it. |
-| `agora-orchestrator` | Orchestrator engine (codename *agora-offload*): named queues, `depends_on` resolution, resource locks, a fire-and-reconcile tick loop, SQLite run-state, and tamper-evident audit, behind pluggable `Executor` / `Trigger` seams. Surfaces as `agora orch` + the client MCP tools. |
+| `agora-orchestrator` | Orchestrator engine (codename *agora-offload*): named queues, `depends_on` resolution, resource locks, a fire-and-reconcile tick loop, SQLite run-state, and a verifiable audit trail (tamper-detecting by default, tamper-evident at the S3 Object Lock tier), behind pluggable `Executor` / `Trigger` seams. Surfaces as `agora orch` + the client MCP tools. |
 
 :::note
 The README labels the agora-mcp tool surface as "exactly six run-time tools."
