@@ -1,40 +1,38 @@
 ---
-title: Welcome to Starlight
-description: Get started building your docs site with Starlight.
-template: splash # Remove or comment out this line to display the site sidebar on this page.
+title: agora
+description: Secure, deterministic, auditable execution of AI agents.
+template: splash
 hero:
-  tagline: Congrats on setting up a new Starlight project!
-  image:
-    file: ../../assets/houston.webp
+  tagline: Submit a DAG of agent tasks. Fan out safely under file-locks. Get back reviewable patches and a tamper-evident audit trail of exactly what ran.
   actions:
-    - text: Example Guide
-      link: /guides/example/
+    - text: Orchestrate a DAG
+      link: /agora/tutorials/first-offload-run/
       icon: right-arrow
-    - text: Read the Starlight docs
-      link: https://starlight.astro.build
-      icon: external
+    - text: View on GitHub
+      link: https://github.com/quarrysystems/agora
       variant: minimal
+      icon: external
 ---
 
 import { Card, CardGrid } from '@astrojs/starlight/components';
 
-## Next steps
+## What do you want to do?
 
-<CardGrid stagger>
-	<Card title="Update content" icon="pencil">
-		Edit `src/content/docs/index.mdx` to see this page change.
-	</Card>
-	<Card title="Change page layout" icon="document">
-		Delete `template: splash` in `src/content/docs/index.mdx` to display a
-		sidebar on this page.
-	</Card>
-	<Card title="Add new content" icon="add-document">
-		Add Markdown or MDX files to `src/content/docs` to create new pages.
-	</Card>
-	<Card title="Configure your site" icon="setting">
-		Edit your `sidebar` and other config in `astro.config.mjs`.
-	</Card>
-	<Card title="Read the docs" icon="open-book">
-		Learn more in [the Starlight Docs](https://starlight.astro.build/).
-	</Card>
+<CardGrid>
+  <Card title="Dispatch one agent" icon="rocket">
+    Wire `AgoraClient` into your app: register a capability, a subagent, and an env, then dispatch and read the result.
+    [Start the dispatch tutorial →](/agora/tutorials/first-dispatch/)
+  </Card>
+  <Card title="Orchestrate a DAG" icon="puzzle">
+    Run agent tasks unattended with `agora orch`: dependency ordering, parallel file-locks, reviewable patches, a verifiable audit bundle.
+    [Run your first offload →](/agora/tutorials/first-offload-run/)
+  </Card>
+  <Card title="Extend a provider" icon="setting">
+    Plug in a new compute, storage, credential, or result-sink backend behind agora's seams.
+    [Write a provider →](/agora/how-to/write-a-provider/)
+  </Card>
+  <Card title="Evaluate / is it safe?" icon="approve-check">
+    What agora is, how agents are sandboxed, the privilege boundary, and what the BSL license means for you.
+    [Read the architecture →](/agora/explanation/architecture-overview/)
+  </Card>
 </CardGrid>
