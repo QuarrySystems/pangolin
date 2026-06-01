@@ -1,0 +1,252 @@
+---
+title: Deploy to Fargate + S3 (production)
+description: Move from the local Docker stack to the production target — Fargate compute, S3 storage with Object Lock, AWS credentials.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+This guide moves a working local stack onto the production target: AWS ECS
+Fargate for compute, S3 for artifact storage, the AWS credential chain, and an
+S3 Object Lock audit anchor. The registry shape and `client.dispatch(...)`
+contract are identical to the local path — the substitution is **constructor
+configuration**, not application rewiring.
+
+<Aside type="caution" title="End-to-end Fargate + S3 parity is maintainer-deferred">
+The V1 design spec marks this as the **one** item not yet proven by the
+maintainers. The local Docker acceptance is verified live, but the spec records:
+
+> the local Docker §7 acceptance is proven live (safe fan-out + per-edit patch
+> `result_ref`s + a verifiable tamper-detecting audit bundle); **the Fargate+S3
+> parity run is the one operator-deferred item.**
+>
+> — [`2026-05-29-agora-offload-v1-design.md`](https://github.com/quarrysystems/agora/blob/main/docs/superpowers/specs/2026-05-29-agora-offload-v1-design.md) (status header)
+
+What follows is the documented production wiring, **grounded in the provider
+code that ships** — every class name and option below is real. Treat it as the
+intended path that still needs a first end-to-end shakeout in your account, not
+a battle-tested happy path. Expect to debug IAM, networking, and task-definition
+details the first time through.
+</Aside>
+
+## Prerequisites
+
+- A working local dispatch first. Do the [hello-world example](https://github.com/quarrysystems/agora/tree/main/examples/hello-world) on the local stack before swapping providers — it isolates "my wiring is wrong" from "my AWS setup is wrong."
+- An AWS account with an ECS cluster, a VPC with subnets and security groups, and an S3 bucket you control.
+- AWS credentials resolvable by the standard SDK chain (env vars, shared config/`~/.aws`, an instance/task role, or SSO). The provider does not take a `region` or static keys — it reads the ambient chain.
+- A worker image published to a registry your Fargate task can pull (ECR or GHCR), **pinned by digest**.
+
+## 1. Publish a pinned worker image
+
+The local example tags `:latest` and sets `allowUnpinnedImage: true` so you can
+iterate without resolving a digest. **Production must not do either.** The
+`FargateProvider` rejects any non-`@sha256:` image reference unless
+`allowUnpinnedImage` is set, and that flag is documented as dev/test only.
+
+Build and push, then capture the digest:
+
+```sh
+docker build \
+  -t public.ecr.aws/quarry-systems/agora-worker:v1 \
+  -f docker/agora-worker/Dockerfile .
+
+docker push public.ecr.aws/quarry-systems/agora-worker:v1
+
+# Resolve the digest you will pin against:
+docker inspect --format='{{index .RepoDigests 0}}' \
+  public.ecr.aws/quarry-systems/agora-worker:v1
+```
+
+You dispatch against the digest form, e.g.
+`public.ecr.aws/quarry-systems/agora-worker@sha256:<64-hex>`.
+
+<Aside type="note" title="The task definition also pins the image">
+On Fargate the **task definition** is what actually launches the container.
+`RunTask` cannot override the container image (an ECS limitation the provider
+documents in code), so the digest in the task definition's container is the one
+that runs. The pin you pass to `client.dispatch(...)` is a guard: it must agree
+with what the task definition launches. Pin both to the same digest.
+</Aside>
+
+## 2. Provision S3 storage (and the Object Lock audit tier)
+
+There are **two distinct S3 concerns**, and they are wired by different code. Do
+not conflate them.
+
+**Artifact storage** is `S3StorageProvider` (`@quarry-systems/agora-storage-s3`).
+It stores subagent/capability/env bundles and dispatch records. Create a bucket
+for it. Its constructor takes only:
+
+| Option | Meaning |
+|---|---|
+| `bucket` (required) | Target bucket. You create it; the provider does not. |
+| `prefix` (optional) | Key prefix inside the bucket (slashes normalized). |
+| `client` (optional) | A pre-built `S3Client` — pass this to set the **region** or a custom endpoint. |
+
+<Aside type="caution" title="S3StorageProvider has no Object Lock and no region option">
+`S3StorageProvider` does **not** set S3 Object Lock on the artifacts it writes,
+and it has **no `region` constructor option**. Region (and any endpoint
+override) is set on the `S3Client` you inject via `client`. Object Lock on the
+artifact bucket, if you want it, is bucket-level AWS configuration that the
+provider neither requires nor manages — content-addressed blobs are already
+dedup-keyed by hash, but immutability there is your bucket policy, not agora's.
+</Aside>
+
+**The tamper-evidence tier is a separate seam.** Object Lock that agora actively
+uses lives in the **audit anchor**, not the storage provider. The orchestrator's
+`S3ObjectLockAnchor` (`@quarry-systems/agora-orchestrator`) writes the signed
+Merkle root of each audit epoch to S3 Object Lock in **compliance mode**. That
+is the `external-immutable` guarantee tier:
+
+- `LocalAnchor` (default) → guarantee `detect` → audit reports claim
+  **`tamper-detecting`**: catches accidental or clumsy mutation, but the root
+  lives in the same store, so it is *not* evidence against an attacker who
+  controls the DB.
+- `S3ObjectLockAnchor` → guarantee `external-immutable` → audit reports claim
+  **`tamper-evident`**: the signed root sits in S3 Object Lock compliance mode in
+  your account — a different trust domain — and survives a DB-side tamper
+  attempt.
+
+<Aside type="caution" title="“tamper-evident” vs “tamper-detecting”">
+The terms are enforced, not decorative. **`tamper-detecting`** is the honest
+word for the local tier; **`tamper-evident`** is licensed only at
+`external-immutable` and above. A missing or unreachable anchored root drops a
+report back to `tamper-detecting` regardless of which anchor you configured.
+</Aside>
+
+`S3ObjectLockAnchor` is constructed with an **injected `S3LockClient` seam**
+(the orchestrator takes no AWS SDK dependency directly), a `bucket`, and an
+optional retention in days (default 3650 ≈ 10 years):
+
+```typescript
+import { S3ObjectLockAnchor } from '@quarry-systems/agora-orchestrator';
+
+// You supply the S3LockClient adapter: putObject(key, body, { retainUntil, mode: 'COMPLIANCE' })
+// and getObject(key). It writes versioned objects under audit/roots/<epochId>.json
+// with Object Lock compliance-mode retention.
+const anchor = new S3ObjectLockAnchor(s3LockClient, 'my-org-agora-audit', 3650);
+```
+
+Create the audit bucket **with Object Lock enabled at creation time** (S3
+requires this; it cannot be turned on later) and grant compliance-mode retention
+permissions to the principal that runs the orchestrator.
+
+<Aside type="note" title="You write the S3LockClient adapter">
+The orchestrator deliberately ships only the `S3LockClient` *interface*, not a
+concrete AWS implementation — keeping the orchestrator dependency-free and
+testable. You provide a small adapter that calls `PutObjectCommand` with
+`ObjectLockMode: 'COMPLIANCE'` and `ObjectLockRetainUntilDate`. This is part of
+the not-yet-proven parity surface: there is no maintainer-shipped adapter to
+copy, so budget time to write and test it.
+</Aside>
+
+## 3. Swap providers in `agora.config`
+
+The local stack uses `LocalDockerProvider`, `LocalStorageProvider`, and
+`NoopCredentialProvider`. Swap each for its AWS counterpart. The class names and
+options below are the **real exported shapes** from the provider packages.
+
+```typescript
+import { AgoraClient, StdoutResultSink } from '@quarry-systems/agora-client';
+import { FargateProvider } from '@quarry-systems/agora-providers-fargate';
+import { S3StorageProvider } from '@quarry-systems/agora-storage-s3';
+import { AwsCredentialProvider } from '@quarry-systems/agora-providers-aws-creds';
+import { S3Client } from '@aws-sdk/client-s3';
+
+// Region (and any endpoint override) is set on the S3Client, NOT on the
+// provider — S3StorageProvider has no `region` option.
+const s3 = new S3Client({ region: 'us-east-1' });
+
+const client = new AgoraClient({
+  namespace: 'hello-world',
+  compute: {
+    fargate: new FargateProvider({
+      cluster: 'arn:aws:ecs:us-east-1:123456789012:cluster/agora',
+      // Family name WITHOUT revision — RunTask resolves the latest active
+      // revision. Pin a specific one with `family:N`.
+      taskDefinitionFamily: 'agora-worker',
+      subnets: ['subnet-abc', 'subnet-def'],
+      securityGroups: ['sg-xyz'],
+      // Default is 'DISABLED'; only ENABLE in a public subnet with no NAT.
+      assignPublicIp: 'DISABLED',
+    }),
+  },
+  // The AWS provider reads the ambient SDK credential chain. No region/keys
+  // option — it has only `providerOverride` for custom assume-role flows.
+  credentials: {
+    aws: new AwsCredentialProvider(),
+  },
+  storage: new S3StorageProvider({
+    bucket: 'my-org-agora-artifacts',
+    client: s3,
+    // prefix: 'agora',   // optional
+  }),
+  targets: { prod: { compute: 'fargate', credentials: 'aws' } },
+  resultSink: new StdoutResultSink(),
+});
+```
+
+<Aside type="note" title="Class/option names differ from some older example snippets">
+Use exactly the names above. The shipping code exports `AwsCredentialProvider`
+(not `AwsCredsProvider`), the Fargate option is `taskDefinitionFamily` (not
+`taskDefinition`), and neither the storage nor the credential provider accepts a
+`region` field. Where you have seen `region:` or `taskDefinition:` in an example,
+prefer the source of truth in the package `index.ts`.
+</Aside>
+
+## 4. Configure the Fargate target
+
+The provider drives `RunTask`/`DescribeTasks`/`StopTask`, but several things are
+fixed by the **task definition**, not by the dispatch. Get these right or the
+dispatch will fail at launch:
+
+1. **Container name must be `agora-worker`.** The provider overrides exactly this
+   container's environment, command, cpu, and memory per dispatch; if the task
+   definition's container is named anything else, the override is dropped.
+2. **Image is locked in the task definition.** `RunTask` cannot change it — pin
+   the same digest you dispatch with (see step 1).
+3. **Secrets must be pre-declared in the task definition's `secrets:[]`.** The
+   provider **throws** if a dispatch carries `secretRefs`, because `RunTask`
+   cannot inject new secrets at launch. Declare each secret (e.g. your
+   `ANTHROPIC_API_KEY`, sourced from AWS Secrets Manager via the
+   `AwsSecretStore` adapter) in the task definition so it is present when the
+   task starts.
+4. **`awsvpc` networking.** The `subnets` and `securityGroups` you pass populate
+   the `awsvpcConfiguration`. Make sure the security group and subnet routing let
+   the task reach S3, Secrets Manager, your model endpoint, and the image
+   registry (NAT gateway, VPC endpoints, or `assignPublicIp: 'ENABLED'` in a
+   public subnet).
+5. **Logging.** The provider does not capture stdout/stderr from Fargate
+   (`awaitExit` returns empty strings for both). Wire the task definition's
+   `awslogs` driver to CloudWatch Logs and read worker output there.
+
+## 5. Dispatch and verify
+
+The dispatch call is unchanged from local — only `target` and the pinned
+`workerImage` differ:
+
+```typescript
+const result = await client.dispatch({
+  subagent: 'echo',
+  env: 'minimal',
+  target: 'prod',
+  // Digest-pinned — FargateProvider rejects unpinned images.
+  workerImage:
+    'public.ecr.aws/quarry-systems/agora-worker@sha256:0123456789abcdef...',
+});
+```
+
+`awaitExit` polls `DescribeTasks` (default every 5000 ms; tune with
+`pollIntervalMs`) until the task reaches `STOPPED`, then projects the container's
+exit code into the result. A non-zero exit, or an infrastructural
+`stoppedReason`, surfaces as a failure — exactly as on the local path. Read the
+worker's structured-log stream from CloudWatch (see step 4.5) since the provider
+does not return it inline.
+
+Then prove the audit trail. With `S3ObjectLockAnchor` in force, the audit report
+names the anchor and claims the **`tamper-evident`** tier; with `LocalAnchor` it
+claims **`tamper-detecting`**.
+
+## Next steps
+
+- [Export & verify an audit bundle](/agora/how-to/verify-audit-bundle/) — produce and check the tamper-evident bundle this anchor backs.
+- [Audit & guarantee tiers](/agora/explanation/audit-guarantee-tiers/) — the full model behind `detect` / `external-immutable` / `witnessed` and the `tamper-detecting` vs `tamper-evident` distinction.
