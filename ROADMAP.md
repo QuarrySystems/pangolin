@@ -59,6 +59,12 @@ shipped in #24).
   a placeholder worker-image digest and their `outputSchema` is declared but not
   enforced. Making it runnable is V1.1 work (below). Today, V1 runs **plain
   registered subagents** named in `WorkItem.inputs`.
+- **Effect-tier policy (computed, not enforced)** — the `EffectTier` vocabulary
+  (`pure` / `read-impure` / `write-impure`) *and* the `effectTierPolicy()`
+  derivation (`cacheable` / `needsSnapshot` / `gated`) ship as code, and the engine
+  computes the policy for each item — but the result is currently **discarded**
+  (`tick.ts`: `void effectTierPolicy(…)`, `// TODO(PR6)`). Nothing caches, snapshots,
+  or gates on it yet. Acting on it is V1.1 (below).
 
 ### Known gap in V1
 
@@ -95,8 +101,10 @@ V1 ships.
   `approve` verb. The `Intent` *type* exists; no interpreter ships yet. This is the
   "lean-runner cut" deferred from V1.
 - **Cost accounting / budget enforcement.**
-- **Effect-tier enforcement** — the vocabulary already exists as a typed property;
-  V1.1 makes policy read it.
+- **Effect-tier enforcement** — the vocabulary and the `effectTierPolicy()`
+  derivation already ship and are computed per item (see "Now"), but the result is
+  discarded. V1.1 makes the engine *act* on it: cache `pure` work, snapshot live
+  state before `read-impure`, gate `write-impure` intents through interpreter policy.
 - **`Authorizer` seam** — an implementor-filled authorization policy. agora ships
   the chokepoint (the operations API) and identity primitives (`actor`, the
   client/service privilege split); it never owns roles. V1 is single-operator
