@@ -34,6 +34,7 @@ import {
   GetObjectCommand,
   ListObjectsV2Command,
   NoSuchKey,
+  type ServerSideEncryption,
 } from '@aws-sdk/client-s3';
 
 import {
@@ -54,6 +55,19 @@ export interface S3StorageProviderOpts {
   client?: S3Client;
   /** Optional prefix inside the bucket. Trailing slashes are normalized. */
   prefix?: string;
+  /** Server-side encryption applied to every object agora writes.
+   *  Omit to inherit the bucket's default encryption (SSE-S3 has been on by
+   *  default for all S3 buckets since Jan 2023). Set to enforce an explicit
+   *  mode — e.g. customer-managed KMS (BYOK). */
+  encryption?:
+    | { mode: 'AES256' }
+    | { mode: 'aws:kms'; kmsKeyId?: string };
+}
+
+/** Subset of PutObject SSE fields derived from {@link S3StorageProviderOpts.encryption}. */
+interface SseParams {
+  ServerSideEncryption?: ServerSideEncryption;
+  SSEKMSKeyId?: string;
 }
 
 interface IndexEntry {
@@ -67,6 +81,24 @@ interface IndexFile {
 
 function emptyIndex(): IndexFile {
   return { entries: [] };
+}
+
+/**
+ * Translate the public {@link S3StorageProviderOpts.encryption} option into
+ * the PutObject SSE fields. Returns an empty object when encryption is
+ * omitted so callers spread nothing (the no-downgrade rule).
+ */
+function deriveSseParams(
+  encryption: S3StorageProviderOpts['encryption'],
+): SseParams {
+  if (!encryption) return {};
+  if (encryption.mode === 'AES256') {
+    return { ServerSideEncryption: 'AES256' };
+  }
+  return {
+    ServerSideEncryption: 'aws:kms',
+    ...(encryption.kmsKeyId ? { SSEKMSKeyId: encryption.kmsKeyId } : {}),
+  };
 }
 
 /** True if the SDK error indicates "no such key / object missing". */
@@ -129,12 +161,20 @@ export class S3StorageProvider implements StorageProvider {
   readonly name = 's3';
   private readonly s3: S3Client;
   private readonly prefix: string;
+  /**
+   * SSE fields spread into every PutObjectCommand input. Empty when
+   * `encryption` is omitted — the no-downgrade rule: forcing AES256 onto a
+   * bucket whose default is KMS would silently downgrade it, so we touch no
+   * SSE field at all and let the bucket default apply.
+   */
+  private readonly sseParams: SseParams;
 
   constructor(private opts: S3StorageProviderOpts) {
     this.s3 = opts.client ?? new S3Client({});
     // Normalize prefix to "" or "foo/" form.
     const raw = (opts.prefix ?? '').replace(/^\/+|\/+$/g, '');
     this.prefix = raw.length === 0 ? '' : `${raw}/`;
+    this.sseParams = deriveSseParams(opts.encryption);
   }
 
   /**
@@ -331,6 +371,7 @@ export class S3StorageProvider implements StorageProvider {
           Bucket: this.opts.bucket,
           Key: blobKey,
           Body: contents,
+          ...this.sseParams,
           // Idempotent dedup: if the object already exists with this hash,
           // S3 returns 412 PreconditionFailed — that's the success path
           // because the content is content-addressed.
@@ -361,6 +402,7 @@ export class S3StorageProvider implements StorageProvider {
         Bucket: this.opts.bucket,
         Key: key,
         Body: contents,
+        ...this.sseParams,
       }),
     );
     return { contentHash: computeContentHash(contents) };
@@ -487,6 +529,7 @@ export class S3StorageProvider implements StorageProvider {
             Key: this.indexKey(parts),
             Body: body,
             ContentType: 'application/json',
+            ...this.sseParams,
             ...(etag ? { IfMatch: etag } : { IfNoneMatch: '*' }),
           }),
         );
