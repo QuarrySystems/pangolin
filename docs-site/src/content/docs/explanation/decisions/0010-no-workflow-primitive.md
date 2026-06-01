@@ -1,10 +1,22 @@
 ---
 title: "ADR-0010: No agora.workflow() / agora.procedure() primitive"
-description: "No agora.workflow() / agora.procedure() primitive in MVP; integrators wrap dispatch() themselves."
-status: accepted
+description: "No agora.workflow() / agora.procedure() primitive in MVP; integrators wrap dispatch() themselves. PARTIALLY SUPERSEDED by ADR-0018 — agora now ships orchestration as a separate layer."
+status: superseded
+superseded_by: ADR-0018
 date: 2026-05-21
 deciders: agora-mvp-design
 ---
+
+:::caution[Partially superseded by ADR-0018]
+The **narrow** decision below still holds: there is no `agora.workflow()` /
+`agora.procedure()` sugar primitive on the client SDK. But this ADR's **broad
+posture** — that orchestration "sits above agora, not inside it" and is "out of
+scope forever," and that the MCP surface "stays at six tools" — has been reversed.
+agora now ships orchestration as a separate, opt-in layer (`agora-orchestrator` /
+offload), and the MCP surface is nine tools. See
+[ADR-0018](/agora/explanation/decisions/0018-orchestration-ships-as-a-layer/).
+The original text is preserved below as the point-in-time record.
+:::
 
 ## Context
 

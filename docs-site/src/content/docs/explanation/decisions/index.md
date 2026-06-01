@@ -23,7 +23,7 @@ ADR that references the old one, not editing the existing file.
 - [0007](/agora/explanation/decisions/0007-inline-secret-ttl-auto-computed/) — Inline secret TTL is auto-computed from dispatch timeout plus a 5-minute cleanup grace.
 - [0008](/agora/explanation/decisions/0008-needs-input-request-stop-restart/) — `needs_input` uses request-stop-restart (Shape A), not in-flight ask.
 - [0009](/agora/explanation/decisions/0009-needs-input-sentinel-file-vs-exit-code/) — `needs_input` is signaled by a sentinel file at a documented path, not by an exit code.
-- [0010](/agora/explanation/decisions/0010-no-workflow-primitive/) — No `agora.workflow()` / `agora.procedure()` primitive in MVP; integrators wrap `dispatch()` themselves.
+- [0010](/agora/explanation/decisions/0010-no-workflow-primitive/) — No `agora.workflow()` / `agora.procedure()` primitive in MVP; integrators wrap `dispatch()` themselves. **(Partially superseded by [0018](/agora/explanation/decisions/0018-orchestration-ships-as-a-layer/).)**
 - [0011](/agora/explanation/decisions/0011-no-entrypoint-override-at-dispatch/) — No `entrypoint` override at dispatch time; customization goes through worker images or `agora-setup.sh`.
 - [0012](/agora/explanation/decisions/0012-notifications-dual-home/) — Notifications live in two homes by design: capability content (behavior-tied) and dispatch field (operational).
 - [0013](/agora/explanation/decisions/0013-mvp-single-namespace/) — MVP is strictly single-namespace; no public cross-namespace addressing.
@@ -31,6 +31,7 @@ ADR that references the old one, not editing the existing file.
 - [0015](/agora/explanation/decisions/0015-capability-size-cap/) — Capability size cap is 50 MiB, rejected synchronously at `register()` time.
 - [0016](/agora/explanation/decisions/0016-cancel-in-mvp/) — `cancel()` is in MVP, not v0.2; best-effort cancellation via provider stop + worker SIGTERM trap.
 - [0017](/agora/explanation/decisions/0017-source-available-bsl/) — Agora is source-available under BSL 1.1 (no hosted-service Additional Use Grant; 4yr → Apache-2.0), superseding the earlier FSL-1.1-MIT choice.
+- [0018](/agora/explanation/decisions/0018-orchestration-ships-as-a-layer/) — agora ships orchestration as a separate opt-in layer (`agora-orchestrator` / offload), partially superseding ADR-0010's "orchestration only above agora / out of scope forever" posture. The client-SDK workflow-primitive rejection still stands.
 
 ## Source
 
