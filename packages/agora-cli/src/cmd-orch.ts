@@ -14,12 +14,9 @@ export interface OrchContext {
   runService?: (signal: AbortSignal) => Promise<void>;   // pre-wired serve() for the `serve` verb
 }
 
-/** CliContext narrowed to include the required getOrchContext factory. */
-type OrchCapableCliContext = CliContext & { getOrchContext: () => Promise<OrchContext> };
-
 const resolveActor = (flag?: string): string => flag ?? process.env.AGORA_ACTOR ?? `human:${userInfo().username}`;
 
-export function attachOrchCmd(program: Command, ctx: OrchCapableCliContext): void {
+export function attachOrchCmd(program: Command, ctx: CliContext): void {
   const o = program.command('orch').aliases(['orchestrator']).description('Submit, follow, cancel, and audit offload runs');
 
   o.command('submit <plan.json>').option('--queue <name>').option('--actor <id>').action(async (file, opts) => {
@@ -34,7 +31,7 @@ export function attachOrchCmd(program: Command, ctx: OrchCapableCliContext): voi
     console.log(JSON.stringify(rec ?? null, null, 2));
   });
 
-  o.command('watch <run-id>').action(async (runId) => {
+  o.command('watch <run-id>').description('Follow a run until it reaches a terminal state (Ctrl-C to stop)').action(async (runId) => {
     const api = new OperationsApi(await ctx.getOrchContext());
     for await (const rec of api.watch(runId)) {
       console.log(JSON.stringify(rec));   // render each status update until terminal
@@ -57,8 +54,14 @@ export function attachOrchCmd(program: Command, ctx: OrchCapableCliContext): voi
     const oc = await ctx.getOrchContext();
     if (!oc.runService) throw new Error('agora orch serve: agora.config `orch` export provides no runService');
     const ac = new AbortController();
-    process.on('SIGINT', () => ac.abort());
-    process.on('SIGTERM', () => ac.abort());
-    await oc.runService(ac.signal);
+    const onAbort = () => ac.abort();
+    process.on('SIGINT', onAbort);
+    process.on('SIGTERM', onAbort);
+    try {
+      await oc.runService(ac.signal);
+    } finally {
+      process.off('SIGINT', onAbort);
+      process.off('SIGTERM', onAbort);
+    }
   });
 }

@@ -280,6 +280,46 @@ describe('attachOrchCmd', () => {
     });
   });
 
+  describe('watch', () => {
+    it('prints each status record as JSON and terminates when all items are in a terminal state', async () => {
+      // Build a transport whose readOutbox returns a status record with all items done.
+      // OperationsApi.watch yields each record and stops when isTerminalStatusBody returns true
+      // (i.e. every item.status is in {done|failed|skipped|cancelled}).
+      const transport = makeFakeTransport();
+      const oc = makeOrchContext({ transport });
+      const ctx = makeCtx(oc);
+
+      const terminalStatusRec: OutboxRecord = {
+        runId: 'run-watch-1',
+        kind: 'status',
+        body: [
+          { id: 'item-1', runId: 'run-watch-1', status: 'done', blockedBy: [] },
+          { id: 'item-2', runId: 'run-watch-1', status: 'failed', blockedBy: [] },
+        ],
+        at: '2026-06-01T12:00:00Z',
+      };
+      await transport.publish(terminalStatusRec);
+
+      const program = new Command();
+      attachOrchCmd(program, ctx);
+
+      // Pass intervalMs=0 so watch doesn't sleep between polls
+      // We can't pass it via CLI flags (no flag defined), so we rely on the
+      // transport already having a terminal record on the first poll — watch
+      // yields once, sees terminal body, and returns without sleeping.
+      const logs = await captureLog(() =>
+        program.parseAsync(['orch', 'watch', 'run-watch-1'], { from: 'user' }),
+      );
+
+      // Should print exactly one status record as JSON
+      expect(logs).toHaveLength(1);
+      const parsed = JSON.parse(logs[0]);
+      expect(parsed.runId).toBe('run-watch-1');
+      expect(parsed.kind).toBe('status');
+      // The command must have returned (not hung); if it hung, captureLog would never resolve
+    });
+  });
+
   describe('audit', () => {
     it('calls through OperationsApi.audit and prints the bundle JSON', async () => {
       // Import orchestrator internals for building a realistic audit export
@@ -370,15 +410,14 @@ describe('attachOrchCmd', () => {
 
       const prevExitCode = process.exitCode;
       process.exitCode = undefined;
-
-      await captureLog(() =>
-        program.parseAsync(['orch', 'audit', runId], { from: 'user' }),
-      );
-
-      expect(process.exitCode).toBe(1);
-
-      // restore
-      process.exitCode = prevExitCode;
+      try {
+        await captureLog(() =>
+          program.parseAsync(['orch', 'audit', runId], { from: 'user' }),
+        );
+        expect(process.exitCode).toBe(1);
+      } finally {
+        process.exitCode = prevExitCode;
+      }
     });
 
     it('writes audit bundle to --out file when specified', async () => {
