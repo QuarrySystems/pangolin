@@ -50,6 +50,14 @@ audit bundle.
   isolation + patch escape, producing a verifiable audit bundle. Walk it in
   [Your first offload run](/agora/tutorials/first-offload-run/).
 - **BSL packaging** — root `LICENSE`, `BUSL-1.1` in every package.
+- **Typed-subagent substrate (scaffolded, not yet operational)** — the
+  `SubagentShape` contract, the `PackRegistry`, construction-time validation, and
+  the `dev` pack's `dev.code-edit` / `dev.verify` shapes ship as code; the engine
+  resolves a `WorkItem.subagentShape` and validates its `inputs` against the
+  shape's schema. **Not yet dispatchable** — the dev shapes carry a placeholder
+  worker-image digest and their `outputSchema` is declared but not enforced.
+  Making it runnable is V1.1 (below); today V1 runs plain registered subagents
+  named in `WorkItem.inputs`.
 
 ### Known gap in V1
 
@@ -68,12 +76,18 @@ A strict superset of V1; nothing below changes what V1 ships.
 - **`cron` trigger** — recurring scheduling via the existing `Trigger` seam.
   `serve` + manual `submit` already delivers *unattended* offload; `cron` adds
   *recurring*. **First item to pull into V1.1.**
-- **Full typed output** — `outputSchema` validation, `output` data products,
-  `intents`, `signals`.
+- **Operationalize the `dev` pack** — the `dev.code-edit` / `dev.verify` shapes and
+  the `PackRegistry` already exist in code (see "Now"), but aren't dispatchable yet:
+  pin the real worker-image digest (currently a `PLACEHOLDER`) and enforce each
+  shape's `outputSchema` via `.agora/output.json`.
+- **Full typed output (enforcement)** — the `output.json` contract *types* exist
+  (`outputSchema`, the `patch` / `intent` schemas), but `.agora/output.json`
+  validation, `output` data products, `intents`, and `signals` are not yet enforced
+  end-to-end.
 - **The autonomous-PR layer** — `Intent` / `IntentInterpreter`, the `dev.open-pr`
   interpreter, the auto-merge-test-only / human-approve policy, the CLI `approve`
-  verb. The "lean-runner cut" deferred from V1.
-- **The `dev` pack** — `code-edit` / `verify` subagent shapes.
+  verb. The `Intent` *type* exists; no interpreter ships yet. The "lean-runner cut"
+  deferred from V1.
 - **Cost accounting / budget enforcement.**
 - **Effect-tier enforcement** — the vocabulary already exists as a typed property;
   V1.1 makes policy read it.
