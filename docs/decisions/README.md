@@ -22,6 +22,7 @@ Each ADR is immutable once accepted. Superseding a decision means adding a new A
 - [0014](0014-stdout-cap.md) — Stdout is capped at 4 MiB and stderr at 256 KiB on `DispatchResult`, with explicit truncation markers.
 - [0015](0015-capability-size-cap.md) — Capability size cap is 50 MiB, rejected synchronously at `register()` time.
 - [0016](0016-cancel-in-mvp.md) — `cancel()` is in MVP, not v0.2; best-effort cancellation via provider stop + worker SIGTERM trap.
+- [0017](0017-source-available-bsl.md) — Agora is source-available under BSL 1.1 (no hosted-service Additional Use Grant; 4yr → Apache-2.0), superseding the earlier FSL-1.1-MIT choice.
 
 ## Source
 

@@ -1,7 +1,7 @@
 ---
 title: Agora Offload — V1 Delivery Spec (Lean Runner)
 date: 2026-05-29
-status: design (approved direction; implementation plan pending)
+status: implemented (V1 shipped — all five waves merged to main, 2026-06-01; PRs #18/#19/#21/#22/#23)
 branch: docs/agora-offload-v1-spec
 authors: [human:Brett, agent:claude-opus-4-8]
 builds_on: "[[docs/superpowers/specs/2026-05-28-agora-orchestrator-design.md]]"
@@ -9,7 +9,13 @@ builds_on: "[[docs/superpowers/specs/2026-05-28-agora-orchestrator-design.md]]"
 
 # Agora Offload — V1 Delivery Spec (Lean Runner)
 
-> **Status:** design note. Approved direction; not yet implemented.
+> **Status:** SHIPPED. V1 is implemented and merged to `main` (2026-06-01) across
+> five waves — `offload-runner` (#18), `offload-escape` (#19), `offload-audit`
+> (#21), `offload-surface` (#22), `offload-launch` (#23). The local Docker §7
+> acceptance is proven live (safe fan-out + per-edit patch `result_ref`s + a
+> verifiable tamper-detecting audit bundle); the Fargate+S3 parity run is the one
+> operator-deferred item. Operator how-to: [`docs/offload-orchestration.md`](../../offload-orchestration.md).
+> This document is retained as the design record.
 > **This is a delivery cut, not new architecture.** It selects the smallest
 > shippable, *productizable* slice of the orchestrator architecture
 > ([2026-05-28 orchestrator spec](./2026-05-28-agora-orchestrator-design.md))
@@ -237,15 +243,16 @@ layer sees an opaque `executorManifest`. This is what makes executor #2 additive
 
 ### 2.1 End-to-end flow (V1 end-state)
 
-The full request path once all five waves land. `✅` = shipped
-(`offload-runner` #18, `offload-escape` #19); `◷` = remaining
-(`offload-audit`, `offload-surface`, `offload-launch`).
+The full request path. **All five waves are now shipped (merged to `main`,
+2026-06-01):** `offload-runner` #18, `offload-escape` #19, `offload-audit` #21,
+`offload-surface` #22, `offload-launch` #23. The `✅`/`◷` markers in the diagram
+below were the in-flight tracker; every leg is now `✅`.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │ CLIENT  (operator / Claude Code session)                                  │
-│   CLI:  orch submit · status · watch · cancel · audit   ◷ surface         │
-│   MCP:  submit · status · watch  (client-only; audit is CLI-only) ◷       │
+│   CLI:  orch submit · status · watch · cancel · audit   ✅ surface        │
+│   MCP:  submit · status · watch  (client-only; audit is CLI-only) ✅      │
 └───────┬──────────────────────────────────────────────▲────────────────────┘
         │ write Run spec                                 │ poll status/result/
         │ (NO inbound networking)                        │ patchRef + audit bundle
@@ -257,7 +264,7 @@ The full request path once all five waves land. `✅` = shipped
 │   dead/             │ │                      │     bundles    (in)           │
 └─────────────────────┼─┘                      │   • patch artifacts  ✅escape │
         ▲             │                         │   • dispatch manifests ✅     │
-        │             ▼                         │   • audit roots/proofs ◷audit │
+        │             ▼                         │   • audit roots/proofs ✅audit │
         │   ┌───────────────────────────────────────────────┐                 │
         │   │ serve daemon  ✅runner   (sole DB writer · only │                 │
         │   │ tick() caller · clean SIGTERM · reconcile-first)│                 │
@@ -297,7 +304,7 @@ The full request path once all five waves land. `✅` = shipped
    ╚══════════════════════════════════════════════════════════════╝  │          │
                                                                        │          │
             ┌──────────────────────────────────────────────┐  events  │          │
-            │ Audit  ◷audit  (engine-side, executor-agnostic)│◄────────┘          │
+            │ Audit  ✅audit  (engine-side, executor-agnostic)│◄────────┘          │
             │  hash-chain → Merkle-per-epoch → Signer(root)  │── anchor root ────►│
             │  → AuditAnchor (LocalAnchor=detect /           │                    │
             │    S3ObjectLockAnchor=external-immutable)      │                    │

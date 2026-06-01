@@ -1,7 +1,7 @@
 ---
 title: Agora Orchestrator — Architecture & Trunk Spec
 date: 2026-05-28
-status: design (approved direction; trunk pending implementation plan)
+status: implemented (trunk shipped as agora-offload V1 — merged to main 2026-06-01)
 branch: docs/orchestrator-spec
 authors: [human:Brett, agent:claude-opus-4-8]
 supersedes: design note "Agora Architecture — Full Spec for Consideration" (v2)
@@ -9,10 +9,17 @@ supersedes: design note "Agora Architecture — Full Spec for Consideration" (v2
 
 # Agora Orchestrator — Architecture & Trunk Spec
 
-> **Status:** design note. Approved direction; not yet implemented.
-> **Trunk** = overnight dev offload (*agora-offload*). This spec captures the
-> architecture the trunk should grow into. Build the mechanism; let contents be
-> pulled by real tasks. Trap-check at §11.
+> **Status:** SHIPPED (trunk). The trunk described here is implemented as the
+> **agora-offload V1** — merged to `main` 2026-06-01 across PRs #18/#19/#21/#22/#23.
+> See the [Offload V1 delivery spec](./2026-05-29-agora-offload-v1-design.md) for
+> the shipped slice and the [Offload orchestration guide](../../offload-orchestration.md)
+> for operator how-to. The §10.6 operations-API consolidation + privilege split,
+> §6 audit layer, queues/deps/locks, and `serve` are all live; deferred branches
+> (additional executors/packs, Intent/interpreter, named queues beyond `default`,
+> cron, the `Claim` type) remain as written. This document is retained as the
+> architecture record.
+> **Trunk** = overnight dev offload (*agora-offload*). Build the mechanism; let
+> contents be pulled by real tasks. Trap-check at §11.
 
 This document is the consolidated, internally-reconciled version of the v2
 architecture note. The architecture body (§0–§12) is preserved as authored; a
