@@ -20,6 +20,8 @@ it('round-trips a cancel control request and acks it', async () => {
   const t = new MailboxSubmissionTransport(memMailbox());
   await t.control({ kind: 'cancel', target: 'run-1', actor: 'human:brett', at: '2026-05-31T00:00:00Z' });
   expect((await t.pollControl()).map((c) => c.target)).toEqual(['run-1']);
+  // poll again — still present (not consumed until ackControl)
+  expect((await t.pollControl()).map((c) => c.target)).toEqual(['run-1']);
   await t.ackControl('run-1');
   expect(await t.pollControl()).toEqual([]);
 });
