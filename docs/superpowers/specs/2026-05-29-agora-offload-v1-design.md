@@ -407,8 +407,8 @@ rewrite it. So:
    provider-agnostic, with no external dependency.
    **Pinned hash algorithm (shared with Mneme):** SHA-256; Merkle leaves
    domain-separated with a `0x00` prefix, internal pairs with `0x01` (second-
-   preimage resistance); empty set → 32 zero bytes; an odd level duplicates its
-   last node. agora's lifecycle-entry canonical form is an ordered, JSON-stringified
+   preimage resistance); empty set → 32 zero bytes; an odd level carries up its
+   last node unhashed. agora's lifecycle-entry canonical form is an ordered, JSON-stringified
    field array (agora pins its own fields — they differ from Mneme's claim events —
    but the chaining + Merkle + domain-separation rules are identical, so the
    *protocol* is bit-compatible).
@@ -440,7 +440,7 @@ platform's two halves anchor identically, and an implementer learns one model.
 (Not shared *code* yet — agora takes no Quarry-lib deps, D11 — but identical
 *shape*, a candidate for the eventual extracted substrate.)
 
-**Pinned contract (normative — transcribed from Mneme verbatim, `src/contracts/audit.ts`):**
+**Pinned contract (normative — transcribed from Mneme verbatim, `src/audit/types.ts`):**
 
 ```typescript
 export type Guarantee = 'detect' | 'external-immutable' | 'witnessed';
