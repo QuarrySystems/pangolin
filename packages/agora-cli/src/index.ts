@@ -15,10 +15,15 @@ import { attachSubagentCmd } from './cmd-subagent.js';
 import { attachEnvCmd } from './cmd-env.js';
 import { attachDispatchCmd } from './cmd-dispatch.js';
 import { attachDeployCmd } from './cmd-deploy.js';
+import { attachOrchCmd } from './cmd-orch.js';
+import type { OrchContext } from './cmd-orch.js';
 
 export interface CliContext {
   /** Lazily-loaded AgoraClient instance (from agora.config.ts in cwd). */
   getClient: () => Promise<AgoraClient>;
+  /** Lazily-loaded OrchContext instance (from agora.config.ts `orch` export in cwd).
+   *  Optional for backward compatibility; if absent, `agora orch` commands will not be registered. */
+  getOrchContext?: () => Promise<OrchContext>;
 }
 
 export function buildProgram(ctx: CliContext): Command {
@@ -29,6 +34,7 @@ export function buildProgram(ctx: CliContext): Command {
   attachEnvCmd(program, ctx);
   attachDispatchCmd(program, ctx);
   attachDeployCmd(program, ctx);
+  if (ctx.getOrchContext) attachOrchCmd(program, ctx as CliContext & { getOrchContext: () => Promise<OrchContext> });
   return program;
 }
 
@@ -57,13 +63,38 @@ export async function defaultGetClient(): Promise<AgoraClient> {
   throw new Error(`agora-cli: no agora.config.{ts,js,mjs} found in ${process.cwd()}`);
 }
 
+export async function defaultGetOrchContext(): Promise<OrchContext> {
+  // Resolve ./agora.config.{ts,js,mjs} relative to cwd, dynamic import, expect
+  // a named `orch` export of an OrchContext object.
+  const { pathToFileURL } = await import('node:url');
+  const { resolve } = await import('node:path');
+  const { access } = await import('node:fs/promises');
+  for (const filename of ['agora.config.ts', 'agora.config.js', 'agora.config.mjs']) {
+    const path = resolve(process.cwd(), filename);
+    try {
+      await access(path);
+    } catch {
+      continue;
+    }
+    const mod = await import(pathToFileURL(path).href);
+    const oc = mod.orch;
+    if (!oc) {
+      throw new Error(
+        `agora-cli: ${filename} must export an OrchContext as a named 'orch' export for agora orch commands`,
+      );
+    }
+    return oc as OrchContext;
+  }
+  throw new Error(`agora-cli: no agora.config.{ts,js,mjs} found in ${process.cwd()}`);
+}
+
 // Direct-invocation guard. The package compiles to CommonJS (no `"type":
 // "module"` in package.json), so we use the CJS-native `require.main ===
 // module` check rather than `import.meta.url`. When this file is executed
 // as the entry script (e.g. via the `agora` bin), build the program and
 // parse argv; when it is `require()`d from a test, skip the side effect.
 if (typeof require !== 'undefined' && require.main === module) {
-  const program = buildProgram({ getClient: defaultGetClient });
+  const program = buildProgram({ getClient: defaultGetClient, getOrchContext: defaultGetOrchContext });
   program.parseAsync(process.argv).catch((err) => {
     console.error(err);
     process.exit(1);
