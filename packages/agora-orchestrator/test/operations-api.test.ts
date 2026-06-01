@@ -227,6 +227,40 @@ describe('OperationsApi', () => {
 
       await expect(api.audit('run-audit-2')).rejects.toThrow('no audit export published');
     });
+
+    it('throws the same clear error when the audit outbox body is malformed (a string)', async () => {
+      const transport = makeFakeTransport();
+      const { anchor } = await buildAuditExport('run-audit-3');
+      const storage = {
+        async get(_ref: string): Promise<Uint8Array> { throw new Error('no manifests'); },
+      };
+
+      const api = new OperationsApi({ transport, anchor, storage });
+
+      // Publish an audit record whose body is a malformed string (not an AuditExport)
+      await transport.publish({
+        runId: 'run-audit-3', kind: 'audit', body: 'garbage', at: '2026-06-01T00:00:00Z',
+      });
+
+      await expect(api.audit('run-audit-3')).rejects.toThrow('no audit export published');
+    });
+
+    it('throws the same clear error when the audit outbox body is an object missing runId', async () => {
+      const transport = makeFakeTransport();
+      const { anchor } = await buildAuditExport('run-audit-4');
+      const storage = {
+        async get(_ref: string): Promise<Uint8Array> { throw new Error('no manifests'); },
+      };
+
+      const api = new OperationsApi({ transport, anchor, storage });
+
+      // Publish an audit record whose body is an object but missing runId
+      await transport.publish({
+        runId: 'run-audit-4', kind: 'audit', body: { entries: [], root: null, items: [] }, at: '2026-06-01T00:00:00Z',
+      });
+
+      await expect(api.audit('run-audit-4')).rejects.toThrow('no audit export published');
+    });
   });
 
   describe('watch', () => {

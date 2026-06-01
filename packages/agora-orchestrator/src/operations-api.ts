@@ -82,8 +82,15 @@ export class OperationsApi {
       throw new Error('audit requires anchor + storage in the orch context');
     }
     const recs = await this.deps.transport.readOutbox(runId);
-    const exp = recs.filter((r) => r.kind === 'audit').at(-1)?.body as AuditExport | undefined;
-    if (!exp) throw new Error(`no audit export published yet for run ${runId}`);
+    const rawBody = recs.filter((r) => r.kind === 'audit').at(-1)?.body;
+    if (
+      rawBody === null || rawBody === undefined ||
+      typeof rawBody !== 'object' ||
+      typeof (rawBody as Record<string, unknown>).runId !== 'string'
+    ) {
+      throw new Error(`no audit export published yet for run ${runId}`);
+    }
+    const exp = rawBody as AuditExport;
     return assembleBundle(exp, {
       anchor: this.deps.anchor,
       storage: this.deps.storage,
