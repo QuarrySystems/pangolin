@@ -42,10 +42,13 @@ audit bundle.
 - **The `default` queue** — concurrency configured at construction. Named queues
   remain a contract, not yet a feature.
 - **Compliance & audit controls** — signed dispatch manifest, Merkle-rooted audit
-  log with a pluggable `AuditAnchor` seam, actor identity on every operation,
-  `agora orch audit` evidence export, encryption-at-rest by default. See
-  [Audit & guarantee tiers](/agora/explanation/audit-guarantee-tiers/). The claim
-  is **"compliance-ready," never "compliant" or "certified."**
+  log with a pluggable `AuditAnchor` seam, actor identity on every operation, and
+  `agora orch audit` evidence export. See
+  [Audit & guarantee tiers](/agora/explanation/audit-guarantee-tiers/).
+  **Encryption-at-rest is delegated to the deployment substrate** (S3 default
+  bucket encryption, encrypted EBS/EFS) — agora ships no application-layer
+  encryption today; customer-managed encryption (BYOK/KMS) is a V1.1 item (below).
+  The claim is **"compliance-ready," never "compliant" or "certified."**
 - **Headline demo** — a single `submit` exercising locks + deps + concurrency +
   isolation + patch escape, producing a verifiable audit bundle. Walk it in
   [Your first offload run](/agora/tutorials/first-offload-run/).
@@ -85,10 +88,11 @@ A strict superset of V1; nothing below changes what V1 ships.
   the `PackRegistry` already exist in code (see "Now"), but aren't dispatchable yet:
   pin the real worker-image digest (currently a `PLACEHOLDER`) and enforce each
   shape's `outputSchema` via `.agora/output.json`.
-- **Full typed output (enforcement)** — the `output.json` contract *types* exist
-  (`outputSchema`, the `patch` / `intent` schemas), but `.agora/output.json`
-  validation, `output` data products, `intents`, and `signals` are not yet enforced
-  end-to-end.
+- **Full typed output (enforcement)** — the worker **already writes**
+  `.agora/output.json` (a fixed `{schemaVersion, patchRef, summary}` sentinel) and
+  the executor reads `patchRef` to surface `result_ref` — that path is live.
+  Deferred: validating it against each shape's `outputSchema`, and the richer
+  `output` / `intents` / `signals` products (types exist; nothing enforces them yet).
 - **The autonomous-PR layer** — `Intent` / `IntentInterpreter`, the `dev.open-pr`
   interpreter, the auto-merge-test-only / human-approve policy, the CLI `approve`
   verb. The `Intent` *type* exists; no interpreter ships yet. The "lean-runner cut"
@@ -100,10 +104,12 @@ A strict superset of V1; nothing below changes what V1 ships.
   `read-impure`, gate `write-impure` intents through interpreter policy.
 - **`Authorizer` seam** — implementor-filled authorization policy at the existing
   operations-API chokepoint. V1 is single-operator ("whoever launched").
-- **Compliance deepening** — BYOK/KMS, full role-based RBAC, automated
-  retention/purge, SIEM/log-export, and a **Bedrock-backed `RuntimeAdapter`** (keeps
-  the model call inside a customer's AWS BAA boundary). All additive via existing
-  seams.
+- **Compliance deepening** — **application-/customer-managed encryption-at-rest**
+  (set `ServerSideEncryption` on S3 puts; BYOK/KMS; envelope-encrypted secrets +
+  patch artifacts — today at-rest encryption is substrate-provided only), full
+  role-based RBAC, automated retention/purge, SIEM/log-export, and a
+  **Bedrock-backed `RuntimeAdapter`** (keeps the model call inside a customer's AWS
+  BAA boundary). All additive via existing seams.
 - **`WitnessAnchor` audit tier** — pushes the audit root to a cross-org witness
   (RFC 3161 TSA / transparency log); an additive third tier above
   `external-immutable`.
