@@ -133,7 +133,7 @@ async function connectClient(): Promise<Client> {
 }
 
 describe('E2E: agora-mcp tool surface via real MCP client', () => {
-  it('listTools returns exactly the six run-time tools and zero deploy-time tools', async () => {
+  it('listTools returns exactly the nine run-time tools (6 dispatch/catalog + 3 client orchestrator) and zero deploy-time or privileged tools', async () => {
     const client = await connectClient();
     try {
       const { tools } = await client.listTools();
@@ -144,13 +144,19 @@ describe('E2E: agora-mcp tool surface via real MCP client', () => {
         'agora_dispatch_cancel',
         'agora_dispatch_describe',
         'agora_envs_list',
+        'agora_orchestrator_status',
+        'agora_orchestrator_submit',
+        'agora_orchestrator_watch',
         'agora_subagents_list',
       ]);
       // Defense in depth: even if the sorted-equality check above is
-      // refactored, the explicit deploy-time exclusion must hold.
+      // refactored, the explicit deploy-time + privileged exclusions must hold.
+      // The orchestrator surface is client-only (§10.6): submit/status/watch are
+      // exposed; cancel/audit/serve are CLI-only/privileged and never on MCP.
       for (const tool of tools) {
         expect(tool.name).not.toMatch(/agora_.*_register$/);
         expect(tool.name).not.toMatch(/agora_.*_assign$/);
+        expect(tool.name).not.toMatch(/agora_orchestrator_(cancel|audit|serve)$/);
       }
     } finally {
       await client.close();
