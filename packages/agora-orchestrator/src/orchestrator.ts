@@ -171,16 +171,20 @@ export class AgoraOrchestrator {
 
   /** Refs-only audit export for a (typically sealed) run: entries + anchored root +
    *  per-item outcomes. `root` is undefined if the run's epoch has not sealed.
-   *  Reads the store only — references only, never secret values (D3, §6.5). */
+   *  Reads the store only — references only, never secret values (D3, §6.5).
+   *  Safe when the store does not implement AuditStore (no auditLog configured). */
   getAuditExport(runId: string): AuditExport {
     const auditStore = this.store as unknown as {
-      getAuditEntries(runId: string): AuditEntryRow[];
-      getAuditRoot(epochId: string): AnchoredRoot | undefined;
+      getAuditEntries?(runId: string): AuditEntryRow[];
+      getAuditRoot?(epochId: string): AnchoredRoot | undefined;
     };
+    const entries = auditStore.getAuditEntries?.(runId) ?? [];
+    const root = auditStore.getAuditRoot?.(runId);
     const items = this.store.getItems(runId).map((i) => ({
       id: deNs(i.id), status: i.status, attempts: i.attempts, actor: i.actor,
-      resultRef: i.resultRef, manifestRef: i.manifestRef,
+      ...(i.resultRef !== undefined ? { resultRef: i.resultRef } : {}),
+      ...(i.manifestRef !== undefined ? { manifestRef: i.manifestRef } : {}),
     }));
-    return { runId, entries: auditStore.getAuditEntries(runId), root: auditStore.getAuditRoot(runId), items };
+    return { runId, entries, root, items };
   }
 }
