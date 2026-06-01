@@ -1,48 +1,65 @@
-# Remote dispatch to a Windows laptop (SSH `DOCKER_HOST`)
+---
+title: Dispatch to a remote Docker daemon
+description: Orchestrate from one machine, run workers on another's Docker daemon over SSH.
+---
+
+import { Aside } from '@astrojs/starlight/components';
 
 Run agora dispatches from one machine (the **orchestrator**) while the worker
 containers execute on a second machine (the **target**) over its Docker daemon.
-This is the "inward dispatch" leg of the substrate topology: laptop orchestrator
+This is the "inward dispatch" leg of the substrate topology: the orchestrator
 reaches a remote Docker daemon to run workers.
 
-> **Why SSH and not a Cloudflare tunnel.** A Docker daemon API is
-> root-equivalent — exposing it over a public tunnel is remote code execution
-> waiting to happen. Inward dispatch stays on **LAN SSH**; Cloudflare Tunnel /
-> portsandbox is reserved for the *outward* direction (exposing an HTTP service
-> like Stoa). See the vault decision
-> `wikis/_meta/decisions/decision-2026-05-23-substrate-architecture-stoa-v04-agora.md`.
+The hop runs over **SSH** — `LocalDockerProvider` honors the standard
+`DOCKER_HOST` environment variable, so pointing it at `ssh://user@target`
+is all the wiring needed. The walkthrough below uses a Windows target as a
+worked example, but nothing here is Windows-only; the genuinely
+Windows-specific steps are called out in asides.
 
-> **Status.** The agora-side seam is verified: `LocalDockerProvider` defaults to
-> `new Docker()` (honors `DOCKER_HOST`) and also accepts an injected
-> `docker?: Docker` client. The Windows→Windows SSH→Docker hop below is a setup
-> to validate with the marked ✅ check commands — it is environment-specific and
-> not exercised in CI. Do this **after the `security/env-leak-hardening` PR
-> merges**, since the secret-store wiring and green build are part of what you
-> dispatch.
+<Aside type="caution" title="Why SSH and not a Cloudflare tunnel">
+A Docker daemon API is root-equivalent — exposing it over a public tunnel is
+remote code execution waiting to happen. Inward dispatch stays on **LAN SSH**;
+Cloudflare Tunnel / portsandbox is reserved for the *outward* direction
+(exposing an HTTP service like Stoa).
+</Aside>
+
+<Aside type="note" title="Status">
+The agora-side seam is verified: `LocalDockerProvider` defaults to
+`new Docker()` (honors `DOCKER_HOST`) and also accepts an injected
+`docker?: Docker` client. The SSH→Docker hop below is a setup to validate with
+the marked ✅ check commands — it is environment-specific and not exercised in
+CI.
+</Aside>
 
 ---
 
-## A. On the target laptop (runs the workers)
+## A. On the target machine (runs the workers)
 
-1. **Docker Desktop running**, with the worker image present locally. Get it
+1. **Docker running**, with the worker image present locally. Get it
    there by any of: build from the repo (`docker build -t
    ghcr.io/quarrysystems/agora-worker:latest -f docker/agora-worker/Dockerfile .`),
    `docker save` on the orchestrator → `docker load` on the target, or pull the
    GHCR digest (needs auth if the package is private).
 
-2. **Enable the OpenSSH Server** (PowerShell, elevated):
+2. **Enable an SSH server.** On Linux/macOS this is the standard `sshd`.
+
+   <Aside type="note" title="Windows target">
+   On Windows, enable the OpenSSH Server (PowerShell, elevated):
 
    ```powershell
    Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
    Start-Service sshd
    Set-Service sshd -StartupType Automatic
    ```
+   </Aside>
 
 3. **Set up key auth.** Put the orchestrator's public key on the target.
 
-   > ⚠️ Windows gotcha: for an **admin** user, Windows OpenSSH reads
-   > `C:\ProgramData\ssh\administrators_authorized_keys` (with strict ACLs), not
-   > `~\.ssh\authorized_keys`. Use a **non-admin** user to avoid that trap.
+   <Aside type="caution" title="Windows admin-user gotcha">
+   For an **admin** user, Windows OpenSSH reads
+   `C:\ProgramData\ssh\administrators_authorized_keys` (with strict ACLs), not
+   `~\.ssh\authorized_keys`. Use a **non-admin** user to avoid that trap.
+   </Aside>
 
 4. ✅ **Confirm Docker is reachable over SSH** (run from the *orchestrator*):
 
@@ -94,7 +111,7 @@ This sidesteps the named-pipe / dial-stdio path entirely.
 
 ## E. Storage
 
-- **Smoke-test first with the client and daemon on the same laptop** to prove
+- **Smoke-test first with the client and daemon on the same machine** to prove
   the `DOCKER_HOST` path in isolation.
 - For a real cross-machine split, switch to **`S3StorageProvider`**.
   `LocalStorageProvider` bind-mounts host paths that live on the *target*

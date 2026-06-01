@@ -1,4 +1,7 @@
-# Capability recipes
+---
+title: Put files where the worker finds them
+description: Where capability files land in the workspace, and the `agora-setup.sh` single-slot rule.
+---
 
 A **capability** is a directory of files that agora overlays onto the worker's
 workspace before the runtime adapter (Claude Code, etc.) starts. This guide
@@ -25,7 +28,7 @@ agora capabilities register --name <name> --from ./path/to/capability-dir
 ```
 
 Or auto-generate from an existing on-disk convention (`.claude/skills/`,
-pokemon profiles, etc.) — see [`sync-providers.md`](./sync-providers.md).
+pokemon profiles, etc.) — see [Sync capabilities & subagents](/agora/how-to/sync-capabilities-subagents/).
 
 ## How agora decides which file wins
 
@@ -162,9 +165,9 @@ Worker workspace will have `<workspace>/fixtures/sample-input.json` etc.
 
 ## See also
 
-- [`sync-providers.md`](./sync-providers.md) — auto-generate capabilities and
+- [Sync capabilities & subagents](/agora/how-to/sync-capabilities-subagents/) — auto-generate capabilities and
   subagents from `.claude/skills/`, `.claude/agents/`, pokemon profiles, etc.
-- [`remote-dispatch-windows.md`](./remote-dispatch-windows.md) — dispatch to a
+- [Dispatch to a remote Docker daemon](/agora/how-to/remote-docker-dispatch/) — dispatch to a
   remote Docker daemon over SSH.
 - MVP spec §6.3 — formal definition of the overlay/merge model.
-- ADR-0005 — why register/assign are not exposed on the MCP surface.
+- [ADR-0005](/agora/explanation/decisions/0005-privileged-ops-never-ai-reachable/) — why register/assign are not exposed on the MCP surface.

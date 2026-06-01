@@ -1,4 +1,7 @@
-# `needs_input` — pausing for clarification
+---
+title: Handle a needs_input pause
+description: How a subagent pauses for clarification and how re-dispatch threads `partial_state`.
+---
 
 A sub-agent that hits ambiguity mid-task — "I could change function A or
 function B; which?" — shouldn't guess. The MVP pattern is
@@ -10,8 +13,8 @@ re-dispatches with the answer added to `input`.
 This page covers what the sub-agent does, what the worker reports, and
 what the orchestrator does with the response.
 
-For the design rationale, see ADR-0008 (why request-stop-restart, not
-in-flight ask) and ADR-0009 (why sentinel file, not exit code).
+For the design rationale, see [ADR-0008](/agora/explanation/decisions/0008-needs-input-request-stop-restart/) (why request-stop-restart, not
+in-flight ask) and [ADR-0009](/agora/explanation/decisions/0009-needs-input-sentinel-file-vs-exit-code/) (why sentinel file, not exit code).
 
 ## The contract in one paragraph
 
@@ -149,9 +152,9 @@ common case. See ADR-0008 §3 for the full economic argument.
 
 ## See also
 
-- ADR-0008 — request-stop-restart vs in-flight ask, with the cost
+- [ADR-0008](/agora/explanation/decisions/0008-needs-input-request-stop-restart/) — request-stop-restart vs in-flight ask, with the cost
   argument.
-- ADR-0009 — why a sentinel file and not an exit code.
+- [ADR-0009](/agora/explanation/decisions/0009-needs-input-sentinel-file-vs-exit-code/) — why a sentinel file and not an exit code.
 - MVP spec §6.9 — the formal protocol.
-- [Dispatch lifecycle](dispatch-lifecycle.md) — how `dispatch.needs_input`
+- [Dispatch lifecycle](/agora/reference/dispatch-lifecycle/) — how `dispatch.needs_input`
   fits in the 6-kind closed vocabulary.

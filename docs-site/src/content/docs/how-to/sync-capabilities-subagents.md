@@ -1,4 +1,7 @@
-# Sync providers
+---
+title: Sync capabilities & subagents
+description: Use `agora capabilities sync` / `agora subagent sync`; the `claude-code` and `stoa` providers.
+---
 
 The `agora capabilities sync` and `agora subagent sync` commands bulk-register
 content from an existing on-disk convention — Claude Code's skill/agent
@@ -170,8 +173,8 @@ through `resolveProvider(name)` from the same map.
 
 ## See also
 
-- [`capability-recipes.md`](./capability-recipes.md) — where to put files for
+- [Put files where the worker finds them](/agora/how-to/worker-file-layout/) — where to put files for
   the worker to pick them up; what `agora capabilities sync` automates.
-- ADR-0005 — register/assign are not exposed on the MCP tool surface, which
+- [ADR-0005](/agora/explanation/decisions/0005-privileged-ops-never-ai-reachable/) — register/assign are not exposed on the MCP tool surface, which
   is why sync runs from the CLI (and the per-launch `agora.config.{ts,js,mjs}`)
   rather than from a dispatched worker.
