@@ -142,3 +142,27 @@ The `AgoraClient` constructor options are documented in full on the
 each become a valid `--target` value for `agora dispatch run`; each target's
 `compute`, `credentials`, and `secretStore` must reference a name present in
 the corresponding option map.
+
+## Targeting a self-hosted / S3-compatible store (MinIO, LocalStack)
+
+The S3 seams accept a custom endpoint, so the whole stack can run against MinIO,
+LocalStack, or any S3-compatible store — no AWS account required. The worked
+example is [`examples/offload-minio/`](https://github.com/quarrysystems/agora/tree/main/examples/offload-minio/)
+(a serve container + MinIO via docker-compose). The relevant options:
+
+| Option | Where | Purpose |
+|---|---|---|
+| `endpoint`, `forcePathStyle`, `region` | `new S3StorageProvider({ bucket, endpoint, forcePathStyle: true, region })` | Point content-addressed storage at the custom endpoint (or inject a pre-built `client`). |
+| `S3Mailbox` | `new MailboxSubmissionTransport(new S3Mailbox(s3MailboxClient))` | The submission inbox/outbox over S3 (the cross-machine analogue of `LocalDirMailbox`). |
+| `AGORA_S3_ENDPOINT` (+ `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_REGION`) | **worker container env** | The worker builds its own S3 client at boot to fetch bundles/upload patches; it reads these to reach the same endpoint. |
+| `extraEnv` | `new LocalDockerProvider({ extraEnv: { AGORA_S3_ENDPOINT, AWS_* } })` | Delivers the worker-boot env above to every launched worker container. |
+
+The endpoint/creds **must** reach the worker as container env (via `extraEnv`),
+not via a bundle — the worker needs S3 access *before* it can fetch any bundle.
+Everything else (the API key, app config) should travel as
+[env bundles](/agora/explanation/how-offload-runs/#running-serve-in-a-container-self-hosted-delivery),
+which ride content-addressed storage and so reach sibling worker containers.
+
+> On **real AWS** none of this is needed: the default S3 endpoint + an IAM task
+> role + AWS Secrets Manager all work without custom endpoints or `extraEnv`.
+> These options exist for self-hosted / local S3.

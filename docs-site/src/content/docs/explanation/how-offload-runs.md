@@ -181,9 +181,41 @@ audit bundle's per-item records, likewise, carry refs only — never secret valu
 so the bundle is safe to hand an auditor (see
 [audit & guarantee tiers](/agora/explanation/audit-guarantee-tiers/)).
 
+## Running serve in a container (self-hosted delivery)
+
+When `serve` itself runs **in a container** (the self-hosted topology — e.g.
+[`examples/offload-minio/`](https://github.com/quarrysystems/agora/tree/main/examples/offload-minio/),
+or Fargate) it launches workers as **siblings on the host Docker daemon**, not as
+children inside itself. That one fact dictates how config and secrets reach a
+worker: anything that lives only inside the `serve` container's filesystem is
+invisible to a sibling worker. Three consequences, each proven out by the MinIO
+example:
+
+- **Storage must be shared, not local-FS.** `LocalStorageProvider` bind-mounts and
+  `LocalDirMailbox` directories live in the `serve` container; siblings can't see
+  them. Use an S3-backed `StorageProvider` + `S3Mailbox` so workers fetch bundles
+  and artifacts over the wire.
+- **Deliver per-dispatch secrets/config via env *bundles*, not inline secrets.** A
+  per-dispatch inline secret stages to the `serve` container's local
+  `LocalSecretStore` dir — which a sibling worker can't read. An **env bundle**
+  rides content-addressed storage, so the worker fetches it and merges it into the
+  adapter env. (On real AWS, a network-reachable secret store like Secrets Manager
+  works directly; the bundle route is what makes the *self-hosted* path work.)
+- **One bootstrap exception — S3 access itself.** The worker builds its S3 client
+  at boot to fetch those very bundles, so the S3 endpoint + credentials can't
+  themselves be a bundle. They ride plain container env via the provider's
+  `extraEnv`. Everything *downstream* of storage access goes through bundles.
+
+One more cross-process subtlety: when `serve` (which **signs** each audit epoch)
+and the client that **verifies** the bundle are different processes, they must
+agree on the signer's public key. A fresh per-process `createLocalSigner()`
+generates a new keypair each time, so verification fails across the process
+boundary — share a deterministic/published key (or use KMS) so signatures verify.
+
 ## See also
 
 - [Your first offload run](/agora/tutorials/first-offload-run/) — run this end to end.
+- [agora.config reference](/agora/reference/config/#targeting-a-self-hosted--s3-compatible-store-minio-localstack) — the self-hosted S3 / MinIO options.
 - [plan.json schema](/agora/reference/plan-json/) — every field of a Run / WorkItem.
 - [Architecture overview](/agora/explanation/architecture-overview/) — where the run sits in the whole system.
 - [Audit & guarantee tiers](/agora/explanation/audit-guarantee-tiers/) — what the audit bundle proves.
