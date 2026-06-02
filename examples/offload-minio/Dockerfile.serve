@@ -77,7 +77,8 @@ ENV NODE_ENV=production
 # (adding the socket's gid) — do NOT bake it into the image.
 USER agora:agora
 
-# tsx is a devDependency of the example but is present in the copied workspace.
-# It is required at runtime because agora.config.mjs imports ./src/*.js which
-# are TypeScript source files resolved by tsx.
-CMD ["node_modules/.bin/tsx", "examples/offload-minio/serve-entrypoint.mjs"]
+# tsx is a devDependency of the example. In a pnpm workspace it is NOT hoisted to
+# the workspace-root node_modules/.bin — it lives in the example package's own
+# node_modules/.bin. Invoke it by that path. tsx is required at runtime because
+# agora.config.mjs imports ./src/*.js which are TypeScript source files.
+CMD ["examples/offload-minio/node_modules/.bin/tsx", "examples/offload-minio/serve-entrypoint.mjs"]
