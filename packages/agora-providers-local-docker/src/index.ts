@@ -81,6 +81,14 @@ export interface LocalDockerProviderOpts {
    * S3 client).
    */
   extraEnv?: Record<string, string>;
+  /**
+   * Extra `HostConfig.ExtraHosts` entries (`<host>:<ip-or-host-gateway>`) applied
+   * to every worker container. Needed when workers must reach a service on the
+   * Docker host (e.g. `host.docker.internal:host-gateway` so MinIO / LocalStack on
+   * the host resolve). Docker Desktop injects `host.docker.internal` automatically,
+   * but native Linux daemons do not — set this for portability.
+   */
+  extraHosts?: string[];
 }
 
 /** Matches the `name@sha256:<64-hex>` tail. */
@@ -101,6 +109,7 @@ export class LocalDockerProvider implements ComputeProvider {
   private readonly secretStoreMountTarget: string;
   private readonly extraBinds: string[];
   private readonly extraEnv: Record<string, string>;
+  private readonly extraHosts: string[];
 
   constructor(opts: LocalDockerProviderOpts = {}) {
     this.docker = opts.docker ?? new Docker();
@@ -111,6 +120,7 @@ export class LocalDockerProvider implements ComputeProvider {
     this.secretStoreMountTarget = opts.secretStoreMountTarget ?? '/agora/secrets';
     this.extraBinds = opts.extraBinds ?? [];
     this.extraEnv = opts.extraEnv ?? {};
+    this.extraHosts = opts.extraHosts ?? [];
   }
 
   async run(spec: TaskSpec, _ctx: ProviderContext): Promise<TaskHandle> {
@@ -118,12 +128,15 @@ export class LocalDockerProvider implements ComputeProvider {
 
     const { env: rewrittenEnv, binds } = this.prepareEnvAndBinds(spec);
     const env = Object.entries(rewrittenEnv).map(([k, v]) => `${k}=${v}`);
+    const hostConfig: { Binds?: string[]; ExtraHosts?: string[] } = {};
+    if (binds.length > 0) hostConfig.Binds = binds;
+    if (this.extraHosts.length > 0) hostConfig.ExtraHosts = this.extraHosts;
     const container = await this.docker.createContainer({
       Image: spec.image,
       Env: env,
       Cmd: spec.command,
       Labels: { 'agora.dispatchId': spec.dispatchId },
-      HostConfig: binds.length > 0 ? { Binds: binds } : undefined,
+      HostConfig: Object.keys(hostConfig).length > 0 ? hostConfig : undefined,
     });
     await container.start();
     return { providerTaskId: container.id };

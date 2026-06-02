@@ -108,6 +108,11 @@ export const client = new AgoraClient({
   compute: {
     'local-docker': new LocalDockerProvider({
       allowUnpinnedImage: true,
+      // Sibling workers must resolve host.docker.internal to reach MinIO +
+      // LocalStack on the host. Docker Desktop injects it automatically; native
+      // Linux needs this host-gateway mapping (the serve container gets it via
+      // compose extra_hosts, but the workers it launches do not).
+      extraHosts: ['host.docker.internal:host-gateway'],
       extraEnv: {
         // S3 (MinIO) storage bootstrap — needed at worker boot, before bundles.
         AGORA_S3_ENDPOINT: process.env.AGORA_S3_ENDPOINT ?? '',

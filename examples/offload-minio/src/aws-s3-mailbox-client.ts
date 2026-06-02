@@ -5,7 +5,7 @@ export interface AwsS3MailboxClientOpts { client: S3Client; bucket: string; pref
 
 export class AwsS3MailboxClient implements MailboxS3Client {
   private readonly p: string;
-  constructor(private readonly o: AwsS3MailboxClientOpts) { this.p = o.prefix?.replace(/\/?$/, '/') ?? ''; }
+  constructor(private readonly o: AwsS3MailboxClientOpts) { this.p = o.prefix ? o.prefix.replace(/\/?$/, '/') : ''; }
   private k(key: string) { return this.p + key; }
   async put(key: string, bytes: Uint8Array) {
     await this.o.client.send(new PutObjectCommand({ Bucket: this.o.bucket, Key: this.k(key), Body: bytes }));
@@ -13,7 +13,8 @@ export class AwsS3MailboxClient implements MailboxS3Client {
   async get(key: string) {
     try {
       const r = await this.o.client.send(new GetObjectCommand({ Bucket: this.o.bucket, Key: this.k(key) }));
-      return new Uint8Array(await r.Body!.transformToByteArray());
+      if (!r.Body) return new Uint8Array(0); // present but empty object
+      return new Uint8Array(await r.Body.transformToByteArray());
     } catch (e) { if (e instanceof NoSuchKey) return null; throw e; }
   }
   async list(prefix: string) {
