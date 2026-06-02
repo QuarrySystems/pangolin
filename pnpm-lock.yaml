@@ -104,6 +104,37 @@ importers:
         specifier: ^2.1.9
         version: 2.1.9(@types/node@25.9.1)
 
+  examples/offload-minio:
+    dependencies:
+      '@aws-sdk/client-s3':
+        specifier: ^3.700.0
+        version: 3.1052.0
+      '@quarry-systems/agora-client':
+        specifier: workspace:*
+        version: link:../../packages/agora-client
+      '@quarry-systems/agora-orchestrator':
+        specifier: workspace:*
+        version: link:../../packages/agora-orchestrator
+      '@quarry-systems/agora-providers-local-docker':
+        specifier: workspace:*
+        version: link:../../packages/agora-providers-local-docker
+      '@quarry-systems/agora-secret-store':
+        specifier: workspace:*
+        version: link:../../packages/agora-secret-store
+      '@quarry-systems/agora-storage-s3':
+        specifier: workspace:*
+        version: link:../../packages/agora-storage-s3
+    devDependencies:
+      tsx:
+        specifier: ^4.19.0
+        version: 4.22.3
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.9
+        version: 2.1.9(@types/node@25.9.1)
+
   examples/orchestrator-offload:
     dependencies:
       '@quarry-systems/agora-client':
