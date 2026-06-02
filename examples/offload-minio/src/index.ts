@@ -4,7 +4,7 @@
 //   1. Register capability (minio-cap) + subagents (code-edit, verify) on the shared client.
 //   2. Submit plan.json via OperationsApi over the S3/MinIO transport (orch.transport).
 //   3. Watch item status to terminal via api.watch().
-//   4. Assemble + print the tamper-detecting audit bundle via api.audit().
+//   4. Assemble + print the tamper-evident audit bundle via api.audit().
 //   5. Exit nonzero on any item failure, !intact bundle, or non-external-immutable guarantee.
 //
 // Prerequisites (LIVE RUN — not a unit test):
@@ -195,7 +195,7 @@ async function main(): Promise<void> {
     process.exitCode = 1;
   } else {
     console.log(
-      '\n=== offload-minio OK — MinIO-backed run completed with tamper-detecting audit bundle ===',
+      '\n=== offload-minio OK — MinIO-backed run completed with tamper-evident audit bundle ===',
     );
   }
 }
