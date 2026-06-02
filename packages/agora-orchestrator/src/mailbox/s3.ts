@@ -10,7 +10,7 @@ export class S3Mailbox implements MailboxStore {
   async list(prefix: string): Promise<string[]> {
     // segment-boundary-safe prefix match, matching LocalDirMailbox semantics
     const dirPrefix = prefix.endsWith('/') ? prefix : prefix + '/';
-    const keys = await this.s3.list(dirPrefix);
+    const keys = await this.s3.list(prefix); // pass BARE prefix; seam may over-return
     return keys.filter((k) => k === prefix || k.startsWith(dirPrefix));
   }
 }
