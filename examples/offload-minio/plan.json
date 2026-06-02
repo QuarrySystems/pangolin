@@ -1,5 +1,6 @@
 {
   "id": "minio-proof-1",
+  "queue": "default",
   "items": [
     { "id": "edit-alpha",    "executor": "dispatch-a", "trigger": "manual",
       "inputs": { "subagent": "code-edit", "workerInput": { "file": "alpha.ts" } },

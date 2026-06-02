@@ -14,7 +14,7 @@ it('4 real edits, routed across two executors, two contend on shared.ts, verify 
   expect(edits.every((e: any) => e.inputs.subagent === 'code-edit')).toBe(true); // all REAL
   expect(edits.every((e: any) => typeof e.inputs.workerInput?.file === 'string')).toBe(true);
   expect(new Set(edits.map((e: any) => e.executor))).toEqual(new Set(['dispatch-a','dispatch-b']));
-  const shared = edits.filter((e: any) => e.resourceLocks[0] === 'shared.ts');
+  const shared = edits.filter((e: any) => e.resourceLocks.includes('shared.ts'));
   expect(shared).toHaveLength(2);
   const verify = plan.items.find((i: any) => i.id === 'verify');
   expect(verify.depends_on).toEqual(expect.arrayContaining(edits.map((e: any) => e.id)));

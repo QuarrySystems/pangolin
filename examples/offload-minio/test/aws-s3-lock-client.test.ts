@@ -14,6 +14,6 @@ d('AwsS3LockClient against MinIO object lock', () => {
     const future = new Date(Date.now() + 60_000);
     await lock.putObject('audit/roots/e1.json', new Uint8Array([1]), { retainUntil: future, mode: 'COMPLIANCE' });
     expect((await lock.getObject('audit/roots/e1.json'))).toEqual(new Uint8Array([1]));
-    await expect(client.send(new DeleteObjectCommand({ Bucket: 'agora-audit', Key: 'audit/roots/e1.json' }))).rejects.toBeTruthy();
+    await expect(client.send(new DeleteObjectCommand({ Bucket: 'agora-audit', Key: 'audit/roots/e1.json' }))).rejects.toThrow();
   });
 });

@@ -15,7 +15,8 @@ export class AwsS3LockClient implements S3LockClient {
   async getObject(key: string) {
     try {
       const r = await this.o.client.send(new GetObjectCommand({ Bucket: this.o.bucket, Key: key }));
-      return new Uint8Array(await r.Body!.transformToByteArray());
+      if (!r.Body) throw new Error('S3 GetObject returned no body');
+      return new Uint8Array(await r.Body.transformToByteArray());
     } catch (e) { if (e instanceof NoSuchKey) return undefined; throw e; }
   }
 }
