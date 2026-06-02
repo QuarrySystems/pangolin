@@ -86,7 +86,17 @@ const queues = { default: { concurrency: 2 } };
 // ---------------------------------------------------------------------------
 export const client = new AgoraClient({
   namespace: 'offload-minio',
-  compute: { 'local-docker': new LocalDockerProvider({ allowUnpinnedImage: true }) },
+  compute: {
+    'local-docker': new LocalDockerProvider({
+      allowUnpinnedImage: true,
+      extraEnv: {
+        AGORA_S3_ENDPOINT: process.env.AGORA_S3_ENDPOINT ?? '',
+        AWS_ACCESS_KEY_ID: process.env.AWS_ACCESS_KEY_ID ?? process.env.AGORA_S3_ACCESS_KEY ?? 'minioadmin',
+        AWS_SECRET_ACCESS_KEY: process.env.AWS_SECRET_ACCESS_KEY ?? process.env.AGORA_S3_SECRET_KEY ?? 'minioadmin',
+        AWS_REGION: process.env.AWS_REGION ?? 'us-east-1',
+      },
+    }),
+  },
   storage,
   secretStores: { local: new LocalSecretStore({ dir: secretDir }) },
   credentials: { none: new NoopCredentialProvider() },
