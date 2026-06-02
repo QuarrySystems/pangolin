@@ -47,9 +47,16 @@ RUN pnpm -r run build
 FROM node:${NODE_VERSION}-slim AS runtime
 
 # ca-certificates for any outbound TLS (S3/MinIO).
+# Also create a dedicated non-root system user (agora:agora, uid/gid 1000) to
+# mirror the agora-worker image's proven pattern — running as root with a
+# mounted Docker socket is a security gap.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates \
- && rm -rf /var/lib/apt/lists/*
+ && rm -rf /var/lib/apt/lists/* \
+ && (userdel -r node 2>/dev/null || true) \
+ && (groupdel node 2>/dev/null || true) \
+ && groupadd --system --gid 1000 agora \
+ && useradd --system --uid 1000 --gid 1000 --create-home --home-dir /home/agora agora
 
 WORKDIR /workspace
 
@@ -57,7 +64,18 @@ WORKDIR /workspace
 # compiled package dist/ directories).
 COPY --from=builder /workspace ./
 
+# Give the non-root user ownership of /workspace so tsx can write temporary
+# files and the SQLite volume path (mounted here by compose) is writable.
+RUN chown -R agora:agora /workspace
+
+# NODE_ENV=production is set here (runtime only). The builder intentionally
+# omits NODE_ENV so devDeps (e.g. tsx) are installed by pnpm.
 ENV NODE_ENV=production
+
+# NOTE for docker-compose: the non-root user needs access to the mounted
+# /var/run/docker.sock. Handle this at runtime via `group_add` in compose
+# (adding the socket's gid) — do NOT bake it into the image.
+USER agora:agora
 
 # tsx is a devDependency of the example but is present in the copied workspace.
 # It is required at runtime because agora.config.mjs imports ./src/*.js which
