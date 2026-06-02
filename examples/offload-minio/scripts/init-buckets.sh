@@ -31,11 +31,13 @@ done
 
 echo "[init-buckets] Creating bucket agora-audit (with object lock)..."
 # --with-lock enables S3 Object Lock (required for COMPLIANCE mode anchoring).
-# Ignore exit code 1 if the bucket already exists.
-mc mb --with-lock myminio/agora-audit 2>&1 | grep -v "already exists" || true
+# --ignore-existing makes the command idempotent (exit 0 if bucket already exists).
+mc mb --with-lock --ignore-existing myminio/agora-audit
+mc ls myminio/agora-audit >/dev/null 2>&1 || { echo "[init-buckets] ERROR: agora-audit bucket not accessible after creation." >&2; exit 1; }
 
 echo "[init-buckets] Creating bucket agora-data (standard)..."
-mc mb myminio/agora-data 2>&1 | grep -v "already exists" || true
+mc mb --ignore-existing myminio/agora-data
+mc ls myminio/agora-data >/dev/null 2>&1 || { echo "[init-buckets] ERROR: agora-data bucket not accessible after creation." >&2; exit 1; }
 
 echo "[init-buckets] Bucket initialisation complete."
 mc ls myminio
