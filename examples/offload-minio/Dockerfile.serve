@@ -1,0 +1,65 @@
+# syntax=docker/dockerfile:1.7
+#
+# agora-orchestrator serve container — Tier-1 MinIO proof (examples/offload-minio).
+#
+# Runs the tick+inbox serve() loop.  This container is the sole SQLite owner and
+# the only orchestrator.tick() caller.  Workers are launched as Docker siblings
+# via the host socket (mounted by docker-compose, NOT wired here).
+#
+# Build context MUST be the repo root so the lockfile, pnpm-workspace.yaml,
+# packages/*, and examples/* are available to the builder stage.
+#
+# Multi-stage layout:
+#   1. builder  — full workspace install + `pnpm -r build` so agora-orchestrator
+#                 dist is compiled.
+#   2. runtime  — node:20-slim with the built workspace copied in; tsx is run
+#                 directly from the workspace node_modules (no Docker CLI needed —
+#                 dockerode communicates with the daemon socket directly).
+#
+# No EXPOSE — the serve container opens no inbound port.
+
+ARG NODE_VERSION=20
+ARG PNPM_VERSION=9.15.4
+
+# --- builder ------------------------------------------------------------------
+FROM node:${NODE_VERSION}-slim AS builder
+ARG PNPM_VERSION
+WORKDIR /workspace
+
+# Corepack ships with Node 20 and is the supported way to pin pnpm.
+RUN corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate
+
+# Copy workspace manifests first for maximum layer-cache reuse on pnpm install.
+# Source changes do not invalidate the install layer.
+COPY pnpm-workspace.yaml pnpm-lock.yaml package.json tsconfig.base.json .npmrc ./
+COPY packages ./packages
+COPY examples ./examples
+
+# Full install — workspace deps cross-link transparently.
+RUN pnpm install --frozen-lockfile
+
+# Build the orchestrator and all its workspace dependencies so dist/ exists.
+# The serve entrypoint imports from @quarry-systems/agora-orchestrator which
+# resolves to packages/agora-orchestrator/dist after this step.
+RUN pnpm -r run build
+
+# --- runtime ------------------------------------------------------------------
+FROM node:${NODE_VERSION}-slim AS runtime
+
+# ca-certificates for any outbound TLS (S3/MinIO).
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace
+
+# Copy the full built workspace (including node_modules with tsx available and
+# compiled package dist/ directories).
+COPY --from=builder /workspace ./
+
+ENV NODE_ENV=production
+
+# tsx is a devDependency of the example but is present in the copied workspace.
+# It is required at runtime because agora.config.mjs imports ./src/*.js which
+# are TypeScript source files resolved by tsx.
+CMD ["node_modules/.bin/tsx", "examples/offload-minio/serve-entrypoint.mjs"]
