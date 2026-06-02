@@ -5,13 +5,13 @@ created: 2026-06-02
 
 ```mermaid
 flowchart TD
-    task-s3-mailbox["task-s3-mailbox: S3-backed mailbox store<br/>files: packages/agora-orchestrator/src/contracts/mailbox.ts +3 more"]
-    task-example-scaffold["task-example-scaffold: example package scaffold<br/>files: examples/offload-minio/package.json"]
-    task-aws-s3-mailbox-client["task-aws-s3-mailbox-client: AWS S3 mailbox client<br/>files: examples/offload-minio/src/aws-s3-mailbox-client.ts +1 more"]
-    task-aws-s3-lock-client["task-aws-s3-lock-client: AWS S3 object-lock client<br/>files: examples/offload-minio/src/aws-s3-lock-client.ts +1 more"]
-    task-plan-smoke["task-plan-smoke: deterministic run plan<br/>files: examples/offload-minio/plan.json +4 more"]
-    task-config["task-config: example config wiring<br/>files: examples/offload-minio/agora.config.mjs"]
-    task-serve-image["task-serve-image: serve container image<br/>files: examples/offload-minio/Dockerfile.serve +1 more"]
+    task-s3-mailbox["task-s3-mailbox: S3-backed mailbox store<br/>files: packages/agora-orchestrator/src/contracts/mailbox.ts +3 more"]:::done
+    task-example-scaffold["task-example-scaffold: example package scaffold<br/>files: examples/offload-minio/package.json +1 more"]:::done
+    task-aws-s3-mailbox-client["task-aws-s3-mailbox-client: AWS S3 mailbox client<br/>files: examples/offload-minio/src/aws-s3-mailbox-client.ts +1 more"]:::done
+    task-aws-s3-lock-client["task-aws-s3-lock-client: AWS S3 object-lock client<br/>files: examples/offload-minio/src/aws-s3-lock-client.ts +1 more"]:::done
+    task-plan-smoke["task-plan-smoke: deterministic run plan<br/>files: examples/offload-minio/plan.json +4 more"]:::done
+    task-config["task-config: example config wiring<br/>files: examples/offload-minio/agora.config.mjs"]:::done
+    task-serve-image["task-serve-image: serve container image<br/>files: examples/offload-minio/Dockerfile.serve +1 more"]:::done
     task-compose["task-compose: MinIO compose stack<br/>files: examples/offload-minio/docker-compose.yml +1 more"]
     task-e2e["task-e2e: end-to-end MinIO demo<br/>files: examples/offload-minio/src/index.ts +1 more"]
     task-readme["task-readme: example README<br/>files: examples/offload-minio/README.md"]
@@ -104,7 +104,7 @@ files:
   - packages/agora-orchestrator/src/mailbox/s3.ts
   - packages/agora-orchestrator/src/index.ts
   - packages/agora-orchestrator/test/mailbox-s3.test.ts
-status: pending
+status: done
 ```
 
 Add the `MailboxS3Client` injected seam to the existing `contracts/mailbox.ts`, and
@@ -190,7 +190,8 @@ id: task-example-scaffold
 depends_on: []
 files:
   - examples/offload-minio/package.json
-status: pending
+  - pnpm-lock.yaml
+status: done
 is_wiring_task: true
 ```
 
@@ -239,7 +240,7 @@ depends_on: [task-example-scaffold, task-s3-mailbox]
 files:
   - examples/offload-minio/src/aws-s3-mailbox-client.ts
   - examples/offload-minio/test/aws-s3-mailbox-client.test.ts
-status: pending
+status: done
 ```
 
 Concrete `MailboxS3Client` backed by `@aws-sdk/client-s3`, talking to MinIO now /
@@ -324,7 +325,7 @@ depends_on: [task-example-scaffold]
 files:
   - examples/offload-minio/src/aws-s3-lock-client.ts
   - examples/offload-minio/test/aws-s3-lock-client.test.ts
-status: pending
+status: done
 ```
 
 Concrete `S3LockClient` (the seam `S3ObjectLockAnchor` already declares and exports)
@@ -404,7 +405,7 @@ files:
   - examples/offload-minio/fixture/beta.ts
   - examples/offload-minio/fixture/shared.ts
   - examples/offload-minio/test/smoke.test.ts
-status: pending
+status: done
 ```
 
 The submitted `Run` and its fixtures, plus an offline CI smoke test (fake executor,
@@ -482,7 +483,7 @@ id: task-config
 depends_on: [task-aws-s3-mailbox-client, task-aws-s3-lock-client]
 files:
   - examples/offload-minio/agora.config.mjs
-status: pending
+status: done
 is_wiring_task: true
 ```
 
@@ -530,7 +531,7 @@ depends_on: [task-config]
 files:
   - examples/offload-minio/Dockerfile.serve
   - examples/offload-minio/serve-entrypoint.mjs
-status: pending
+status: running
 is_wiring_task: true
 ```
 
