@@ -1,0 +1,20 @@
+{
+  "id": "minio-proof-1",
+  "items": [
+    { "id": "edit-alpha",    "executor": "dispatch-a", "trigger": "manual",
+      "inputs": { "subagent": "code-edit", "workerInput": { "file": "alpha.ts" } },
+      "depends_on": [], "resourceLocks": ["alpha.ts"] },
+    { "id": "edit-beta",     "executor": "dispatch-b", "trigger": "manual",
+      "inputs": { "subagent": "code-edit", "workerInput": { "file": "beta.ts" } },
+      "depends_on": [], "resourceLocks": ["beta.ts"] },
+    { "id": "edit-shared-1", "executor": "dispatch-a", "trigger": "manual",
+      "inputs": { "subagent": "code-edit", "workerInput": { "file": "shared.ts" } },
+      "depends_on": [], "resourceLocks": ["shared.ts"] },
+    { "id": "edit-shared-2", "executor": "dispatch-b", "trigger": "manual",
+      "inputs": { "subagent": "code-edit", "workerInput": { "file": "shared.ts" } },
+      "depends_on": [], "resourceLocks": ["shared.ts"] },
+    { "id": "verify", "executor": "dispatch-a", "trigger": "manual",
+      "inputs": { "subagent": "verify" },
+      "depends_on": ["edit-alpha","edit-beta","edit-shared-1","edit-shared-2"], "resourceLocks": [] }
+  ]
+}
