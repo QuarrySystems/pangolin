@@ -7,28 +7,23 @@ created: 2026-06-02
 flowchart TD
     task-s3-mailbox["task-s3-mailbox: S3-backed mailbox store<br/>files: packages/agora-orchestrator/src/contracts/mailbox.ts +3 more"]
     task-example-scaffold["task-example-scaffold: example package scaffold<br/>files: examples/offload-minio/package.json"]
-    task-no-model-adapter["task-no-model-adapter: no-model runtime adapter<br/>files: examples/offload-minio/adapters/no-model/index.js +1 more"]
     task-aws-s3-mailbox-client["task-aws-s3-mailbox-client: AWS S3 mailbox client<br/>files: examples/offload-minio/src/aws-s3-mailbox-client.ts +1 more"]
     task-aws-s3-lock-client["task-aws-s3-lock-client: AWS S3 object-lock client<br/>files: examples/offload-minio/src/aws-s3-lock-client.ts +1 more"]
-    task-plan-smoke["task-plan-smoke: deterministic run plan<br/>files: examples/offload-minio/plan.json +5 more"]
+    task-plan-smoke["task-plan-smoke: deterministic run plan<br/>files: examples/offload-minio/plan.json +4 more"]
     task-config["task-config: example config wiring<br/>files: examples/offload-minio/agora.config.mjs"]
-    task-dockerfile["task-dockerfile: derived worker image<br/>files: examples/offload-minio/Dockerfile +1 more"]
     task-serve-image["task-serve-image: serve container image<br/>files: examples/offload-minio/Dockerfile.serve +1 more"]
     task-compose["task-compose: MinIO compose stack<br/>files: examples/offload-minio/docker-compose.yml +1 more"]
     task-e2e["task-e2e: end-to-end MinIO demo<br/>files: examples/offload-minio/src/index.ts +1 more"]
     task-readme["task-readme: example README<br/>files: examples/offload-minio/README.md"]
 
-    task-example-scaffold --> task-no-model-adapter
     task-example-scaffold --> task-aws-s3-mailbox-client
     task-s3-mailbox --> task-aws-s3-mailbox-client
     task-example-scaffold --> task-aws-s3-lock-client
     task-example-scaffold --> task-plan-smoke
     task-aws-s3-mailbox-client --> task-config
     task-aws-s3-lock-client --> task-config
-    task-no-model-adapter --> task-dockerfile
     task-config --> task-serve-image
     task-serve-image --> task-compose
-    task-dockerfile --> task-compose
     task-compose --> task-e2e
     task-plan-smoke --> task-e2e
     task-e2e --> task-readme
@@ -56,8 +51,20 @@ concrete `AwsS3LockClient`) so Tier-2 Fargate is a config swap.
   (`task-s3-mailbox`). `S3LockClient` already ships (index.ts:26), so no
   orchestrator change is needed for the anchor.
 - `examples/offload-minio` — the new self-contained proof: concrete AWS clients,
-  the no-model adapter, the compose stack (MinIO + serve container), config,
-  run plan, the e2e/tamper test, CI smoke, and docs.
+  the compose stack (MinIO + serve container), config, run plan, the e2e/tamper
+  test, CI smoke, and docs.
+
+**Spike resolution (2026-06-02) — all-real worker, no no-model adapter.** A spike
+confirmed there is **no per-dispatch runtime-adapter selection** in the codebase
+today: `agora-client` hardcodes `AGORA_RUNTIME_ADAPTER: 'claude-code'`
+(dispatch.ts:219), `DispatchWork` (agora-core) has no `runtimeAdapter` field, and
+`work.env` is **env-bundle references** (resolved by `resolveEnvBundles`), not raw
+`KEY=VALUE`. So a no-model adapter could not be selected without a product change to
+`agora-client`. Decision: **every edit runs the real `claude-code` adapter** (the
+exact path `offload-fanout` already proves green) on a one-line rename — maximally
+faithful, zero product change, ~pennies/run. This dropped the former no-model-adapter
+and derived-image tasks; the worker image is the **stock**
+`ghcr.io/quarrysystems/agora-worker:latest`.
 
 **Grounding facts verified against the codebase:**
 - `MailboxStore` is a 4-method seam (`put/get/list/delete`); only `LocalDirMailbox`
@@ -67,11 +74,12 @@ concrete `AwsS3LockClient`) so Tier-2 Fargate is a config swap.
   and the `S3LockClient` type are exported (index.ts:25-26).
 - `S3StorageProvider` accepts an injected `client?: S3Client` for endpoint override
   ("LocalStack, MinIO, etc.").
-- The worker resolves its adapter from `<adaptersRoot>/<name>/index.js` selected by
-  `AGORA_RUNTIME_ADAPTER` (default `claude-code`); `WorkItem.inputs.env` flows
-  straight to the dispatch, so per-item adapter selection is just an env var.
+- Per-item **data** flows `workerInput → work.input → AGORA_INPUT_JSON` (dispatch.ts:218)
+  → worker `inputJson` (env-parser.ts:94) → `spec.input` to the adapter — **verified
+  end-to-end**. This is how each edit learns which file to rename (the `offload-fanout`
+  `{{file}}` promptTemplate pattern).
 - `LocalDockerProvider` sets no `NetworkMode` (workers land on the default bridge →
-  MinIO endpoint duality, spec §2.1) and exposes `extraBinds`.
+  MinIO endpoint duality, spec §2.1) and reads `DOCKER_HOST` / the socket via `new Docker()`.
 
 **Execution note:** `task-config` and downstream import the new `S3Mailbox` symbol;
 the dependency edges ensure `task-s3-mailbox`'s source lands first, but the
@@ -79,20 +87,10 @@ implementer for any orchestrator-consuming example task must run `pnpm -r build`
 (or at least build `agora-orchestrator`) so the workspace `dist` carries the new
 export before typecheck.
 
-**Load-bearing risk to verify FIRST (audit finding A):** the per-item adapter
-selection in spec §3 assumes `WorkItem.inputs.env` reaches the worker as raw
-`KEY=VALUE` env that survives to the process (so `AGORA_RUNTIME_ADAPTER=no-model`
-selects the adapter). This is **not yet verified** — `inputs.env` may be interpreted
-as env-bundle *references*, and an env firewall may strip unrecognized vars.
-Before/within `task-config`, confirm the mechanism by reading `agora-client`'s
-dispatch env handling + `agora-worker`'s `env-parser`. Candidate fallbacks if raw
-env doesn't pass through: (a) register a named env bundle that sets
-`AGORA_RUNTIME_ADAPTER`; (b) bind the adapter to the subagent definition if the
-subagent schema carries a `runtimeAdapter` field; (c) a second baked worker image
-whose default `AGORA_RUNTIME_ADAPTER` is `no-model`, selected per-item via the
-executor's `workerImage`. Per-item **data** (which file to edit) already avoids this
-risk by going through `workerInput` → `spec.input` (the structured channel
-`DispatchExecutor` maps), not env.
+**Prerequisite (not a task — pre-existing repo artifact):** the stock worker image
+must be built locally (it is GHCR-private):
+`docker build -t ghcr.io/quarrysystems/agora-worker:latest -f docker/agora-worker/Dockerfile .`.
+No derived image is needed — the stock `claude-code` adapter is what runs.
 
 ## Tasks
 
@@ -198,8 +196,8 @@ is_wiring_task: true
 
 Scaffold the new workspace package `offload-minio-example` so all downstream
 imports resolve. Mirrors `examples/offload-fanout/package.json` and adds the deps
-this proof needs beyond it: `@quarry-systems/agora-storage-s3`,
-`@quarry-systems/agora-core`, and `@aws-sdk/client-s3`.
+this proof needs beyond it: `@quarry-systems/agora-storage-s3` and
+`@aws-sdk/client-s3`.
 
 ```jsonc
 {
@@ -216,7 +214,6 @@ this proof needs beyond it: `@quarry-systems/agora-storage-s3`,
   "dependencies": {
     "@quarry-systems/agora-client": "workspace:*",
     "@quarry-systems/agora-orchestrator": "workspace:*",
-    "@quarry-systems/agora-core": "workspace:*",
     "@quarry-systems/agora-storage-s3": "workspace:*",
     "@quarry-systems/agora-providers-local-docker": "workspace:*",
     "@quarry-systems/agora-secret-store": "workspace:*",
@@ -233,85 +230,6 @@ this proof needs beyond it: `@quarry-systems/agora-storage-s3`,
 - All deps listed are present so downstream tasks' imports satisfy H8.
 
 Test file: `examples/offload-minio/test/smoke.test.ts` (its presence under this package is what proves the package is wired; authored in `task-plan-smoke`).
-
-## Task: no-model runtime adapter
-
-```yaml
-id: task-no-model-adapter
-depends_on: [task-example-scaffold]
-files:
-  - examples/offload-minio/adapters/no-model/index.js
-  - examples/offload-minio/test/no-model-adapter.test.ts
-status: pending
-```
-
-A zero-token adapter conforming to the real `RuntimeAdapter` contract
-(`agora-core/src/runtime-adapter.ts`: `name`, `reservedPaths`, `invoke(spec, ctx)
-→ RuntimeExit`). Its `invoke` performs a deterministic edit in `spec.workspaceDir`
-so the diff-capture/escape path yields a real patch with no model call (spec §3.1).
-Authored as plain `index.js` (ESM) because the loader imports exactly
-`<adaptersRoot>/<name>/index.js` — no compile step, so `task-dockerfile` can `COPY`
-it directly. The target file comes from `spec.input` (the structured dispatch
-payload, set per-item via `workerInput`), NOT from `process.env` — see the Context
-note on the env firewall. A legitimate alternate runtime, not a mock.
-
-## Implementation
-
-```javascript
-// examples/offload-minio/adapters/no-model/index.js
-import { readFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
-
-/** Default factory — the worker's loadRuntimeAdapter calls this.
- *  @returns {import('@quarry-systems/agora-core').RuntimeAdapter} */
-export default function createAdapter() {
-  return {
-    name: 'no-model',
-    reservedPaths: [],
-    /** @param {import('@quarry-systems/agora-core').RuntimeInvocation} spec
-     *  @param {import('@quarry-systems/agora-core').RuntimeContext} ctx */
-    async invoke(spec, ctx) {
-      const file = String(spec.input?.file ?? 'alpha.ts');
-      const path = join(spec.workspaceDir, file);
-      const src = await readFile(path, 'utf8');
-      await writeFile(path, src.replace('OLD_NAME', 'NEW_NAME'));
-      return { exitCode: 0, stdout: `no-model: edited ${file}`, stderr: '' };
-    },
-  };
-}
-```
-
-```typescript
-// examples/offload-minio/test/no-model-adapter.test.ts
-import { describe, it, expect } from 'vitest';
-import { mkdtemp, writeFile, readFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import createAdapter from '../adapters/no-model/index.js';
-
-it('renames OLD_NAME -> NEW_NAME in spec.workspaceDir/spec.input.file, exit 0, no network', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'nomodel-'));
-  await writeFile(join(dir, 'alpha.ts'), 'export const OLD_NAME = 1;\n');
-  const exit = await createAdapter().invoke(
-    { workspaceDir: dir, input: { file: 'alpha.ts' } },
-    { dispatchId: 't', env: {} },
-  );
-  expect(exit.exitCode).toBe(0);
-  expect(await readFile(join(dir, 'alpha.ts'), 'utf8')).toContain('NEW_NAME');
-});
-```
-
-## Acceptance criteria
-
-- `createAdapter()` returns a value satisfying the real `RuntimeAdapter` interface:
-  `name: 'no-model'`, `reservedPaths: []`, and `invoke(spec, ctx)` returning a
-  `RuntimeExit` (`exitCode`/`stdout`/`stderr`).
-- `invoke` rewrites `OLD_NAME`→`NEW_NAME` in `join(spec.workspaceDir, spec.input.file)`
-  with `exitCode: 0` and makes no network call.
-- The file is plain ESM `index.js` (no build artifact) so the loader resolves it at
-  `/opt/agora/adapters/no-model/index.js` after a bare `COPY` (verified by `task-dockerfile`).
-
-Test file: `examples/offload-minio/test/no-model-adapter.test.ts`.
 
 ## Task: AWS S3 mailbox client
 
@@ -485,16 +403,18 @@ files:
   - examples/offload-minio/fixture/alpha.ts
   - examples/offload-minio/fixture/beta.ts
   - examples/offload-minio/fixture/shared.ts
-  - examples/offload-minio/fixture/claude-target.ts
   - examples/offload-minio/test/smoke.test.ts
 status: pending
 ```
 
 The submitted `Run` and its fixtures, plus an offline CI smoke test (fake executor,
-no Docker/MinIO/key) that asserts the plan shape — mirrors `offload-fanout`'s smoke
-test (spec §5, §7). The run: 3 no-model edits (executor-routed `dispatch-a`/`-b`,
-one sharing a lock with another to force serialization) + 1 real-Claude edit + 1
-verify gate depending on all edits.
+no Docker/MinIO/key) asserting the plan shape — mirrors `offload-fanout`'s smoke
+test (spec §5, §7). All edits run the real `code-edit` subagent; the file each edits
+comes via `workerInput.file`. The run: 4 edits — `edit-alpha`/`edit-beta` with
+disjoint per-file locks (fan out across `dispatch-a`/`dispatch-b`) and
+`edit-shared-1`/`edit-shared-2` that **share the `shared.ts` lock** (serialize; the
+rename is idempotent so order doesn't matter) — plus a `verify` gate depending on all
+four.
 
 ## Implementation
 
@@ -503,50 +423,54 @@ verify gate depending on all edits.
 {
   "id": "minio-proof-1",
   "items": [
-    { "id": "edit-alpha",  "executor": "dispatch-a", "trigger": "manual",
-      "inputs": { "subagent": "code-edit", "env": ["AGORA_RUNTIME_ADAPTER=no-model"], "workerInput": { "file": "alpha.ts" } },
+    { "id": "edit-alpha",    "executor": "dispatch-a", "trigger": "manual",
+      "inputs": { "subagent": "code-edit", "workerInput": { "file": "alpha.ts" } },
       "depends_on": [], "resourceLocks": ["alpha.ts"] },
-    { "id": "edit-beta",   "executor": "dispatch-b", "trigger": "manual",
-      "inputs": { "subagent": "code-edit", "env": ["AGORA_RUNTIME_ADAPTER=no-model"], "workerInput": { "file": "beta.ts" } },
+    { "id": "edit-beta",     "executor": "dispatch-b", "trigger": "manual",
+      "inputs": { "subagent": "code-edit", "workerInput": { "file": "beta.ts" } },
       "depends_on": [], "resourceLocks": ["beta.ts"] },
-    { "id": "edit-shared", "executor": "dispatch-a", "trigger": "manual",
-      "inputs": { "subagent": "code-edit", "env": ["AGORA_RUNTIME_ADAPTER=no-model"], "workerInput": { "file": "shared.ts" } },
+    { "id": "edit-shared-1", "executor": "dispatch-a", "trigger": "manual",
+      "inputs": { "subagent": "code-edit", "workerInput": { "file": "shared.ts" } },
       "depends_on": [], "resourceLocks": ["shared.ts"] },
-    { "id": "edit-claude", "executor": "dispatch-a", "trigger": "manual",
-      "inputs": { "subagent": "code-edit-claude", "workerInput": { "file": "claude-target.ts" } },
-      "depends_on": [], "resourceLocks": ["claude-target.ts"] },
+    { "id": "edit-shared-2", "executor": "dispatch-b", "trigger": "manual",
+      "inputs": { "subagent": "code-edit", "workerInput": { "file": "shared.ts" } },
+      "depends_on": [], "resourceLocks": ["shared.ts"] },
     { "id": "verify", "executor": "dispatch-a", "trigger": "manual",
       "inputs": { "subagent": "verify" },
-      "depends_on": ["edit-alpha","edit-beta","edit-shared","edit-claude"], "resourceLocks": [] }
+      "depends_on": ["edit-alpha","edit-beta","edit-shared-1","edit-shared-2"], "resourceLocks": [] }
   ]
 }
 ```
 
 ```typescript
-// examples/offload-minio/test/smoke.test.ts  (offline — fake executor)
+// examples/offload-minio/test/smoke.test.ts  (offline — no Docker/MinIO/key)
 import { describe, it, expect } from 'vitest';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
-it('plan has 4 edits routed across two executors + a verify gate on all', async () => {
+it('4 real edits, routed across two executors, two contend on shared.ts, verify gates all', async () => {
   const plan = JSON.parse(await readFile(fileURLToPath(new URL('../plan.json', import.meta.url)), 'utf8'));
   const edits = plan.items.filter((i: any) => i.id.startsWith('edit-'));
   expect(edits).toHaveLength(4);
+  expect(edits.every((e: any) => e.inputs.subagent === 'code-edit')).toBe(true); // all REAL
+  expect(edits.every((e: any) => typeof e.inputs.workerInput?.file === 'string')).toBe(true);
   expect(new Set(edits.map((e: any) => e.executor))).toEqual(new Set(['dispatch-a','dispatch-b']));
+  // two items share the shared.ts lock → serialize; the other two are disjoint → fan out
+  const shared = edits.filter((e: any) => e.resourceLocks[0] === 'shared.ts');
+  expect(shared).toHaveLength(2);
   const verify = plan.items.find((i: any) => i.id === 'verify');
   expect(verify.depends_on).toEqual(expect.arrayContaining(edits.map((e: any) => e.id)));
-  // each edit declares its own file lock (disjoint locks fan out)
-  expect(edits.every((e: any) => e.resourceLocks.length === 1)).toBe(true);
 });
 ```
 
 ## Acceptance criteria
 
 - `plan.json` parses and contains exactly 4 `edit-*` items + 1 `verify` item.
-- 3 edits use `AGORA_RUNTIME_ADAPTER=no-model`; the 4th (`edit-claude`) omits it (defaults to `claude-code`).
-- Edits are split across `dispatch-a` and `dispatch-b` (routing-by-executor-name); each edit declares a single per-file `resourceLock`.
+- **All** edits use the real `code-edit` subagent (no faked/no-model runtime); each carries `workerInput.file`.
+- Edits are split across `dispatch-a` and `dispatch-b` (routing-by-executor-name).
+- `edit-shared-1` and `edit-shared-2` both lock `shared.ts` (serialize); `edit-alpha`/`edit-beta` hold disjoint locks (fan out).
 - `verify` `depends_on` all four edits.
-- Fixtures `alpha.ts`/`beta.ts`/`shared.ts`/`claude-target.ts` each export `OLD_NAME`.
+- Fixtures `alpha.ts`/`beta.ts`/`shared.ts` each export `OLD_NAME`.
 - The smoke test passes with no Docker, no MinIO, no API key.
 
 Test file: `examples/offload-minio/test/smoke.test.ts`.
@@ -567,65 +491,36 @@ Assemble the operator config (spec §4): an `S3Client` at `$AGORA_S3_ENDPOINT`
 `S3Mailbox` transport via `AwsS3MailboxClient` (`agora-data`, prefix `mailbox/`),
 the `S3ObjectLockAnchor` via `AwsS3LockClient` (`agora-audit`), a local ed25519
 signer, and **two** dispatch executors (`dispatch-a`/`dispatch-b`, both
-`target: 'local'`, same `workerImage`). The endpoint comes from env so the same
-file serves the in-container serve path (`host.docker.internal`) and the host
-client path (`localhost`) per spec §2.1.
+`target: 'local'`, the **stock** `workerImage`, each with
+`secrets: { ANTHROPIC_API_KEY: { inline: process.env.ANTHROPIC_API_KEY } }` so the
+real `claude-code` worker can run — matching `offload-fanout`). The endpoint comes
+from env so the same file serves the in-container serve path (`host.docker.internal`)
+and the host client path (`localhost`) per spec §2.1.
 
 ```javascript
 // shape (abridged) — examples/offload-minio/agora.config.mjs
 import { S3Client } from '@aws-sdk/client-s3';
+import { S3StorageProvider } from '@quarry-systems/agora-storage-s3';
 import { AwsS3MailboxClient } from './src/aws-s3-mailbox-client.js';
 import { AwsS3LockClient } from './src/aws-s3-lock-client.js';
-import { S3Mailbox, MailboxSubmissionTransport, S3ObjectLockAnchor /* +orchestrator parts */ } from '@quarry-systems/agora-orchestrator';
+import { S3Mailbox, MailboxSubmissionTransport, S3ObjectLockAnchor, DispatchExecutor /* +orchestrator parts */ } from '@quarry-systems/agora-orchestrator';
+const WORKER_IMAGE = 'ghcr.io/quarrysystems/agora-worker:latest'; // STOCK image
 const s3 = new S3Client({ endpoint: process.env.AGORA_S3_ENDPOINT, forcePathStyle: true, region: 'us-east-1', credentials: { /* minio */ } });
-// storage: S3StorageProvider({ bucket: 'agora-data', client: s3 })
+// storage: new S3StorageProvider({ bucket: 'agora-data', client: s3 })
 // transport: new MailboxSubmissionTransport(new S3Mailbox(new AwsS3MailboxClient({ client: s3, bucket: 'agora-data', prefix: 'mailbox/' })))
 // anchor: new S3ObjectLockAnchor(new AwsS3LockClient({ client: s3, bucket: 'agora-audit' }), 'agora-audit')
-// executors: { 'dispatch-a': new DispatchExecutor({ client, target: 'local', workerImage }), 'dispatch-b': new DispatchExecutor({ client, target: 'local', workerImage }) }
+// executors: { 'dispatch-a': new DispatchExecutor({ client, target: 'local', workerImage: WORKER_IMAGE, secrets: { ANTHROPIC_API_KEY: { inline: process.env.ANTHROPIC_API_KEY } } }),
+//              'dispatch-b': new DispatchExecutor({ client, target: 'local', workerImage: WORKER_IMAGE, secrets: { ANTHROPIC_API_KEY: { inline: process.env.ANTHROPIC_API_KEY } } }) }
 ```
 
 ## Acceptance criteria
 
-- Importing `agora.config.mjs` is side-effect-safe (no throw, no network) when `ANTHROPIC_API_KEY` is unset — matching `offload-fanout`'s import-safety rule.
+- Importing `agora.config.mjs` is side-effect-safe (no throw, no network) when `ANTHROPIC_API_KEY` is unset — matching `offload-fanout`'s import-safety rule (the empty-string inline secret is acceptable at import; the live-run guard is the serve container's concern).
 - Exports a wired `client`/`orch` shape consumable by both the serve entrypoint and the host driver.
 - Uses `$AGORA_S3_ENDPOINT` (not a hardcoded host) so serve and the host client can each point at the right MinIO endpoint (§2.1).
-- Registers exactly two executors (`dispatch-a`, `dispatch-b`), storage→`agora-data`, mailbox→`agora-data/mailbox/`, anchor→`agora-audit`.
+- Registers exactly two executors (`dispatch-a`, `dispatch-b`) on the **stock** worker image, storage→`agora-data`, mailbox→`agora-data/mailbox/`, anchor→`agora-audit`.
 
 Test file: `examples/offload-minio/test/e2e.test.ts` (config is exercised end-to-end there; authored in `task-e2e`).
-
-## Task: derived worker image
-
-```yaml
-id: task-dockerfile
-depends_on: [task-no-model-adapter]
-files:
-  - examples/offload-minio/Dockerfile
-  - examples/offload-minio/.dockerignore
-status: pending
-is_wiring_task: true
-```
-
-A thin Dockerfile that `FROM`s the base worker image and bakes the compiled
-no-model adapter to `/opt/agora/adapters/no-model/index.js`, so a single
-`workerImage` serves both executors and the no-model/real choice is purely the
-`AGORA_RUNTIME_ADAPTER` env var (spec §3.2). Confirm the base image's adapters
-path (`/opt/agora/adapters`) against `docker/agora-worker/Dockerfile` before
-finalizing.
-
-```dockerfile
-# examples/offload-minio/Dockerfile  (build context = examples/offload-minio)
-FROM ghcr.io/quarrysystems/agora-worker:latest
-# no-model adapter is plain ESM index.js — no build step needed
-COPY adapters/no-model/index.js /opt/agora/adapters/no-model/index.js
-```
-
-## Acceptance criteria
-
-- `docker build -t agora-worker-nomodel:latest examples/offload-minio` succeeds.
-- The resulting image contains `/opt/agora/adapters/no-model/index.js`, and a container started with `AGORA_RUNTIME_ADAPTER=no-model` resolves it via `loadRuntimeAdapter` (no "adapter not found" error).
-- The baked-in `claude-code` adapter still resolves when `AGORA_RUNTIME_ADAPTER` is unset.
-
-Test file: `examples/offload-minio/test/e2e.test.ts` (the live run exercises both adapters via the image; authored in `task-e2e`).
 
 ## Task: serve container image
 
@@ -643,9 +538,10 @@ Package `serve` as its own container (spec §2, §5 service side): a Node image 
 loads `agora.config.mjs` and runs the `serve()` loop. The entrypoint constructs the
 orchestrator + `S3Mailbox` transport from the config and calls `serve()`; the
 container mounts the Docker socket (to launch sibling workers) and a named volume
-(SQLite) — those mounts are declared in `task-compose`, not here. Resolve the §2
-open item: prefer `agora orch serve` if it can load this config, else this thin
-entrypoint.
+(SQLite) — those mounts are declared in `task-compose`. The serve container is given
+`ANTHROPIC_API_KEY` (the executors stage it into the real worker) and
+`AGORA_S3_ENDPOINT=http://host.docker.internal:9000`. Resolve the §2 open item:
+prefer `agora orch serve` if it can load this config, else this thin entrypoint.
 
 ```javascript
 // examples/offload-minio/serve-entrypoint.mjs
@@ -660,6 +556,7 @@ await serve({ orchestrator: orch.orchestrator, transport: orch.transport, signal
 
 - `docker build -f examples/offload-minio/Dockerfile.serve` produces an image whose `CMD` runs the serve loop.
 - On start the container performs the §13.6 cold-start sequence (create SQLite schema if absent → construct registries from config → connect storage → poll the S3 inbox → start the tick loop) and exposes **no** inbound port.
+- The container receives `ANTHROPIC_API_KEY` and `AGORA_S3_ENDPOINT` from its environment (set by compose).
 - SIGTERM stops firing, finishes the in-flight reconcile pass, and exits cleanly.
 
 Test file: `examples/offload-minio/test/e2e.test.ts` (serve is driven by the live run; authored in `task-e2e`).
@@ -668,7 +565,7 @@ Test file: `examples/offload-minio/test/e2e.test.ts` (serve is driven by the liv
 
 ```yaml
 id: task-compose
-depends_on: [task-serve-image, task-dockerfile]
+depends_on: [task-serve-image]
 files:
   - examples/offload-minio/docker-compose.yml
   - examples/offload-minio/scripts/init-buckets.sh
@@ -679,14 +576,15 @@ is_wiring_task: true
 The compose stack (spec §2): a MinIO service (published on host `9000`), a one-shot
 bucket-init that creates `agora-audit` **with object lock enabled** and `agora-data`
 (no lock), and the `serve` container with the Docker socket mounted, a named volume
-for SQLite, `AGORA_S3_ENDPOINT=http://host.docker.internal:9000`, and **no published
-port**. Worker containers (launched by serve on the host daemon, default bridge per
-§2.1) also reach MinIO at `host.docker.internal:9000`.
+for SQLite, `AGORA_S3_ENDPOINT=http://host.docker.internal:9000`, `ANTHROPIC_API_KEY`
+(from `../../.env`), and **no published port**. Worker containers (launched by serve
+on the host daemon, default bridge per §2.1) run the **stock** worker image and reach
+MinIO at `host.docker.internal:9000`.
 
 ## Acceptance criteria
 
 - `docker compose up` starts MinIO and serve; `init-buckets.sh` creates `agora-audit` (object-lock enabled) and `agora-data` (no lock) idempotently.
-- The serve service mounts `/var/run/docker.sock` and a named volume for the SQLite DB, sets `AGORA_S3_ENDPOINT` to the in-container endpoint, and publishes no port.
+- The serve service mounts `/var/run/docker.sock` and a named volume for the SQLite DB, sets `AGORA_S3_ENDPOINT` + `ANTHROPIC_API_KEY`, and publishes no port.
 - A worker container launched during a run can reach MinIO at `host.docker.internal:9000` (add `host-gateway` mapping for non-Desktop Linux).
 - Bringing the stack down and up again preserves run-state on the named volume (crash-safety, spec §4).
 
@@ -704,9 +602,13 @@ status: pending
 ```
 
 The host-side client driver (spec §5 client side) plus the live e2e + tamper test
-asserting the §6 acceptance criteria. The driver builds only an `OperationsApi` over
-the same `S3Mailbox` transport (host endpoint) and never holds the `orchestrator`/
-`store` — it talks to the serve container purely through MinIO.
+asserting the §6 acceptance criteria. The driver registers the `code-edit`
+(promptTemplate with `{{file}}`, à la `offload-fanout`) and `verify` subagents plus
+the fixture capability **against MinIO storage** (shared, content-addressed — not a
+serve connection), then builds an `OperationsApi` over the same `S3Mailbox` transport
+(host endpoint) and submits. It never holds the `orchestrator`/`store` — it reaches
+the serve container purely through MinIO. The host driver needs **no** API key (the
+serve container stages it).
 
 ## Implementation
 
@@ -714,8 +616,17 @@ the same `S3Mailbox` transport (host endpoint) and never holds the `orchestrator
 // examples/offload-minio/src/index.ts  (driver — abridged)
 import { readFile } from 'node:fs/promises';
 import { OperationsApi } from '@quarry-systems/agora-orchestrator';
-import { orch } from '../agora.config.mjs';
-if (!process.env.ANTHROPIC_API_KEY) { console.error('set ANTHROPIC_API_KEY (one real item)'); process.exit(1); }
+import { client, orch } from '../agora.config.mjs';
+// 1. register subagents + fixture capability into shared MinIO storage (offload-fanout pattern)
+const dir = new URL('../fixture/', import.meta.url);
+const files = Object.fromEntries(await Promise.all(['alpha.ts','beta.ts','shared.ts']
+  .map(async f => [f, await readFile(new URL(f, dir), 'utf8')])));
+await client.capabilities.register({ name: 'minio-cap', files });
+await client.subagent.register({ name: 'code-edit', capabilities: ['minio-cap'],
+  promptTemplate: 'Rename the identifier OLD_NAME to NEW_NAME in `{{file}}` only — edit and save that one file, then stop.' });
+await client.subagent.register({ name: 'verify', capabilities: ['minio-cap'],
+  systemPrompt: 'Post-edit gate. Confirm the fixture files exist in your workspace, then exit 0.' });
+// 2. submit via the mailbox; watch; audit
 const api = new OperationsApi({ transport: orch.transport, anchor: orch.anchor, storage: orch.storage, verifySignature: orch.verifySignature });
 const plan = JSON.parse(await readFile(new URL('../plan.json', import.meta.url), 'utf8'));
 const runId = await api.submit(plan, 'human:demo');
@@ -729,8 +640,8 @@ if (!bundle.report.intact || bundle.report.guarantee !== 'external-immutable') p
 import { describe, it, expect } from 'vitest';
 const live = process.env.AGORA_RUN_E2E ? describe : describe.skip;
 live('tier-1 minio e2e', () => {
-  it('all items reach done with result_refs and an external-immutable audit bundle', async () => {
-    // submit plan via OperationsApi over the S3 mailbox; watch to terminal
+  it('all 4 real-Claude edits reach done with result_refs and an external-immutable audit bundle', async () => {
+    // register subagents/capability into MinIO; submit plan via OperationsApi over the S3 mailbox; watch to terminal
     // assert: every edit has a result_ref; bundle.report.intact === true;
     //         bundle.report.guarantee === 'external-immutable'
     expect(true).toBe(true); // placeholder for the live assertions
@@ -746,7 +657,8 @@ live('tier-1 minio e2e', () => {
 ## Acceptance criteria
 
 - `submit` returns a run id without blocking; `watch` advances item statuses driven only through the MinIO mailbox (the host driver cannot reach serve directly — no port).
-- Every `edit-*` item (incl. `edit-claude`) exposes a `result_ref`; fetching it from `agora-data` yields a reviewable patch.
+- All four `edit-*` items run the real `claude-code` worker and expose a `result_ref`; fetching it from `agora-data` yields a reviewable patch.
+- `edit-shared-1`/`edit-shared-2` are observed to serialize (never `running` simultaneously) via their shared `shared.ts` lock; `edit-alpha`/`edit-beta` may run concurrently.
 - `audit(runId)` reports `intact: true`, `guarantee: 'external-immutable'`, and an `anchorId` naming the `agora-audit` object-lock anchor.
 - The tamper test: mutating a persisted audit entry while the MinIO-anchored root stays put makes verification report `intact: false`.
 - The exported bundle contains no secret values (refs only).
@@ -764,15 +676,15 @@ status: pending
 is_wiring_task: true
 ```
 
-Document the proof: prerequisites (build the no-model adapter, build the derived
-worker image, `docker compose up`), the run command, what the §6 acceptance checks
-prove, the tamper demonstration, and the §0.2 representativeness boundary so a
-reader doesn't over-claim what green means. Link the design spec.
+Document the proof: prerequisites (build the **stock** worker image locally,
+`docker compose up`), the run command, what the §6 acceptance checks prove, the
+tamper demonstration, and the §0.2 representativeness boundary so a reader doesn't
+over-claim what green means. Link the design spec.
 
 ## Acceptance criteria
 
-- README lists the exact build/run sequence (`docker build` the derived worker image which bakes the plain-JS no-model adapter → `docker compose up` → run the host driver) with the two MinIO endpoints called out (§2.1).
-- Documents the §6 acceptance + the tamper check, and links the design spec and the §0.2 boundary (no-model proves the plumbing; one real item proves the AI path; Fargate/KMS are Tier-2).
-- States the cost posture ($0 infra; near-$0 tokens) and the Tier-2 swap (endpoints + signer + Fargate target).
+- README lists the exact build/run sequence (`docker build` the stock worker image → `docker compose up` (MinIO + serve) → run the host driver) with the two MinIO endpoints called out (§2.1) and the `ANTHROPIC_API_KEY`-into-serve requirement.
+- Documents the §6 acceptance + the tamper check, and links the design spec and the §0.2 boundary (all edits run the real adapter; the only substitutions are MinIO storage/mailbox/anchor + local-docker compute; Fargate/real-S3/KMS are Tier-2).
+- States the cost posture (free infra; ~pennies of tokens per run) and the Tier-2 swap (endpoints + signer + Fargate target).
 
 Test file: `examples/offload-minio/test/e2e.test.ts` (the README documents exactly this flow; no separate doc test).

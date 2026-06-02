@@ -57,7 +57,9 @@ and a concrete S3-lock client), so Tier-2 Fargate is a config swap, not new code
 - `serve` runs **as a container with no published port** — reachable only through
   the MinIO mailbox. The strongest available demonstration of the
   no-inbound-networking / "lives outside local env" model short of a remote host.
-- Zero/near-zero cost: most work runs a no-model adapter; one item runs real Claude.
+- **Maximum fidelity:** every edit runs the **real `claude-code` adapter** (the exact
+  path `offload-fanout` proves green) on a one-line rename — nothing about the worker
+  is faked. Cost is ~pennies of tokens per run (infra is free).
 
 **Defers (explicitly out of scope):**
 - Real AWS (Fargate compute, real S3, EFS volume, KMS signer) — Tier 2.
@@ -75,54 +77,59 @@ A passing Tier-1 must not be over-read. This section pins exactly what the green
 checkmark does and does not cover, so neither a future reader nor a marketing
 claim mistakes it for a Fargate proof.
 
-**The no-model adapter swaps exactly one step.** A worker run is a fixed pipeline;
-the `RuntimeAdapter.invoke()` call is one step in it:
+**The worker is not faked anywhere.** Every edit runs the real `claude-code`
+adapter through the full worker pipeline — the exact path `offload-fanout` already
+proves green:
 
 ```
 boot → resolve secrets → agora-setup.sh → captureBaseline (git write-tree)
-   → RuntimeAdapter.invoke()      ← the ONLY thing the no-model adapter changes
+   → RuntimeAdapter.invoke()   ← the REAL claude-code adapter spawns the claude CLI
    → computeWorkspacePatch (git diff) → upload patch artifact
    → write .agora/output.json → emit lifecycle events
 ```
 
-Everything except `invoke()` is identical between no-model and real-Claude runs,
-and identical between local and remote. Crucially, **swapping the adapter is the
-designed extension seam** (`loadRuntimeAdapter` + `AGORA_RUNTIME_ADAPTER`), the same
-mechanism a future Bedrock/Codex runtime uses — a no-model adapter is a legitimate
-alternate runtime, **not a mock**.
+**Why all-real (spike finding, 2026-06-02).** An earlier draft proposed a no-model
+adapter to drive token cost to $0. A spike found there is **no per-dispatch
+runtime-adapter selection** in the codebase: `agora-client` hardcodes
+`AGORA_RUNTIME_ADAPTER: 'claude-code'` (dispatch.ts:219), `DispatchWork` has no
+`runtimeAdapter` field, and `work.env` is env-bundle *references* (not raw env). A
+no-model adapter would therefore require a product change to `agora-client`. Since
+the goal is a *true* pressure test, the better answer is to run the real adapter on
+a trivial one-line rename — maximally faithful, zero product change, ~pennies/run.
+(Per-dispatch runtime selection remains a legitimate future `agora-client` feature
+for multi-runtime — Bedrock/Codex — but it is out of scope here.)
 
-**Fully exercised by the no-model majority (the orchestration/transport layer):**
-serve-over-S3 with no inbound networking, multi-executor routing, container boot +
-secret staging + baseline, the git-diff patch escape → `result_ref`, S3-backed
-content-addressed storage, the Merkle audit + object-lock anchor + verify, and the
-dispatch fire/reconcile + deps + locks + retry engine. These paths cannot observe
-what `invoke()` did — so a no-model run proves them as well as a real-model run.
+**Fully exercised (everything except the AWS-specific substitutions):** serve-over-S3
+with no inbound networking, multi-executor routing, container boot + real secret
+staging (`ANTHROPIC_API_KEY`), baseline, the **real** `claude` agent edit loop, the
+git-diff patch escape → `result_ref`, S3-backed content-addressed storage, the Merkle
+audit + object-lock anchor + verify, and the dispatch fire/reconcile + deps + locks +
+retry engine.
 
-**Covered ONLY by the single real-Claude item (the AI-execution path):** spawning
-the `claude` CLI, the API key used as a live network secret, the agent edit loop,
-non-determinism, latency, token cost. The no-model adapter does **not** represent
-any of this — which is why exactly one real item exists.
+**The only substitutions (legitimate endpoints, not mocks):**
+- Storage / mailbox / anchor → **MinIO**. The real AWS SDK talks to MinIO over the
+  real S3 protocol; the code can't tell. A substitute *endpoint*, not a mock.
+- Compute → **local Docker** (`local-docker` provider) instead of Fargate.
 
-**NOT covered by Tier-1 at all (true regardless of adapter — these are Tier-2):**
+**NOT covered by Tier-1 (these are Tier-2):**
 - Fargate mechanics: ECS task launch, IAM task roles, EFS volume mount, the
-  `agora-providers-fargate` compute path (Tier-1 uses `local-docker`).
+  `agora-providers-fargate` compute path.
 - Real AWS S3 + real Object-Lock `COMPLIANCE` enforcement (vs MinIO's implementation).
 - `KmsSigner` (Tier-1 uses the local ed25519 signer).
-- Live egress to Anthropic from inside a VPC-bound task.
+- Live egress to Anthropic from inside a *VPC-bound* task (Tier-1 egresses from the
+  local worker container, which is real egress — just not VPC-constrained).
 
 The architectural bet is that every NOT-covered item is a **seam swap** (target
 string, endpoint, signer), not new code — so Tier-1 de-risks everything *up to* the
-swap, and Tier-2 validates the AWS implementations *behind* the seams. The model
-call is deliberately the least-covered piece because it is the least uncertain: it
-already runs green locally in `offload-fanout`. Spending the free test budget on the
-never-tested plumbing is the point.
+swap, and Tier-2 validates the AWS implementations *behind* the seams.
 
 ---
 
 ## 1. New components
 
-Four building blocks, named for their **mechanism**, not the deployment they are
-tested against (MinIO-ness lives only in config — see §6):
+Three building blocks, named for their **mechanism**, not the deployment they are
+tested against (MinIO-ness lives only in config — see §6). The worker itself is the
+**stock** `claude-code` image — no new adapter:
 
 | Component | What it is | Home (Tier 1) |
 |---|---|---|
@@ -130,7 +137,6 @@ tested against (MinIO-ness lives only in config — see §6):
 | `MailboxS3Client` | The tiny injected seam `S3Mailbox` depends on (object put/get/list/delete). Interface only. | `agora-orchestrator/src/contracts/mailbox.ts` |
 | `AwsS3MailboxClient` | Concrete `MailboxS3Client` backed by `@aws-sdk/client-s3`; endpoint-configurable (MinIO now, real S3 later). | `examples/offload-minio/` for now |
 | `AwsS3LockClient` | Concrete `S3LockClient` (the seam `S3ObjectLockAnchor` already declares): `PutObject` with object-lock `COMPLIANCE` retention + `GetObject`. Endpoint-configurable. | `examples/offload-minio/` for now |
-| `no-model` RuntimeAdapter | ~20-line `RuntimeAdapter` (`{name, invoke}`) that deterministically edits a workspace file so diff-capture/escape fires with **zero tokens**. | `examples/offload-minio/adapters/no-model/` → baked into a local worker image |
 
 **Trap-check / promotion (orchestrator spec §11):** the two `Aws*` concrete
 clients stay example-local until a **second consumer** (Tier-2 Fargate) pulls
@@ -177,16 +183,17 @@ edge.
   - is the **only DB opener** and the only `tick()` caller. The client
     (`OperationsApi`) reaches it **only** through the MinIO mailbox — serve exposes
     no inbound port at all.
+  - is also given `ANTHROPIC_API_KEY` (its executors stage it into the real worker)
+    and `AGORA_S3_ENDPOINT=http://host.docker.internal:9000`.
   - **config loading:** the serve container needs the orchestrator constructed from
     `agora.config.mjs` (executors/anchor/transport). *Plan task:* confirm whether
     `agora orch serve` loads the example config directly, or a thin
     `serve-entrypoint.mjs` that imports the config and calls `serve()` is needed.
 - **Workers** run in **local Docker** via `LocalDockerProvider` (started by serve
-  on the host daemon). Requires the worker image built locally (it is GHCR-private)
-  with the no-model adapter baked in (§3.2):
-  `docker build -t agora-worker-nomodel:latest -f examples/offload-minio/Dockerfile .`
-  (which `FROM`s `ghcr.io/quarrysystems/agora-worker:latest`, itself built from
-  `docker/agora-worker/Dockerfile`).
+  on the host daemon), using the **stock** worker image with its built-in
+  `claude-code` adapter — no derived image. The image is GHCR-private, so build it
+  locally once:
+  `docker build -t ghcr.io/quarrysystems/agora-worker:latest -f docker/agora-worker/Dockerfile .`
 
 ### 2.1 MinIO endpoint duality (a wiring nuance, easy to get wrong)
 
@@ -207,48 +214,30 @@ as a plan portability detail.)
 
 ---
 
-## 3. Worker: per-item adapter selection (the zero-token mechanism)
+## 3. Worker: the stock claude-code adapter + per-item file selection
 
-Grounded in the worker code:
+Every edit runs the **stock** `claude-code` adapter — the same one `offload-fanout`
+proves. There is no custom adapter and no per-dispatch adapter selection (the spike
+found `AGORA_RUNTIME_ADAPTER` is hardcoded in `agora-client`; §0.2). What *is*
+per-item is the **file to edit**, passed via the structured input channel — verified
+end-to-end in the spike:
 
-- `loadRuntimeAdapter(name)` resolves `<adaptersRoot>/<name>/index.js` (default
-  root `/opt/agora/adapters`), constructing the module's default factory.
-- The adapter `name` comes from the **`AGORA_RUNTIME_ADAPTER`** env var (default
-  `claude-code`).
-- `WorkItem.inputs.env` flows straight through `DispatchExecutor.fire` →
-  `client.dispatch.fire({ env })` to the worker.
+```
+WorkItem.inputs.workerInput  →  DispatchExecutor → work.input
+   → AGORA_INPUT_JSON (dispatch.ts:218) → worker inputJson (env-parser.ts:94)
+   → RuntimeInvocation.input → {{file}} substitution in the code-edit promptTemplate
+```
 
-Therefore **per-item adapter selection is just an env var** — no new plumbing:
+So each edit item carries `workerInput: { file: "<name>.ts" }`, and the `code-edit`
+subagent's `promptTemplate` references `{{file}}` (exactly the `offload-fanout`
+pattern: "rename OLD_NAME → NEW_NAME in `{{file}}` only"). The agent makes a real
+edit → real git diff → patch artifact → `result_ref`.
 
-- No-model items set `env: ["AGORA_RUNTIME_ADAPTER=no-model"]`.
-- The one real item omits it (defaults to `claude-code`).
-
-### 3.1 The `no-model` adapter
-
-A `RuntimeAdapter` whose `invoke()` performs a deterministic workspace edit (e.g.
-rename `OLD_NAME → NEW_NAME` in a seeded fixture file, mirroring `offload-fanout`'s
-prompt-driven edit) and returns success. Because it runs at the adapter step
-(after `captureBaseline`, before `computeWorkspacePatch`), its edit produces a
-real diff → a patch artifact → a `result_ref`. No model call, no tokens.
-
-### 3.2 Getting the adapter into the container
-
-**Resolved approach:** bake a **second adapter** into a locally-built worker image
-alongside `claude-code`, so a single `workerImage` serves both executors and the
-no-model/real choice is purely the `AGORA_RUNTIME_ADAPTER` env var. Concretely: a
-thin `examples/offload-minio/Dockerfile` that `FROM`s the base worker image and
-`COPY`s the compiled `no-model` adapter to `/opt/agora/adapters/no-model/index.js`.
-
-A mount is *possible* — `LocalDockerProvider.extraBinds` (confirmed present) accepts
-Dockerode `<host>:<container>` strings, so the adapter dir could be bind-mounted
-into the worker for a faster local edit loop. It is **not** the default: a host bind
-source doesn't exist on a remote daemon, so it breaks the local→remote parity that
-is the whole point of Tier 2. Bake for the proof; mount only as a dev convenience.
-
-> **Confirm during implementation (plan task 1):** read `docker/agora-worker/Dockerfile`
-> to verify the adapters path (`/opt/agora/adapters`) and base layout before writing
-> the derived Dockerfile. The env-var selection and `extraBinds` mechanisms are
-> already confirmed in source; only the base-image path needs this check.
+> **Note (deferred feature):** per-dispatch runtime-adapter selection — needed for a
+> future multi-runtime story (Bedrock/Codex) or a genuine zero-token mode — would be
+> a small `agora-client` change (`DispatchWork.runtimeAdapter` → the hardcoded
+> `AGORA_RUNTIME_ADAPTER`). Out of scope for this proof; recorded so the option isn't
+> lost.
 
 ---
 
@@ -268,10 +257,13 @@ client.
 - **transport** → `new MailboxSubmissionTransport(new S3Mailbox(new AwsS3MailboxClient({ endpoint: $AGORA_S3_ENDPOINT, bucket: 'agora-data', prefix: 'mailbox/', ... })))`.
 - **anchor** → `new S3ObjectLockAnchor(new AwsS3LockClient({ endpoint: $AGORA_S3_ENDPOINT, bucket: 'agora-audit', ... }), 'agora-audit')`
   (replaces `LocalAnchor`; the object-lock bucket).
-- **executors** → **two** dispatch executors, both `target: 'local'`, same
-  `workerImage` (the §3.2 image), keyed `dispatch-a` and `dispatch-b`. The worker
-  env carries `AGORA_S3_ENDPOINT=host.docker.internal:9000` (sibling containers are
-  on the default bridge, §2.1).
+- **executors** → **two** dispatch executors, both `target: 'local'`, the **stock**
+  `workerImage` (`ghcr.io/quarrysystems/agora-worker:latest`), keyed `dispatch-a`
+  and `dispatch-b`. Each carries
+  `secrets: { ANTHROPIC_API_KEY: { inline: process.env.ANTHROPIC_API_KEY } }` so the
+  real worker can run (matching `offload-fanout`). The worker env carries
+  `AGORA_S3_ENDPOINT=host.docker.internal:9000` (sibling containers are on the
+  default bridge, §2.1).
 - **signer** → `createLocalSigner()` (ed25519) — unchanged; `KmsSigner` is Tier-2.
 
 All MinIO-specific values (endpoint, bucket names, `forcePathStyle`, credentials)
@@ -281,32 +273,32 @@ live in config/env — **not** in any class name (§1).
 
 ## 5. Run shape (`examples/offload-minio/plan.json` + driver)
 
-A single submitted `Run` that exercises every claim at once:
+A single submitted `Run` that exercises every claim at once. **All four edits run
+the real `code-edit` subagent** (stock `claude-code` adapter); each carries
+`workerInput: { file }`:
 
-- **N no-model `code-edit` items** (e.g. 3), each with a **per-file
-  `resourceLock`**, split across the two executors:
-  `executor: "dispatch-a"` vs `"dispatch-b"` — proving routing-by-name. One file
-  is shared so its lock forces serialization (disjoint locks fan out).
-- **1 real-Claude `code-edit` item** (`executor: "dispatch-a"`, default adapter)
-  on its own fixture file — proves the real AI path.
-- **1 `verify` gate item** that `depends_on` all edits — proves DAG ordering.
+- **`edit-alpha` / `edit-beta`** — disjoint per-file `resourceLock`s, one on
+  `dispatch-a` and one on `dispatch-b` → **fan out** concurrently.
+- **`edit-shared-1` / `edit-shared-2`** — both lock `shared.ts` → **serialize**
+  (the rename is idempotent, so order is irrelevant and both produce a valid patch).
+  This is the resource-lock contention demonstration, proven not just claimed.
+- **`verify` gate** that `depends_on` all four edits — proves DAG ordering.
 
 Unlike `offload-fanout` (which runs serve and the client in one process), Tier-1
 **splits the two roles** because serve is containerized (§2):
 
 - **Service side** — the serve container constructs orchestrator + `S3Mailbox`
-  transport + anchor from the config and runs the `serve()` loop. No client code,
-  no published port.
-- **Client driver** (`examples/offload-minio/src/index.ts`, host process) — builds
-  only an `OperationsApi` over the **same** `S3Mailbox` transport (host endpoint)
-  and the storage/anchor for reads, then `submit → watch → status → audit`. It
-  never holds the `orchestrator` or `store` object — it talks to the service purely
-  through MinIO. A live-run guard checks `ANTHROPIC_API_KEY` only because of the one
-  real item; the no-model majority needs no key.
+  transport + anchor from the config and runs the `serve()` loop. It holds the
+  executors (and thus the staged `ANTHROPIC_API_KEY`). No client code, no published port.
+- **Client driver** (`examples/offload-minio/src/index.ts`, host process) — registers
+  the `code-edit`/`verify` subagents + the fixture capability **into shared MinIO
+  storage** (content-addressed, not a serve connection), then builds only an
+  `OperationsApi` over the **same** `S3Mailbox` transport (host endpoint) and
+  `submit → watch → status → audit`. It never holds the `orchestrator`/`store` —
+  it reaches the service purely through MinIO, and needs **no** API key itself.
 
-`docker compose up` starts MinIO (+ bucket init) and serve; the host driver is then
-run against the same MinIO. `ANTHROPIC_API_KEY` is passed into the serve container
-(it stages secrets into the one real worker), not into the host driver.
+`docker compose up` starts MinIO (+ bucket init) and serve (with `ANTHROPIC_API_KEY`
+from `../../.env`); the host driver is then run against the same MinIO.
 
 ---
 
@@ -315,8 +307,9 @@ run against the same MinIO. `ANTHROPIC_API_KEY` is passed into the serve contain
 1. `submit` returns a run id and does not block.
 2. `watch` shows waves advancing with blocking reasons (lock/dep), driven entirely
    through the **MinIO** mailbox (no direct client↔serve channel).
-3. Every edit item — including the real-Claude one — exposes a `result_ref`;
-   fetching it from MinIO yields a reviewable patch.
+3. Every edit item (all four run the real `claude-code` worker) exposes a
+   `result_ref`; fetching it from MinIO yields a reviewable patch. `edit-shared-1`
+   and `edit-shared-2` are observed to serialize via their shared lock.
 4. `audit <run-id>` produces a bundle whose `report.intact === true` and
    **`report.guarantee === 'external-immutable'`** and `report.claim` reads
    *tamper-evident* (not merely *tamper-detecting*), with `anchorId` naming the
@@ -344,11 +337,12 @@ run against the same MinIO. `ANTHROPIC_API_KEY` is passed into the serve contain
 
 ## 8. Risks & open details
 
-- **Primary risk — no-model adapter delivery into the container** (§3.2). Mitigated
-  by the confirmed env-var selection mechanism; only the bake-vs-mount delivery
-  needs the plan's task-1 check. `extraBinds` (confirmed present) makes the mount
-  fallback viable for local iteration, but bake is the portable default (mount host
-  paths don't survive the local→remote move).
+- **Subagent registration must reach shared MinIO storage before run** — the host
+  driver registers `code-edit`/`verify` + the fixture capability via the
+  `AgoraClient` (storage = `agora-data`). The serve-launched workers fetch them from
+  the same bucket. This is storage I/O, not a serve connection, so it doesn't weaken
+  the no-inbound-networking claim — but the driver's `AgoraClient` and serve's
+  executors must point at the **same** `agora-data` bucket/namespace or workers 404.
 - **Docker-out-of-docker from the serve container** — serve must reach the host
   daemon via the mounted socket. On Docker Desktop/Windows the socket path and
   permissions differ from native Linux; the plan must confirm the mount works on
