@@ -102,6 +102,20 @@ V1 ships.
   Deferred: validating the sentinel against each shape's `outputSchema`, and the
   richer `output` / `intents` / `signals` products (the types exist; nothing
   enforces or consumes them yet).
+- **Per-dispatch artifact I/O** — V1 carries files *into* a worker only via
+  register-once capability bundles (already binary-capable:
+  `files: Record<string, Uint8Array | string>`), and escapes results *out* only as
+  a workspace diff (`result_ref`, a unified patch). Two symmetric gaps remain for
+  *artifact-shaped* work — a worker that consumes or produces a binary deliverable
+  (a PDF, an image, a build output) rather than editing code: there is no
+  per-dispatch **input** blob materialized into the workspace, and no **binary
+  output** channel (the git-diff patch records binary changes as
+  `Binary files … differ`, dropping the bytes). V1.1 adds a content-addressed
+  artifact seam — per-dispatch inputs materialized into the workspace at a known
+  path, declared outputs captured and content-addressed on write — both folded into
+  the audit manifest, sitting **alongside** the existing code-edit patch (which is
+  correct as-is for the editing path). Additive via the existing storage +
+  overlay/capture machinery; pulled when an artifact-generation use case needs it.
 - **The autonomous-PR layer** — `Intent` / `IntentInterpreter`, the `dev.open-pr`
   interpreter, the auto-merge-test-only / human-approve policy, and the CLI
   `approve` verb. The `Intent` *type* exists; no interpreter ships yet. This is the
