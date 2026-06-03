@@ -69,6 +69,12 @@ shipped in #24).
   computes the policy for each item — but the result is currently **discarded**
   (`tick.ts`: `void effectTierPolicy(…)`, `// TODO(PR6)`). Nothing caches, snapshots,
   or gates on it yet. Acting on it is V1.1 (below).
+- **Cron scheduling** — `agora orch schedule add|list|rm` CLI verbs; schedules
+  persisted in a `schedules` SQLite table via a config-owned `scheduleStore`
+  (default `SqliteScheduleStore`). The cron scheduler acts as a Run *producer*
+  feeding the existing submission inbox — no new Trigger primitive. Catch-up
+  coalesces to one run after downtime; runIds are deterministic per slot. UTC /
+  minute granularity; single-`serve` assumption.
 
 ### Known gap in V1
 
@@ -88,10 +94,6 @@ shipped in #24).
 The V1.1 layer is a strict superset of V1. Nothing below requires changing what
 V1 ships.
 
-- **`cron` trigger** — recurring scheduling via the existing `Trigger` seam.
-  `serve` + manual `submit` already delivers *unattended* offload (submit once,
-  walk away); `cron` adds *recurring*. **This is the first item to pull into
-  V1.1.**
 - **Operationalize the `dev` pack** — the `dev.code-edit` / `dev.verify` shapes and
   the `PackRegistry` already exist in code (see "Now"), but the shapes are **not
   dispatchable yet**: pin the real worker-image digest (currently a `PLACEHOLDER`)

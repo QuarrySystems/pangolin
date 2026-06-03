@@ -9,6 +9,15 @@ workspace. See [RELEASING.md](./RELEASING.md) for how a release is cut.
 
 ## [Unreleased]
 
+### Added
+
+- **Cron scheduling (`agora orch schedule add|list|rm`).** Recurring submissions
+  via a cron scheduler that feeds the existing submission inbox — no new Trigger
+  primitive required. Schedules are persisted in a `schedules` SQLite table via a
+  config-owned `SqliteScheduleStore`. Catch-up after downtime coalesces to one run
+  per slot; runIds are deterministic per slot. UTC / minute granularity;
+  single-`serve` assumption.
+
 ## [0.1.0] - 2026-06-01
 
 First public, **source-available** release (BSL 1.1). All thirteen packages
