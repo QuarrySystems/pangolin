@@ -5,14 +5,14 @@ created: 2026-06-02
 
 ```mermaid
 flowchart TD
-    task-schedule-contracts["task-schedule-contracts: scheduling contracts<br/>files: contracts/schedule.ts +3 more"]
-    task-cron-scheduler["task-cron-scheduler: cron scheduler<br/>files: scheduling/cron-scheduler.ts +2 more"]
-    task-sqlite-schedule-store["task-sqlite-schedule-store: sqlite schedule store<br/>files: runstate/sqlite-schedule-store.ts +1 more"]
-    task-serve-wiring["task-serve-wiring: serve loop scheduler block<br/>files: serve/driver.ts +1 more"]
-    task-barrel-exports["task-barrel-exports: export scheduling symbols<br/>files: src/index.ts +1 more"]
-    task-cli-schedule["task-cli-schedule: orch schedule CLI<br/>files: cmd-orch.ts +1 more"]
-    task-docs-site["task-docs-site: public docs site<br/>files: reference/cli.md +4 more"]
-    task-repo-docs["task-repo-docs: internal repo docs<br/>files: ROADMAP.md +1 more"]
+    task-schedule-contracts["task-schedule-contracts: scheduling contracts<br/>files: contracts/schedule.ts +3 more"]:::done
+    task-cron-scheduler["task-cron-scheduler: cron scheduler<br/>files: scheduling/cron-scheduler.ts +2 more"]:::done
+    task-sqlite-schedule-store["task-sqlite-schedule-store: sqlite schedule store<br/>files: runstate/sqlite-schedule-store.ts +1 more"]:::done
+    task-serve-wiring["task-serve-wiring: serve loop scheduler block<br/>files: serve/driver.ts +1 more"]:::done
+    task-barrel-exports["task-barrel-exports: export scheduling symbols<br/>files: src/index.ts +1 more"]:::done
+    task-cli-schedule["task-cli-schedule: orch schedule CLI<br/>files: cmd-orch.ts +2 more"]:::done
+    task-docs-site["task-docs-site: public docs site<br/>files: reference/cli.md +4 more"]:::done
+    task-repo-docs["task-repo-docs: internal repo docs<br/>files: ROADMAP.md +1 more"]:::done
 
     task-schedule-contracts --> task-cron-scheduler
     task-schedule-contracts --> task-sqlite-schedule-store
@@ -90,18 +90,18 @@ not forgotten.
 edits from the Tier-1 MinIO work at plan-authoring time. Commit or stash those
 before this task runs so the cron promotion lands as a clean, separable diff.
 
-DAG status: 8 tasks · 0 done · 0 failed · 0 skipped · 8 pending
+DAG status: 8 tasks · 8 done · 0 running · 0 failed · 0 skipped · 0 pending — COMPLETE
 
 | id | depends_on | status |
 |---|---|---|
-| task-schedule-contracts | — | · pending |
-| task-cron-scheduler | task-schedule-contracts | · pending |
-| task-sqlite-schedule-store | task-schedule-contracts | · pending |
-| task-serve-wiring | task-cron-scheduler | · pending |
-| task-barrel-exports | task-schedule-contracts, task-cron-scheduler, task-sqlite-schedule-store | · pending |
-| task-cli-schedule | task-barrel-exports | · pending |
-| task-docs-site | task-cli-schedule | · pending |
-| task-repo-docs | task-cli-schedule | · pending |
+| task-schedule-contracts | — | ✓ done (b04955b) |
+| task-cron-scheduler | task-schedule-contracts | ✓ done (988f0c1) |
+| task-sqlite-schedule-store | task-schedule-contracts | ✓ done (eb86ada) |
+| task-serve-wiring | task-cron-scheduler | ✓ done (fb9a7f4) |
+| task-barrel-exports | task-schedule-contracts, task-cron-scheduler, task-sqlite-schedule-store | ✓ done (fb9a7f4) |
+| task-cli-schedule | task-barrel-exports | ✓ done (8790341) |
+| task-docs-site | task-cli-schedule | ✓ done (e0c5ab0) |
+| task-repo-docs | task-cli-schedule | ✓ done (c4774fb) |
 
 ## Tasks
 
@@ -115,7 +115,7 @@ files:
   - packages/agora-orchestrator/src/contracts/schedule-store.ts
   - packages/agora-orchestrator/src/contracts/index.ts
   - packages/agora-orchestrator/test/schedule-contracts.test.ts
-status: pending
+status: done
 ```
 
 Define the contract surface for cron scheduling: the `Schedule` shape (cron
@@ -198,7 +198,7 @@ files:
   - packages/agora-orchestrator/src/scheduling/cron-scheduler.ts
   - packages/agora-orchestrator/package.json
   - packages/agora-orchestrator/test/cron-scheduler.test.ts
-status: pending
+status: done
 ```
 
 Implement the `CronScheduler` (the Run producer `serve` polls) plus a standalone
@@ -294,7 +294,7 @@ depends_on: [task-schedule-contracts]
 files:
   - packages/agora-orchestrator/src/runstate/sqlite-schedule-store.ts
   - packages/agora-orchestrator/test/runstate-schedule-store.test.ts
-status: pending
+status: done
 ```
 
 Implement `SqliteScheduleStore implements ScheduleStore`, backed by a new
@@ -389,7 +389,7 @@ depends_on: [task-cron-scheduler]
 files:
   - packages/agora-orchestrator/src/serve/driver.ts
   - packages/agora-orchestrator/test/serve-scheduler.test.ts
-status: pending
+status: done
 ```
 
 Wire the scheduler into the `serve` loop: add an optional `scheduler` field to
@@ -472,7 +472,7 @@ depends_on: [task-schedule-contracts, task-cron-scheduler, task-sqlite-schedule-
 files:
   - packages/agora-orchestrator/src/index.ts
   - packages/agora-orchestrator/test/barrel-schedule-surface.test.ts
-status: pending
+status: done
 is_wiring_task: true
 ```
 
@@ -506,7 +506,8 @@ depends_on: [task-barrel-exports]
 files:
   - packages/agora-cli/src/cmd-orch.ts
   - packages/agora-cli/test/cmd-orch-schedule.test.ts
-status: pending
+  - packages/agora-cli/test/cmd-orch.test.ts
+status: done
 ```
 
 Add the `agora orch schedule add|list|rm` operator verbs (commander) and a
@@ -624,7 +625,7 @@ files:
   - docs-site/src/content/docs/how-to/schedule-recurring-runs.md
   - docs-site/src/content/docs/explanation/how-offload-runs.md
   - docs-site/src/content/docs/explanation/project-status-roadmap.md
-status: pending
+status: done
 is_wiring_task: true
 ```
 
@@ -673,7 +674,7 @@ depends_on: [task-cli-schedule]
 files:
   - ROADMAP.md
   - CHANGELOG.md
-status: pending
+status: done
 is_wiring_task: true
 ```
 
