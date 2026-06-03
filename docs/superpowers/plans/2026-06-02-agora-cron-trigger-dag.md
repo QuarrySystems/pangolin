@@ -59,6 +59,18 @@ Decomposition notes:
 - Scheduling is an operator action → CLI only, no MCP tool (spec §0.2), so no
   task touches any `mcp` surface and the CI privilege-allowlist check is
   unaffected.
+- **Test convention (audited against the repo):** tests use `vitest`
+  (`import { describe, it, expect } from 'vitest'`) and define fakes **locally
+  per test file** — the repo does not hoist transport/orchestrator/store fakes
+  into a shared module (`test/support/` holds only `make-shape.ts`;
+  `makeFakeTransport` is redefined locally in both `serve-driver.test.ts` and
+  `cmd-orch.test.ts`). New test files follow suit: `serve-scheduler.test.ts`
+  defines a submit-recording transport locally and drives a **real**
+  `AgoraOrchestrator` (`SqliteRunStateStore` + `ManualTrigger` +
+  `immediateExecutor` fixture); the CLI test uses the `new Command()` +
+  `attachOrchCmd` + `parseAsync(..., { from: 'user' })` harness with a
+  `makeOrchContext`-style fake. SQLite stores cast rows to an explicit named
+  shape (e.g. `as ScheduleRow[]`), never `any`, matching `sqlite.ts`.
 
 Documentation tasks (`task-docs-site`, `task-repo-docs`) both depend on
 `task-cli-schedule` (the last behaviour task) so the docs describe the complete
@@ -148,6 +160,7 @@ Barrel addition (`contracts/index.ts`): append
 
 ```typescript
 // packages/agora-orchestrator/test/schedule-contracts.test.ts
+import { it, expect } from 'vitest';
 import type { Schedule, ScheduleStore } from '../src/contracts/index.js';
 
 it("ScheduleStore is implementable and Schedule round-trips through it", () => {
@@ -240,6 +253,7 @@ resolves.
 
 ```typescript
 // packages/agora-orchestrator/test/cron-scheduler.test.ts
+import { it, expect } from 'vitest';
 import { CronScheduler, nextDueAfter } from '../src/scheduling/cron-scheduler.js';
 import type { Schedule, ScheduleStore } from '../src/contracts/index.js';
 
@@ -307,6 +321,9 @@ CREATE TABLE IF NOT EXISTS schedules (
 );
 CREATE INDEX IF NOT EXISTS idx_schedules_due ON schedules(next_due_at);`;
 
+// Explicit row shape (repo convention: cast to a named shape, not `any` — see sqlite.ts)
+interface ScheduleRow { id: string; cron_expr: string; run_template: string; actor: string; last_fired_at: string | null; next_due_at: string; }
+
 export class SqliteScheduleStore implements ScheduleStore {
   private db: Database.Database;
   constructor(path = ':memory:') {
@@ -323,20 +340,21 @@ export class SqliteScheduleStore implements ScheduleStore {
   }
   due(nowMs: number): Schedule[] {
     const iso = new Date(nowMs).toISOString();
-    return (this.db.prepare('SELECT * FROM schedules WHERE next_due_at <= ?').all(iso) as any[]).map(this.row);
+    return (this.db.prepare('SELECT * FROM schedules WHERE next_due_at <= ?').all(iso) as ScheduleRow[]).map(this.row);
   }
   markFired(id: string, firedAtMs: number, nextDueAt: string): void {
     this.db.prepare('UPDATE schedules SET last_fired_at=?, next_due_at=? WHERE id=?')
       .run(new Date(firedAtMs).toISOString(), nextDueAt, id);
   }
   remove(id: string): void { this.db.prepare('DELETE FROM schedules WHERE id=?').run(id); }
-  list(): Schedule[] { return (this.db.prepare('SELECT * FROM schedules ORDER BY id').all() as any[]).map(this.row); }
-  private row = (r: any): Schedule => ({ id: r.id, cronExpr: r.cron_expr, run: JSON.parse(r.run_template), actor: r.actor, lastFiredAt: r.last_fired_at ?? undefined, nextDueAt: r.next_due_at });
+  list(): Schedule[] { return (this.db.prepare('SELECT * FROM schedules ORDER BY id').all() as ScheduleRow[]).map(this.row); }
+  private row = (r: ScheduleRow): Schedule => ({ id: r.id, cronExpr: r.cron_expr, run: JSON.parse(r.run_template), actor: r.actor, lastFiredAt: r.last_fired_at ?? undefined, nextDueAt: r.next_due_at });
 }
 ```
 
 ```typescript
 // packages/agora-orchestrator/test/runstate-schedule-store.test.ts
+import { describe, it, expect } from 'vitest';
 import { SqliteScheduleStore } from '../src/runstate/sqlite-schedule-store.js';
 import type { Schedule } from '../src/contracts/index.js';
 
@@ -401,18 +419,37 @@ if (opts.scheduler) {
 
 ```typescript
 // packages/agora-orchestrator/test/serve-scheduler.test.ts
+import { describe, it, expect, vi } from 'vitest';
+import { AgoraOrchestrator, SqliteRunStateStore, ManualTrigger } from '../src/index.js';
+import type { SubmissionEnvelope, SubmissionTransport, OutboxRecord } from '../src/index.js';
 import { serve } from '../src/serve/driver.js';
+import { immediateExecutor } from './fixtures/executors.js';
 
-it("submits each due envelope through the transport once per tick", async () => {
-  const env = { run: { id: "nightly@slot", items: [] }, actor: "human:test", submittedAt: "2026-06-03T04:00:00.000Z" };
-  let calls = 0;
-  const scheduler = { dueSubmissions: () => (calls++ === 0 ? [env] : []) } as any;  // due on first tick only
+// Local per-file fake (repo convention — see serve-driver.test.ts). Records submit() calls.
+function makeSubmitRecordingTransport(): SubmissionTransport & { submitted: string[] } {
   const submitted: string[] = [];
-  const transport = makeFakeTransport({ onSubmit: (e: any) => submitted.push(e.run.id) }); // pollInbox/ack/publish no-ops
-  const ac = new AbortController();
-  const run = serve({ orchestrator: makeFakeOrchestrator(), transport, scheduler, signal: ac.signal, tickIntervalMs: 1 });
-  await tickOnce(); ac.abort(); await run;
-  expect(submitted).toContain("nightly@slot");
+  return {
+    submitted,
+    submit: async (e: SubmissionEnvelope) => { submitted.push(e.run.id); return e.run.id; },
+    pollInbox: async () => [],
+    ack: async () => {},
+    deadLetter: async () => {},
+    publish: async (_r: OutboxRecord) => {},
+    readOutbox: async () => [],
+  };
+}
+
+describe('serve + scheduler', () => {
+  it('submits each due envelope through the transport for its due tick', async () => {
+    const env: SubmissionEnvelope = { run: { id: 'nightly@slot', items: [] } as SubmissionEnvelope['run'], actor: 'human:test', submittedAt: '2026-06-03T04:00:00.000Z' };
+    const scheduler = { dueSubmissions: vi.fn().mockReturnValueOnce([env]).mockReturnValue([]) };
+    const transport = makeSubmitRecordingTransport();
+    const orchestrator = new AgoraOrchestrator({ store: new SqliteRunStateStore(), executors: { immediate: immediateExecutor }, triggers: { manual: new ManualTrigger() }, queues: { default: { concurrency: 1 } } });
+    const ac = new AbortController();
+    const loop = serve({ orchestrator, transport, scheduler: scheduler as unknown as never, signal: ac.signal, tickIntervalMs: 1 });
+    await new Promise((r) => setTimeout(r, 5)); ac.abort(); await loop;
+    expect(transport.submitted).toContain('nightly@slot');
+  });
 });
 ```
 
@@ -520,16 +557,43 @@ sched.command('rm').requiredOption('--id <id>').action(async (opts) => {
 
 ```typescript
 // packages/agora-cli/test/cmd-orch-schedule.test.ts
-it("schedule add rejects an invalid cron expression", async () => {
-  await expect(runCli(['orch', 'schedule', 'add', '--id', 'x', '--cron', 'not-a-cron', '--plan', planFixture]))
-    .rejects.toThrow();
-});
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { Command } from 'commander';
+import { writeFile, mkdtemp, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { attachOrchCmd, type OrchContext } from '../src/cmd-orch.js';
+import type { CliContext } from '../src/index.js';
+import type { Schedule, ScheduleStore } from '@quarry-systems/agora-orchestrator';
 
-it("schedule add upserts with a computed nextDueAt", async () => {
-  const store = makeMemoryScheduleStore();
-  await runCli(['orch', 'schedule', 'add', '--id', 'nightly', '--cron', '0 2 * * *', '--plan', planFixture], { scheduleStore: store });
-  expect(store.list()).toHaveLength(1);
-  expect(store.list()[0].nextDueAt).toMatch(/T02:00:00\.000Z$/);
+// Local per-file fakes (repo convention — see cmd-orch.test.ts).
+function makeMemoryScheduleStore(): ScheduleStore & { rows: Map<string, Schedule> } {
+  const rows = new Map<string, Schedule>();
+  return { rows, upsert: (s) => rows.set(s.id, s), list: () => [...rows.values()], remove: (id) => { rows.delete(id); }, due: () => [], markFired: () => {} };
+}
+const makeCtx = (oc: OrchContext): CliContext => ({ getOrchContext: async () => oc } as unknown as CliContext);
+
+describe('attachOrchCmd schedule', () => {
+  let dir: string, planPath: string;
+  beforeEach(async () => { dir = await mkdtemp(join(tmpdir(), 'agora-')); planPath = join(dir, 'plan.json'); await writeFile(planPath, JSON.stringify({ id: 'r', items: [] })); });
+  afterEach(async () => { await rm(dir, { recursive: true, force: true }); });
+
+  it('rejects an invalid cron expression before writing', async () => {
+    const store = makeMemoryScheduleStore();
+    const program = new Command();
+    attachOrchCmd(program, makeCtx({ scheduleStore: store } as OrchContext));
+    await expect(program.parseAsync(['orch', 'schedule', 'add', '--id', 'x', '--cron', 'nope', '--plan', planPath], { from: 'user' })).rejects.toThrow();
+    expect(store.list()).toHaveLength(0);   // no write on invalid cron
+  });
+
+  it('add upserts with a computed nextDueAt', async () => {
+    const store = makeMemoryScheduleStore();
+    const program = new Command();
+    attachOrchCmd(program, makeCtx({ scheduleStore: store } as OrchContext));
+    await program.parseAsync(['orch', 'schedule', 'add', '--id', 'nightly', '--cron', '0 2 * * *', '--plan', planPath], { from: 'user' });
+    expect(store.list()).toHaveLength(1);
+    expect(store.list()[0].nextDueAt).toMatch(/T02:00:00\.000Z$/);
+  });
 });
 ```
 
