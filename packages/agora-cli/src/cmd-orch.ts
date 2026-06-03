@@ -1,8 +1,8 @@
 import { Command } from 'commander';
 import { readFile, writeFile } from 'node:fs/promises';
 import { userInfo } from 'node:os';
-import { OperationsApi } from '@quarry-systems/agora-orchestrator';
-import type { SubmissionTransport, ControlChannel, AuditAnchor, Signature } from '@quarry-systems/agora-orchestrator';
+import { OperationsApi, nextDueAfter } from '@quarry-systems/agora-orchestrator';
+import type { SubmissionTransport, ControlChannel, AuditAnchor, Signature, ScheduleStore, Schedule } from '@quarry-systems/agora-orchestrator';
 import type { CliContext } from './index.js';
 
 /** Config-owned operator wiring. Client verbs use transport(+anchor/storage); `serve` uses runService. */
@@ -12,6 +12,7 @@ export interface OrchContext {
   storage?: { get(ref: string): Promise<Uint8Array> };
   verifySignature?: (root: Uint8Array, sig: Signature) => boolean;
   runService?: (signal: AbortSignal) => Promise<void>;   // pre-wired serve() for the `serve` verb
+  scheduleStore?: ScheduleStore;   // config-owned; required for `schedule` verbs
 }
 
 const resolveActor = (flag?: string): string => flag ?? process.env.AGORA_ACTOR ?? `human:${userInfo().username}`;
@@ -64,4 +65,36 @@ export function attachOrchCmd(program: Command, ctx: CliContext): void {
       process.off('SIGTERM', onAbort);
     }
   });
+
+  const sched = o.command('schedule').description('Manage recurring submissions');
+
+  sched.command('add')
+    .requiredOption('--id <id>')
+    .requiredOption('--cron <expr>')
+    .requiredOption('--plan <plan.json>')
+    .option('--actor <id>')
+    .action(async (opts) => {
+      const oc = await ctx.getOrchContext();
+      if (!oc.scheduleStore) throw new Error('agora orch schedule: agora.config `orch` export provides no scheduleStore');
+      const nextDueAt = nextDueAfter(opts.cron, Date.now());   // validates the expr (throws on bad cron)
+      const run = JSON.parse(await readFile(opts.plan, 'utf8'));
+      const s: Schedule = { id: opts.id, cronExpr: opts.cron, run, actor: resolveActor(opts.actor), nextDueAt };
+      oc.scheduleStore.upsert(s);
+      console.log(`schedule '${opts.id}' next due ${nextDueAt}`);
+    });
+
+  sched.command('list').action(async () => {
+    const oc = await ctx.getOrchContext();
+    for (const s of oc.scheduleStore?.list() ?? []) {
+      console.log(`${s.id}\t${s.cronExpr}\tlast=${s.lastFiredAt ?? '-'}\tnext=${s.nextDueAt}`);
+    }
+  });
+
+  sched.command('rm')
+    .requiredOption('--id <id>')
+    .action(async (opts) => {
+      const oc = await ctx.getOrchContext();
+      oc.scheduleStore?.remove(opts.id);
+      console.log(`schedule '${opts.id}' removed`);
+    });
 }

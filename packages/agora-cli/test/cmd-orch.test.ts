@@ -83,7 +83,7 @@ async function captureLog(fn: () => Promise<void>): Promise<string[]> {
 // ---------------------------------------------------------------------------
 
 describe('attachOrchCmd', () => {
-  it('registers serve|submit|status|watch|cancel|audit subcommands + orchestrator alias', () => {
+  it('registers serve|submit|status|watch|cancel|audit|schedule subcommands + orchestrator alias', () => {
     const program = new Command();
     const ctx = makeCtx(makeOrchContext());
     attachOrchCmd(program, ctx);
@@ -92,7 +92,7 @@ describe('attachOrchCmd', () => {
     expect(orchCmd).toBeDefined();
     expect(orchCmd.aliases()).toContain('orchestrator');
     const names = orchCmd.commands.map((c) => c.name()).sort();
-    expect(names).toEqual(['audit', 'cancel', 'serve', 'status', 'submit', 'watch']);
+    expect(names).toEqual(['audit', 'cancel', 'schedule', 'serve', 'status', 'submit', 'watch']);
   });
 
   describe('submit', () => {
