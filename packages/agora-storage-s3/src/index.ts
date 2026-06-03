@@ -51,10 +51,21 @@ import {
 export interface S3StorageProviderOpts {
   /** Target bucket. The caller is responsible for creating it. */
   bucket: string;
-  /** Optional pre-built S3 client (for endpoint overrides, custom creds). */
+  /** Optional pre-built S3 client (for endpoint overrides, custom creds).
+   *  When supplied it takes precedence over `endpoint`/`forcePathStyle`/`region`. */
   client?: S3Client;
   /** Optional prefix inside the bucket. Trailing slashes are normalized. */
   prefix?: string;
+  /** Custom endpoint URL — e.g. `http://localhost:9000` for MinIO or LocalStack.
+   *  When set (and no `client` is supplied) a new S3Client is built targeting
+   *  this endpoint. Credentials are resolved from the SDK's default env chain. */
+  endpoint?: string;
+  /** Enable S3 path-style addressing (`/<bucket>/<key>`).
+   *  Required by MinIO; ignored when `client` is supplied. */
+  forcePathStyle?: boolean;
+  /** AWS region for the auto-built client. Defaults to `'us-east-1'`.
+   *  Ignored when `client` is supplied. */
+  region?: string;
   /** Server-side encryption applied to every object agora writes.
    *  Omit to inherit the bucket's default encryption (SSE-S3 has been on by
    *  default for all S3 buckets since Jan 2023). Set to enforce an explicit
@@ -170,7 +181,11 @@ export class S3StorageProvider implements StorageProvider {
   private readonly sseParams: SseParams;
 
   constructor(private opts: S3StorageProviderOpts) {
-    this.s3 = opts.client ?? new S3Client({});
+    this.s3 = opts.client ?? new S3Client(
+      opts.endpoint
+        ? { endpoint: opts.endpoint, forcePathStyle: opts.forcePathStyle, region: opts.region ?? 'us-east-1' }
+        : {},
+    );
     // Normalize prefix to "" or "foo/" form.
     const raw = (opts.prefix ?? '').replace(/^\/+|\/+$/g, '');
     this.prefix = raw.length === 0 ? '' : `${raw}/`;

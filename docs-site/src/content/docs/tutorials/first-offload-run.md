@@ -169,8 +169,35 @@ When you are done, stop the serve loop you backgrounded:
 kill %1
 ```
 
+## Variant: the same run on MinIO (tamper-evident tier)
+
+This tutorial runs entirely local-FS, which caps the audit at the
+**tamper-detecting** tier. To see the stronger **tamper-evident**
+(`external-immutable`) tier — and the *self-hosted remote* topology where `serve`
+runs in its own container and launches sibling workers — run the
+[`offload-minio` example](https://github.com/quarrysystems/agora/tree/main/examples/offload-minio).
+It swaps the local stack for free, S3-compatible substitutes (no AWS account):
+
+- storage, mailbox, and the audit anchor move to **MinIO** (`S3StorageProvider` +
+  `S3Mailbox` + `S3ObjectLockAnchor` against a MinIO object-lock bucket);
+- `serve` runs as a **container** with no inbound port, launching workers as
+  Docker siblings;
+- the audit bundle comes back `report.guarantee: 'external-immutable'` /
+  `report.claim: 'tamper-evident'`.
+
+It is one `docker compose up` plus `pnpm start`. Because `serve` and the workers
+are now separate containers, secrets reach workers via a network-reachable store
+(Secrets Manager — LocalStack here) and non-secret config via env bundles, rather
+than local-FS staging — the
+[self-hosted delivery model](/agora/explanation/how-offload-runs/#running-serve-in-a-container-self-hosted-delivery)
+explains why, and the example's README walks the exact steps.
+
 ## Next steps
 
+- [Run it on MinIO](https://github.com/quarrysystems/agora/tree/main/examples/offload-minio) —
+  the same fan-out against self-hosted S3, reaching the `external-immutable` audit
+  tier (see the variant above).
+- [Self-hosted / S3-compatible config](/agora/reference/config/#targeting-a-self-hosted--s3-compatible-store-minio-localstack) — the `endpoint` / `S3Mailbox` / `extraEnv` knobs.
 - [Export & verify an audit bundle](/agora/how-to/verify-audit-bundle/) — take
   the bundle you just produced, export it, and verify it independently.
 - [Audit & guarantee tiers](/agora/explanation/audit-guarantee-tiers/) — what

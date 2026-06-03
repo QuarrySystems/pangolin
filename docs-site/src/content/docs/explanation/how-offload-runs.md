@@ -181,9 +181,83 @@ audit bundle's per-item records, likewise, carry refs only — never secret valu
 so the bundle is safe to hand an auditor (see
 [audit & guarantee tiers](/agora/explanation/audit-guarantee-tiers/)).
 
+## Running serve in a container (self-hosted delivery)
+
+When `serve` itself runs **in a container** (the self-hosted topology — e.g.
+[`examples/offload-minio/`](https://github.com/quarrysystems/agora/tree/main/examples/offload-minio/),
+or Fargate) it launches workers as **siblings on the host Docker daemon**, not as
+children inside itself. That one fact dictates how config and secrets reach a
+worker: anything that lives only inside the `serve` container's filesystem is
+invisible to a sibling worker. Three consequences, each proven out by the MinIO
+example:
+
+- **Storage must be shared, not local-FS.** `LocalStorageProvider` bind-mounts and
+  `LocalDirMailbox` directories live in the `serve` container; siblings can't see
+  them. Use an S3-backed `StorageProvider` + `S3Mailbox` so workers fetch bundles
+  and artifacts over the wire.
+- **Secrets need a *network-reachable* `SecretStore`, not a local-FS one.** A
+  per-dispatch secret stages through the target's `SecretStore`; `LocalSecretStore`
+  writes to the `serve` container's local dir, which a sibling worker can't read.
+  Use a networked store — **AWS Secrets Manager** (or **LocalStack** standing in for
+  it when self-hosting): serve stages the secret, the worker resolves the ref over
+  the wire, and the value is injected + log-redacted with **refs-only in the audit**.
+  Non-secret config travels as **env bundles** (content-addressed storage, so they
+  reach workers too).
+- **One bootstrap exception — S3 access itself.** The worker builds its S3 client
+  at boot to fetch bundles and resolve refs, so the S3 endpoint + credentials can't
+  come from a bundle. They ride plain container env via the provider's `extraEnv`
+  (along with the Secrets Manager endpoint). Everything *downstream* of storage
+  access goes through bundles or the secret store.
+
+One more cross-process subtlety: when `serve` (which **signs** each audit epoch)
+and the client that **verifies** the bundle are different processes, they must
+agree on the signer's public key. A fresh per-process `createLocalSigner()`
+generates a new keypair each time, so verification fails across the process
+boundary — share a deterministic/published key (or use KMS) so signatures verify.
+
+## Performance & scaling characteristics
+
+This design is optimized for **unattended, auditable batch offload**, and it makes
+deliberate tradeoffs to get there. Knowing where those bite saves a surprise later.
+
+| Optimized for | Not optimized for |
+|---|---|
+| No inbound networking; submitter holds no creds | Low-latency / interactive dispatch |
+| Integrity-verified, replayable, audit-grade provenance | High request throughput |
+| Local→remote as a config swap; S3-durable, crash-safe | HA of the orchestrator itself |
+
+The costs, concretely:
+
+- **Polling latency + idle cost.** State transitions wait for the next tick, and
+  `serve` lists/gets the mailbox every tick whether or not there's work. Fine for
+  minutes-long jobs; wasteful for low-latency or high request rates.
+- **Cold re-fetches.** Workers are ephemeral with empty caches, so a fan-out that
+  shares a capability re-downloads it per worker. Content-addressing *makes a cache
+  trivial* (the hash is the key) — there just isn't one yet.
+- **S3 as a mutable mailbox.** S3 is ideal for immutable content-addressed blobs;
+  the mailbox is mutable (inbox/outbox, delete-on-consume, list-to-poll) — a job a
+  real queue or DB does better. (That's why `MailboxStore` is a *separate* seam from
+  `StorageProvider`.)
+- **Single-writer run-state.** One `serve` owns the SQLite DB — a throughput ceiling
+  and SPOF for that orchestrator (deliberate for overnight offload; see
+  [ADR-0018](/agora/explanation/decisions/0018-orchestration-ships-as-a-layer/)).
+- **Orchestration overhead.** submit → poll → tick → resolve → container spin →
+  worker fetch → run. The overhead dwarfs a sub-second task; it's batch-shaped.
+
+The point isn't that these are unsolved — it's that each fix is an **additive swap
+through an existing seam**, so you add it only when a real workload pulls it:
+
+- a host/worker **content cache** keyed by content hash — biggest cheap win;
+- an **event-driven mailbox** (e.g. SQS/SNS) behind `SubmissionTransport`, replacing fixed-interval polling;
+- a **networked run-state DB** behind `RunStateStore` when concurrency/HA demand more than one writer.
+
+Don't spend that complexity before a workload earns it; the architecture is shaped
+so you don't have to.
+
 ## See also
 
 - [Your first offload run](/agora/tutorials/first-offload-run/) — run this end to end.
+- [agora.config reference](/agora/reference/config/#targeting-a-self-hosted--s3-compatible-store-minio-localstack) — the self-hosted S3 / MinIO options.
 - [plan.json schema](/agora/reference/plan-json/) — every field of a Run / WorkItem.
 - [Architecture overview](/agora/explanation/architecture-overview/) — where the run sits in the whole system.
 - [Audit & guarantee tiers](/agora/explanation/audit-guarantee-tiers/) — what the audit bundle proves.

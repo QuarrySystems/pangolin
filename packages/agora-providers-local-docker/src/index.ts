@@ -72,6 +72,23 @@ export interface LocalDockerProviderOpts {
    * configuration without rebuilding the image.
    */
   extraBinds?: string[];
+  /**
+   * Deploy-time env merged into every worker container. `spec.env` wins on
+   * key collision, so dispatch-time variables always take precedence over
+   * provider-level defaults. Intended for static configuration such as
+   * `AGORA_S3_ENDPOINT` and `AWS_*` credentials that must reach the worker's
+   * `process.env` at boot (the only point the worker can configure its own
+   * S3 client).
+   */
+  extraEnv?: Record<string, string>;
+  /**
+   * Extra `HostConfig.ExtraHosts` entries (`<host>:<ip-or-host-gateway>`) applied
+   * to every worker container. Needed when workers must reach a service on the
+   * Docker host (e.g. `host.docker.internal:host-gateway` so MinIO / LocalStack on
+   * the host resolve). Docker Desktop injects `host.docker.internal` automatically,
+   * but native Linux daemons do not — set this for portability.
+   */
+  extraHosts?: string[];
 }
 
 /** Matches the `name@sha256:<64-hex>` tail. */
@@ -91,6 +108,8 @@ export class LocalDockerProvider implements ComputeProvider {
   private readonly storageMountTarget: string;
   private readonly secretStoreMountTarget: string;
   private readonly extraBinds: string[];
+  private readonly extraEnv: Record<string, string>;
+  private readonly extraHosts: string[];
 
   constructor(opts: LocalDockerProviderOpts = {}) {
     this.docker = opts.docker ?? new Docker();
@@ -100,6 +119,8 @@ export class LocalDockerProvider implements ComputeProvider {
     this.storageMountTarget = opts.storageMountTarget ?? '/agora/storage';
     this.secretStoreMountTarget = opts.secretStoreMountTarget ?? '/agora/secrets';
     this.extraBinds = opts.extraBinds ?? [];
+    this.extraEnv = opts.extraEnv ?? {};
+    this.extraHosts = opts.extraHosts ?? [];
   }
 
   async run(spec: TaskSpec, _ctx: ProviderContext): Promise<TaskHandle> {
@@ -107,12 +128,15 @@ export class LocalDockerProvider implements ComputeProvider {
 
     const { env: rewrittenEnv, binds } = this.prepareEnvAndBinds(spec);
     const env = Object.entries(rewrittenEnv).map(([k, v]) => `${k}=${v}`);
+    const hostConfig: { Binds?: string[]; ExtraHosts?: string[] } = {};
+    if (binds.length > 0) hostConfig.Binds = binds;
+    if (this.extraHosts.length > 0) hostConfig.ExtraHosts = this.extraHosts;
     const container = await this.docker.createContainer({
       Image: spec.image,
       Env: env,
       Cmd: spec.command,
       Labels: { 'agora.dispatchId': spec.dispatchId },
-      HostConfig: binds.length > 0 ? { Binds: binds } : undefined,
+      HostConfig: Object.keys(hostConfig).length > 0 ? hostConfig : undefined,
     });
     await container.start();
     return { providerTaskId: container.id };
@@ -133,7 +157,7 @@ export class LocalDockerProvider implements ComputeProvider {
     env: Record<string, string>;
     binds: string[];
   } {
-    const env = { ...spec.env };
+    const env = { ...this.extraEnv, ...spec.env }; // spec.env wins on collision
     const binds = [...this.extraBinds];
     const storageUri = env.AGORA_STORAGE_URI;
     if (

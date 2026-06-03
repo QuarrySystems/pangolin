@@ -13,6 +13,7 @@ export { PackRegistry } from './packs/registry.js';
 export { devPack, devCodeEdit, devVerify, devRegistry } from './packs/dev.js';
 export { MailboxSubmissionTransport } from './transport/storage-transport.js';
 export { LocalDirMailbox } from './mailbox/local-dir.js';
+export { S3Mailbox } from './mailbox/s3.js';
 export { serve } from './serve/driver.js';
 export type { ServeOptions } from './serve/driver.js';
 export { buildManifest } from './audit/manifest.js';

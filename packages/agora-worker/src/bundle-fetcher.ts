@@ -73,7 +73,12 @@ export async function constructStorageProvider(
         `s3:// URI requires a non-empty bucket: ${storageUri}`,
       );
     }
-    return new S3StorageProvider({ bucket, prefix });
+    const endpoint = process.env.AGORA_S3_ENDPOINT;
+    return new S3StorageProvider(
+      endpoint
+        ? { bucket, prefix, endpoint, forcePathStyle: true, region: process.env.AWS_REGION ?? 'us-east-1' }
+        : { bucket, prefix },
+    );
   }
   if (storageUri.startsWith("file://") || storageUri.startsWith("/")) {
     let LocalStorageProvider: typeof import("@quarry-systems/agora-storage-local").LocalStorageProvider;

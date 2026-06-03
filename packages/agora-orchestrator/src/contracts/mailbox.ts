@@ -7,3 +7,12 @@ export interface MailboxStore {
   list(prefix: string): Promise<string[]>;              // logical keys under prefix
   delete(key: string): Promise<void>;                   // idempotent (no-op if absent)
 }
+
+/** Minimal injected S3 seam for S3Mailbox — keeps agora-orchestrator AWS-SDK-free.
+ *  Keys are '/'-delimited logical paths under a bucket+prefix the impl owns. */
+export interface MailboxS3Client {
+  put(key: string, bytes: Uint8Array): Promise<void>;
+  get(key: string): Promise<Uint8Array | null>;
+  list(prefix: string): Promise<string[]>;   // returns full logical keys
+  delete(key: string): Promise<void>;          // idempotent
+}
