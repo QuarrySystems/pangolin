@@ -27,5 +27,7 @@ export { LocalAnchor, S3ObjectLockAnchor } from './audit/anchor.js';
 export type { S3LockClient } from './audit/anchor.js';
 export { createLocalSigner, NoneSigner, verifyEd25519 } from './audit/signer.js';
 export { verify } from './audit/verify.js';
+export { renderVerification } from './audit/render.js';
+export { verifyBundle } from './audit/verify-bundle.js';
 export { CronScheduler, nextDueAfter } from './scheduling/cron-scheduler.js';
 export { SqliteScheduleStore } from './runstate/sqlite-schedule-store.js';
