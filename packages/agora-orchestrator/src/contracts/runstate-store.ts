@@ -22,6 +22,7 @@ export interface RunStateStore {
   bumpAttempt(itemId: string): void;        // attempts += 1
   requeue(itemId: string, notBeforeMs: number): void; // status -> 'ready', nextAttemptAt = notBeforeMs
   setResultRef(itemId: string, ref: string): void;    // persist opaque result artifact ref
+  setVerify(itemId: string, verify: { passed: boolean; report?: string; durationMs?: number }): void; // persist self-verify signal
   setManifestRef(itemId: string, ref: string): void;  // persist opaque dispatch-manifest ref
   close(): void;
 }

@@ -43,6 +43,8 @@ export interface ItemState extends WorkItem {
   nextAttemptAt?: number;
   /** Opaque escape artifact ref (e.g. patch URI). Never interpreted by the store. */
   resultRef?: string;
+  /** Self-verify signal (Gap A) read from the worker's output sentinel. */
+  verify?: { passed: boolean; report?: string; durationMs?: number };
   /** Opaque dispatch-manifest ref. Never interpreted by the store. */
   manifestRef?: string;
   /** ISO-8601 submission time (if recorded). Never interpreted by the store. */

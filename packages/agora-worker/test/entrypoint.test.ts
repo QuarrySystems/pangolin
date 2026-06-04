@@ -290,6 +290,22 @@ describe('runWorker', () => {
     expect(parsed.verify.passed).toBe(true);
   });
 
+  it('treats verify.timeout:0 as unset (uses the default), not an instant timeout', async () => {
+    const h = await setupHarness({ verify: { command: 'exit 0', timeout: 0 } });
+    cleanupDirs.push(h.workDir, h.adaptersRoot);
+    h.setRuntimeExit({ exitCode: 0, stdout: '', stderr: '' });
+
+    const code = await runWorker(h.env, makeDeps(h));
+    expect(code).toBe(0);
+
+    const sentinelUri = buildDispatchRecordUri('ns', 'd-1', 'output.json');
+    const parsed = JSON.parse(
+      new TextDecoder().decode(await h.storage.get(sentinelUri)),
+    );
+    // Before the guard, timeout:0 → setTimeout(0) → instant SIGKILL → passed:false.
+    expect(parsed.verify.passed).toBe(true);
+  });
+
   it('is report-only: a failing verify seals passed:false but the dispatch still finishes 0', async () => {
     const h = await setupHarness({ verify: { command: 'exit 1' } });
     cleanupDirs.push(h.workDir, h.adaptersRoot);

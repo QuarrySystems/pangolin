@@ -25,6 +25,7 @@ interface ItemRow {
   attempts: number | null;
   next_attempt_at: number | null;
   result_ref: string | null;
+  verify: string | null;
   manifest_ref: string | null;
   submitted_at: string | null;
 }
@@ -36,7 +37,7 @@ CREATE TABLE IF NOT EXISTS items (
   inputs TEXT NOT NULL, depends_on TEXT NOT NULL, resource_locks TEXT NOT NULL,
   status TEXT NOT NULL, dispatch_hash TEXT, subagent_shape TEXT, reason TEXT,
   actor TEXT, attempts INTEGER NOT NULL DEFAULT 0, next_attempt_at REAL,
-  result_ref TEXT, manifest_ref TEXT, submitted_at TEXT
+  result_ref TEXT, verify TEXT, manifest_ref TEXT, submitted_at TEXT
 );
 CREATE TABLE IF NOT EXISTS locks (key TEXT PRIMARY KEY, item_id TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS audit_entries (
@@ -59,6 +60,7 @@ const MIGRATIONS: ReadonlyArray<readonly [string, string]> = [
   ['attempts', 'INTEGER NOT NULL DEFAULT 0'],
   ['next_attempt_at', 'REAL'],
   ['result_ref', 'TEXT'],
+  ['verify', 'TEXT'],
   ['manifest_ref', 'TEXT'],
   ['submitted_at', 'TEXT'],
 ];
@@ -93,7 +95,7 @@ export class SqliteRunStateStore implements RunStateStore, AuditStore {
 
   saveRun(run: Run, actor?: string, submittedAt?: string): void {
     const ins = this.db.prepare(
-      'INSERT INTO items(id,run_id,queue,executor,inputs,depends_on,resource_locks,status,dispatch_hash,subagent_shape,reason,actor,attempts,next_attempt_at,result_ref,manifest_ref,submitted_at) VALUES(?,?,?,?,?,?,?,?,NULL,?,NULL,?,0,NULL,NULL,NULL,?)',
+      'INSERT INTO items(id,run_id,queue,executor,inputs,depends_on,resource_locks,status,dispatch_hash,subagent_shape,reason,actor,attempts,next_attempt_at,result_ref,verify,manifest_ref,submitted_at) VALUES(?,?,?,?,?,?,?,?,NULL,?,NULL,?,0,NULL,NULL,NULL,NULL,?)',
     );
     const tx = this.db.transaction((r: Run) => {
       for (const it of r.items)
@@ -194,6 +196,10 @@ export class SqliteRunStateStore implements RunStateStore, AuditStore {
 
   setResultRef(itemId: string, ref: string): void {
     this.db.prepare('UPDATE items SET result_ref=? WHERE id=?').run(ref, itemId);
+  }
+
+  setVerify(itemId: string, verify: { passed: boolean; report?: string; durationMs?: number }): void {
+    this.db.prepare('UPDATE items SET verify=? WHERE id=?').run(JSON.stringify(verify), itemId);
   }
 
   setManifestRef(itemId: string, ref: string): void {
@@ -323,6 +329,7 @@ export class SqliteRunStateStore implements RunStateStore, AuditStore {
     attempts: r.attempts ? r.attempts : undefined, // 0/null -> undefined (absent === 0)
     nextAttemptAt: r.next_attempt_at ?? undefined,
     resultRef: r.result_ref ?? undefined,
+    verify: r.verify ? JSON.parse(r.verify) : undefined,
     manifestRef: r.manifest_ref ?? undefined,
     submittedAt: r.submitted_at ?? undefined,
   });

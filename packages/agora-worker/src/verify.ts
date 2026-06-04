@@ -15,7 +15,7 @@
 // output sentinel so the operator can read pass/fail without re-running by
 // hand. Gating on verify is a deliberate future pull, not part of v1.
 
-import { spawn } from "node:child_process";
+import { runBoundedCommand } from "./bounded-command.js";
 
 export interface VerifyResult {
   passed: boolean;
@@ -42,58 +42,31 @@ function truncate(s: string, limit: number): string {
 
 /**
  * Run the verify command in the workspace, time-bounded, and report pass/fail.
- * Resolves (never rejects) with a {@link VerifyResult}.
+ * Resolves (never rejects) with a {@link VerifyResult}. Report-only: a non-zero
+ * exit, a timeout, or a failure to start all map to `passed: false`.
  */
 export async function runVerify(opts: RunVerifyOpts): Promise<VerifyResult> {
   const limit = opts.reportLimit ?? DEFAULT_REPORT_LIMIT;
-  const start = Date.now();
-
-  return new Promise<VerifyResult>((resolve) => {
-    const child = spawn(opts.command, {
-      cwd: opts.workspaceDir,
-      env: opts.env,
-      shell: true,
-    });
-
-    let out = "";
-    const append = (d: Buffer): void => {
-      if (out.length < limit) out += d.toString();
-    };
-    child.stdout?.on("data", append);
-    child.stderr?.on("data", append);
-
-    let settled = false;
-    const finish = (r: VerifyResult): void => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve(r);
-    };
-
-    const timer = setTimeout(() => {
-      child.kill("SIGKILL");
-      finish({
-        passed: false,
-        report: truncate(out + "\n[verify timed out]", limit),
-        durationMs: Date.now() - start,
-      });
-    }, opts.timeoutSeconds * 1000);
-
-    child.on("error", (err) => {
-      finish({
-        passed: false,
-        report: truncate(`[verify failed to start] ${err.message}`, limit),
-        durationMs: Date.now() - start,
-      });
-    });
-
-    child.on("exit", (code) => {
-      const report = truncate(out, limit);
-      finish({
-        passed: code === 0,
-        report: report.length > 0 ? report : undefined,
-        durationMs: Date.now() - start,
-      });
-    });
+  const result = await runBoundedCommand({
+    command: opts.command,
+    cwd: opts.workspaceDir,
+    env: opts.env,
+    timeoutSeconds: opts.timeoutSeconds,
+    maxOutputChars: limit,
   });
+
+  let report: string;
+  if (result.startError) {
+    report = `[verify failed to start] ${result.startError.message}`;
+  } else {
+    report = result.stdout + result.stderr;
+    if (result.timedOut) report += "\n[verify timed out]";
+  }
+  report = truncate(report, limit);
+
+  return {
+    passed: !result.timedOut && result.startError === undefined && result.exitCode === 0,
+    report: report.length > 0 ? report : undefined,
+    durationMs: result.durationMs,
+  };
 }

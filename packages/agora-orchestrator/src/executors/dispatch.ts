@@ -130,8 +130,16 @@ export class DispatchExecutor implements Executor {
       const sentinel = JSON.parse(new TextDecoder().decode(bytes));
       const out: { patchRef?: string; verify?: ExecutionResult['verify'] } = {};
       if (typeof sentinel.patchRef === 'string') out.patchRef = sentinel.patchRef;
-      if (sentinel.verify && typeof sentinel.verify.passed === 'boolean') {
-        out.verify = sentinel.verify;
+      // Construct a clean, bounded verify from the (worker-written but possibly
+      // older/tampered) sentinel — don't forward the raw object by reference.
+      const v = sentinel.verify;
+      if (v && typeof v.passed === 'boolean') {
+        const verify: NonNullable<ExecutionResult['verify']> = { passed: v.passed };
+        if (typeof v.report === 'string') verify.report = v.report.slice(0, 16_000);
+        if (typeof v.durationMs === 'number' && Number.isFinite(v.durationMs)) {
+          verify.durationMs = v.durationMs;
+        }
+        out.verify = verify;
       }
       return out;
     } catch {

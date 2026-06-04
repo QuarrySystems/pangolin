@@ -10,6 +10,13 @@ export class StructuredLogger {
     process.stdout.write(JSON.stringify(redacted) + '\n');
   }
 
+  /** Redact every registered secret value from a free string — same rule as
+   *  log redaction, for content (e.g. a verify report) that is sealed/surfaced
+   *  outside the structured log. */
+  redactString(value: string): string {
+    return this.redact(value) as string;
+  }
+
   private redact(value: unknown): unknown {
     if (typeof value === 'string') {
       let out = value;
