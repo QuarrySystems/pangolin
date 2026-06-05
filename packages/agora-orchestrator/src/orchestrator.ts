@@ -3,8 +3,10 @@ import type { VerifyOutcome } from '@quarry-systems/agora-core';
 import type { AuditEntryRow, AnchoredRoot, AuditExport, Executor, ItemState, Run, RunStateStore, Trigger, WorkItem } from './contracts/index.js';
 import type { PackRegistry } from './packs/registry.js';
 import type { AuditLog } from './audit/audit-log.js';
+import type { Pattern } from './contracts/pattern.js';
 import { tick } from './engine/tick.js';
 import { normalizeRun, validateRun } from './engine/run-validator.js';
+import { collectSpawns } from './patterns/scan.js';
 
 /** Namespace separator — U+001F UNIT SEPARATOR (not a valid item-id char in practice). */
 const NS = '\x1f';
@@ -13,7 +15,7 @@ const ns = (runId: string, id: string) => `${runId}${NS}${id}`;
 /** Strip the runId prefix from a namespaced id; pass-through if no separator found. */
 const deNs = (id: string) => { const i = id.indexOf(NS); return i < 0 ? id : id.slice(i + 1); };
 
-export interface QueueConfig { concurrency: number; }
+export interface QueueConfig { concurrency: number; pattern?: Pattern; }
 export interface AgoraOrchestratorOptions {
   store: RunStateStore;
   executors: Record<string, Executor>;
@@ -46,6 +48,8 @@ export class AgoraOrchestrator {
   private readonly maxItemsPerRun: number;
   private readonly packs: PackRegistry | undefined;
   private readonly auditLog: AuditLog | undefined;
+  /** Per-queue pattern bindings (undefined entry = no pattern on that queue). */
+  private readonly patterns: Record<string, Pattern | undefined>;
   constructor(opts: AgoraOrchestratorOptions) {
     this.store = opts.store;
     this.executors = opts.executors;
@@ -57,6 +61,8 @@ export class AgoraOrchestrator {
     this.auditLog = opts.auditLog;
     if (!opts.queues[this.defaultQueue]) throw new Error(`AgoraOrchestrator: default queue '${this.defaultQueue}' not configured`);
     for (const [name, q] of Object.entries(opts.queues)) this.store.ensureQueue(name, q.concurrency);
+    // Retain per-queue patterns.
+    this.patterns = Object.fromEntries(Object.entries(opts.queues).map(([n, q]) => [n, q.pattern]));
     // Audit is optional but when present the store must implement AuditStore (getAuditRoot)
     // so the per-tick double-seal guard and epoch sealing can function correctly.
     if (opts.auditLog !== undefined && typeof (opts.store as unknown as { getAuditRoot?: unknown }).getAuditRoot !== 'function') {
@@ -99,8 +105,12 @@ export class AgoraOrchestrator {
     if (this.store.getItems(run.id).length > 0) return run.id; // already ingested — idempotent no-op
     const trigger = this.triggers['manual'];
     if (!trigger) throw new Error("AgoraOrchestrator: no 'manual' trigger registered");
+    // Pattern plan() runs BEFORE normalize/validate so pattern expansion goes through the same
+    // validation chokepoint (spec §4). A throwing plan rejects the submission before saveRun.
+    const pat = this.patterns[run.queue];
+    const planned = pat ? pat.plan(run) : run;
     // Normalize: auto-union needs[*].from into depends_on.
-    const normalized = normalizeRun(run);
+    const normalized = normalizeRun(planned);
     // Validate: throw before touching the store so it stays clean on bad input.
     const errors = validateRun(normalized, this.packs);
     if (errors.length) throw new Error(`run '${run.id}' failed validation:\n${errors.join('\n')}`);
@@ -154,6 +164,53 @@ export class AgoraOrchestrator {
     return normalized.map((it) => it.id);
   }
 
+  /** Apply the pattern phase for a single queue: for each unsealed (or all, if no auditLog) run,
+   *  call collectSpawns and apply each directive via extendRun.  A failing spawn must NOT abort
+   *  the tick — best-effort posture per spec §4. */
+  private applyPatternPhase(q: string): void {
+    const pattern = this.patterns[q];
+    if (!pattern) return;
+
+    // Group queue items by runId.
+    const byRun = new Map<string, ItemState[]>();
+    for (const it of this.store.getItems().filter((i) => i.queue === q)) {
+      const arr = byRun.get(it.runId) ?? [];
+      arr.push(it);
+      byRun.set(it.runId, arr);
+    }
+
+    const auditStore = this.auditLog
+      ? (this.store as unknown as { getAuditRoot(epochId: string): unknown })
+      : null;
+
+    for (const [runId, items] of byRun) {
+      // With auditLog: skip runs whose epoch is already sealed (same guard as the seal block).
+      if (auditStore && auditStore.getAuditRoot(runId) !== undefined) continue;
+
+      // Build de-namespaced logical view — items.id are namespaced in store; patterns see logical ids.
+      const view: ItemState[] = items.map((i) => ({
+        ...i,
+        id: deNs(i.id),
+        depends_on: i.depends_on.map(deNs),
+        ...(i.needs ? {
+          needs: Object.fromEntries(
+            Object.entries(i.needs).map(([k, b]) => [k, { ...b, from: deNs(b.from) }]),
+          ),
+        } : {}),
+      }));
+
+      const spawns = collectSpawns(view, pattern);
+      for (const spawn of spawns) {
+        try {
+          this.extendRun(runId, spawn.items, `pattern:${q}`, spawn.causeItemId);
+        } catch (err) {
+          // best-effort: a spawn failure must not abort the tick — but stay visible for diagnosis
+          try { process.stderr.write(`[agora] pattern spawn failed (run ${runId}, cause ${spawn.causeItemId}): ${String(err)}\n`); } catch { /* stderr unavailable */ }
+        }
+      }
+    }
+  }
+
   async tick(queue?: string) {
     // Wrap each executor so the item passed to fire() carries the original (de-namespaced) id.
     // The store-internal id is namespaced; executors should only ever see the logical item id.
@@ -170,6 +227,10 @@ export class AgoraOrchestrator {
       auditLog: this.auditLog,
       denamespace: deNs,
     });
+
+    // Pattern phase: BEFORE the seal block so spawned items are pending when the seal check runs.
+    // A run that just grew has pending items and structurally cannot seal this tick (spec §3).
+    this.applyPatternPhase(q);
 
     // Seal any run whose all items are now terminal and whose epoch has not yet been sealed.
     // Audit is best-effort: a seal failure must NOT throw out of tick() or abort run state.

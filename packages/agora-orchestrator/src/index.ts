@@ -33,3 +33,8 @@ export { CronScheduler, nextDueAfter } from './scheduling/cron-scheduler.js';
 export { SqliteScheduleStore } from './runstate/sqlite-schedule-store.js';
 export { validateRun, normalizeRun } from './engine/run-validator.js';
 export { resolveInputRefs, selectProductRef } from './engine/needs-resolver.js';
+export { staticDag } from './patterns/static-dag.js';
+export { pipeline } from './patterns/pipeline.js';
+export { mapReduce } from './patterns/map-reduce.js';
+export { collectSpawns } from './patterns/scan.js';
+export { respawnLineage, parseAttempt } from './patterns/respawn.js';

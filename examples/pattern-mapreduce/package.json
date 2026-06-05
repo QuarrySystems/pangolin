@@ -1,0 +1,20 @@
+{
+  "name": "pattern-mapreduce-example",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Offline demo of N-unknown fan-out via the mapReduce pattern: a fake splitter spawns 3 maps + a reduce at runtime, proving the graph grows through the audited extendRun seam.",
+  "type": "module",
+  "license": "BUSL-1.1",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --esModuleInterop --skipLibCheck --strict src/index.ts",
+    "build": "tsc --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --esModuleInterop --skipLibCheck --strict src/index.ts"
+  },
+  "dependencies": {
+    "@quarry-systems/agora-orchestrator": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.2"
+  }
+}
