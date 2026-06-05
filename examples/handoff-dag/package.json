@@ -1,0 +1,27 @@
+{
+  "name": "handoff-dag-example",
+  "version": "0.0.0",
+  "private": true,
+  "description": "§8 acceptance example: typed-product handoff — node A produces a patch; node B binds it via `needs` and applies it with `git apply`. Provenance-sealed: every consumed input ref is a sealed product of a completed item in the same run.",
+  "type": "module",
+  "license": "BUSL-1.1",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "start:env": "tsx --env-file=../../.env src/index.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --esModuleInterop --skipLibCheck --strict src/index.ts test/handoff.test.ts",
+    "build": "tsc --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --esModuleInterop --skipLibCheck --strict src/index.ts"
+  },
+  "dependencies": {
+    "@quarry-systems/agora-client": "workspace:*",
+    "@quarry-systems/agora-orchestrator": "workspace:*",
+    "@quarry-systems/agora-providers-local-docker": "workspace:*",
+    "@quarry-systems/agora-secret-store": "workspace:*",
+    "@quarry-systems/agora-storage-local": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.9"
+  }
+}

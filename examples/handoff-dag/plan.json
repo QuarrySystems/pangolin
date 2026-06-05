@@ -1,0 +1,23 @@
+{
+  "id": "handoff-dag-1",
+  "queue": "default",
+  "items": [
+    {
+      "id": "edit-a",
+      "executor": "dispatch",
+      "inputs": { "subagent": "code-edit", "workerInput": { "file": "src/main.ts" } },
+      "depends_on": [],
+      "resourceLocks": []
+    },
+    {
+      "id": "apply-patch",
+      "executor": "dispatch",
+      "inputs": { "subagent": "apply-patch" },
+      "depends_on": [],
+      "resourceLocks": [],
+      "needs": {
+        "patch": { "from": "edit-a", "select": { "kind": "patch" } }
+      }
+    }
+  ]
+}

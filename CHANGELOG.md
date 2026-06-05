@@ -11,6 +11,19 @@ workspace. See [RELEASING.md](./RELEASING.md) for how a release is cut.
 
 ### Added
 
+- **Typed-product handoff (Wave A–C).** Dependent DAGs now hand products node-to-node
+  by content-addressed ref: Wave A (#39) added the `outputs/` / `outputRefs` producer
+  seam; Wave B (#40) added the `needs` consumer wiring (auto-unioned into `depends_on`
+  at submit-normalization, resolved at fire time into `inputs.inputRefs`) plus
+  `buildManifest` sealing of those refs; Wave C (this PR) closes the provenance loop —
+  `verifyBundle(bundle, { anchor })` now checks that every `inputRefs` value in every
+  dispatch manifest is a sealed `resultRef` or `outputRef` of a completed item in the
+  same run (`checks.handoff.ok`), and `agora verify` proves the chain end-to-end. The
+  `examples/handoff-dag` demo ships a runnable two-item plan (edit-a produces a patch;
+  apply-patch binds it via `needs` and applies it with `git apply inputs/patch.diff`)
+  with an offline CI test that drives the plan to done and asserts `intact: true` and
+  `checks.handoff.ok === true`.
+
 - **Bundle verification (`agora verify <bundle.json>`).** A standalone, top-level
   command that re-verifies an exported audit bundle against its **external** anchor
   (never the root embedded in the bundle) and prints a human-readable checklist +
