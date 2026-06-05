@@ -1,5 +1,5 @@
 // packages/agora-orchestrator/test/pattern-phase.test.ts
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { SqliteRunStateStore } from '../src/runstate/sqlite.js';
 import { idKeyedExecutor, makeOrch, driveUntilDone } from './fixtures/pattern-harness.js';
 import { AgoraOrchestrator } from '../src/orchestrator.js';
@@ -17,14 +17,30 @@ function wi(id: string, depends_on: string[] = [], extra: Partial<WorkItem> = {}
 }
 
 /**
+ * Tracks de-namespace contract violations detected in fakePattern.onTaskDone.
+ * Reset in beforeEach; asserted non-empty would indicate the pattern received namespaced ids.
+ */
+const deNsViolations: string[] = [];
+
+/**
  * Fake pattern:
  *  - plan(): identity (passes the run through unchanged)
  *  - onTaskDone(): when item 'a' completes (done) and 'b' is not yet present → spawn 'b'
+ *
+ * De-namespace contract check: records a violation (instead of throwing, which would be
+ * swallowed by the phase catch) if any id contains the U+001F namespace separator.
  */
 const fakePattern: Pattern = {
   id: 'fake',
   plan(run: Run): Run { return run; },
   onTaskDone(item: ItemState, ctx: { runItems: ItemState[] }): SpawnDirective | null {
+    // De-namespace contract: patterns must receive logical (de-namespaced) ids, never raw store ids.
+    // Record violations rather than throwing (a throw would be swallowed by the phase catch).
+    if (item.id.includes('\x1f')) deNsViolations.push(`item.id contains NS: ${item.id}`);
+    for (const i of ctx.runItems) {
+      if (i.id.includes('\x1f')) deNsViolations.push(`ctx.runItems[].id contains NS: ${i.id}`);
+    }
+
     if (item.id !== 'a' || item.status !== 'done') return null;
     // Only spawn 'b' if it doesn't already exist in the run
     const hasB = ctx.runItems.some((i) => i.id === 'b');
@@ -75,6 +91,9 @@ const badSpawnPattern: Pattern = {
 };
 
 // ─── Test suite ───────────────────────────────────────────────────────────────
+
+// Reset de-namespace violation log before each test so fakePattern checks start clean.
+beforeEach(() => { deNsViolations.length = 0; });
 
 describe('pattern-phase: QueueConfig pattern binding', () => {
   it('a queue with no pattern behaves identically to today (existing behavior unchanged)', async () => {
@@ -181,6 +200,9 @@ describe('pattern-phase: seal ordering (spawning in tick N delays seal to tick N
       { id: 'a', status: 'done' },
       { id: 'b', status: 'done' },
     ]));
+
+    // De-namespace contract: fakePattern must have received only logical (non-namespaced) ids.
+    expect(deNsViolations).toHaveLength(0);
     store.close();
   });
 });
@@ -230,6 +252,9 @@ describe('pattern-phase: crash-replay / restart idempotency', () => {
     const finalExport = orch2.getAuditExport('r-replay');
     expect(finalExport.root).toBeDefined();
     expect(orch2.getStatus('r-replay').every((s) => s.status === 'done')).toBe(true);
+
+    // De-namespace contract: fakePattern must have received only logical (non-namespaced) ids.
+    expect(deNsViolations).toHaveLength(0);
     store.close();
   });
 });
@@ -265,12 +290,14 @@ describe('pattern-phase: without auditLog', () => {
     const afterExtraItems = orch.getStatus('r-noaudit');
     expect(afterExtraItems).toHaveLength(2); // still exactly a + b
 
+    // De-namespace contract: fakePattern must have received only logical (non-namespaced) ids.
+    expect(deNsViolations).toHaveLength(0);
     store.close();
   });
 });
 
 describe('pattern-phase: bad spawn does not abort tick; other runs advance', () => {
-  it('a pattern whose spawn fails validation does not abort the tick; other runs still advance', async () => {
+  it('a pattern whose spawn fails validation does not abort the tick; other runs still advance; failure is emitted to stderr', async () => {
     const store = new SqliteRunStateStore();
     const blobs = new Map<string, Uint8Array>();
     const executor = idKeyedExecutor(blobs, () => ({ status: 'done' }));
@@ -278,15 +305,31 @@ describe('pattern-phase: bad spawn does not abort tick; other runs advance', () 
       queues: { default: { concurrency: 5, pattern: badSpawnPattern } },
     });
 
-    // Two runs: run-bad has the bad spawn pattern trigger; run-good is a simple run
-    orch.submitRun({ id: 'run-bad', queue: 'default', items: [wi('a')] });
-    orch.submitRun({ id: 'run-good', queue: 'default', items: [wi('x'), wi('y', ['x'])] });
+    // Spy on process.stderr.write to capture diagnostic messages from the phase catch block.
+    const stderrMessages: string[] = [];
+    const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+      stderrMessages.push(String(chunk));
+      return true;
+    });
 
-    // Drive until done — run-good should complete even if run-bad's spawn fails
-    await driveUntilDone(orch, 32, 'run-good');
+    try {
+      // Two runs: run-bad has the bad spawn pattern trigger; run-good is a simple run
+      orch.submitRun({ id: 'run-bad', queue: 'default', items: [wi('a')] });
+      orch.submitRun({ id: 'run-good', queue: 'default', items: [wi('x'), wi('y', ['x'])] });
 
-    const goodStatuses = orch.getStatus('run-good').map((s) => s.status);
-    expect(goodStatuses.every((s) => s === 'done')).toBe(true);
+      // Drive until done — run-good should complete even if run-bad's spawn fails
+      await driveUntilDone(orch, 32, 'run-good');
+
+      const goodStatuses = orch.getStatus('run-good').map((s) => s.status);
+      expect(goodStatuses.every((s) => s === 'done')).toBe(true);
+
+      // The failed spawn for run-bad must have emitted a diagnostic — distinguishing
+      // "spawn rejected silently" from "spawn applied".
+      const spawnFailureMsg = stderrMessages.find((m) => m.includes('[agora] pattern spawn failed') && m.includes('run-bad'));
+      expect(spawnFailureMsg).toBeDefined();
+    } finally {
+      stderrSpy.mockRestore();
+    }
 
     store.close();
   });
@@ -309,6 +352,8 @@ describe('pattern-phase: spawned item actor is pattern:default in audit export',
     expect(bItem).toBeDefined();
     expect(bItem?.actor).toBe('pattern:default');
 
+    // De-namespace contract: fakePattern must have received only logical (non-namespaced) ids.
+    expect(deNsViolations).toHaveLength(0);
     store.close();
   });
 });

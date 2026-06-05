@@ -203,8 +203,9 @@ export class AgoraOrchestrator {
       for (const spawn of spawns) {
         try {
           this.extendRun(runId, spawn.items, `pattern:${q}`, spawn.causeItemId);
-        } catch {
-          // A spawn failure must NOT abort the tick — best-effort posture.
+        } catch (err) {
+          // best-effort: a spawn failure must not abort the tick — but stay visible for diagnosis
+          try { process.stderr.write(`[agora] pattern spawn failed (run ${runId}, cause ${spawn.causeItemId}): ${String(err)}\n`); } catch { /* stderr unavailable */ }
         }
       }
     }
