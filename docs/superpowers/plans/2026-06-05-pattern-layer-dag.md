@@ -5,20 +5,20 @@ created: 2026-06-05
 
 ```mermaid
 flowchart TD
-    task-pattern-contract["task-pattern-contract: Pattern contract types<br/>files: src/contracts/pattern.ts +2 more"]
-    task-test-harness["task-test-harness: shared pattern test harness<br/>files: test/fixtures/pattern-harness.ts +1 more"]
-    task-scan["task-scan: collectSpawns pure scan helper<br/>files: src/patterns/scan.ts +1 more"]
-    task-static-dag["task-static-dag: static-dag pattern<br/>files: src/patterns/static-dag.ts +1 more"]
-    task-respawn["task-respawn: respawnLineage pure helper<br/>files: src/patterns/respawn.ts +1 more"]
-    task-pipeline["task-pipeline: pipeline pattern + gate policy<br/>files: src/patterns/pipeline.ts +1 more"]
-    task-map-reduce["task-map-reduce: map-reduce pattern<br/>files: src/patterns/map-reduce.ts +1 more"]
-    task-extend-run["task-extend-run: extendRun append seam<br/>files: src/orchestrator.ts +2 more"]
-    task-pattern-phase["task-pattern-phase: pattern wiring in orchestrator<br/>files: src/orchestrator.ts +1 more"]
-    task-barrel["task-barrel: barrel exports<br/>files: src/index.ts +1 more"]
-    task-int-mapreduce["task-int-mapreduce: map-reduce integration test<br/>files: test/pattern-mapreduce.int.test.ts"]
-    task-int-dogfood["task-int-dogfood: dogfood pipeline integration test<br/>files: test/pattern-dogfood.int.test.ts"]
-    task-example-mapreduce["task-example-mapreduce: runnable mapreduce example<br/>files: examples/pattern-mapreduce/README.md +3 more"]
-    task-example-dogfood["task-example-dogfood: runnable dogfood example<br/>files: examples/pattern-dogfood/README.md +3 more"]
+    task-pattern-contract["task-pattern-contract: Pattern contract types<br/>files: src/contracts/pattern.ts +2 more"]:::done
+    task-test-harness["task-test-harness: shared pattern test harness<br/>files: test/fixtures/pattern-harness.ts +1 more"]:::done
+    task-scan["task-scan: collectSpawns pure scan helper<br/>files: src/patterns/scan.ts +1 more"]:::done
+    task-static-dag["task-static-dag: static-dag pattern<br/>files: src/patterns/static-dag.ts +1 more"]:::done
+    task-respawn["task-respawn: respawnLineage pure helper<br/>files: src/patterns/respawn.ts +1 more"]:::done
+    task-pipeline["task-pipeline: pipeline pattern + gate policy<br/>files: src/patterns/pipeline.ts +1 more"]:::done
+    task-map-reduce["task-map-reduce: map-reduce pattern<br/>files: src/patterns/map-reduce.ts +1 more"]:::done
+    task-extend-run["task-extend-run: extendRun append seam<br/>files: src/orchestrator.ts +2 more"]:::done
+    task-pattern-phase["task-pattern-phase: pattern wiring in orchestrator<br/>files: src/orchestrator.ts +1 more"]:::done
+    task-barrel["task-barrel: barrel exports<br/>files: src/index.ts +1 more"]:::done
+    task-int-mapreduce["task-int-mapreduce: map-reduce integration test<br/>files: test/pattern-mapreduce.int.test.ts"]:::done
+    task-int-dogfood["task-int-dogfood: dogfood pipeline integration test<br/>files: test/pattern-dogfood.int.test.ts"]:::done
+    task-example-mapreduce["task-example-mapreduce: runnable mapreduce example<br/>files: examples/pattern-mapreduce/README.md +3 more"]:::done
+    task-example-dogfood["task-example-dogfood: runnable dogfood example<br/>files: examples/pattern-dogfood/README.md +3 more"]:::done
 
     task-pattern-contract --> task-scan
     task-pattern-contract --> task-static-dag
@@ -99,7 +99,7 @@ files:
   - packages/agora-orchestrator/src/contracts/pattern.ts
   - packages/agora-orchestrator/src/contracts/index.ts
   - packages/agora-orchestrator/test/patterns/pattern-contract.test.ts
-status: pending
+status: done
 ```
 
 The pattern layer's public contract (spec §4): `Pattern`, `SpawnDirective`, `PatternContext`,
@@ -199,7 +199,7 @@ depends_on: []
 files:
   - packages/agora-orchestrator/test/fixtures/pattern-harness.ts
   - packages/agora-orchestrator/test/fixtures/pattern-harness.test.ts
-status: pending
+status: done
 ```
 
 The shared offline test harness (S7 hoist) — sibling of the existing
@@ -294,7 +294,7 @@ depends_on: [task-pattern-contract]
 files:
   - packages/agora-orchestrator/src/patterns/scan.ts
   - packages/agora-orchestrator/test/patterns/scan.test.ts
-status: pending
+status: done
 ```
 
 The pure scan the orchestrator applies (spec §4, audit amendment B): given ONE run's
@@ -363,7 +363,7 @@ depends_on: [task-pattern-contract]
 files:
   - packages/agora-orchestrator/src/patterns/static-dag.ts
   - packages/agora-orchestrator/test/patterns/static-dag.test.ts
-status: pending
+status: done
 model_hint: cheap
 ```
 
@@ -411,7 +411,7 @@ depends_on: [task-pattern-contract]
 files:
   - packages/agora-orchestrator/src/patterns/respawn.ts
   - packages/agora-orchestrator/test/patterns/respawn.test.ts
-status: pending
+status: done
 ```
 
 The shared circle-back helper (spec §6c): given a terminal gate, its `GateConfig`, and the
@@ -502,7 +502,7 @@ depends_on: [task-pattern-contract, task-respawn]
 files:
   - packages/agora-orchestrator/src/patterns/pipeline.ts
   - packages/agora-orchestrator/test/patterns/pipeline.test.ts
-status: pending
+status: done
 ```
 
 The pipeline pattern (spec §6b/§6c): `plan` auto-chains items lacking `depends_on` in
@@ -582,7 +582,7 @@ depends_on: [task-pattern-contract]
 files:
   - packages/agora-orchestrator/src/patterns/map-reduce.ts
   - packages/agora-orchestrator/test/patterns/map-reduce.test.ts
-status: pending
+status: done
 ```
 
 The map-reduce pattern (spec §6d): the splitter item carries `inputs.mapReduce`
@@ -682,7 +682,7 @@ files:
   - packages/agora-orchestrator/src/orchestrator.ts
   - packages/agora-orchestrator/src/contracts/audit.ts
   - packages/agora-orchestrator/test/extend-run.test.ts
-status: pending
+status: done
 ```
 
 The audited append seam (spec §5): a public-but-documented-internal `extendRun` on
@@ -783,7 +783,7 @@ depends_on: [task-extend-run, task-scan, task-test-harness]
 files:
   - packages/agora-orchestrator/src/orchestrator.ts
   - packages/agora-orchestrator/test/pattern-phase.test.ts
-status: pending
+status: done
 ```
 
 Wires the pattern layer into the orchestrator (spec §3/§4): `QueueConfig` gains `pattern?:
@@ -863,7 +863,7 @@ depends_on: [task-static-dag, task-pipeline, task-map-reduce, task-pattern-phase
 files:
   - packages/agora-orchestrator/src/index.ts
   - packages/agora-orchestrator/test/barrel-pattern-surface.test.ts
-status: pending
+status: done
 is_wiring_task: true
 ```
 
@@ -890,7 +890,7 @@ id: task-int-mapreduce
 depends_on: [task-pattern-phase, task-map-reduce, task-test-harness]
 files:
   - packages/agora-orchestrator/test/pattern-mapreduce.int.test.ts
-status: pending
+status: done
 ```
 
 End-to-end offline proof of dynamic-spawn provability (spec §9 tests): a fake splitter
@@ -955,7 +955,7 @@ id: task-int-dogfood
 depends_on: [task-pattern-phase, task-pipeline, task-test-harness]
 files:
   - packages/agora-orchestrator/test/pattern-dogfood.int.test.ts
-status: pending
+status: done
 ```
 
 End-to-end offline proof of gated circle-back (spec §9): `implement → review(gate) → package`
@@ -1022,7 +1022,7 @@ files:
   - examples/pattern-mapreduce/package.json
   - examples/pattern-mapreduce/plan.json
   - examples/pattern-mapreduce/src/index.ts
-status: pending
+status: done
 is_wiring_task: true
 model_hint: cheap
 ```
@@ -1068,7 +1068,7 @@ files:
   - examples/pattern-dogfood/package.json
   - examples/pattern-dogfood/plan.json
   - examples/pattern-dogfood/src/index.ts
-status: pending
+status: done
 is_wiring_task: true
 model_hint: cheap
 ```
