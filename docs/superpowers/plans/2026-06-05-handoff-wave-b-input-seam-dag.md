@@ -5,18 +5,18 @@ created: 2026-06-05
 
 ```mermaid
 flowchart TD
-    task-needs-contract["task-needs-contract: persisted needs wiring contract<br/>files: packages/agora-orchestrator/src/contracts/types.ts +2 more"]
-    task-edge-tags["task-edge-tags: edgeType tags on SubagentShape<br/>files: packages/agora-orchestrator/src/contracts/subagent-shape.ts +3 more"]
-    task-needs-resolver["task-needs-resolver: pure needs resolver<br/>files: packages/agora-orchestrator/src/engine/needs-resolver.ts +1 more"]
-    task-run-validator["task-run-validator: run admission validator<br/>files: packages/agora-orchestrator/src/engine/run-validator.ts +1 more"]
-    task-tick-resolve["task-tick-resolve: resolve-at-fire in tick<br/>files: packages/agora-orchestrator/src/engine/tick.ts +1 more"]
-    task-submitrun-gate["task-submitrun-gate: submitRun normalize-validate gate<br/>files: packages/agora-orchestrator/src/orchestrator.ts +3 more"]
-    task-cli-validate["task-cli-validate: agora orch validate command<br/>files: packages/agora-cli/src/cmd-orch.ts +1 more"]
-    task-client-inputrefs["task-client-inputrefs: DispatchWork.inputRefs client staging<br/>files: packages/agora-core/src/dispatch.ts +2 more"]
-    task-executor-thread["task-executor-thread: executor threads inputRefs<br/>files: packages/agora-orchestrator/src/executors/dispatch.ts +1 more"]
-    task-worker-envparser["task-worker-envparser: BundleRefs.inputs parsing<br/>files: packages/agora-worker/src/env-parser.ts +1 more"]
-    task-fetcher-inputs["task-fetcher-inputs: inputs fetch via shared fetchVerified<br/>files: packages/agora-worker/src/bundle-fetcher.ts +1 more"]
-    task-entrypoint-inputs["task-entrypoint-inputs: inputs overlay into workspace<br/>files: packages/agora-worker/src/entrypoint.ts +1 more"]
+    task-needs-contract["task-needs-contract: persisted needs wiring contract<br/>files: packages/agora-orchestrator/src/contracts/types.ts +2 more"]:::done
+    task-edge-tags["task-edge-tags: edgeType tags on SubagentShape<br/>files: packages/agora-orchestrator/src/contracts/subagent-shape.ts +3 more"]:::done
+    task-needs-resolver["task-needs-resolver: pure needs resolver<br/>files: packages/agora-orchestrator/src/engine/needs-resolver.ts +1 more"]:::done
+    task-run-validator["task-run-validator: run admission validator<br/>files: packages/agora-orchestrator/src/engine/run-validator.ts +1 more"]:::done
+    task-tick-resolve["task-tick-resolve: resolve-at-fire in tick<br/>files: packages/agora-orchestrator/src/engine/tick.ts +1 more"]:::done
+    task-submitrun-gate["task-submitrun-gate: submitRun normalize-validate gate<br/>files: packages/agora-orchestrator/src/orchestrator.ts +3 more"]:::done
+    task-cli-validate["task-cli-validate: agora orch validate command<br/>files: packages/agora-cli/src/cmd-orch.ts +1 more"]:::done
+    task-client-inputrefs["task-client-inputrefs: DispatchWork.inputRefs client staging<br/>files: packages/agora-core/src/dispatch.ts +2 more"]:::done
+    task-executor-thread["task-executor-thread: executor threads inputRefs<br/>files: packages/agora-orchestrator/src/executors/dispatch.ts +1 more"]:::done
+    task-worker-envparser["task-worker-envparser: BundleRefs.inputs parsing<br/>files: packages/agora-worker/src/env-parser.ts +1 more"]:::done
+    task-fetcher-inputs["task-fetcher-inputs: inputs fetch via shared fetchVerified<br/>files: packages/agora-worker/src/bundle-fetcher.ts +1 more"]:::done
+    task-entrypoint-inputs["task-entrypoint-inputs: inputs overlay into workspace<br/>files: packages/agora-worker/src/entrypoint.ts +1 more"]:::done
 
     task-needs-contract --> task-needs-resolver
     task-needs-contract --> task-run-validator
@@ -107,7 +107,7 @@ files:
   - packages/agora-orchestrator/src/contracts/types.ts
   - packages/agora-orchestrator/src/runstate/sqlite.ts
   - packages/agora-orchestrator/test/runstate-sqlite.test.ts
-status: pending
+status: done
 ```
 
 The `needs` contract (spec §3): `InputBinding`/`OutputSelector` types colocated with `WorkItem` in
@@ -177,7 +177,7 @@ files:
   - packages/agora-orchestrator/src/packs/dev.ts
   - packages/agora-orchestrator/test/subagent-shape.test.ts
   - packages/agora-orchestrator/test/packs/dev.test.ts
-status: pending
+status: done
 ```
 
 The typed-product tag surface (spec §6, pinned contract #5): two optional fields on `SubagentShape`,
@@ -232,7 +232,7 @@ depends_on: [task-needs-contract]
 files:
   - packages/agora-orchestrator/src/engine/needs-resolver.ts
   - packages/agora-orchestrator/test/needs-resolver.test.ts
-status: pending
+status: done
 ```
 
 The resolve-at-fire decision helper (spec §4) as a **pure, IO-free** `engine/` module — the
@@ -304,7 +304,7 @@ depends_on: [task-needs-contract, task-edge-tags]
 files:
   - packages/agora-orchestrator/src/engine/run-validator.ts
   - packages/agora-orchestrator/test/run-validator.test.ts
-status: pending
+status: done
 ```
 
 The one pure validator, two callers (Context: spec-deviation note). `normalizeRun` auto-unions
@@ -373,7 +373,7 @@ depends_on: [task-needs-resolver]
 files:
   - packages/agora-orchestrator/src/engine/tick.ts
   - packages/agora-orchestrator/test/tick-refs.test.ts
-status: pending
+status: done
 ```
 
 `tick` applies the pure resolver in the fire path (spec §4): resolve **before** `inputSchema`
@@ -441,7 +441,7 @@ files:
   - packages/agora-orchestrator/src/index.ts
   - packages/agora-orchestrator/test/orchestrator.test.ts
   - packages/agora-orchestrator/test/barrel-surface.test.ts
-status: pending
+status: done
 ```
 
 The authoritative gate (Context: spec-deviation note): `submitRun` normalizes, validates against
@@ -511,7 +511,7 @@ depends_on: [task-submitrun-gate]
 files:
   - packages/agora-cli/src/cmd-orch.ts
   - packages/agora-cli/test/cmd-orch.test.ts
-status: pending
+status: done
 ```
 
 Pre-flight CLI surface (spec §6, corrected namespace `agora orch validate`): a `validate <plan.json>`
@@ -572,7 +572,7 @@ files:
   - packages/agora-core/src/dispatch.ts
   - packages/agora-client/src/dispatch.ts
   - packages/agora-client/test/dispatch-fire.test.ts
-status: pending
+status: done
 is_wiring_task: true
 ```
 
@@ -639,7 +639,7 @@ depends_on: [task-client-inputrefs]
 files:
   - packages/agora-orchestrator/src/executors/dispatch.ts
   - packages/agora-orchestrator/test/executors/dispatch.test.ts
-status: pending
+status: done
 ```
 
 `DispatchExecutor.fire` reads the reserved `item.inputs.inputRefs` carrier (pinned contract #2 — set by
@@ -690,7 +690,7 @@ depends_on: []
 files:
   - packages/agora-worker/src/env-parser.ts
   - packages/agora-worker/test/env-parser.test.ts
-status: pending
+status: done
 model_hint: cheap
 ```
 
@@ -742,7 +742,7 @@ depends_on: [task-worker-envparser]
 files:
   - packages/agora-worker/src/bundle-fetcher.ts
   - packages/agora-worker/test/bundle-fetcher.test.ts
-status: pending
+status: done
 ```
 
 The DRY fetch (spec §5/§10): a shared raw-bytes `fetchVerified` helper absorbs the new inputs fetch
@@ -801,7 +801,7 @@ depends_on: [task-fetcher-inputs]
 files:
   - packages/agora-worker/src/entrypoint.ts
   - packages/agora-worker/test/entrypoint.test.ts
-status: pending
+status: done
 ```
 
 Materialization (spec §5, pinned contract #2's worker end): Step 6 builds one extra `inputs` bundle
