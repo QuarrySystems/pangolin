@@ -7,6 +7,14 @@ it("dev shapes declare correct effect tiers", () => {
   expect(devVerify.effectTier).toBe("read-impure");
 });
 
+it("devCodeEdit declares outputEdgeType 'patch-ref'", () => {
+  expect(devCodeEdit.outputEdgeType).toBe("patch-ref");
+});
+
+it("devVerify declares inputEdgeTypes mapping patch to 'patch-ref'", () => {
+  expect(devVerify.inputEdgeTypes).toEqual({ patch: "patch-ref" });
+});
+
 it("dev shapes register without collision and schema round-trips are correct", () => {
   const r = new PackRegistry(devPack);
 
