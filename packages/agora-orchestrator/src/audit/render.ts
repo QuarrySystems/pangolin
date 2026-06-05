@@ -107,6 +107,12 @@ export function renderVerification(bundle: AuditBundle, opts: RenderOpts = {}): 
 
   lines.push(`  ${mark(r.checks.anchor, color)} anchor       ${r.anchorId}  (${r.guarantee})`);
 
+  // BACKWARD COMPAT: renderVerification is a public export and bundle JSONs exported BEFORE
+  // Wave-C have no handoff field in their stale report objects — access it defensively.
+  const handoff = r.checks.handoff ?? { ok: 'n/a' as const };
+  const handoffDetail = handoff.detail ?? (handoff.ok === 'n/a' ? 'n/a' : String(handoff.ok));
+  lines.push(`  ${mark(handoff, color)} handoff      ${handoffDetail}`);
+
   lines.push('  ' + sep);
 
   // Ledger

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { renderVerification } from '../../src/audit/render.js';
-import type { AuditBundle, AuditEntryRow } from '../../src/contracts/index.js';
+import type { AuditBundle, AuditEntryRow, VerificationReport } from '../../src/contracts/index.js';
 
 // ---------------------------------------------------------------------------
 // Factory helpers
@@ -18,7 +18,7 @@ function makeEntry(seq: number, overrides: Partial<AuditEntryRow> = {}): AuditEn
   };
 }
 
-function greenBundle(): AuditBundle {
+function greenBundle(checksOverrides?: Partial<VerificationReport['checks']>): AuditBundle {
   const entries: AuditEntryRow[] = [makeEntry(0), makeEntry(1)];
   return {
     runId: 'run-green',
@@ -36,6 +36,8 @@ function greenBundle(): AuditBundle {
         root:      { ok: true },
         signature: { ok: 'n/a' },
         anchor:    { ok: true },
+        handoff:   { ok: true, detail: '0 input refs accounted for' },
+        ...checksOverrides,
       },
     },
   };
@@ -60,6 +62,7 @@ function tamperedBundle(): AuditBundle {
         root:      { ok: 'n/a' },
         signature: { ok: 'n/a' },
         anchor:    { ok: true },
+        handoff:   { ok: true, detail: '0 input refs accounted for' },
       },
     },
   };
@@ -187,5 +190,40 @@ describe('verdict line', () => {
   it('contains anchorId in the anchor row', () => {
     const out = renderVerification(greenBundle(), { color: false });
     expect(out).toContain('anchor-ext');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Handoff row (Wave-C spec §7)
+// ---------------------------------------------------------------------------
+
+describe('handoff row', () => {
+  it('renders the handoff row with its detail', () => {
+    const out = renderVerification(
+      greenBundle({ handoff: { ok: true, detail: '2 input refs accounted for' } }),
+      { color: false },
+    );
+    expect(out).toContain('handoff');
+    expect(out).toContain('2 input refs accounted for');
+  });
+
+  it('marks a failed handoff with the failure glyph', () => {
+    const out = renderVerification(
+      greenBundle({ handoff: { ok: false, detail: 'item b input patch: ref-abc not produced by declared output' } }),
+      { color: false },
+    );
+    expect(out).toMatch(/✗ handoff/);
+    expect(out).toContain('item b input patch: ref-abc not produced by declared output');
+  });
+
+  it('tolerates a pre-handoff bundle report (field absent) by rendering n/a', () => {
+    // Simulate a stale bundle.report that lacks `handoff` (pre-Wave-C exported JSON)
+    const staleBundle = greenBundle();
+    // Cast via unknown to strip `handoff` — mimics old bundle JSON deserialized without the field
+    const checks = staleBundle.report.checks as unknown as Record<string, unknown>;
+    delete checks['handoff'];
+    const out = renderVerification(staleBundle, { color: false });
+    expect(out).toContain('handoff');
+    expect(out).toContain('n/a');
   });
 });
