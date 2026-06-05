@@ -109,26 +109,26 @@ export class DispatchExecutor implements Executor {
     entry.inflight.cleanup();
     const status = result.exitCode === 0 ? 'done' : 'failed';
     if (status === 'done') {
-      const { patchRef, verify } = await this.readSentinel(dispatchHash);
-      return { status, output: result, resultRef: patchRef, verify };
+      const { patchRef, verify, outputRefs } = await this.readSentinel(dispatchHash);
+      return { status, output: result, resultRef: patchRef, verify, outputRefs };
     }
     return { status, output: result };
   }
 
   /**
-   * Best-effort: read the patchRef and verify signal from the dispatch output
-   * sentinel. NEVER throws — any failure returns an empty object.
+   * Best-effort: read the patchRef, verify signal, and outputs from the dispatch
+   * output sentinel. NEVER throws — any failure returns an empty object.
    */
   private async readSentinel(
     dispatchId: string,
-  ): Promise<{ patchRef?: string; verify?: ExecutionResult['verify'] }> {
+  ): Promise<{ patchRef?: string; verify?: ExecutionResult['verify']; outputRefs?: ExecutionResult['outputRefs'] }> {
     try {
       const ns = this.opts.client.namespace;
       const bytes = await this.opts.client.storage.get(
         buildDispatchRecordUri(ns, dispatchId, 'output.json'),
       );
       const sentinel = JSON.parse(new TextDecoder().decode(bytes));
-      const out: { patchRef?: string; verify?: ExecutionResult['verify'] } = {};
+      const out: { patchRef?: string; verify?: ExecutionResult['verify']; outputRefs?: ExecutionResult['outputRefs'] } = {};
       if (typeof sentinel.patchRef === 'string') out.patchRef = sentinel.patchRef;
       // Construct a clean, bounded verify from the (worker-written but possibly
       // older/tampered) sentinel — don't forward the raw object by reference.
@@ -140,6 +140,19 @@ export class DispatchExecutor implements Executor {
           verify.durationMs = v.durationMs;
         }
         out.verify = verify;
+      }
+      // Construct a clean, bounded outputRefs from the sentinel outputs array.
+      // Sentinel is worker-written and untrusted; reconstruct defensively.
+      const MAX_SENTINEL_OUTPUTS = 256;
+      const o = sentinel.outputs;
+      if (Array.isArray(o)) {
+        const outputRefs = Object.create(null) as Record<string, string>;
+        for (const e of o.slice(0, MAX_SENTINEL_OUTPUTS)) {
+          if (e && typeof e.path === 'string' && typeof e.ref === 'string') {
+            outputRefs[e.path] = e.ref;
+          }
+        }
+        if (Object.keys(outputRefs).length > 0) out.outputRefs = outputRefs;
       }
       return out;
     } catch {

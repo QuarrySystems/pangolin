@@ -77,7 +77,7 @@ import {
 import { LifecycleEmitter } from './lifecycle.js';
 import { StructuredLogger } from './logger.js';
 import { captureBaseline, type WorkspaceBaseline } from './patch-capture.js';
-import { capturePatch, writeSentinel } from './output-sentinel.js';
+import { capturePatch, captureOutputs, writeSentinel, type OutputEntry } from './output-sentinel.js';
 import { runVerify } from './verify.js';
 import type { VerifyOutcome, VerifyConfig } from '@quarry-systems/agora-core';
 
@@ -549,7 +549,21 @@ export async function runWorker(
       });
     }
 
-    // Write the sentinel with the pre-verify patchRef + the verify signal.
+    // Capture outputs/ deliverables after self-verify. Best-effort: a failure
+    // logs escape.failed and never changes the dispatch outcome.
+    let outputs: OutputEntry[] | undefined;
+    try {
+      outputs = await captureOutputs({
+        workspaceDir,
+        storage,
+        namespace: cfg.namespace,
+        dispatchId: cfg.dispatchId,
+      });
+    } catch (err) {
+      logger.log({ kind: 'escape.failed', dispatchId: cfg.dispatchId, detail: (err as Error).message });
+    }
+
+    // Write the sentinel with the pre-verify patchRef + the verify signal + outputs.
     // Best-effort: a failure logs escape.failed but must NOT change the exit
     // code or terminal event.
     try {
@@ -560,6 +574,7 @@ export async function runWorker(
         dispatchId: cfg.dispatchId,
         patchRef,
         verify,
+        outputs,
       });
     } catch (err) {
       logger.log({

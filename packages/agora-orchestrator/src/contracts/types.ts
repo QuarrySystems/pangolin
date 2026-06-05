@@ -47,6 +47,8 @@ export interface ItemState extends WorkItem {
   resultRef?: string;
   /** Self-verify signal (Gap A) read from the worker's output sentinel. */
   verify?: VerifyOutcome;
+  /** Content-addressed outputs/ deliverable refs (Wave A). Never interpreted by the store. */
+  outputRefs?: Record<string, string>;
   /** Opaque dispatch-manifest ref. Never interpreted by the store. */
   manifestRef?: string;
   /** ISO-8601 submission time (if recorded). Never interpreted by the store. */

@@ -6,12 +6,19 @@
 // and the two-write (patchRef + dispatch record) contract.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile, mkdir, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { buildDispatchRecordUri, type StorageProvider } from '@quarry-systems/agora-core';
 import { captureBaseline, type WorkspaceBaseline } from '../src/patch-capture.js';
-import { escapeWorkspace, capturePatch, writeSentinel } from '../src/output-sentinel.js';
+import {
+  escapeWorkspace,
+  capturePatch,
+  writeSentinel,
+  captureOutputs,
+  MAX_OUTPUT_FILE_BYTES,
+  MAX_OUTPUT_ENTRIES,
+} from '../src/output-sentinel.js';
 
 // ---------------------------------------------------------------------------
 // Minimal in-memory StorageProvider stub
@@ -297,5 +304,140 @@ describe('escapeWorkspace', () => {
     const dispatchUri = buildDispatchRecordUri('ns', 'd5', 'output.json');
     const sentinelBytes = await storage.get(dispatchUri);
     expect(JSON.parse(new TextDecoder().decode(sentinelBytes)).schemaVersion).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// captureOutputs / outputs field (Wave A §5)
+// ---------------------------------------------------------------------------
+
+describe('captureOutputs + writeSentinel outputs field', () => {
+  let dir: string;
+  let storage: MemoryStorage;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'outputs-test-'));
+    storage = new MemoryStorage();
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('captures outputs/ files as content-addressed refs sealed in the sentinel', async () => {
+    await mkdir(join(dir, 'outputs', 'data'), { recursive: true });
+    await writeFile(join(dir, 'outputs', 'report.txt'), 'hello');
+    await writeFile(join(dir, 'outputs', 'data', 'x.bin'), Buffer.from([1, 2, 3]));
+    const outputs = await captureOutputs({ workspaceDir: dir, storage, namespace: 'ns', dispatchId: 'd1' });
+    expect(outputs!.map((o) => o.path)).toEqual(['data/x.bin', 'report.txt']); // sorted, posix-relative
+    for (const o of outputs!) await expect(storage.get(o.ref)).resolves.toBeInstanceOf(Uint8Array);
+    const sentinel = await writeSentinel({ workspaceDir: dir, storage, namespace: 'ns', dispatchId: 'd1', outputs });
+    expect(sentinel.outputs).toEqual(outputs);
+  });
+
+  it('returns undefined (and an outputs-free sentinel) when outputs/ is absent', async () => {
+    expect(await captureOutputs({ workspaceDir: dir, storage, namespace: 'ns', dispatchId: 'd2' })).toBeUndefined();
+    const sentinel = await writeSentinel({ workspaceDir: dir, storage, namespace: 'ns', dispatchId: 'd2' });
+    expect('outputs' in sentinel).toBe(false); // hash-stable additive field, like verify
+  });
+
+  it('returns undefined when outputs/ is empty', async () => {
+    await mkdir(join(dir, 'outputs'), { recursive: true });
+    const outputs = await captureOutputs({ workspaceDir: dir, storage, namespace: 'ns', dispatchId: 'd3' });
+    expect(outputs).toBeUndefined();
+  });
+
+  it('skips files over MAX_OUTPUT_FILE_BYTES and does not include them in entries', async () => {
+    await mkdir(join(dir, 'outputs'), { recursive: true });
+    // Write an ordinary small file.
+    await writeFile(join(dir, 'outputs', 'small.txt'), 'keep me');
+    // Create a sparse "huge" file of size MAX_OUTPUT_FILE_BYTES + 1 without
+    // allocating that much memory: truncate creates a sparse hole on most OSes.
+    const { open } = await import('node:fs/promises');
+    const fh = await open(join(dir, 'outputs', 'huge.bin'), 'w');
+    await fh.truncate(MAX_OUTPUT_FILE_BYTES + 1);
+    await fh.close();
+    const outputs = await captureOutputs({ workspaceDir: dir, storage, namespace: 'ns', dispatchId: 'd4' });
+    expect(outputs).toBeDefined();
+    expect(outputs!.map((o) => o.path)).toEqual(['small.txt']);
+    expect(outputs!.every((o) => o.path !== 'huge.bin')).toBe(true);
+  });
+
+  it('stops at MAX_OUTPUT_ENTRIES and returns only that many entries', async () => {
+    await mkdir(join(dir, 'outputs'), { recursive: true });
+    // Write MAX_OUTPUT_ENTRIES + 5 files
+    for (let i = 0; i < MAX_OUTPUT_ENTRIES + 5; i++) {
+      await writeFile(join(dir, 'outputs', `file-${String(i).padStart(4, '0')}.txt`), `data${i}`);
+    }
+    const outputs = await captureOutputs({ workspaceDir: dir, storage, namespace: 'ns', dispatchId: 'd5' });
+    expect(outputs).toBeDefined();
+    expect(outputs!.length).toBe(MAX_OUTPUT_ENTRIES);
+  });
+
+  it('round-trips file bytes: storage.get(ref) returns the exact file bytes', async () => {
+    await mkdir(join(dir, 'outputs'), { recursive: true });
+    const content = Buffer.from([0xde, 0xad, 0xbe, 0xef, 0x00, 0x01, 0x02]);
+    await writeFile(join(dir, 'outputs', 'binary.bin'), content);
+    const outputs = await captureOutputs({ workspaceDir: dir, storage, namespace: 'ns', dispatchId: 'd6' });
+    expect(outputs).toHaveLength(1);
+    const stored = await storage.get(outputs![0].ref);
+    expect(Buffer.from(stored)).toEqual(content);
+  });
+
+  it('cap counts only files — directory entries interleaved in recursive readdir do not consume cap slots', async () => {
+    // Create MAX_OUTPUT_ENTRIES files spread across subdirectories so that the
+    // raw readdir result contains directory entries interspersed with file
+    // entries. Before the fix, the cap would fire before MAX_OUTPUT_ENTRIES
+    // files were actually captured.
+    const numFiles = MAX_OUTPUT_ENTRIES;
+    // Put half the files in subdirectories (each subdir entry appears in the
+    // raw readdir list alongside its files, inflating the raw count).
+    const subDirCount = 8;
+    for (let s = 0; s < subDirCount; s++) {
+      await mkdir(join(dir, 'outputs', `sub${s}`), { recursive: true });
+    }
+    for (let i = 0; i < numFiles; i++) {
+      const subDir = `sub${i % subDirCount}`;
+      await writeFile(
+        join(dir, 'outputs', subDir, `file-${String(i).padStart(4, '0')}.txt`),
+        `data${i}`,
+      );
+    }
+    const outputs = await captureOutputs({
+      workspaceDir: dir,
+      storage,
+      namespace: 'ns',
+      dispatchId: 'd7',
+    });
+    expect(outputs).toBeDefined();
+    expect(outputs!.length).toBe(numFiles);
+  });
+
+  // Symlink guard — symlink creation on Windows requires elevated privileges or
+  // developer mode. Match the itPosix pattern used elsewhere in this package.
+  const itPosix = process.platform === 'win32' ? it.skip : it;
+
+  itPosix('skips symlinks pointing outside outputs/ to prevent scope inflation', async () => {
+    // Create a directory outside outputs/ with a file we must NOT capture.
+    const outsideDir = join(dir, 'outside');
+    await mkdir(outsideDir, { recursive: true });
+    await writeFile(join(outsideDir, 'secret.txt'), 'do-not-capture');
+
+    // Create outputs/ with a legitimate file and a symlink to the outside dir.
+    await mkdir(join(dir, 'outputs'), { recursive: true });
+    await writeFile(join(dir, 'outputs', 'legit.txt'), 'capture me');
+    await symlink(outsideDir, join(dir, 'outputs', 'leaked-link'), 'dir');
+
+    const outputs = await captureOutputs({
+      workspaceDir: dir,
+      storage,
+      namespace: 'ns',
+      dispatchId: 'd8',
+    });
+    expect(outputs).toBeDefined();
+    const paths = outputs!.map((o) => o.path);
+    expect(paths).toEqual(['legit.txt']); // only the legitimate file
+    expect(paths.some((p) => p.includes('secret'))).toBe(false);
+    expect(paths.some((p) => p.includes('leaked-link'))).toBe(false);
   });
 });

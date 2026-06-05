@@ -276,6 +276,25 @@ describe('SqliteRunStateStore', () => {
     expect(it.verify).toBeUndefined();
   });
 
+  it('persists and reads back outputRefs', () => {
+    const store = new SqliteRunStateStore();
+    store.ensureQueue('default', 1);
+    store.saveRun({ id: 'ro', queue: 'default', items: [
+      { id: 'a', executor: 'x', inputs: {}, depends_on: [], resourceLocks: [] }] });
+    store.setOutputRefs('a', { 'report.txt': 'agora://ns/artifact/d1/sha256:abc' });
+    expect(store.getItems('ro').find((i) => i.id === 'a')!.outputRefs)
+      .toEqual({ 'report.txt': 'agora://ns/artifact/d1/sha256:abc' });
+  });
+
+  it('item without outputRefs reads back undefined', () => {
+    const store = new SqliteRunStateStore();
+    store.ensureQueue('default', 1);
+    store.saveRun({ id: 'rno', queue: 'default', items: [
+      { id: 'b', executor: 'x', inputs: {}, depends_on: [], resourceLocks: [] }] });
+    const it = store.getItems('rno').find((i) => i.id === 'b')!;
+    expect(it.outputRefs).toBeUndefined();
+  });
+
   it('saveRun without submittedAt stores NULL — reads back as undefined', () => {
     const store = new SqliteRunStateStore();
     store.ensureQueue('default', 1);

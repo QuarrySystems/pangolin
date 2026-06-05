@@ -15,6 +15,9 @@ export interface ExecutionResult {
    * green/red without re-running by hand.
    */
   verify?: VerifyOutcome;
+  /** Wave A (§5): content-addressed deliverable refs read from the worker's output
+   *  sentinel, keyed by posix path inside outputs/. Report-only in this wave. */
+  outputRefs?: Record<string, string>;
 }
 
 /** Generic, executor-agnostic context passed at fire time. NO AI/dispatch

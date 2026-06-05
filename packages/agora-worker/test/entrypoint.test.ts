@@ -18,6 +18,7 @@ import {
   buildDispatchRecordUri,
   type StorageProvider,
   type RuntimeAdapter,
+  type RuntimeInvocation,
   type RuntimeExit,
   type LifecycleEvent,
 } from '@quarry-systems/agora-core';
@@ -112,6 +113,8 @@ async function setupHarness(opts?: {
   capabilityFiles?: Record<string, Uint8Array>;
   capabilityHashCorrect?: boolean; // default true
   verify?: { command: string; timeout?: number };
+  /** Called inside the stub adapter's invoke(), after incrementing the counter. */
+  onInvoke?: (spec: RuntimeInvocation) => Promise<void>;
 }): Promise<Harness> {
   const workDir = await mkdtemp(join(tmpdir(), 'entrypoint-work-'));
   const adaptersRoot = await mkdtemp(join(tmpdir(), 'entrypoint-adapters-'));
@@ -180,8 +183,9 @@ async function setupHarness(opts?: {
   const adapter: RuntimeAdapter = {
     name: 'claude-code',
     reservedPaths: [],
-    invoke: async () => {
+    invoke: async (spec) => {
       invokeCalls++;
+      if (opts?.onInvoke) await opts.onInvoke(spec);
       return runtimeExit;
     },
   };
@@ -573,5 +577,85 @@ describe('runWorker', () => {
     const finished = h.events.find((e) => e.kind === 'dispatch.finished');
     expect(finished).toBeDefined();
     expect(finished && 'exitCode' in finished && finished.exitCode).toBe(0);
+  });
+
+  it('seals outputs/ deliverables written by the adapter into the uploaded sentinel', async () => {
+    const h = await setupHarness({
+      onInvoke: async (spec) => {
+        await mkdir(join(spec.workspaceDir, 'outputs'), { recursive: true });
+        await writeFile(join(spec.workspaceDir, 'outputs', 'report.txt'), 'done');
+      },
+    });
+    cleanupDirs.push(h.workDir, h.adaptersRoot);
+
+    const code = await runWorker(h.env, makeDeps(h));
+    expect(code).toBe(0);
+
+    const sentinelUri = buildDispatchRecordUri('ns', 'd-1', 'output.json');
+    const parsed = JSON.parse(new TextDecoder().decode(await h.storage.get(sentinelUri)));
+    expect(parsed.outputs).toEqual([{ path: 'report.txt', ref: expect.stringMatching(/^agora:\/\//) }]);
+    const refBytes = await h.storage.get(parsed.outputs[0].ref);
+    expect(new TextDecoder().decode(refBytes)).toBe('done');
+  });
+
+  it('logs escape.failed and still succeeds with no outputs key when captureOutputs throws', async () => {
+    const h = await setupHarness({
+      onInvoke: async (spec) => {
+        await mkdir(join(spec.workspaceDir, 'outputs'), { recursive: true });
+        await writeFile(join(spec.workspaceDir, 'outputs', 'report.txt'), 'done');
+      },
+    });
+    cleanupDirs.push(h.workDir, h.adaptersRoot);
+
+    // Make storage.put throw for artifact URIs so captureOutputs fails.
+    const orig = h.storage.put.bind(h.storage);
+    h.storage.put = async (uri: string, bytes: Uint8Array) => {
+      // Only throw for artifact URIs (not the sentinel itself).
+      if (uri.includes('/artifact/')) throw new Error('artifact upload failed');
+      return orig(uri, bytes);
+    };
+
+    const writes: string[] = [];
+    const spy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation((chunk: string | Uint8Array): boolean => {
+        writes.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString());
+        return true;
+      });
+
+    let code: number;
+    try {
+      code = await runWorker(h.env, makeDeps(h));
+    } finally {
+      spy.mockRestore();
+    }
+
+    // Outcome must not change.
+    expect(code!).toBe(0);
+    const kinds = h.events.map((e) => e.kind);
+    expect(kinds).toContain('dispatch.finished');
+    expect(kinds).not.toContain('dispatch.failed');
+
+    // escape.failed was logged.
+    const allLogs = writes.join('');
+    expect(allLogs).toContain('escape.failed');
+
+    // Sentinel was still written — but without outputs.
+    const sentinelUri = buildDispatchRecordUri('ns', 'd-1', 'output.json');
+    const parsed = JSON.parse(new TextDecoder().decode(await h.storage.get(sentinelUri)));
+    expect(parsed.outputs).toBeUndefined();
+  });
+
+  it('produces a sentinel with no outputs key when the adapter writes nothing to outputs/', async () => {
+    const h = await setupHarness();
+    cleanupDirs.push(h.workDir, h.adaptersRoot);
+    h.setRuntimeExit({ exitCode: 0, stdout: '', stderr: '' });
+
+    const code = await runWorker(h.env, makeDeps(h));
+    expect(code).toBe(0);
+
+    const sentinelUri = buildDispatchRecordUri('ns', 'd-1', 'output.json');
+    const parsed = JSON.parse(new TextDecoder().decode(await h.storage.get(sentinelUri)));
+    expect(parsed.outputs).toBeUndefined();
   });
 });

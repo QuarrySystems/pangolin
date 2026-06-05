@@ -24,6 +24,7 @@ export interface RunStateStore {
   requeue(itemId: string, notBeforeMs: number): void; // status -> 'ready', nextAttemptAt = notBeforeMs
   setResultRef(itemId: string, ref: string): void;    // persist opaque result artifact ref
   setVerify(itemId: string, verify: VerifyOutcome): void; // persist self-verify signal
+  setOutputRefs(itemId: string, outputRefs: Record<string, string>): void; // persist deliverable refs
   setManifestRef(itemId: string, ref: string): void;  // persist opaque dispatch-manifest ref
   close(): void;
 }
