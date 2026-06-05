@@ -492,7 +492,14 @@ impossible (deterministic ids + id-skip + all-or-nothing extendRun).
   the operator-append race story).
 - User-defined patterns (the pluggable seam exists; curation discipline per the locked decision).
 - Collector/`outputs-of` selectors — spawn-time concretization made them structurally
-  unnecessary, not merely deferred.
+  unnecessary **for spawnable consumers** (reduce-style: don't submit until N is known). One
+  adjacent case remains genuinely deferred-not-unnecessary: a PRE-SUBMITTED item whose source
+  varies at runtime (e.g. consume fast-path's product, else fallback's). The secure shape, if
+  a use case pulls it, is a richer DECLARATIVE selector (`oneOf` alternatives resolved by the
+  same pure resolve-at-fire, chosen ref sealed in the manifest as today — never mutation of
+  pending items), and the real cost is OR-readiness semantics in the engine
+  (`computeNewlyReady` + skip cascade) — a separate design pass that must wait for a concrete
+  consumer to define its give-up policy.
 - Map partial-tolerance config (`minSuccess`, reduce-over-survivors).
 - Cross-run provenance; pattern-config persistence beyond reserved `inputs` keys; high-water-mark
   optimization for the at-least-once scan.
