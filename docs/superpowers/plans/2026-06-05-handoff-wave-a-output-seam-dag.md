@@ -5,12 +5,12 @@ created: 2026-06-05
 
 ```mermaid
 flowchart TD
-    task-capture-outputs["task-capture-outputs: worker outputs capture into sentinel<br/>files: packages/agora-worker/src/output-sentinel.ts +1 more"]
-    task-patch-exclude["task-patch-exclude: exclude outputs dir from workspace patch<br/>files: packages/agora-worker/src/patch-capture.ts +1 more"]
-    task-store-outputrefs["task-store-outputrefs: store outputRefs persistence<br/>files: packages/agora-orchestrator/src/contracts/executor.ts +4 more"]
-    task-entrypoint-outputs["task-entrypoint-outputs: entrypoint outputs capture wiring<br/>files: packages/agora-worker/src/entrypoint.ts +1 more"]
-    task-read-sentinel-outputs["task-read-sentinel-outputs: dispatch executor reads sentinel outputs<br/>files: packages/agora-orchestrator/src/executors/dispatch.ts +1 more"]
-    task-tick-outputrefs["task-tick-outputrefs: tick persists outputRefs on reconcile<br/>files: packages/agora-orchestrator/src/engine/tick.ts +1 more"]
+    task-capture-outputs["task-capture-outputs: worker outputs capture into sentinel<br/>files: packages/agora-worker/src/output-sentinel.ts +1 more"]:::done
+    task-patch-exclude["task-patch-exclude: exclude outputs dir from workspace patch<br/>files: packages/agora-worker/src/patch-capture.ts +1 more"]:::done
+    task-store-outputrefs["task-store-outputrefs: store outputRefs persistence<br/>files: packages/agora-orchestrator/src/contracts/executor.ts +4 more"]:::done
+    task-entrypoint-outputs["task-entrypoint-outputs: entrypoint outputs capture wiring<br/>files: packages/agora-worker/src/entrypoint.ts +1 more"]:::done
+    task-read-sentinel-outputs["task-read-sentinel-outputs: dispatch executor reads sentinel outputs<br/>files: packages/agora-orchestrator/src/executors/dispatch.ts +1 more"]:::done
+    task-tick-outputrefs["task-tick-outputrefs: tick persists outputRefs on reconcile<br/>files: packages/agora-orchestrator/src/engine/tick.ts +1 more"]:::done
 
     task-capture-outputs --> task-entrypoint-outputs
     task-store-outputrefs --> task-read-sentinel-outputs
@@ -59,7 +59,7 @@ depends_on: []
 files:
   - packages/agora-worker/src/output-sentinel.ts
   - packages/agora-worker/test/output-sentinel.test.ts
-status: pending
+status: done
 ```
 
 Add `captureOutputs` (sibling of `capturePatch`) and the additive `outputs?` sentinel field per spec
@@ -158,7 +158,7 @@ depends_on: []
 files:
   - packages/agora-worker/src/patch-capture.ts
   - packages/agora-worker/test/patch-capture.test.ts
-status: pending
+status: done
 model_hint: cheap
 ```
 
@@ -209,7 +209,7 @@ depends_on: [task-capture-outputs]
 files:
   - packages/agora-worker/src/entrypoint.ts
   - packages/agora-worker/test/entrypoint.test.ts
-status: pending
+status: done
 ```
 
 Wire `captureOutputs` into the success path with the spec §5 sequence
@@ -279,7 +279,7 @@ files:
   - packages/agora-orchestrator/src/contracts/runstate-store.ts
   - packages/agora-orchestrator/src/runstate/sqlite.ts
   - packages/agora-orchestrator/test/runstate-sqlite.test.ts
-status: pending
+status: done
 ```
 
 The `outputRefs` persistence contract — field-for-field the #37 `verify` column pattern (spec §4/§10):
@@ -345,7 +345,7 @@ depends_on: [task-store-outputrefs]
 files:
   - packages/agora-orchestrator/src/executors/dispatch.ts
   - packages/agora-orchestrator/test/executors/dispatch.test.ts
-status: pending
+status: done
 ```
 
 Extend `readSentinel` to extract `sentinel.outputs` **defensively** — the sentinel is worker-written
@@ -410,7 +410,7 @@ depends_on: [task-store-outputrefs]
 files:
   - packages/agora-orchestrator/src/engine/tick.ts
   - packages/agora-orchestrator/test/tick-refs.test.ts
-status: pending
+status: done
 model_hint: cheap
 ```
 
