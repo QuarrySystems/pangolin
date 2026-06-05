@@ -145,6 +145,12 @@ export function respawnLineage(args: {
   // Guard: no fixTemplate
   if (!config.fixTemplate) return [];
 
+  // Guard: gate must be in a respawn-eligible state.
+  // Eligible states: 'failed' OR done-but-red (done + verify.passed === false).
+  // A done gate that passed (verify absent or verify.passed !== false) must not respawn.
+  const isDoneButRed = gate.status === 'done' && gate.verify?.passed === false;
+  if (gate.status !== 'failed' && !isDoneButRed) return [];
+
   // Guard: attempt bound
   const { base, attempt } = parseAttempt(gate.id);
   const maxFixAttempts = config.maxFixAttempts ?? 1;
@@ -174,12 +180,6 @@ export function respawnLineage(args: {
   const fixNeeds: Record<string, InputBinding> = {
     work: { from: config.subject, select: { kind: 'patch' } },
   };
-
-  // done-but-red: gate is done with verify.ok === false and has outputRefs['findings']
-  const isDoneButRed =
-    gate.status === 'done' &&
-    gate.verify != null &&
-    !(gate.verify as { ok: boolean }).ok;
 
   const fixInputs: Record<string, unknown> = { ...config.fixTemplate.inputs };
 

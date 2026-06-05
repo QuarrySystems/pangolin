@@ -180,7 +180,7 @@ it('done-but-red gate with outputRefs[findings]: fix gains needs.findings', () =
     { id: 'implement', status: 'done', executor: 'x', inputs: {}, depends_on: [], resourceLocks: [], runId: 'r1', queue: 'q' },
     {
       id: 'review', status: 'done', executor: 'x', inputs: {}, depends_on: ['implement'], resourceLocks: [], runId: 'r1', queue: 'q',
-      verify: { ok: false, message: 'red' } as never,
+      verify: { passed: false, report: 'red' },
       outputRefs: { findings: 'outputs/findings.json' },
     },
     { id: 'package', status: 'pending', executor: 'x', inputs: {}, depends_on: ['review'], resourceLocks: [], runId: 'r1', queue: 'q' },
@@ -194,6 +194,22 @@ it('done-but-red gate with outputRefs[findings]: fix gains needs.findings', () =
   expect(fix).toBeDefined();
   expect(fix.needs?.['findings']).toEqual({ from: 'review', select: { kind: 'output', path: 'findings' } });
   expect(fix.inputs['gateReason']).toBeUndefined();
+});
+
+it('done gate with green verify (passed: true) must NOT respawn', () => {
+  const items: ItemState[] = [
+    { id: 'implement', status: 'done', executor: 'x', inputs: {}, depends_on: [], resourceLocks: [], runId: 'r1', queue: 'q' },
+    {
+      id: 'review', status: 'done', executor: 'x', inputs: {}, depends_on: ['implement'], resourceLocks: [], runId: 'r1', queue: 'q',
+      verify: { passed: true },
+    },
+  ];
+  const out = respawnLineage({
+    gate: items[1]!,
+    config: { onRed: 'spawn-fix', subject: 'implement', fixTemplate: { executor: 'x', inputs: {} } },
+    runItems: items,
+  });
+  expect(out).toEqual([]);
 });
 
 // ---------------------------------------------------------------------------
