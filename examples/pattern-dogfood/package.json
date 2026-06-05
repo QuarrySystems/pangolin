@@ -1,0 +1,20 @@
+{
+  "name": "pattern-dogfood-example",
+  "version": "0.0.0",
+  "private": true,
+  "description": "§9 acceptance example: gated DAG-plan circle-back (dogfood loop) — implement → review(gate) → package on the pipeline pattern. Demonstrates spawn-fix respawn: the failed branch stays as sealed history; a new forward arc is added.",
+  "type": "module",
+  "license": "BUSL-1.1",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --esModuleInterop --skipLibCheck --strict src/index.ts",
+    "build": "tsc --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --esModuleInterop --skipLibCheck --strict src/index.ts"
+  },
+  "dependencies": {
+    "@quarry-systems/agora-orchestrator": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.2"
+  }
+}
