@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { normalizeRun, validateRun } from '../src/engine/run-validator.js';
 import type { Run } from '../src/contracts/types.js';
-import { devRegistry, devCodeEdit, devVerify } from '../src/packs/dev.js';
+import { devRegistry } from '../src/packs/dev.js';
 import { PackRegistry } from '../src/packs/registry.js';
 import { makeShape } from './support/make-shape.js';
 
@@ -176,6 +176,37 @@ describe('validateRun — structural', () => {
     const errors = validateRun(run);
     // each error should name something (not be an empty string)
     expect(errors.every((e) => e.length > 0)).toBe(true);
+  });
+
+  it('reports both cycles in two disconnected cycle components (a->b->a and c->d->c)', () => {
+    const run = mkRun([
+      mkItem('a', { depends_on: ['b'] }),
+      mkItem('b', { depends_on: ['a'] }),
+      mkItem('c', { depends_on: ['d'] }),
+      mkItem('d', { depends_on: ['c'] }),
+    ]);
+    const errors = validateRun(run);
+    const cycleErrors = errors.filter((e) => /cycle/i.test(e));
+    expect(cycleErrors.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('detects a self-cycle (a depends on itself)', () => {
+    const run = mkRun([mkItem('a', { depends_on: ['a'] })]);
+    const errors = validateRun(run);
+    expect(errors.some((e) => /cycle/i.test(e) && /a/.test(e))).toBe(true);
+  });
+
+  it('suppresses cycle detection when structural ref errors exist (unknown-ref + separate cycle)', () => {
+    // 'ghost' is unknown (structural error); c->d->c is a cycle
+    // The cycle should NOT be reported because structural errors exist
+    const run = mkRun([
+      mkItem('a', { depends_on: ['ghost'] }),
+      mkItem('c', { depends_on: ['d'] }),
+      mkItem('d', { depends_on: ['c'] }),
+    ]);
+    const errors = validateRun(run);
+    expect(errors.some((e) => /ghost/.test(e))).toBe(true);   // ref error IS reported
+    expect(errors.every((e) => !/cycle/i.test(e))).toBe(true); // cycle is NOT reported
   });
 });
 

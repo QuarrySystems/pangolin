@@ -57,10 +57,10 @@ export function validateRun(run: Run, packs?: PackRegistry): string[] {
     }
   }
 
-  // ---- 3. Cycle detection (DFS) — only if no reference errors ----
+  // ---- 3. Cycle detection (DFS) — any structural error suppresses cycle detection ----
   // (If unknown refs exist, cycles might false-positive)
-  const hasCycleErrors = errors.length > 0;
-  if (!hasCycleErrors) {
+  const hasStructuralErrors = errors.length > 0;
+  if (!hasStructuralErrors) {
     const WHITE = 0, GRAY = 1, BLACK = 2;
     const color = new Map<string, number>(run.items.map((i) => [i.id, WHITE]));
 
