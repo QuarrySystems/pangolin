@@ -101,7 +101,9 @@ export async function captureOutputs(opts: {
   namespace: string;
   dispatchId: string;
 }): Promise<OutputEntry[] | undefined> {
-  // readdir recursive; sort paths; per file:
+  // readdir(dir, { recursive: true }) — fine, repo engines pin node >= 20.
+  // NORMALIZE path separators to '/' (path.relative gives '\' on Windows; the
+  // repo's tests run on Windows too) and sort entries for determinism. Per file:
   //   const contentHash = computeContentHash(bytes);
   //   const ref = buildAgoraUri({ namespace, type: 'artifact', name: dispatchId, contentHash });
   //   await storage.put(ref, bytes);
@@ -113,21 +115,23 @@ export async function captureOutputs(opts: {
 ```
 
 ```typescript
-// packages/agora-worker/test/output-sentinel.test.ts (new cases)
+// packages/agora-worker/test/output-sentinel.test.ts (new cases). Uses the file's
+// existing MemoryStorage stub + `dir` workspace convention; NO initGitRepo needed —
+// captureOutputs never touches git (only capturePatch does).
 it('captures outputs/ files as content-addressed refs sealed in the sentinel', async () => {
-  await mkdir(join(ws, 'outputs', 'data'), { recursive: true });
-  await writeFile(join(ws, 'outputs', 'report.txt'), 'hello');
-  await writeFile(join(ws, 'outputs', 'data', 'x.bin'), Buffer.from([1, 2, 3]));
-  const outputs = await captureOutputs({ workspaceDir: ws, storage, namespace: 'ns', dispatchId: 'd1' });
+  await mkdir(join(dir, 'outputs', 'data'), { recursive: true });
+  await writeFile(join(dir, 'outputs', 'report.txt'), 'hello');
+  await writeFile(join(dir, 'outputs', 'data', 'x.bin'), Buffer.from([1, 2, 3]));
+  const outputs = await captureOutputs({ workspaceDir: dir, storage, namespace: 'ns', dispatchId: 'd1' });
   expect(outputs!.map((o) => o.path)).toEqual(['data/x.bin', 'report.txt']); // sorted, posix-relative
   for (const o of outputs!) await expect(storage.get(o.ref)).resolves.toBeInstanceOf(Uint8Array);
-  const sentinel = await writeSentinel({ workspaceDir: ws, storage, namespace: 'ns', dispatchId: 'd1', outputs });
+  const sentinel = await writeSentinel({ workspaceDir: dir, storage, namespace: 'ns', dispatchId: 'd1', outputs });
   expect(sentinel.outputs).toEqual(outputs);
 });
 
 it('returns undefined (and an outputs-free sentinel) when outputs/ is absent', async () => {
-  expect(await captureOutputs({ workspaceDir: ws, storage, namespace: 'ns', dispatchId: 'd2' })).toBeUndefined();
-  const sentinel = await writeSentinel({ workspaceDir: ws, storage, namespace: 'ns', dispatchId: 'd2' });
+  expect(await captureOutputs({ workspaceDir: dir, storage, namespace: 'ns', dispatchId: 'd2' })).toBeUndefined();
+  const sentinel = await writeSentinel({ workspaceDir: dir, storage, namespace: 'ns', dispatchId: 'd2' });
   expect('outputs' in sentinel).toBe(false); // hash-stable additive field, like verify
 });
 ```
@@ -174,13 +178,15 @@ const diff = await git(workspaceDir, [
 ```
 
 ```typescript
-// packages/agora-worker/test/patch-capture.test.ts (new case)
+// packages/agora-worker/test/patch-capture.test.ts (new top-level case — mirror the
+// existing "excluding .agora/" exclusion test at :7, same setup helpers)
 it('excludes outputs/ from the workspace patch', async () => {
-  const baseline = await captureBaseline(ws);
-  await writeFile(join(ws, 'edited.txt'), 'changed');
-  await mkdir(join(ws, 'outputs'), { recursive: true });
-  await writeFile(join(ws, 'outputs', 'gen.bin'), 'deliverable');
-  const patch = new TextDecoder().decode((await computeWorkspacePatch(ws, baseline))!);
+  const dir = await makeWorkspace();           // whatever setup the :7 test uses
+  const baseline = await captureBaseline(dir);
+  await writeFile(join(dir, 'edited.txt'), 'changed');
+  await mkdir(join(dir, 'outputs'), { recursive: true });
+  await writeFile(join(dir, 'outputs', 'gen.bin'), 'deliverable');
+  const patch = new TextDecoder().decode((await computeWorkspacePatch(dir, baseline))!);
   expect(patch).toContain('edited.txt');
   expect(patch).not.toContain('outputs/gen.bin');
 });
@@ -227,17 +233,25 @@ await writeSentinel({ workspaceDir, storage, namespace: cfg.namespace, dispatchI
 ```
 
 ```typescript
-// packages/agora-worker/test/entrypoint.test.ts (new case — follow the existing
-// fake-adapter harness used by the self-verify tests)
+// packages/agora-worker/test/entrypoint.test.ts (new case). Uses the REAL harness:
+// extend setupHarness opts with an `onInvoke?: (spec: RuntimeInvocation) => Promise<void>`
+// hook, called inside the stub adapter's invoke (keeps the invokeCalls counter intact) —
+// the same opts-extension pattern as the existing `verify?:` opt.
 it('seals outputs/ deliverables written by the adapter into the uploaded sentinel', async () => {
-  const adapter = fakeAdapter(async ({ workspaceDir }) => {
-    await mkdir(join(workspaceDir, 'outputs'), { recursive: true });
-    await writeFile(join(workspaceDir, 'outputs', 'report.txt'), 'done');
-    return { exitCode: 0 };
+  const h = await setupHarness({
+    onInvoke: async (spec) => {
+      await mkdir(join(spec.workspaceDir, 'outputs'), { recursive: true });
+      await writeFile(join(spec.workspaceDir, 'outputs', 'report.txt'), 'done');
+    },
   });
-  await runWorker(cfgWith({ adapter }));
-  const sentinel = JSON.parse(text(await storage.get(dispatchRecordUri('output.json'))));
-  expect(sentinel.outputs).toEqual([{ path: 'report.txt', ref: expect.stringMatching(/^agora:\/\/.*sha256:/) }]);
+  cleanupDirs.push(h.workDir, h.adaptersRoot);
+
+  const code = await runWorker(h.env, makeDeps(h));
+  expect(code).toBe(0);
+
+  const sentinelUri = buildDispatchRecordUri('ns', 'd-1', 'output.json');
+  const parsed = JSON.parse(new TextDecoder().decode(await h.storage.get(sentinelUri)));
+  expect(parsed.outputs).toEqual([{ path: 'report.txt', ref: expect.stringMatching(/^agora:\/\//) }]);
 });
 ```
 
@@ -298,16 +312,18 @@ setOutputRefs(itemId: string, outputRefs: Record<string, string>): void; // pers
 ```
 
 ```typescript
-// packages/agora-orchestrator/test/runstate-sqlite.test.ts (new case, beside the setVerify case)
-it('round-trips outputRefs via setOutputRefs', () => {
+// packages/agora-orchestrator/test/runstate-sqlite.test.ts (new cases, directly beside —
+// and in the exact style of — the existing "persists and reads back verify" case at :260)
+it('persists and reads back outputRefs', () => {
   const store = new SqliteRunStateStore();
-  store.ensureQueue('q', 1);
-  store.saveRun({ id: 'r', queue: 'q', items: [
+  store.ensureQueue('default', 1);
+  store.saveRun({ id: 'ro', queue: 'default', items: [
     { id: 'a', executor: 'x', inputs: {}, depends_on: [], resourceLocks: [] }] });
   store.setOutputRefs('a', { 'report.txt': 'agora://ns/artifact/d1/sha256:abc' });
-  expect(store.getItems().find((i) => i.id === 'a')!.outputRefs)
+  expect(store.getItems('ro').find((i) => i.id === 'a')!.outputRefs)
     .toEqual({ 'report.txt': 'agora://ns/artifact/d1/sha256:abc' });
 });
+// plus an "item without outputRefs reads back undefined" sibling, mirroring the verify one at :270
 ```
 
 ## Acceptance criteria
@@ -353,17 +369,24 @@ if (Array.isArray(o)) {
 ```
 
 ```typescript
-// test/executors/dispatch.test.ts (new cases, beside the verify sentinel cases)
-it('surfaces sentinel outputs as ExecutionResult.outputRefs', async () => {
-  putSentinel({ schemaVersion: 1, outputs: [{ path: 'report.txt', ref: 'agora://ns/artifact/d/sha256:abc' }] });
-  const res = await reconcileDone();
-  expect(res.outputRefs).toEqual({ 'report.txt': 'agora://ns/artifact/d/sha256:abc' });
+// test/executors/dispatch.test.ts (new cases). Follow the EXISTING sentinel-seeding
+// pattern of the verify cases (dispatch.test.ts:527-599): fire, seed the sentinel at the
+// dispatch-record URI, settle, reconcile, assert on the result.
+it('reconcile of a done dispatch surfaces sentinel outputs as outputRefs', async () => {
+  // ...fire via the existing fake-client harness, then:
+  const sentinelUri = buildDispatchRecordUri('ns', dispatchHash, 'output.json');
+  await storage.put(sentinelUri, new TextEncoder().encode(JSON.stringify({
+    schemaVersion: 1,
+    outputs: [{ path: 'report.txt', ref: 'agora://ns/artifact/d/sha256:' + 'a'.repeat(64) }],
+  })));
+  const res = await ex.reconcile(dispatchHash);
+  expect(res?.outputRefs).toEqual({ 'report.txt': 'agora://ns/artifact/d/sha256:' + 'a'.repeat(64) });
 });
 
-it('drops malformed output entries instead of forwarding them', async () => {
-  putSentinel({ schemaVersion: 1, outputs: [{ path: 7 }, 'junk', { path: 'ok.txt', ref: 'agora://ns/artifact/d/sha256:def' }] });
-  const res = await reconcileDone();
-  expect(res.outputRefs).toEqual({ 'ok.txt': 'agora://ns/artifact/d/sha256:def' });
+it('reconcile sanitises outputs from the sentinel: drops malformed entries', async () => {
+  // mirrors the existing "reconcile sanitises verify" case (dispatch.test.ts:561)
+  // sentinel.outputs = [{ path: 7 }, 'junk', { path: 'ok.txt', ref: '<valid>' }]
+  // expect res?.outputRefs to equal only { 'ok.txt': '<valid>' }
 });
 ```
 
