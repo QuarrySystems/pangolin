@@ -11,15 +11,25 @@ License 1.1 is not an OSI-approved open source license; the full terms are at
 
 ## What you can do
 
-You are free to self-host Agora, use it internally, modify the source, and build
-on top of it for essentially any purpose.
+You are free to self-host Agora, use it internally for development, evaluation,
+and your own production workloads, and modify the source.
 
-## The one restriction
+## The restriction (today)
 
 You may not offer Agora itself, or a product derived from it, to third parties as
 a hosted or managed orchestration / agent-dispatch service. In plain terms: you
 can run it for yourself; you cannot productise it as a service you sell or
-provide to others.
+provide to others. The [`LICENSE`](https://github.com/quarrysystems/agora/blob/main/LICENSE)
+file is always the authoritative statement of what is and isn't permitted — this
+page is a plain-language summary, not the grant.
+
+## Embedding Agora in a product you ship?
+
+If you're building Agora into a product or service delivered to third parties —
+hosted **or** self-hosted — get in touch about commercial licensing. It keeps you
+on solid footing as the project's grant evolves toward a clean "free to build,
+pay to ship" line, and it's how the engine stays sustainably maintained.
+[Talk to us about a commercial license or pilot →](/agora/commercial/).
 
 ## When does it convert?
 

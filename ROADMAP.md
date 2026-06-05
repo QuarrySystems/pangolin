@@ -94,6 +94,18 @@ shipped in #24).
 The V1.1 layer is a strict superset of V1. Nothing below requires changing what
 V1 ships.
 
+> **Seam vs. implementation (open-core).** Several items below — the `Authorizer`
+> seam, the enterprise compliance layer, and the `WitnessAnchor` tier — ship the
+> *extension point* in the open engine while their *production implementation*
+> (packaged RBAC, SSO, retention/attestation/evidence-export, a managed witness
+> tier) is an **Enterprise module**, distributed separately under a commercial
+> license. The engine runs fully standalone without them; that is the point of
+> the seams. Items carrying this split are tagged **[seam free · impl Enterprise]**.
+
+- **`cron` trigger** — recurring scheduling via the existing `Trigger` seam.
+  `serve` + manual `submit` already delivers *unattended* offload (submit once,
+  walk away); `cron` adds *recurring*. **This is the first item to pull into
+  V1.1.**
 - **Operationalize the `dev` pack** — the `dev.code-edit` / `dev.verify` shapes and
   the `PackRegistry` already exist in code (see "Now"), but the shapes are **not
   dispatchable yet**: pin the real worker-image digest (currently a `PLACEHOLDER`)
@@ -130,17 +142,23 @@ V1 ships.
 - **`Authorizer` seam** — an implementor-filled authorization policy. agora ships
   the chokepoint (the operations API) and identity primitives (`actor`, the
   client/service privilege split); it never owns roles. V1 is single-operator
-  ("whoever launched").
+  ("whoever launched"). **[seam free · impl Enterprise]** — the seam is open; a
+  packaged role-based-access implementation is an Enterprise module.
 - **Compliance deepening** — extend customer-managed encryption **beyond S3
   objects** (S3 SSE/SSE-KMS already ships; deferred: envelope-encrypted staged
   secrets + encrypted run-state), full role-based RBAC, automated retention/purge
   policy, SIEM/log-export integrations, and a
   **Bedrock-backed `RuntimeAdapter`** (keeps the model call inside a customer's
   AWS BAA boundary). All additive via existing seams. The SOC2 audit / HIPAA risk
-  assessment themselves are organizational process, not software.
+  assessment themselves are organizational process, not software. **[seam free ·
+  impl Enterprise]** — the encryption/anchor/runtime seams are open; packaged
+  RBAC, SSO, retention/purge, attestation/evidence-export, and SIEM/log-export
+  tooling are Enterprise modules.
 - **`WitnessAnchor` audit tier** — pushes the audit root to a cross-org witness
   (RFC 3161 TSA / transparency log) for customers who won't trust even their own
-  WORM admin. Additive third tier above `external-immutable`.
+  WORM admin. Additive third tier above `external-immutable`. **[seam free · impl
+  Enterprise]** — the anchor seam is open; a managed witness/transparency-log
+  implementation is an Enterprise module.
 
 ---
 

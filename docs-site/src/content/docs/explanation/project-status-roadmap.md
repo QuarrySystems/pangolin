@@ -89,6 +89,19 @@ interface is provided; you implement it).
 
 A strict superset of V1; nothing below changes what V1 ships.
 
+:::note[Seam vs. implementation (open-core)]
+Several items below — the `Authorizer` seam, the enterprise compliance layer, and
+the `WitnessAnchor` tier — ship the *extension point* in the open engine while
+their *production implementation* (packaged RBAC, SSO,
+retention/attestation/evidence-export, a managed witness tier) is an **Enterprise
+module**, distributed separately under a commercial license. The engine runs fully
+standalone without them — that is the point of the seams. Items carrying this
+split are tagged **[seam free · impl Enterprise]**.
+:::
+
+- **`cron` trigger** — recurring scheduling via the existing `Trigger` seam.
+  `serve` + manual `submit` already delivers *unattended* offload; `cron` adds
+  *recurring*. **First item to pull into V1.1.**
 - **Operationalize the `dev` pack** — the `dev.code-edit` / `dev.verify` shapes and
   the `PackRegistry` already exist in code (see "Now"), but aren't dispatchable yet:
   pin the real worker-image digest (currently a `PLACEHOLDER`) and enforce each
@@ -109,15 +122,20 @@ A strict superset of V1; nothing below changes what V1 ships.
   `read-impure`, gate `write-impure` intents through interpreter policy.
 - **`Authorizer` seam** — implementor-filled authorization policy at the existing
   operations-API chokepoint. V1 is single-operator ("whoever launched").
+  **[seam free · impl Enterprise]** — the seam is open; a packaged role-based-access
+  implementation is an Enterprise module.
 - **Compliance deepening** — extend customer-managed encryption **beyond S3
   objects** (S3 SSE/SSE-KMS already ships; deferred: envelope-encrypted staged
   secrets + encrypted run-state), full role-based RBAC, automated retention/purge,
   SIEM/log-export, and a
   **Bedrock-backed `RuntimeAdapter`** (keeps the model call inside a customer's AWS
-  BAA boundary). All additive via existing seams.
+  BAA boundary). All additive via existing seams. **[seam free · impl Enterprise]**
+  — the encryption/anchor/runtime seams are open; packaged RBAC, SSO, retention/purge,
+  attestation/evidence-export, and SIEM/log-export tooling are Enterprise modules.
 - **`WitnessAnchor` audit tier** — pushes the audit root to a cross-org witness
   (RFC 3161 TSA / transparency log); an additive third tier above
-  `external-immutable`.
+  `external-immutable`. **[seam free · impl Enterprise]** — the anchor seam is open;
+  a managed witness/transparency-log implementation is an Enterprise module.
 
 ## Later — branches (pulled when a use case needs them)
 
