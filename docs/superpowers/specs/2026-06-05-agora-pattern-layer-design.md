@@ -167,7 +167,9 @@ export interface PatternContext {
 
 export interface Pattern {
   id: string;                                   // 'static-dag' | 'map-reduce' | 'pipeline'
-  /** Expand/normalize a submission BEFORE validateRun. Pure. Identity for static-DAG. */
+  /** Expand/normalize a submission BEFORE validateRun. Pure. Identity for static-DAG.
+   *  MAY throw a descriptive Error on malformed pattern config (e.g. bad inputs.mapReduce);
+   *  submitRun surfaces it like a validation failure — before saveRun, so the store stays clean. */
   plan(run: Run): Run;
   /** Called AT LEAST ONCE per terminal item of an unsealed run, every tick until the run
    *  seals. MUST be pure and idempotent: deterministic spawn ids; same inputs → same
@@ -206,8 +208,10 @@ Semantics, in order:
 1. **Idempotency by id-skip** (the cron-dedup posture, item-granular): drop any item whose
    namespaced id already exists in the store. All dropped → no-op, no audit entry. This is what
    makes `onTaskDone` replay-safe.
-2. **Validate the merged graph**: `validateRun` over existing items (as immutable facts) ∪ new
-   items. New items may `depends_on`/`needs` existing items **including `done` ones** —
+2. **Normalize + validate the merged graph**: `normalizeRun` over the new items (auto-union
+   `needs[*].from` into `depends_on`, exactly as at submit), then `validateRun` over existing
+   items (as immutable facts) ∪ new items. New items may `depends_on`/`needs` existing items
+   **including `done` ones** —
    resolve-at-fire reads their refs identically whether the consumer was submitted or spawned.
    Acyclicity is structural: existing items are never mutated, so new edges only point backward.
    Reject → the *spawn* fails (logged via `onError`-style best-effort, run unharmed), never a
@@ -309,14 +313,24 @@ inputs.gate = {
   with `spawn-fix` triggers the same spawn, minus the cascade (its downstream proceeds — that is
   what report-only means; authors who want holding-back semantics make the gate fail).
 - **`spawn-fix`** applies a substitution map over the failed lineage. Spawn
-  `<gate>-fix-<n>` (from `fixTemplate`; `needs` = subject's product + the gate's findings
-  `outputRefs`), then copies of the gate and each skipped descendant with ids suffixed `~<n+1>`,
-  every copied `depends_on`/`needs.from` mapped through
+  `<gate>-fix-<n>` (from `fixTemplate`), then copies of the gate and each skipped descendant
+  with ids suffixed `~<n+1>`, every copied `depends_on`/`needs.from` mapped through
   `S = { subject → fix, gate → gate~next, each skipped d → d~next }` (identity otherwise).
   Implemented as a shared pure helper `respawnLineage()` in `patterns/` — map-reduce can reuse
   it later for map remediation.
-- Bounded by `maxFixAttempts` (default 1); `maxItemsPerRun` is the engine-side fuse behind it.
-  All ids deterministic → replay-safe.
+- **What the fix item consumes.** Its `needs` binds the subject's product (subject is `done`,
+  so closure holds). The gate's findings `outputRefs` bind **only in the done-but-red case** —
+  a *failed* gate has no `outputRefs` (`tick.ts` persists them on `done` only) and provenance
+  closure only admits `done` producers; for failed gates the failure `reason` (ItemState.reason)
+  is threaded into the fix's plain `inputs` as data, not as a ref.
+- **Attempt numbering derives from the cause, never from counting.** The cause item's id
+  carries its attempt (`review` = attempt 1, `review~2` = attempt 2): `onTaskDone(review
+  failed)` spawns exactly `{review-fix-1, review~2, …}`; `onTaskDone(review~2 failed)` spawns
+  exactly `{review-fix-2, review~3, …}`. Deterministic per cause → replay re-derives the same
+  ids → id-skip. (Counting existing fix items would break idempotency: replay after `fix-1`
+  exists would mint `fix-2`.)
+- Bounded by `maxFixAttempts` (default 1): when the cause's attempt exceeds it, spawn nothing —
+  the run settles failed. `maxItemsPerRun` is the engine-side fuse behind it.
 
 ```
  BEFORE (tick N)                            AFTER pattern phase (same tick)
@@ -324,8 +338,8 @@ inputs.gate = {
  implement ──► review ──► package                 review→review~2, package→package~2 }
    done        FAILED      skipped
     │            │  (engine retry exhausted; implement   review-fix-1 ◄─ consumes implement's
-    │            │   computeSkipped cascaded)   done ───► (fix)          patch + review's
-    │            │                               │          │            findings outputRefs
+    │            │   computeSkipped cascaded)   done ───► (fix)          patch; review's failure
+    │            │                               │          │            reason rides fix inputs
     │            └── onTaskDone(review failed,   │          ▼
     │                gate: spawn-fix, subject:   │       review~2   ◄─ gates the FIX's product
     │                implement) ─────────────►   │          │          (needs remapped via S)
@@ -346,8 +360,11 @@ replay-safe because `inputs` is already persisted and immutable):
 
 ```typescript
 inputs.mapReduce = {
-  map:    { executor, inputs, subagentShape?, needsKey? },   // template; needsKey default 'input'
-  reduce: { executor, inputs, subagentShape?, keyPrefix? },  // template; keyPrefix default 'part'
+  map:    { executor, inputs, subagentShape?,
+            needsKey?,      // input key each map's needs binding uses; default 'input'
+            outputPath? },  // outputs/ path each map writes its product to; default 'result'
+  reduce: { executor, inputs, subagentShape?,
+            keyPrefix? },   // reduce needs-key prefix; default 'part'
 }
 ```
 
@@ -357,9 +374,10 @@ inputs.mapReduce = {
   `needs: { [needsKey]: { from: splitter, select: { kind: 'output', path: key } } }`.
 - `onTaskDone(any map terminal)` → if **all** `map-*` items are `done` and `reduce` does not
   exist → spawn `reduce` with concrete `needs: { '<keyPrefix>-<key>': { from: 'map-<key>',
-  select } }` over all maps. If any map terminally failed: no reduce spawn — the run settles
-  red and the failed map's status tells the story (v1 policy; partial-tolerance config is
-  demand-pulled).
+  select: { kind: 'output', path: map.outputPath } } }` over all maps (the map template's
+  `outputPath` is the contract for what each map produces). If any map terminally failed: no
+  reduce spawn — the run settles red and the failed map's status tells the story (v1 policy;
+  partial-tolerance config is demand-pulled).
 - Everything is derived from `ctx.runItems` by id convention — no pattern state anywhere.
 
 ```
