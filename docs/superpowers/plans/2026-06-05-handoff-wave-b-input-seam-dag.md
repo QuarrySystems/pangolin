@@ -87,8 +87,14 @@ packs-less (structural checks). One pure validator, two callers — the DRY inte
 
 SQLite columns via the idempotent `MIGRATIONS` array; pure decision helpers in `engine/<name>.ts`
 (`dep-resolver`/`lock-manager` pattern) — `tick` orchestrates, helpers decide; new barrel exports must
-update `test/barrel-surface.test.ts`; every test snippet below quotes the REAL harness of the file it
-extends — implementers must follow those harnesses, not invent new ones.
+update `test/barrel-surface.test.ts`; agora:// URIs are parsed with `parseAgoraUri` from agora-core
+(never hand-split); every test snippet below quotes the REAL harness of the file it extends —
+implementers must follow those harnesses, not invent new ones.
+
+Audited for cascade fallout (this session): no test anywhere asserts whole-object equality on
+`bundleRefs` / `BundleRefs` / `FetchedBundles` (all per-field), so the additive `inputs` fields are
+safe; the tick error-path style (`setStatus` + `releaseLocks` + `continue`, even pre-acquire) matches
+the existing `subagentShape` failure block verbatim.
 
 ## Tasks
 
@@ -585,11 +591,15 @@ for the Wave-C manifest. No new env var, no registration, no scanning — pure r
 inputRefs?: Record<string, string>;
 
 // agora-client/src/dispatch.ts:
-// (1) bundleRefs assembly (:183-211) gains:
-//     inputs: Object.entries(work.inputRefs ?? {}).map(([key, uri]) => ({
-//       key, uri, contentHash: 'sha256:' + uri.split('/sha256:')[1],  // hash segment of the pinned URI
-//     })),
-//     — reject (throw) an inputRefs URI that has no sha256 segment: unpinned refs are a caller bug.
+// (1) bundleRefs assembly (:183-211) gains (DRY: parse via the existing agora-core
+//     parseAgoraUri — uri.ts:72 — NEVER hand-split the URI; it also rejects malformed
+//     URIs for free, and AgoraUriParts.contentHash is "present iff pinned"):
+//     inputs: Object.entries(work.inputRefs ?? {}).map(([key, uri]) => {
+//       const { contentHash } = parseAgoraUri(uri); // throws on malformed
+//       if (!contentHash) throw new Error(
+//         `dispatch: inputRefs['${key}'] must be a pinned agora:// URI (missing content hash): ${uri}`);
+//       return { key, uri, contentHash };
+//     }),
 // (2) InFlightDispatch.resolved (:332-341) gains: inputRefs: work.inputRefs ?? {},
 //     and the `resolved` interface (:71-86) gains inputRefs: Record<string, string>;
 ```
@@ -612,9 +622,10 @@ it('threads inputRefs into bundleRefs.inputs with the hash from the pinned URI',
 ## Acceptance criteria
 
 - `bundleRefs.inputs` is `[{ key, uri, contentHash }]` inside `AGORA_BUNDLE_REFS_JSON`; `contentHash`
-  equals the URI's `sha256:` segment; omitted/empty `inputRefs` yields `inputs: []` (old workers
-  tolerate it — additive JSON field).
-- An unpinned URI (no `sha256:` segment) throws a clear error BEFORE the container starts.
+  is extracted via `parseAgoraUri` (no hand-rolled string splitting); omitted/empty `inputRefs` yields
+  `inputs: []` (old workers tolerate it — additive JSON field).
+- An unpinned URI (no contentHash segment) AND a malformed URI each throw a clear error BEFORE the
+  container starts (the malformed case via `parseAgoraUri` itself).
 - `InFlightDispatch.resolved.inputRefs` carries the map verbatim (refs only — for the Wave-C manifest).
 - Existing dispatch/dispatch-fire tests pass unchanged.
 
