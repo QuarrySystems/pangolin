@@ -27,8 +27,9 @@ function anchorOf(root: Uint8Array, guarantee: 'detect' | 'external-immutable' |
     async anchor() {
       return { anchorId: 'fake', epochId: 'r', guarantee, at: 0 };
     },
-    async fetch() {
-      return [{ epochId: 'r', root, receipt: { anchorId: 'fake', epochId: 'r', guarantee, at: 0 } }];
+    async fetch(range?: { epochId?: string }) {
+      const epochId = range?.epochId ?? 'r';
+      return [{ epochId, root, receipt: { anchorId: 'fake', epochId, guarantee, at: 0 } }];
     },
   };
 }
@@ -212,19 +213,14 @@ describe('attachVerifyCmd', () => {
     const program = new Command();
     attachVerifyCmd(program, ctx);
 
-    const prevExitCode = process.exitCode;
-    process.exitCode = undefined;
-    try {
-      const { logs, exitCode } = await captureLog(() =>
-        program.parseAsync(['verify', bundlePath], { from: 'user' }),
-      );
+    // captureLog already saves and restores process.exitCode around the call.
+    const { logs, exitCode } = await captureLog(() =>
+      program.parseAsync(['verify', bundlePath], { from: 'user' }),
+    );
 
-      const output = logs.join('\n');
-      expect(output).toContain('TAMPERED');
-      expect(exitCode).toBe(1);
-    } finally {
-      process.exitCode = prevExitCode;
-    }
+    const output = logs.join('\n');
+    expect(output).toContain('TAMPERED');
+    expect(exitCode).toBe(1);
   });
 
   it('--json flag emits the raw VerificationReport JSON instead of rendered text', async () => {

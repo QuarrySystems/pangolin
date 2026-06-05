@@ -93,32 +93,21 @@ it('detect-tier anchor on an intact bundle returns tamper-detecting', async () =
   expect(r.claim).toBe('tamper-detecting');
 });
 
-it('the anchored root is taken from deps.anchor, not from bundle.auditLog.root', async () => {
-  // Build a tampered bundle where the embedded root has been patched to the "wrong" recomputed value
-  const { bundle, root: originalRoot } = buildSealedBundle();
-
-  // Mutate an entry's actor — chain is now broken
-  bundle.auditLog.entries[0]!.actor = 'attacker';
-
-  // Also overwrite the embedded root in the bundle to match the tampered state
-  // (simulating an attacker who tried to update both the entry AND the embedded root)
-  const tamperedEntries = bundle.auditLog.entries;
-  const tamperedRoot = merkleRoot(
-    leavesFromEntryHashes(tamperedEntries.map((e) => e.entryHash)),
-  );
+it('ignores bundle.auditLog.root — an intact bundle with a garbage embedded root still verifies via the anchor', async () => {
+  // The chain is left INTACT; only the embedded root is corrupted. If verifyBundle trusted the
+  // embedded root it would report a root mismatch. It must pass, because the anchor holds the truth —
+  // which directly proves the embedded root is never consulted.
+  const { bundle, root } = buildSealedBundle();
   bundle.auditLog.root = {
     epochId: 'r',
-    root: tamperedRoot,
+    root: new Uint8Array(32).fill(0xff), // garbage embedded root
     receipt: { anchorId: 'fake', epochId: 'r', guarantee: 'external-immutable', at: 0 },
   };
 
-  // The anchor still holds the ORIGINAL (pre-tamper) root
-  const r = await verifyBundle(bundle, { anchor: anchorOf(originalRoot, 'external-immutable') });
+  const r = await verifyBundle(bundle, { anchor: anchorOf(root, 'external-immutable') });
 
-  // Verification must fail — the bundle's embedded root is not trusted
-  expect(r.intact).toBe(false);
-  // Chain check fails because the entry hash no longer matches its (unchanged) entryHash field
-  expect(r.checks.chain.ok).toBe(false);
+  expect(r.intact).toBe(true); // embedded garbage ignored; the anchored root is authoritative
+  expect(r.checks.root.ok).toBe(true);
 });
 
 it('a root-mismatch is detected when recomputed root differs from the anchored one', async () => {

@@ -136,7 +136,7 @@ describe('agora-cli integration', () => {
     vi.restoreAllMocks();
   });
 
-  it('composes the full subcommand surface (capabilities, subagent, env, dispatch, deploy, orch)', () => {
+  it('composes the full subcommand surface (capabilities, subagent, env, dispatch, deploy, orch, verify)', () => {
     const fake = makeFakeClient();
     const program = buildAll(fake);
     const names = program.commands.map((c) => c.name()).sort();

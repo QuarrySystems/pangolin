@@ -10,7 +10,12 @@ export function attachVerifyCmd(program: Command, ctx: CliContext): void {
     .option('--json', 'emit the raw VerificationReport as JSON')
     .option('--full', 'print every ledger row')
     .action(async (file: string, opts: { json?: boolean; full?: boolean }) => {
-      const bundle = JSON.parse(await readFile(file, 'utf8'));
+      let bundle: any;
+      try {
+        bundle = JSON.parse(await readFile(file, 'utf8'));
+      } catch (err) {
+        throw new Error(`agora verify: cannot read bundle at '${file}': ${(err as Error).message}`);
+      }
       const { anchor, verifySignature } = await ctx.getOrchContext();
       if (!anchor) {
         throw new Error('agora verify: agora.config `orch` export provides no anchor');

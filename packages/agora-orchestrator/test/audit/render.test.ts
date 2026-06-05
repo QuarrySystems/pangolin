@@ -11,7 +11,7 @@ function makeEntry(seq: number, overrides: Partial<AuditEntryRow> = {}): AuditEn
     runId: 'run-test',
     seq,
     kind: 'run.submitted',
-    at: `2026-06-04T00:0${seq}:00Z`,
+    at: `2026-06-04T00:${String(seq).padStart(2, '0')}:00Z`,
     entryHash: `hash${seq}`.padEnd(64, '0'),
     prevHash: seq === 0 ? '' : `hash${seq - 1}`.padEnd(64, '0'),
     ...overrides,
@@ -106,6 +106,18 @@ describe('color: false → no ANSI escape sequences', () => {
   it('tampered bundle also has no ANSI codes when color is false', () => {
     const out = renderVerification(tamperedBundle(), { color: false });
     expect(out).not.toMatch(/\x1b\[/);
+  });
+});
+
+describe('color: true → ANSI escape sequences', () => {
+  it('wraps the green verdict in ANSI when color is true', () => {
+    const out = renderVerification(greenBundle(), { color: true });
+    expect(out).toMatch(/\x1b\[/);
+  });
+
+  it('wraps the TAMPERED verdict in ANSI when color is true', () => {
+    const out = renderVerification(tamperedBundle(), { color: true });
+    expect(out).toMatch(/\x1b\[/);
   });
 });
 
