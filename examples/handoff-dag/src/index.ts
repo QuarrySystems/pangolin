@@ -14,6 +14,7 @@
 import { readFile, mkdtemp, mkdir, rm } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { APPLY_PATCH_SETUP_SH } from './capabilities.js';
 import {
   AgoraClient,
   NoopCredentialProvider,
@@ -98,7 +99,7 @@ async function main(): Promise<void> {
     await client.capabilities.register({
       name: 'handoff-cap-apply',
       files: {
-        'agora-setup.sh': '#!/bin/sh\nset -e\ngit apply inputs/patch.diff\n',
+        'agora-setup.sh': APPLY_PATCH_SETUP_SH,
       },
     });
 
@@ -200,32 +201,38 @@ async function main(): Promise<void> {
     console.log('\n=== Audit bundle + handoff verification ===');
     let proofOk = false;
     try {
-      // Poll for the audit export (published after epoch seal).
-      let rawBundle: Awaited<ReturnType<typeof api.audit>> | undefined;
-      for (let i = 0; i < 15; i++) {
-        try {
-          rawBundle = await api.audit(runId);
-          break;
-        } catch (e) {
-          const msg = e instanceof Error ? e.message : String(e);
-          if (i === 14 || !/no audit export/.test(msg)) throw e;
-          await new Promise((r) => setTimeout(r, 1000));
+      if (watchAc.signal.aborted) {
+        // Timeout fired — ac.abort() already stopped the serve loop so the
+        // audit export will never arrive.  Skip the retry loop entirely.
+        console.error('  timed out before audit export');
+      } else {
+        // Poll for the audit export (published after epoch seal).
+        let rawBundle: Awaited<ReturnType<typeof api.audit>> | undefined;
+        for (let i = 0; i < 15; i++) {
+          try {
+            rawBundle = await api.audit(runId);
+            break;
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            if (i === 14 || !/no audit export/.test(msg)) throw e;
+            await new Promise((r) => setTimeout(r, 1000));
+          }
         }
-      }
-      if (!rawBundle) throw new Error('audit export never became available');
+        if (!rawBundle) throw new Error('audit export never became available');
 
-      // verifyBundle adds the handoff closure check on top of chain/anchor/root.
-      const report = await verifyBundle(rawBundle, { anchor, verifySignature });
-      console.log(`  intact:           ${report.intact}`);
-      console.log(`  claim:            ${report.claim}`);
-      console.log(`  anchorId:         ${report.anchorId ?? '(none)'}`);
-      console.log(`  guarantee:        ${report.guarantee}`);
-      console.log(`  checks.chain:     ${JSON.stringify(report.checks.chain)}`);
-      console.log(`  checks.root:      ${JSON.stringify(report.checks.root)}`);
-      console.log(`  checks.handoff:   ${JSON.stringify(report.checks.handoff)}`);
-      if (report.failure) console.log(`  failure:          ${report.failure}`);
-      if (report.intact && report.checks.handoff.ok === true) {
-        proofOk = true;
+        // verifyBundle adds the handoff closure check on top of chain/anchor/root.
+        const report = await verifyBundle(rawBundle, { anchor, verifySignature });
+        console.log(`  intact:           ${report.intact}`);
+        console.log(`  claim:            ${report.claim}`);
+        console.log(`  anchorId:         ${report.anchorId ?? '(none)'}`);
+        console.log(`  guarantee:        ${report.guarantee}`);
+        console.log(`  checks.chain:     ${JSON.stringify(report.checks.chain)}`);
+        console.log(`  checks.root:      ${JSON.stringify(report.checks.root)}`);
+        console.log(`  checks.handoff:   ${JSON.stringify(report.checks.handoff)}`);
+        if (report.failure) console.log(`  failure:          ${report.failure}`);
+        if (report.intact && report.checks.handoff.ok === true) {
+          proofOk = true;
+        }
       }
     } catch (err) {
       console.error('  audit/verify failed:', err);

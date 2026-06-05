@@ -12,6 +12,7 @@ import { readFile, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { APPLY_PATCH_SETUP_SH } from '../src/capabilities.js';
 import {
   AgoraOrchestrator,
   SqliteRunStateStore,
@@ -35,6 +36,16 @@ const PLAN_PATH = resolve(__dirname, '../plan.json');
 // ---------------------------------------------------------------------------
 
 describe('handoff-dag example', () => {
+  it('apply-patch setup script initializes git repo before applying the patch', () => {
+    // The worker workspace is a fresh mkdtemp'd directory — not a git repo.
+    // agora-setup.sh must run `git init` before `git apply`, otherwise `git apply`
+    // exits non-zero and the worker fails.
+    expect(APPLY_PATCH_SETUP_SH).toContain('git init');
+    const initIdx = APPLY_PATCH_SETUP_SH.indexOf('git init');
+    const applyIdx = APPLY_PATCH_SETUP_SH.indexOf('git apply');
+    expect(applyIdx).toBeGreaterThan(initIdx);
+  });
+
   it('plan.json declares the edit item and apply-patch item with needs only (no hand-written depends_on on apply-patch)', async () => {
     const raw = await readFile(PLAN_PATH, 'utf-8');
     const plan = JSON.parse(raw) as Run;

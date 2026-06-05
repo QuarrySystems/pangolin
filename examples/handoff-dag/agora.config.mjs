@@ -30,9 +30,10 @@ import {
 } from '@quarry-systems/agora-orchestrator';
 
 // ---------------------------------------------------------------------------
-// Path setup — use stable per-host dirs so containers can bind-mount them.
-// The db path is process-unique to avoid SQLITE_BUSY on concurrent/repeat
-// imports from parallel CLI invocations.
+// Path setup — rootDir/secretDir/mailboxDir use stable per-host paths so
+// containers can bind-mount them across CLI invocations (intentional; matches
+// offload-fanout template).  dbPath is PID-qualified to avoid SQLITE_BUSY
+// when multiple CLI invocations run concurrently (each gets its own DB file).
 // ---------------------------------------------------------------------------
 const rootDir = join(tmpdir(), 'agora-handoff-storage');
 const secretDir = join(tmpdir(), 'agora-handoff-secrets');
