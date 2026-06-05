@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import { readFile, writeFile } from 'node:fs/promises';
 import { userInfo } from 'node:os';
 import { OperationsApi, nextDueAfter, validateRun, normalizeRun } from '@quarry-systems/agora-orchestrator';
-import type { SubmissionTransport, ControlChannel, AuditAnchor, Signature, ScheduleStore, Schedule } from '@quarry-systems/agora-orchestrator';
+import type { SubmissionTransport, ControlChannel, AuditAnchor, Signature, ScheduleStore, Schedule, Run } from '@quarry-systems/agora-orchestrator';
 import type { CliContext } from './index.js';
 
 /** Config-owned operator wiring. Client verbs use transport(+anchor/storage); `serve` uses runService. */
@@ -28,14 +28,22 @@ export function attachOrchCmd(program: Command, ctx: CliContext): void {
   });
 
   o.command('validate <plan.json>').description('Statically validate a run plan (structure, edges, cycles)').action(async (file) => {
-    const run = JSON.parse(await readFile(file, 'utf8'));
-    const errors = validateRun(normalizeRun(run));
+    let run: unknown;
+    try {
+      run = JSON.parse(await readFile(file, 'utf8'));
+    } catch (err) {
+      console.error(`validate: cannot read plan — ${(err as Error).message}`);
+      process.exitCode = 1;
+      return;
+    }
+    const normalized = normalizeRun(run as Run);
+    const errors = validateRun(normalized);
     if (errors.length) {
       for (const e of errors) console.error(e);
       process.exitCode = 1;
       return;
     }
-    console.log(JSON.stringify({ valid: true, items: run.items.length }));
+    console.log(JSON.stringify({ valid: true, items: normalized.items.length }));
   });
 
   o.command('status [run-id]').action(async (runId) => {

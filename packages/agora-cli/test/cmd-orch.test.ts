@@ -505,13 +505,23 @@ describe('attachOrchCmd', () => {
 
   describe('validate', () => {
     let tmpDir: string;
+    let savedExitCode: typeof process.exitCode;
+    let stderrLines: string[];
+    let origError: typeof console.error;
 
     beforeEach(async () => {
       tmpDir = await mkdtemp(join(tmpdir(), 'agora-cli-validate-'));
+      savedExitCode = process.exitCode;
+      process.exitCode = undefined;
+      stderrLines = [];
+      origError = console.error;
+      console.error = vi.fn((...args: unknown[]) => stderrLines.push(args.map(String).join(' ')));
     });
 
     afterEach(async () => {
       await rm(tmpDir, { recursive: true, force: true });
+      process.exitCode = savedExitCode;
+      console.error = origError;
     });
 
     it('prints valid:true for a well-formed plan and makes no transport calls', async () => {
@@ -529,6 +539,7 @@ describe('attachOrchCmd', () => {
       expect(JSON.parse(logs[0]).valid).toBe(true);
       expect(JSON.parse(logs[0]).items).toBe(1);
       expect(transport._submissions).toHaveLength(0);
+      expect(process.exitCode).not.toBe(1);
     });
 
     it('reports each error on stderr and sets exitCode = 1 for an invalid plan (unknown dep)', async () => {
@@ -543,22 +554,11 @@ describe('attachOrchCmd', () => {
       const program = new Command();
       attachOrchCmd(program, ctx);
 
-      const stderrLines: string[] = [];
-      const origError = console.error;
-      console.error = vi.fn((...args: unknown[]) => stderrLines.push(args.map(String).join(' ')));
-
-      const prevExitCode = process.exitCode;
-      process.exitCode = undefined;
-      try {
-        await program.parseAsync(['orch', 'validate', planPath], { from: 'user' });
-        expect(process.exitCode).toBe(1);
-        expect(stderrLines.length).toBeGreaterThan(0);
-        expect(stderrLines[0]).toContain('missing-item');
-        expect(transport._submissions).toHaveLength(0);
-      } finally {
-        console.error = origError;
-        process.exitCode = prevExitCode;
-      }
+      await program.parseAsync(['orch', 'validate', planPath], { from: 'user' });
+      expect(process.exitCode).toBe(1);
+      expect(stderrLines.length).toBeGreaterThan(0);
+      expect(stderrLines[0]).toContain('missing-item');
+      expect(transport._submissions).toHaveLength(0);
     });
 
     it('reports a cycle error on stderr and sets exitCode = 1', async () => {
@@ -576,22 +576,42 @@ describe('attachOrchCmd', () => {
       const program = new Command();
       attachOrchCmd(program, ctx);
 
-      const stderrLines: string[] = [];
-      const origError = console.error;
-      console.error = vi.fn((...args: unknown[]) => stderrLines.push(args.map(String).join(' ')));
+      await program.parseAsync(['orch', 'validate', planPath], { from: 'user' });
+      expect(process.exitCode).toBe(1);
+      expect(stderrLines.length).toBeGreaterThan(0);
+      expect(stderrLines.some((l) => l.includes('cycle'))).toBe(true);
+      expect(transport._submissions).toHaveLength(0);
+    });
 
-      const prevExitCode = process.exitCode;
-      process.exitCode = undefined;
-      try {
-        await program.parseAsync(['orch', 'validate', planPath], { from: 'user' });
-        expect(process.exitCode).toBe(1);
-        expect(stderrLines.length).toBeGreaterThan(0);
-        expect(stderrLines.some((l) => l.includes('cycle'))).toBe(true);
-        expect(transport._submissions).toHaveLength(0);
-      } finally {
-        console.error = origError;
-        process.exitCode = prevExitCode;
-      }
+    it('prints "validate: cannot read plan" to stderr and sets exitCode = 1 for a missing file', async () => {
+      const transport = makeFakeTransport();
+      const ctx = makeCtx(makeOrchContext({ transport }));
+      const missingPath = join(tmpDir, 'nonexistent.json');
+
+      const program = new Command();
+      attachOrchCmd(program, ctx);
+
+      await program.parseAsync(['orch', 'validate', missingPath], { from: 'user' });
+      expect(process.exitCode).toBe(1);
+      expect(stderrLines.length).toBeGreaterThan(0);
+      expect(stderrLines[0]).toContain('validate: cannot read plan');
+      expect(transport._submissions).toHaveLength(0);
+    });
+
+    it('prints "validate: cannot read plan" to stderr and sets exitCode = 1 for an invalid JSON file', async () => {
+      const transport = makeFakeTransport();
+      const ctx = makeCtx(makeOrchContext({ transport }));
+      const badJsonPath = join(tmpDir, 'bad.json');
+      await writeFile(badJsonPath, '{ not valid json !!!');
+
+      const program = new Command();
+      attachOrchCmd(program, ctx);
+
+      await program.parseAsync(['orch', 'validate', badJsonPath], { from: 'user' });
+      expect(process.exitCode).toBe(1);
+      expect(stderrLines.length).toBeGreaterThan(0);
+      expect(stderrLines[0]).toContain('validate: cannot read plan');
+      expect(transport._submissions).toHaveLength(0);
     });
   });
 });
