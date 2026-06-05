@@ -594,6 +594,8 @@ describe('runWorker', () => {
     const sentinelUri = buildDispatchRecordUri('ns', 'd-1', 'output.json');
     const parsed = JSON.parse(new TextDecoder().decode(await h.storage.get(sentinelUri)));
     expect(parsed.outputs).toEqual([{ path: 'report.txt', ref: expect.stringMatching(/^agora:\/\//) }]);
+    const refBytes = await h.storage.get(parsed.outputs[0].ref);
+    expect(new TextDecoder().decode(refBytes)).toBe('done');
   });
 
   it('logs escape.failed and still succeeds with no outputs key when captureOutputs throws', async () => {
