@@ -146,7 +146,7 @@ export class DispatchExecutor implements Executor {
       const MAX_SENTINEL_OUTPUTS = 256;
       const o = sentinel.outputs;
       if (Array.isArray(o)) {
-        const outputRefs: Record<string, string> = {};
+        const outputRefs = Object.create(null) as Record<string, string>;
         for (const e of o.slice(0, MAX_SENTINEL_OUTPUTS)) {
           if (e && typeof e.path === 'string' && typeof e.ref === 'string') {
             outputRefs[e.path] = e.ref;

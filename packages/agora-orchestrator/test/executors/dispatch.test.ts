@@ -714,6 +714,61 @@ describe('DispatchExecutor', () => {
     expect(res?.outputRefs).toBeUndefined();
   });
 
+  it('sentinel outputs with prototype-polluting path keys are handled safely', async () => {
+    const { compute, resolveExit } = makeDeferredCompute();
+    const storage = makeMemoryStorage();
+    storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
+    const client = new AgoraClient({
+      namespace: 'ns',
+      compute: { default: compute },
+      credentials: { default: makeCredentials() },
+      storage,
+      targets: { prod: { compute: 'default', credentials: 'default' } },
+    });
+    const executor = new DispatchExecutor({ client, target: 'prod', workerImage: 'img' });
+
+    const { dispatchHash } = await executor.fire(baseItem);
+
+    const sentinelUri = buildDispatchRecordUri('ns', dispatchHash, 'output.json');
+    const validRef = 'agora://ns/artifact/d/sha256:' + 'd'.repeat(64);
+    await storage.put(sentinelUri, new TextEncoder().encode(JSON.stringify({
+      schemaVersion: 1,
+      outputs: [
+        { path: '__proto__', ref: 'agora://ns/artifact/d/sha256:' + 'e'.repeat(64) },
+        { path: 'constructor', ref: 'agora://ns/artifact/d/sha256:' + 'f'.repeat(64) },
+        { path: 'ok.txt', ref: validRef },
+      ],
+    })));
+
+    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+    await new Promise((r) => setImmediate(r));
+
+    const res = await executor.reconcile(dispatchHash);
+    expect(res?.status).toBe('done');
+
+    // Object.keys must work and contain the expected own-data property keys
+    const keys = Object.keys(res!.outputRefs!);
+    expect(keys).toContain('ok.txt');
+
+    // Nothing leaked onto Object.prototype — a fresh plain object must have no injected property
+    expect((({}) as Record<string, unknown>).__proto__).toBe(Object.prototype); // structural sanity
+    expect((({}) as Record<string, unknown>).polluted).toBeUndefined();
+    // The outputRefs accumulator was built with Object.create(null) — keys that look like
+    // prototype slot names are stored as own data properties, not as prototype mutations
+    if ('__proto__' in res!.outputRefs! || 'constructor' in res!.outputRefs!) {
+      // If the dangerous keys were stored, they must be own properties, not prototype
+      const outputRefs = res!.outputRefs!;
+      if ('__proto__' in outputRefs) {
+        expect(Object.prototype.hasOwnProperty.call(outputRefs, '__proto__')).toBe(true);
+      }
+      if ('constructor' in outputRefs) {
+        expect(Object.prototype.hasOwnProperty.call(outputRefs, 'constructor')).toBe(true);
+      }
+    }
+    // The plain Object prototype must be untouched
+    expect(Object.prototype.hasOwnProperty.call(Object.prototype, 'polluted')).toBe(false);
+  });
+
   it('reconcile with absent outputs field yields no outputRefs field', async () => {
     const { compute, resolveExit } = makeDeferredCompute();
     const storage = makeMemoryStorage();
