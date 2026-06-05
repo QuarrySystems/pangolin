@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import type { AuditBundle, AuditAnchor, AuditEntryRow, AnchoredRoot } from '../../src/contracts/index.js';
+import type { AuditBundle, AuditAnchor, AuditEntryRow, AnchoredRoot, DispatchManifest } from '../../src/contracts/index.js';
 import { canonEntry } from '../../src/audit/canon.js';
 import { chainHash, merkleRoot, leavesFromEntryHashes } from '../../src/audit/merkle.js';
 import { verifyBundle } from '../../src/audit/verify-bundle.js';
@@ -60,11 +60,34 @@ function buildSealedBundle(runId: string = 'r'): { bundle: AuditBundle; root: Ui
         root: { ok: true },
         signature: { ok: 'n/a' },
         anchor: { ok: true },
+        handoff: { ok: 'n/a' },
       },
     },
   };
   return { bundle, root };
 }
+
+/** Build a minimal DispatchManifest with optional inputRefs. */
+function manifestFor(itemId: string, inputRefs: Record<string, string> = {}): DispatchManifest {
+  return {
+    schemaVersion: 1,
+    runId: 'r',
+    itemId,
+    parent: 'run:r',
+    executor: 'dispatch',
+    executorManifest: {},
+    secretRefs: [],
+    actor: 'human:test',
+    firedAt: 't0',
+    manifestHash: 'sha256:dummy',
+    inputRefs: Object.keys(inputRefs).length > 0 ? inputRefs : undefined,
+  };
+}
+
+// Stable fake refs for tests
+const REF_A = 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+const REF_O = 'sha256:oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo';
+const REF_GHOST = 'sha256:deaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddead';
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -152,4 +175,89 @@ it('a bad verifySignature causes intact to be false', async () => {
   const r = await verifyBundle(bundle, { anchor: anchorWithSig, verifySignature: () => false });
   expect(r.intact).toBe(false);
   expect(r.failure).toBe('signature');
+});
+
+// ---------------------------------------------------------------------------
+// Handoff closure tests (spec §7)
+// ---------------------------------------------------------------------------
+
+it('bundle with no manifests (zero inputRefs) reports handoff ok: true, no handoff edges', async () => {
+  const { bundle, root } = buildSealedBundle();
+  // manifests: [] (default) — zero handoff edges
+  const r = await verifyBundle(bundle, { anchor: anchorOf(root) });
+  expect(r.checks.handoff).toEqual({ ok: true, detail: 'no handoff edges' });
+  expect(r.intact).toBe(true);
+  expect(r.claim).toBe('tamper-evident');
+});
+
+it('handoff passes when every consumed inputRef matches a resultRef of a sealed item', async () => {
+  const { bundle, root } = buildSealedBundle('r');
+  bundle.items = [
+    { id: 'a', status: 'done', resultRef: REF_A },
+    { id: 'b', status: 'done' },
+  ];
+  bundle.manifests = [manifestFor('b', { patch: REF_A })];
+  const r = await verifyBundle(bundle, { anchor: anchorOf(root) });
+  expect(r.checks.handoff).toEqual({ ok: true, detail: '1 input ref accounted for' });
+  expect(r.intact).toBe(true);
+});
+
+it('handoff fails closed on an unaccounted input ref', async () => {
+  const { bundle, root } = buildSealedBundle('r');
+  bundle.items = [{ id: 'a', status: 'done' }];
+  bundle.manifests = [manifestFor('b', { patch: REF_GHOST })];
+  const r = await verifyBundle(bundle, { anchor: anchorOf(root) });
+  expect(r.checks.handoff).toEqual({
+    ok: false,
+    detail: `item b input patch: ${REF_GHOST} not produced by any item in this run`,
+  });
+  expect(r.intact).toBe(false);
+  expect(r.failure).toBe('handoff');
+});
+
+it('outputRefs products also satisfy the handoff closure', async () => {
+  const { bundle, root } = buildSealedBundle('r');
+  bundle.items = [
+    { id: 'a', status: 'done', outputRefs: { 'data.bin': REF_O } },
+    { id: 'b', status: 'done' },
+  ];
+  bundle.manifests = [manifestFor('b', { data: REF_O })];
+  const r = await verifyBundle(bundle, { anchor: anchorOf(root) });
+  expect(r.checks.handoff).toEqual({ ok: true, detail: '1 input ref accounted for' });
+  expect(r.intact).toBe(true);
+});
+
+it('multiple inputRefs accounted for yields plural detail message', async () => {
+  const { bundle, root } = buildSealedBundle('r');
+  bundle.items = [
+    { id: 'a', status: 'done', resultRef: REF_A },
+    { id: 'b', status: 'done', outputRefs: { 'data.bin': REF_O } },
+  ];
+  bundle.manifests = [
+    manifestFor('c', { patch: REF_A, data: REF_O }),
+  ];
+  const r = await verifyBundle(bundle, { anchor: anchorOf(root) });
+  expect(r.checks.handoff).toEqual({ ok: true, detail: '2 input refs accounted for' });
+  expect(r.intact).toBe(true);
+});
+
+it('a tampered chain AND broken closure reports failure === chain (earlier check wins)', async () => {
+  const { bundle, root } = buildSealedBundle('r');
+  // Tamper the chain
+  bundle.auditLog.entries[0]!.actor = 'attacker';
+  // Add a broken closure on top
+  bundle.items = [{ id: 'a', status: 'done' }];
+  bundle.manifests = [manifestFor('b', { patch: REF_GHOST })];
+  const r = await verifyBundle(bundle, { anchor: anchorOf(root) });
+  expect(r.failure).toBe('chain');
+  expect(r.intact).toBe(false);
+});
+
+it('handoff failure cannot yield tamper-evident claim', async () => {
+  const { bundle, root } = buildSealedBundle('r');
+  bundle.items = [{ id: 'a', status: 'done' }];
+  bundle.manifests = [manifestFor('b', { patch: REF_GHOST })];
+  const r = await verifyBundle(bundle, { anchor: anchorOf(root) });
+  // claim must be tamper-detecting (never tamper-evident) because intact is false
+  expect(r.claim).toBe('tamper-detecting');
 });
