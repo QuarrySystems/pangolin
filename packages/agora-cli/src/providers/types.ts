@@ -14,12 +14,20 @@
 //   - The shared frontmatter helper in src/frontmatter.ts (one concern)
 // and makes adding a second provider a single new file under providers/.
 
+import type { VerifyConfig } from '@quarry-systems/agora-client';
+
 export interface SubagentDef {
   name: string;
   systemPrompt?: string;
   promptTemplate?: string;
   model?: string;
   capabilities?: string[];
+  /**
+   * Optional self-verify command (Gap A) — a language-agnostic shell command
+   * (`dotnet test`, `cargo test`, `pytest`, `tsc && vitest`, …) the worker
+   * runs over its edit, sealing pass/fail into the output sentinel.
+   */
+  verify?: VerifyConfig;
 }
 
 export interface CapabilityBundle {

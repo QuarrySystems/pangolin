@@ -13,6 +13,9 @@ export {
   type DispatchRetentionConfig,
 } from './client.js';
 
+// ── Self-verify config (re-exported from agora-core for consumers) ─────────
+export type { VerifyConfig } from '@quarry-systems/agora-core';
+
 // ── Credential-pattern scanner ─────────────────────────────────────────────
 export {
   assertNoCredentialPattern,

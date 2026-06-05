@@ -52,6 +52,7 @@ export async function tick(
       } else {
         store.setStatus(it.id, res.status, res.status === 'failed' ? 'executor reported failed' : undefined);
         if (res.status === 'done' && res.resultRef) store.setResultRef(it.id, res.resultRef);
+        if (res.status === 'done' && res.verify) store.setVerify(it.id, res.verify);
         store.releaseLocks(it.id);
         if (res.status === 'done') {
           audit({ kind: 'item.reconciled', runId: it.runId, itemId: deNs(it.id), status: 'done', ...(res.resultRef ? { resultRef: res.resultRef } : {}), at: auditAt });

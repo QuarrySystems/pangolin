@@ -77,7 +77,12 @@ import {
 import { LifecycleEmitter } from './lifecycle.js';
 import { StructuredLogger } from './logger.js';
 import { captureBaseline, type WorkspaceBaseline } from './patch-capture.js';
-import { escapeWorkspace } from './output-sentinel.js';
+import { capturePatch, writeSentinel } from './output-sentinel.js';
+import { runVerify } from './verify.js';
+import type { VerifyOutcome, VerifyConfig } from '@quarry-systems/agora-core';
+
+/** Default ceiling for the self-verify command (install + build + test). */
+const DEFAULT_VERIFY_TIMEOUT_SECONDS = 600;
 
 /**
  * Injection seam for tests. Every field is optional; production callers
@@ -421,6 +426,7 @@ export async function runWorker(
     systemPrompt?: string;
     promptTemplate?: string;
     model?: string;
+    verify?: VerifyConfig;
   };
   let runtimeExit;
   const runtimeStartedAt = Date.now();
@@ -496,15 +502,64 @@ export async function runWorker(
 
   // Step 14: terminal lifecycle event + exit code.
   if (runtimeExit.exitCode === 0) {
-    // Escape: best-effort patch capture + sentinel upload. A failure here
-    // logs escape.failed but must NOT change the exit code or terminal event.
+    // Capture the patch FIRST — the agent's edit, before self-verify runs — so
+    // verify's build artifacts (node_modules, caches) never pollute the patch.
+    // Best-effort: a failure logs escape.failed and never changes the outcome.
+    let patchRef: string | undefined;
     try {
-      await escapeWorkspace({
+      patchRef = await capturePatch({
         workspaceDir,
         storage,
         namespace: cfg.namespace,
         dispatchId: cfg.dispatchId,
         baseline,
+      });
+    } catch (err) {
+      logger.log({ kind: 'escape.failed', dispatchId: cfg.dispatchId, detail: (err as Error).message });
+    }
+
+    // Step 13b (Gap A): self-verify, AFTER patch capture. If the subagent
+    // declares a verify command, run it over the agent's edit and seal the
+    // pass/fail signal. Report-only: a failed (or absent) verify never changes
+    // the dispatch outcome — it only adds evidence so the operator can read
+    // green/red without re-running by hand.
+    let verify: VerifyOutcome | undefined;
+    const verifyCommand = subagent.verify?.command;
+    if (verifyCommand) {
+      // Guard falsy/invalid timeouts: 0 or negative would SIGKILL instantly.
+      const t = subagent.verify?.timeout;
+      const timeoutSeconds = typeof t === 'number' && t > 0 ? t : DEFAULT_VERIFY_TIMEOUT_SECONDS;
+      verify = await runVerify({
+        workspaceDir,
+        command: verifyCommand,
+        env: mergedEnv,
+        timeoutSeconds,
+      });
+      // The report can echo the secret-bearing env (a test that prints env, a
+      // failing assertion dumping config). Redact registered secrets before it
+      // is sealed into the sentinel and surfaced to the operator.
+      if (verify.report !== undefined) {
+        verify = { ...verify, report: logger.redactString(verify.report) };
+      }
+      logger.log({
+        kind: 'verify.ran',
+        dispatchId: cfg.dispatchId,
+        passed: verify.passed,
+        durationMs: verify.durationMs,
+      });
+    }
+
+    // Write the sentinel with the pre-verify patchRef + the verify signal.
+    // Best-effort: a failure logs escape.failed but must NOT change the exit
+    // code or terminal event.
+    try {
+      await writeSentinel({
+        workspaceDir,
+        storage,
+        namespace: cfg.namespace,
+        dispatchId: cfg.dispatchId,
+        patchRef,
+        verify,
       });
     } catch (err) {
       logger.log({

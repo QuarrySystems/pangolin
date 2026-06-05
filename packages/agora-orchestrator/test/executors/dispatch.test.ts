@@ -524,6 +524,81 @@ describe('DispatchExecutor', () => {
     expect(res?.resultRef).toBe(patchRef);
   });
 
+  it('reconcile of a done dispatch reads verify from sentinel and surfaces it on the result', async () => {
+    const { compute, resolveExit } = makeDeferredCompute();
+    const storage = makeMemoryStorage();
+    storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
+    const client = new AgoraClient({
+      namespace: 'ns',
+      compute: { default: compute },
+      credentials: { default: makeCredentials() },
+      storage,
+      targets: { prod: { compute: 'default', credentials: 'default' } },
+    });
+    const executor = new DispatchExecutor({ client, target: 'prod', workerImage: 'img' });
+
+    const { dispatchHash } = await executor.fire(baseItem);
+
+    const sentinelUri = buildDispatchRecordUri('ns', dispatchHash, 'output.json');
+    await storage.put(
+      sentinelUri,
+      new TextEncoder().encode(
+        JSON.stringify({
+          schemaVersion: 1,
+          verify: { passed: false, report: 'tsc failed', durationMs: 10 },
+        }),
+      ),
+    );
+
+    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+    await new Promise((r) => setImmediate(r));
+
+    const res = await executor.reconcile(dispatchHash);
+    expect(res?.status).toBe('done');
+    expect(res?.verify).toEqual({ passed: false, report: 'tsc failed', durationMs: 10 });
+  });
+
+  it('reconcile sanitises verify from the sentinel: bounds report, drops wrong-typed/extra fields', async () => {
+    const { compute, resolveExit } = makeDeferredCompute();
+    const storage = makeMemoryStorage();
+    storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
+    const client = new AgoraClient({
+      namespace: 'ns',
+      compute: { default: compute },
+      credentials: { default: makeCredentials() },
+      storage,
+      targets: { prod: { compute: 'default', credentials: 'default' } },
+    });
+    const executor = new DispatchExecutor({ client, target: 'prod', workerImage: 'img' });
+
+    const { dispatchHash } = await executor.fire(baseItem);
+
+    const sentinelUri = buildDispatchRecordUri('ns', dispatchHash, 'output.json');
+    await storage.put(
+      sentinelUri,
+      new TextEncoder().encode(
+        JSON.stringify({
+          schemaVersion: 1,
+          verify: {
+            passed: true,
+            report: 'x'.repeat(50_000),
+            durationMs: 'fast', // wrong type
+            injected: 'evil', // extra field
+          },
+        }),
+      ),
+    );
+
+    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+    await new Promise((r) => setImmediate(r));
+
+    const res = await executor.reconcile(dispatchHash);
+    expect(res?.verify?.passed).toBe(true);
+    expect(res?.verify?.report!.length).toBeLessThanOrEqual(16_000);
+    expect(res?.verify?.durationMs).toBeUndefined(); // wrong type → dropped
+    expect((res?.verify as Record<string, unknown>).injected).toBeUndefined();
+  });
+
   it('reconcile of a done dispatch with no sentinel yields resultRef undefined, no throw', async () => {
     const { compute, resolveExit } = makeDeferredCompute();
     const storage = makeMemoryStorage();

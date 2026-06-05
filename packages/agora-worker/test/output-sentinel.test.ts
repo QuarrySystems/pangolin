@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { buildDispatchRecordUri, type StorageProvider } from '@quarry-systems/agora-core';
 import { captureBaseline, type WorkspaceBaseline } from '../src/patch-capture.js';
-import { escapeWorkspace } from '../src/output-sentinel.js';
+import { escapeWorkspace, capturePatch, writeSentinel } from '../src/output-sentinel.js';
 
 // ---------------------------------------------------------------------------
 // Minimal in-memory StorageProvider stub
@@ -196,6 +196,87 @@ describe('escapeWorkspace', () => {
       new TextDecoder().decode(await storage.get(dispatchUri)),
     );
     expect(parsed.summary).toBe('task finished successfully');
+  });
+
+  it('includes verify in the sentinel when provided', async () => {
+    await initGitRepo(dir);
+    const baseline: WorkspaceBaseline = await captureBaseline(dir);
+
+    const sentinel = await escapeWorkspace({
+      workspaceDir: dir,
+      storage,
+      namespace: 'ns',
+      dispatchId: 'd6',
+      baseline,
+      verify: { passed: true, report: 'tsc --noEmit ok', durationMs: 42 },
+    });
+
+    expect(sentinel.verify).toEqual({
+      passed: true,
+      report: 'tsc --noEmit ok',
+      durationMs: 42,
+    });
+    const dispatchUri = buildDispatchRecordUri('ns', 'd6', 'output.json');
+    const parsed = JSON.parse(
+      new TextDecoder().decode(await storage.get(dispatchUri)),
+    );
+    expect(parsed.verify.passed).toBe(true);
+    expect(parsed.verify.report).toBe('tsc --noEmit ok');
+  });
+
+  it('omits verify from the sentinel when not provided (backward-compat)', async () => {
+    await initGitRepo(dir);
+    const baseline: WorkspaceBaseline = await captureBaseline(dir);
+
+    const sentinel = await escapeWorkspace({
+      workspaceDir: dir,
+      storage,
+      namespace: 'ns',
+      dispatchId: 'd7',
+      baseline,
+    });
+
+    expect(sentinel.verify).toBeUndefined();
+    const dispatchUri = buildDispatchRecordUri('ns', 'd7', 'output.json');
+    const parsed = JSON.parse(
+      new TextDecoder().decode(await storage.get(dispatchUri)),
+    );
+    expect('verify' in parsed).toBe(false);
+  });
+
+  it('capturePatch snapshots at call time — later workspace writes (e.g. verify artifacts) are excluded', async () => {
+    await initGitRepo(dir);
+    await writeFile(join(dir, 'edit.txt'), 'base', 'utf-8');
+    const baseline: WorkspaceBaseline = await captureBaseline(dir);
+
+    // The agent's edit.
+    await writeFile(join(dir, 'edit.txt'), 'agent-change', 'utf-8');
+
+    // Capture the patch NOW (before verify would run).
+    const patchRef = await capturePatch({
+      workspaceDir: dir,
+      storage,
+      namespace: 'ns',
+      dispatchId: 'd8',
+      baseline,
+    });
+    expect(patchRef).toBeDefined();
+
+    // Now simulate a verify step polluting the workspace AFTER capture.
+    await writeFile(join(dir, 'node_modules_marker.txt'), 'x'.repeat(100), 'utf-8');
+
+    // Write the sentinel with the already-captured patchRef.
+    await writeSentinel({
+      workspaceDir: dir,
+      storage,
+      namespace: 'ns',
+      dispatchId: 'd8',
+      patchRef,
+    });
+
+    const patch = new TextDecoder().decode(await storage.get(patchRef!));
+    expect(patch).toContain('edit.txt');
+    expect(patch).not.toContain('node_modules_marker.txt');
   });
 
   it('works with unavailable baseline (no git) — omits patch, still writes sentinel', async () => {

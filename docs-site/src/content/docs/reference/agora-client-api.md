@@ -77,12 +77,20 @@ interface RegisterSubagentOpts {
   promptTemplate?: string;
   model?: string;
   capabilities?: Array<string | CapabilityRef>;  // bare names or full refs
+  verify?: VerifyConfig;  // self-verify config (Gap A): { command: string; timeout?: number }
 }
 ```
 
 `capabilities` entries that are bare names are resolved against
 `client.storage.resolveLatest`. `assign` re-registers the subagent under a new
 capability set, producing a NEW pinned version (old and new coexist immutably).
+
+`verify`, when set, declares a language-agnostic shell command the worker runs
+over the agent's edit before sealing; its `{ passed, report, durationMs }` result
+is recorded in the output sentinel and surfaced on the dispatch result. It is
+report-only (a failed verify never fails the dispatch) and only present in the
+stored definition when set (so subagents without it keep their content hash).
+See [Dispatch lifecycle → Self-verify](/agora/reference/dispatch-lifecycle/#self-verify-optional).
 
 ## `client.env`
 

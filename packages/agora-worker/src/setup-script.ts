@@ -8,9 +8,9 @@
 // `reason: 'worker-failed'`; captured stdout/stderr is included in the
 // worker's structured logs.
 
-import { spawn } from "node:child_process";
 import { access } from "node:fs/promises";
 import { join } from "node:path";
+import { runBoundedCommand } from "./bounded-command.js";
 
 export interface SetupScriptResult {
   exitCode: number;
@@ -59,56 +59,24 @@ export async function runSetupScriptIfPresent(
     return null;
   }
 
-  const start = Date.now();
-  return new Promise<SetupScriptResult>((resolve, reject) => {
-    const child = spawn("/bin/bash", [scriptPath], {
-      cwd: opts.workspaceDir,
-      env: opts.env,
-    });
-
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (d) => {
-      stdout += d.toString();
-    });
-    child.stderr.on("data", (d) => {
-      stderr += d.toString();
-    });
-
-    let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill("SIGKILL");
-      reject(
-        new SetupScriptError({
-          exitCode: -1,
-          stdout,
-          stderr,
-          durationMs: Date.now() - start,
-        }),
-      );
-    }, opts.timeoutSeconds * 1000);
-
-    child.on("error", (err) => {
-      clearTimeout(timer);
-      if (timedOut) return;
-      reject(err);
-    });
-
-    child.on("exit", (code) => {
-      clearTimeout(timer);
-      if (timedOut) return;
-      const result: SetupScriptResult = {
-        exitCode: code ?? -1,
-        stdout,
-        stderr,
-        durationMs: Date.now() - start,
-      };
-      if (result.exitCode !== 0) {
-        reject(new SetupScriptError(result));
-      } else {
-        resolve(result);
-      }
-    });
+  const r = await runBoundedCommand({
+    command: "/bin/bash",
+    args: [scriptPath],
+    cwd: opts.workspaceDir,
+    env: opts.env,
+    timeoutSeconds: opts.timeoutSeconds,
   });
+
+  // A spawn failure (e.g. no /bin/bash) is a real error, not a script result.
+  if (r.startError) throw r.startError;
+
+  const result: SetupScriptResult = {
+    exitCode: r.exitCode,
+    stdout: r.stdout,
+    stderr: r.stderr,
+    durationMs: r.durationMs,
+  };
+  // Timeout (exitCode -1) and any non-zero exit fail the dispatch.
+  if (r.timedOut || result.exitCode !== 0) throw new SetupScriptError(result);
+  return result;
 }

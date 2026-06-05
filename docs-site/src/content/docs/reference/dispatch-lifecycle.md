@@ -49,6 +49,30 @@ Most of what you see in stdout is the worker's structured-log stream.
 Everything after step 5 is bracketed by the appropriate lifecycle event so
 the orchestrator can attribute failures.
 
+## Self-verify (optional)
+
+If the subagent declares a `verify.command` (via
+`client.subagent.register({ verify: { command, timeout } })`), the worker runs
+that command over the agent's edit **after the agent finishes and before the
+workspace is sealed**, and records `{ passed, report, durationMs }` into the
+output sentinel. It is surfaced on the dispatch result and on the orchestrator's
+`status` / `watch` for that item.
+
+It is **report-only**: a failed verify does *not* change the dispatch outcome
+(no `dispatch.failed`) — it is evidence so an operator reads green/red without
+re-running by hand. The patch is captured **before** verify runs, so the verify
+command's build artifacts (`node_modules`, `dist/`, …) never pollute the sealed
+patch. Registered secrets are redacted from the captured report.
+
+The command is language-agnostic — whatever shell string the subagent declares
+(`npm test`, `dotnet test`, `cargo test`, `pytest`, …), run in the workspace. Its
+toolchain must be present in the worker image or installed by `agora-setup.sh`.
+The worker emits a `verify.ran` event:
+
+```
+{"kind":"verify.ran","dispatchId":"...","passed":true,"durationMs":548}
+```
+
 ## The 6 lifecycle events (closed vocabulary)
 
 | Event | Meaning | Worker exit code |

@@ -257,6 +257,25 @@ describe('SqliteRunStateStore', () => {
     expect(it.submittedAt).toBe('2026-05-31T00:00:00.000Z');
   });
 
+  it('persists and reads back verify (self-verify signal)', () => {
+    const store = new SqliteRunStateStore();
+    store.ensureQueue('default', 1);
+    store.saveRun({ id: 'rv', queue: 'default', items: [
+      { id: 'a', executor: 'x', inputs: {}, depends_on: [], resourceLocks: [] }] });
+    store.setVerify('a', { passed: false, report: 'tsc failed', durationMs: 12 });
+    const it = store.getItems('rv').find((i) => i.id === 'a')!;
+    expect(it.verify).toEqual({ passed: false, report: 'tsc failed', durationMs: 12 });
+  });
+
+  it('item without verify reads back undefined', () => {
+    const store = new SqliteRunStateStore();
+    store.ensureQueue('default', 1);
+    store.saveRun({ id: 'rnv', queue: 'default', items: [
+      { id: 'b', executor: 'x', inputs: {}, depends_on: [], resourceLocks: [] }] });
+    const it = store.getItems('rnv').find((i) => i.id === 'b')!;
+    expect(it.verify).toBeUndefined();
+  });
+
   it('saveRun without submittedAt stores NULL — reads back as undefined', () => {
     const store = new SqliteRunStateStore();
     store.ensureQueue('default', 1);

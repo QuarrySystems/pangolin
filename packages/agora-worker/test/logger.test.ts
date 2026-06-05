@@ -143,6 +143,13 @@ describe("StructuredLogger", () => {
     writeStub.mockRestore();
   });
 
+  it("redactString redacts registered secrets from a free string", () => {
+    logger.registerSecret("sk-abc123");
+    const out = logger.redactString("ANTHROPIC_API_KEY=sk-abc123 done");
+    expect(out).toBe("ANTHROPIC_API_KEY=<redacted:secret> done");
+    expect(out).not.toContain("sk-abc123");
+  });
+
   it("preserves non-string, non-array, non-object values", () => {
     const writeStub = vi.spyOn(process.stdout, "write");
 

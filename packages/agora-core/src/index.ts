@@ -16,3 +16,4 @@ export * from './storage.js';
 export * from './runtime-adapter.js';
 export * from './dispatch.js';
 export * from './result-sink.js';
+export * from './verify.js';

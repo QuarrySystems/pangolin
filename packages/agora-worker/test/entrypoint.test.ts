@@ -111,6 +111,7 @@ interface Harness {
 async function setupHarness(opts?: {
   capabilityFiles?: Record<string, Uint8Array>;
   capabilityHashCorrect?: boolean; // default true
+  verify?: { command: string; timeout?: number };
 }): Promise<Harness> {
   const workDir = await mkdtemp(join(tmpdir(), 'entrypoint-work-'));
   const adaptersRoot = await mkdtemp(join(tmpdir(), 'entrypoint-adapters-'));
@@ -133,7 +134,8 @@ async function setupHarness(opts?: {
     'utf-8',
   );
 
-  const subagentDef = { name: 'alpha', systemPrompt: 'do work' };
+  const subagentDef: Record<string, unknown> = { name: 'alpha', systemPrompt: 'do work' };
+  if (opts?.verify) subagentDef.verify = opts.verify;
   const subagentUri = 'agora://ns/subagent/alpha/sha256:s';
   const subagentHash = computeContentHash(subagentDef);
 
@@ -269,6 +271,59 @@ describe('runWorker', () => {
       const parsed = JSON.parse(new TextDecoder().decode(sentinelBytes));
       expect(parsed.schemaVersion).toBe(1);
     }
+  });
+
+  it('runs the configured verify command and seals verify.passed into the sentinel', async () => {
+    // `exit 0` is a shell builtin (sh + cmd) — no PATH needed in the verify shell.
+    const h = await setupHarness({ verify: { command: 'exit 0' } });
+    cleanupDirs.push(h.workDir, h.adaptersRoot);
+    h.setRuntimeExit({ exitCode: 0, stdout: '', stderr: '' });
+
+    const code = await runWorker(h.env, makeDeps(h));
+    expect(code).toBe(0);
+
+    const sentinelUri = buildDispatchRecordUri('ns', 'd-1', 'output.json');
+    const parsed = JSON.parse(
+      new TextDecoder().decode(await h.storage.get(sentinelUri)),
+    );
+    expect(parsed.verify).toBeDefined();
+    expect(parsed.verify.passed).toBe(true);
+  });
+
+  it('treats verify.timeout:0 as unset (uses the default), not an instant timeout', async () => {
+    const h = await setupHarness({ verify: { command: 'exit 0', timeout: 0 } });
+    cleanupDirs.push(h.workDir, h.adaptersRoot);
+    h.setRuntimeExit({ exitCode: 0, stdout: '', stderr: '' });
+
+    const code = await runWorker(h.env, makeDeps(h));
+    expect(code).toBe(0);
+
+    const sentinelUri = buildDispatchRecordUri('ns', 'd-1', 'output.json');
+    const parsed = JSON.parse(
+      new TextDecoder().decode(await h.storage.get(sentinelUri)),
+    );
+    // Before the guard, timeout:0 → setTimeout(0) → instant SIGKILL → passed:false.
+    expect(parsed.verify.passed).toBe(true);
+  });
+
+  it('is report-only: a failing verify seals passed:false but the dispatch still finishes 0', async () => {
+    const h = await setupHarness({ verify: { command: 'exit 1' } });
+    cleanupDirs.push(h.workDir, h.adaptersRoot);
+    h.setRuntimeExit({ exitCode: 0, stdout: '', stderr: '' });
+
+    const code = await runWorker(h.env, makeDeps(h));
+
+    // Report-only: red verify must NOT change the dispatch outcome.
+    expect(code).toBe(0);
+    const kinds = h.events.map((e) => e.kind);
+    expect(kinds).toContain('dispatch.finished');
+    expect(kinds).not.toContain('dispatch.failed');
+
+    const sentinelUri = buildDispatchRecordUri('ns', 'd-1', 'output.json');
+    const parsed = JSON.parse(
+      new TextDecoder().decode(await h.storage.get(sentinelUri)),
+    );
+    expect(parsed.verify.passed).toBe(false);
   });
 
   it('logs escape.failed but still emits dispatch.finished and returns 0 when escape throws', async () => {

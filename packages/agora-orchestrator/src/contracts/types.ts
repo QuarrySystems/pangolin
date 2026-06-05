@@ -1,3 +1,5 @@
+import type { VerifyOutcome } from '@quarry-systems/agora-core';
+
 export const RUN_STATUSES = ['pending', 'ready', 'running', 'done', 'failed', 'skipped', 'cancelled'] as const;
 export type RunStatus = (typeof RUN_STATUSES)[number];
 
@@ -43,6 +45,8 @@ export interface ItemState extends WorkItem {
   nextAttemptAt?: number;
   /** Opaque escape artifact ref (e.g. patch URI). Never interpreted by the store. */
   resultRef?: string;
+  /** Self-verify signal (Gap A) read from the worker's output sentinel. */
+  verify?: VerifyOutcome;
   /** Opaque dispatch-manifest ref. Never interpreted by the store. */
   manifestRef?: string;
   /** ISO-8601 submission time (if recorded). Never interpreted by the store. */

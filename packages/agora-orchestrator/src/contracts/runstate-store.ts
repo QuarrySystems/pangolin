@@ -1,3 +1,4 @@
+import type { VerifyOutcome } from '@quarry-systems/agora-core';
 import type { ItemState, Run, TerminalStatus } from './types.js';
 
 /**
@@ -22,6 +23,7 @@ export interface RunStateStore {
   bumpAttempt(itemId: string): void;        // attempts += 1
   requeue(itemId: string, notBeforeMs: number): void; // status -> 'ready', nextAttemptAt = notBeforeMs
   setResultRef(itemId: string, ref: string): void;    // persist opaque result artifact ref
+  setVerify(itemId: string, verify: VerifyOutcome): void; // persist self-verify signal
   setManifestRef(itemId: string, ref: string): void;  // persist opaque dispatch-manifest ref
   close(): void;
 }

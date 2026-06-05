@@ -85,6 +85,31 @@ describe('registerSubagent', () => {
     expect(typeof handle.assign).toBe('function');
   });
 
+  it('carries a verify command through into the stored subagent definition', async () => {
+    const storage = makeMemoryStorage();
+    const client = makeClient(storage);
+    const handle = await registerSubagent(client, {
+      name: 'editor',
+      systemPrompt: 'edit',
+      verify: { command: 'dotnet test', timeout: 300 },
+    });
+    const pinnedUri = `agora://ns/subagent/editor/${handle.contentHash}`;
+    const def = JSON.parse(new TextDecoder().decode(await storage.get(pinnedUri)));
+    expect(def.verify).toEqual({ command: 'dotnet test', timeout: 300 });
+  });
+
+  it('omits verify from the stored def when not provided (hash-stable for existing subagents)', async () => {
+    const storage = makeMemoryStorage();
+    const client = makeClient(storage);
+    const handle = await registerSubagent(client, {
+      name: 'editor',
+      systemPrompt: 'edit',
+    });
+    const pinnedUri = `agora://ns/subagent/editor/${handle.contentHash}`;
+    const def = JSON.parse(new TextDecoder().decode(await storage.get(pinnedUri)));
+    expect('verify' in def).toBe(false);
+  });
+
   it('writes the subagent definition to storage at the pinned URI', async () => {
     const storage = makeMemoryStorage();
     const client = makeClient(storage);

@@ -109,26 +109,41 @@ export class DispatchExecutor implements Executor {
     entry.inflight.cleanup();
     const status = result.exitCode === 0 ? 'done' : 'failed';
     if (status === 'done') {
-      const resultRef = await this.readPatchRef(dispatchHash);
-      return { status, output: result, resultRef };
+      const { patchRef, verify } = await this.readSentinel(dispatchHash);
+      return { status, output: result, resultRef: patchRef, verify };
     }
     return { status, output: result };
   }
 
   /**
-   * Best-effort: read the patchRef from the dispatch output sentinel.
-   * NEVER throws — any failure returns undefined.
+   * Best-effort: read the patchRef and verify signal from the dispatch output
+   * sentinel. NEVER throws — any failure returns an empty object.
    */
-  private async readPatchRef(dispatchId: string): Promise<string | undefined> {
+  private async readSentinel(
+    dispatchId: string,
+  ): Promise<{ patchRef?: string; verify?: ExecutionResult['verify'] }> {
     try {
       const ns = this.opts.client.namespace;
       const bytes = await this.opts.client.storage.get(
         buildDispatchRecordUri(ns, dispatchId, 'output.json'),
       );
       const sentinel = JSON.parse(new TextDecoder().decode(bytes));
-      return typeof sentinel.patchRef === 'string' ? sentinel.patchRef : undefined;
+      const out: { patchRef?: string; verify?: ExecutionResult['verify'] } = {};
+      if (typeof sentinel.patchRef === 'string') out.patchRef = sentinel.patchRef;
+      // Construct a clean, bounded verify from the (worker-written but possibly
+      // older/tampered) sentinel — don't forward the raw object by reference.
+      const v = sentinel.verify;
+      if (v && typeof v.passed === 'boolean') {
+        const verify: NonNullable<ExecutionResult['verify']> = { passed: v.passed };
+        if (typeof v.report === 'string') verify.report = v.report.slice(0, 16_000);
+        if (typeof v.durationMs === 'number' && Number.isFinite(v.durationMs)) {
+          verify.durationMs = v.durationMs;
+        }
+        out.verify = verify;
+      }
+      return out;
     } catch {
-      return undefined;
+      return {};
     }
   }
 

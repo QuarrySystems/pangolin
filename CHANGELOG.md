@@ -27,6 +27,15 @@ workspace. See [RELEASING.md](./RELEASING.md) for how a release is cut.
   config-owned `SqliteScheduleStore`. Catch-up after downtime coalesces to one run
   per slot; runIds are deterministic per slot. UTC / minute granularity;
   single-`serve` assumption.
+- **Worker self-verify (`subagentDef.verify`).** After the agent produces its
+  edit, the worker can run a subagent-declared, language-agnostic verify command
+  (`npm test`, `dotnet test`, `cargo test`, …) over its own edit and seal
+  `{ passed, report, durationMs }` into the output sentinel; surfaced on the
+  dispatch result and item `status` / `watch`. **Report-only** — a failed verify
+  does not change the dispatch outcome. The patch is captured *before* verify so
+  build artifacts never pollute it; registered secrets are redacted from the
+  report; a new `verify.ran` worker event is emitted. Set it via
+  `client.subagent.register({ verify: { command, timeout } })`.
 
 ## [0.1.0] - 2026-06-01
 
