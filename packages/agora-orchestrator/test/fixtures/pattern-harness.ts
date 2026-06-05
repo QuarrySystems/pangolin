@@ -21,6 +21,11 @@ export interface ItemBehavior {
  * (handoff-dag.int.test.ts pattern); reconcile() returns behavior(itemId).
  * Item ids arrive de-namespaced (the orchestrator wraps executors).
  *
+ * **Instance reuse semantics:** each `idKeyedExecutor` instance maintains its own
+ * internal `dispatchMap`. The dispatchHash now encodes the runId so that two runs
+ * sharing a logical item id do NOT collide. However, a single instance IS safe to
+ * reuse across runs precisely because of this encoding.
+ *
  * @param blobs - Mutable map where manifest bytes are stored keyed by manifestRef.
  * @param behavior - Called with the de-namespaced item id; returns terminal outcome.
  */
@@ -51,7 +56,9 @@ export function idKeyedExecutor(
       const manifestRef = `agora://ns/manifest/m/${manifest.manifestHash}`;
       blobs.set(manifestRef, bytes);
 
-      const dispatchHash = `d-${item.id}`;
+      // Include runId in the dispatchHash so that two runs sharing the same logical
+      // item id cannot collide inside this instance's dispatchMap.
+      const dispatchHash = `d-${ctx?.runId ?? ''}-${item.id}`;
       dispatchMap.set(dispatchHash, item.id);
 
       return { dispatchHash, manifestRef };
@@ -74,8 +81,10 @@ export function idKeyedExecutor(
 /**
  * Orchestrator factory with audit wiring.
  *
- * `extra` is spread into the options verbatim (queues override, maxItemsPerRun, ...)
- * so this file never references late-landing fields.
+ * `extra` is merged into the options so that callers can override individual
+ * executors without replacing the whole executors map. `extra.executors` is
+ * merged with the default `{ dispatch: executor }` — keys in `extra.executors`
+ * take precedence. All other `extra` keys are spread last (highest precedence).
  */
 export function makeOrch(
   store: SqliteRunStateStore,
@@ -84,22 +93,29 @@ export function makeOrch(
 ): { orch: AgoraOrchestrator; anchor: LocalAnchor } {
   const anchor = new LocalAnchor(store);
   const auditLog = new AuditLog({ store, signer: NoneSigner, anchor });
+  const { executors: extraExecutors, ...restExtra } = extra ?? {};
   const orch = new AgoraOrchestrator({
     store,
-    executors: { dispatch: executor },
+    executors: { dispatch: executor, ...extraExecutors },
     triggers: { manual: new ManualTrigger() },
     queues: { default: { concurrency: 5 } },
     auditLog,
-    ...extra,
+    ...restExtra,
   });
   return { orch, anchor };
 }
 
-/** Drive the orchestrator until all items reach a terminal status or tick-limit is hit. */
-export async function driveUntilDone(orch: AgoraOrchestrator, maxTicks = 32): Promise<void> {
+/**
+ * Drive the orchestrator until all items (optionally scoped to `runId`) reach a
+ * terminal status or the tick-limit is hit.
+ *
+ * @param runId - When provided, only items belonging to this run are checked.
+ *   Defaults to checking all active runs (legacy behaviour).
+ */
+export async function driveUntilDone(orch: AgoraOrchestrator, maxTicks = 32, runId?: string): Promise<void> {
   for (let i = 0; i < maxTicks; i++) {
     await orch.tick('default');
-    const statuses = orch.getStatus().map((s) => s.status);
+    const statuses = orch.getStatus(runId).map((s) => s.status);
     if (statuses.length > 0 && statuses.every((s) => ['done', 'failed', 'skipped', 'cancelled'].includes(s))) {
       return;
     }
