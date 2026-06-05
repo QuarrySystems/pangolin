@@ -4,6 +4,7 @@ import type { AuditEntryRow, AnchoredRoot, AuditExport, Executor, ItemState, Run
 import type { PackRegistry } from './packs/registry.js';
 import type { AuditLog } from './audit/audit-log.js';
 import { tick } from './engine/tick.js';
+import { normalizeRun, validateRun } from './engine/run-validator.js';
 
 /** Namespace separator — U+001F UNIT SEPARATOR (not a valid item-id char in practice). */
 const NS = '\x1f';
@@ -63,14 +64,24 @@ export class AgoraOrchestrator {
     if (this.store.getItems(run.id).length > 0) return run.id; // already ingested — idempotent no-op
     const trigger = this.triggers['manual'];
     if (!trigger) throw new Error("AgoraOrchestrator: no 'manual' trigger registered");
+    // Normalize: auto-union needs[*].from into depends_on.
+    const normalized = normalizeRun(run);
+    // Validate: throw before touching the store so it stays clean on bad input.
+    const errors = validateRun(normalized, this.packs);
+    if (errors.length) throw new Error(`run '${run.id}' failed validation:\n${errors.join('\n')}`);
     // Namespace item ids so two runs with a same-named item never collide in the store.
     // run ids are NOT namespaced; resourceLocks are NOT namespaced (cross-run locks are intentional).
     const nsRun: Run = {
-      ...run,
-      items: run.items.map((it) => ({
+      ...normalized,
+      items: normalized.items.map((it) => ({
         ...it,
         id: ns(run.id, it.id),
         depends_on: it.depends_on.map((d) => ns(run.id, d)),
+        ...(it.needs ? {
+          needs: Object.fromEntries(
+            Object.entries(it.needs).map(([k, b]) => [k, { ...b, from: ns(run.id, b.from) }]),
+          ),
+        } : {}),
       })),
     };
     this.store.saveRun(nsRun, actor, submittedAt);

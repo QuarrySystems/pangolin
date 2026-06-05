@@ -47,6 +47,16 @@ function asBytes(obj: unknown): Uint8Array {
   return new TextEncoder().encode(JSON.stringify(obj));
 }
 
+/**
+ * Convenience: seed a valid subagent blob and return the matching BundleRef.
+ * Used by tests that only care about inputs/capabilities, not subagent content.
+ */
+function subRef(storage: FakeStorage): BundleRefs["subagent"] {
+  const uri = "agora://ns/subagent/s/sha256:s";
+  storage.set(uri, asBytes({}));
+  return { uri, contentHash: computeContentHash({}) };
+}
+
 describe("fetchBundles", () => {
   it("fetches and verifies a subagent JSON bundle", async () => {
     const subagentDef = { name: "alpha", prompt: "hello" };
@@ -224,6 +234,63 @@ describe("fetchBundles", () => {
     );
     expect(result.envs[0]?.name).toBe("env1");
     expect(result.envs[0]?.def).toEqual(envDef);
+  });
+
+  it("fetches and raw-bytes-verifies input refs", async () => {
+    const bytes = new TextEncoder().encode("diff --git a/x b/x");
+    const storage = new FakeStorage();
+    const refs: BundleRefs = {
+      subagent: subRef(storage),
+      capabilities: [],
+      env: [],
+      inputs: [
+        {
+          key: "patch",
+          uri: "agora://ns/artifact/d/sha256:p",
+          contentHash: computeContentHash(bytes),
+        },
+      ],
+    };
+    storage.set("agora://ns/artifact/d/sha256:p", bytes);
+
+    const result = await fetchBundles(refs, storage);
+
+    expect(result.inputs).toEqual([{ key: "patch", bytes }]);
+  });
+
+  it("throws IntegrityMismatchError on a tampered input blob", async () => {
+    const bytes = new TextEncoder().encode("diff --git a/x b/x");
+    const storage = new FakeStorage();
+    const refs: BundleRefs = {
+      subagent: subRef(storage),
+      capabilities: [],
+      env: [],
+      inputs: [
+        {
+          key: "patch",
+          uri: "agora://ns/artifact/d/sha256:p",
+          contentHash: "sha256:wrong",
+        },
+      ],
+    };
+    storage.set("agora://ns/artifact/d/sha256:p", bytes);
+
+    await expect(fetchBundles(refs, storage)).rejects.toBeInstanceOf(
+      IntegrityMismatchError,
+    );
+  });
+
+  it("returns inputs: [] when refs.inputs is absent", async () => {
+    const storage = new FakeStorage();
+    const refs: BundleRefs = {
+      subagent: subRef(storage),
+      capabilities: [],
+      env: [],
+    };
+
+    const result = await fetchBundles(refs, storage);
+
+    expect(result.inputs).toEqual([]);
   });
 });
 

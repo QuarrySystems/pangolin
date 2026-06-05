@@ -28,4 +28,18 @@ describe('validateShape', () => {
       )
     ).toThrow(/imageDigest/);
   });
+
+  it('rejects an empty outputEdgeType', () => {
+    expect(() => validateShape(makeShape({ outputEdgeType: '' }))).toThrow(/outputEdgeType/);
+  });
+
+  it('rejects an inputEdgeTypes entry with an empty-string value', () => {
+    expect(() => validateShape(makeShape({ inputEdgeTypes: { x: '' } }))).toThrow(/inputEdgeTypes/);
+  });
+
+  it('accepts a shape with declared edge-type tags', () => {
+    expect(() => validateShape(makeShape({
+      outputEdgeType: 'patch-ref', inputEdgeTypes: { patch: 'patch-ref' },
+    }))).not.toThrow();
+  });
 });

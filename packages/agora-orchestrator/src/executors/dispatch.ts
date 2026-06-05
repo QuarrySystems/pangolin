@@ -43,6 +43,18 @@ export class DispatchExecutor implements Executor {
     if (typeof subagent !== 'string' || subagent.length === 0) {
       throw new Error(`DispatchExecutor: WorkItem '${item.id}' is missing a string inputs.subagent`);
     }
+    // Read the inputRefs carrier set by tick's resolve-at-fire.
+    // Shape guard (not trust guard): filter out any non-string values.
+    const rawRefs = item.inputs.inputRefs;
+    const inputRefs =
+      rawRefs && typeof rawRefs === 'object'
+        ? (Object.fromEntries(
+            Object.entries(rawRefs as Record<string, unknown>).filter(
+              ([, v]) => typeof v === 'string',
+            ),
+          ) as Record<string, string>)
+        : undefined;
+
     // Container starts HERE. Anything that throws BEFORE this is a clean pre-start
     // failure. Anything AFTER must NOT throw, or tick fails the item without
     // recording the dispatchHash and the running container is orphaned.
@@ -53,6 +65,7 @@ export class DispatchExecutor implements Executor {
       target: this.opts.target,
       workerImage: this.opts.workerImage,
       secrets: this.opts.secrets,
+      ...(inputRefs && Object.keys(inputRefs).length ? { inputRefs } : {}),
     });
     const entry: InFlightEntry = { inflight: flight, settled: null };
     // Detached background await — never throws out; records terminal state for reconcile().

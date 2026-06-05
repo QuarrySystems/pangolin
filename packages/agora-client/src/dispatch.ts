@@ -32,6 +32,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   buildAgoraUri,
+  parseAgoraUri,
   type DispatchWork,
   type DispatchResult,
   type CapabilityRef,
@@ -79,6 +80,7 @@ export interface InFlightDispatch {
     env: EnvRef[];
     secretRefs: Record<string, string>; // envName -> ref (references, never values)
     workerImage: string;
+    inputRefs: Record<string, string>; // key -> already-pinned agora:// URI (Wave-C manifest)
   };
   awaitExit(): Promise<TaskExit>;
   reconcile(exit: TaskExit): Promise<DispatchResult>;
@@ -180,6 +182,22 @@ export async function fireWork(
 
   // 6. Build TaskSpec.env — bundle-ref descriptors + the seven AGORA_* vars
   //    from §6.1. `callback` injects two extras when configured.
+  //
+  // Resolve inputRefs BEFORE the container starts: parse each URI with
+  // parseAgoraUri (rejects malformed URIs) and verify the URI is pinned
+  // (has a contentHash segment). This is pure pass-through — the blobs
+  // already exist in storage (typed-product handoff, spec §5).
+  const resolvedInputRefs: Array<{ key: string; uri: string; contentHash: string }> =
+    Object.entries(work.inputRefs ?? {}).map(([key, uri]) => {
+      const { contentHash } = parseAgoraUri(uri); // throws on malformed
+      if (!contentHash) {
+        throw new Error(
+          `dispatch: inputRefs['${key}'] must be a pinned agora:// URI (missing content hash): ${uri}`,
+        );
+      }
+      return { key, uri, contentHash };
+    });
+
   const bundleRefs = {
     subagent: {
       uri: buildAgoraUri({
@@ -208,6 +226,7 @@ export async function fireWork(
       }),
       contentHash: e.contentHash,
     })),
+    inputs: resolvedInputRefs,
   };
 
   const envVars: Record<string, string> = {
@@ -338,6 +357,7 @@ export async function fireWork(
       env: resolvedEnv,
       secretRefs,
       workerImage: opts.workerImage,
+      inputRefs: work.inputRefs ?? {},
     },
     awaitExit,
     reconcile,

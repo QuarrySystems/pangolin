@@ -236,4 +236,94 @@ describe("parseWorkerEnv", () => {
       ).toThrow(/AGORA_SECRET_STORE_KIND/);
     });
   });
+
+  describe("bundle refs inputs", () => {
+    it("parses bundleRefs.inputs when present", () => {
+      const env = baseEnv();
+      env.AGORA_BUNDLE_REFS_JSON = JSON.stringify({
+        subagent: { uri: "s3://b/sub", contentHash: "sha256:aaa" },
+        capabilities: [],
+        env: [],
+        inputs: [{ key: "patch", uri: "agora://ns/artifact/d/sha256:bb", contentHash: "sha256:bb" }],
+      });
+      expect(parseWorkerEnv(env).bundleRefs.inputs).toEqual([
+        { key: "patch", uri: "agora://ns/artifact/d/sha256:bb", contentHash: "sha256:bb" },
+      ]);
+    });
+
+    it("tolerates absent inputs (old clients)", () => {
+      const cfg = parseWorkerEnv(baseEnv());
+      expect(cfg.bundleRefs.inputs).toBeUndefined();
+    });
+
+    it("throws when inputs is not an array", () => {
+      const env = baseEnv();
+      env.AGORA_BUNDLE_REFS_JSON = JSON.stringify({
+        subagent: { uri: "s3://b/sub", contentHash: "sha256:aaa" },
+        capabilities: [],
+        env: [],
+        inputs: "not-an-array",
+      });
+      expect(() => parseWorkerEnv(env)).toThrow(/AGORA_BUNDLE_REFS_JSON.*inputs/);
+    });
+
+    it("throws when inputs entry is missing key", () => {
+      const env = baseEnv();
+      env.AGORA_BUNDLE_REFS_JSON = JSON.stringify({
+        subagent: { uri: "s3://b/sub", contentHash: "sha256:aaa" },
+        capabilities: [],
+        env: [],
+        inputs: [{ uri: "agora://ns/artifact/d/sha256:bb", contentHash: "sha256:bb" }],
+      });
+      expect(() => parseWorkerEnv(env)).toThrow(/AGORA_BUNDLE_REFS_JSON.*inputs/);
+    });
+
+    it("throws when inputs entry is missing uri", () => {
+      const env = baseEnv();
+      env.AGORA_BUNDLE_REFS_JSON = JSON.stringify({
+        subagent: { uri: "s3://b/sub", contentHash: "sha256:aaa" },
+        capabilities: [],
+        env: [],
+        inputs: [{ key: "patch", contentHash: "sha256:bb" }],
+      });
+      expect(() => parseWorkerEnv(env)).toThrow(/AGORA_BUNDLE_REFS_JSON.*inputs/);
+    });
+
+    it("throws when inputs entry is missing contentHash", () => {
+      const env = baseEnv();
+      env.AGORA_BUNDLE_REFS_JSON = JSON.stringify({
+        subagent: { uri: "s3://b/sub", contentHash: "sha256:aaa" },
+        capabilities: [],
+        env: [],
+        inputs: [{ key: "patch", uri: "agora://ns/artifact/d/sha256:bb" }],
+      });
+      expect(() => parseWorkerEnv(env)).toThrow(/AGORA_BUNDLE_REFS_JSON.*inputs/);
+    });
+
+    it("throws when inputs entry fields are not strings", () => {
+      const env = baseEnv();
+      env.AGORA_BUNDLE_REFS_JSON = JSON.stringify({
+        subagent: { uri: "s3://b/sub", contentHash: "sha256:aaa" },
+        capabilities: [],
+        env: [],
+        inputs: [{ key: 123, uri: "agora://ns/artifact/d/sha256:bb", contentHash: "sha256:bb" }],
+      });
+      expect(() => parseWorkerEnv(env)).toThrow(/AGORA_BUNDLE_REFS_JSON.*inputs/);
+    });
+
+    it("supports multiple inputs entries", () => {
+      const env = baseEnv();
+      env.AGORA_BUNDLE_REFS_JSON = JSON.stringify({
+        subagent: { uri: "s3://b/sub", contentHash: "sha256:aaa" },
+        capabilities: [],
+        env: [],
+        inputs: [
+          { key: "patch", uri: "agora://ns/artifact/d/sha256:bb", contentHash: "sha256:bb" },
+          { key: "config", uri: "agora://ns/artifact/d/sha256:cc", contentHash: "sha256:cc" },
+        ],
+      });
+      expect(parseWorkerEnv(env).bundleRefs.inputs).toHaveLength(2);
+      expect(parseWorkerEnv(env).bundleRefs.inputs?.[1]?.key).toBe("config");
+    });
+  });
 });

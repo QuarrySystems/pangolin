@@ -30,6 +30,7 @@ interface ItemRow {
   output_refs: string | null;
   manifest_ref: string | null;
   submitted_at: string | null;
+  needs: string | null;
 }
 
 const SCHEMA = `
@@ -39,7 +40,8 @@ CREATE TABLE IF NOT EXISTS items (
   inputs TEXT NOT NULL, depends_on TEXT NOT NULL, resource_locks TEXT NOT NULL,
   status TEXT NOT NULL, dispatch_hash TEXT, subagent_shape TEXT, reason TEXT,
   actor TEXT, attempts INTEGER NOT NULL DEFAULT 0, next_attempt_at REAL,
-  result_ref TEXT, verify TEXT, output_refs TEXT, manifest_ref TEXT, submitted_at TEXT
+  result_ref TEXT, verify TEXT, output_refs TEXT, manifest_ref TEXT, submitted_at TEXT,
+  needs TEXT
 );
 CREATE TABLE IF NOT EXISTS locks (key TEXT PRIMARY KEY, item_id TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS audit_entries (
@@ -66,6 +68,7 @@ const MIGRATIONS: ReadonlyArray<readonly [string, string]> = [
   ['output_refs', 'TEXT'],
   ['manifest_ref', 'TEXT'],
   ['submitted_at', 'TEXT'],
+  ['needs', 'TEXT'],
 ];
 
 export class SqliteRunStateStore implements RunStateStore, AuditStore {
@@ -98,14 +101,15 @@ export class SqliteRunStateStore implements RunStateStore, AuditStore {
 
   saveRun(run: Run, actor?: string, submittedAt?: string): void {
     const ins = this.db.prepare(
-      'INSERT INTO items(id,run_id,queue,executor,inputs,depends_on,resource_locks,status,dispatch_hash,subagent_shape,reason,actor,attempts,next_attempt_at,result_ref,verify,output_refs,manifest_ref,submitted_at) VALUES(?,?,?,?,?,?,?,?,NULL,?,NULL,?,0,NULL,NULL,NULL,NULL,NULL,?)',
+      'INSERT INTO items(id,run_id,queue,executor,inputs,depends_on,resource_locks,status,dispatch_hash,subagent_shape,reason,actor,attempts,next_attempt_at,result_ref,verify,output_refs,manifest_ref,submitted_at,needs) VALUES(?,?,?,?,?,?,?,?,NULL,?,NULL,?,0,NULL,NULL,NULL,NULL,NULL,?,?)',
     );
     const tx = this.db.transaction((r: Run) => {
       for (const it of r.items)
         ins.run(it.id, r.id, r.queue, it.executor,
           JSON.stringify(it.inputs), JSON.stringify(it.depends_on),
           JSON.stringify(it.resourceLocks), 'pending',
-          it.subagentShape ?? null, actor ?? null, submittedAt ?? null);
+          it.subagentShape ?? null, actor ?? null, submittedAt ?? null,
+          it.needs != null ? JSON.stringify(it.needs) : null);
     });
     tx(run);
   }
@@ -340,5 +344,6 @@ export class SqliteRunStateStore implements RunStateStore, AuditStore {
     outputRefs: r.output_refs ? JSON.parse(r.output_refs) : undefined,
     manifestRef: r.manifest_ref ?? undefined,
     submittedAt: r.submitted_at ?? undefined,
+    needs: r.needs ? JSON.parse(r.needs) : undefined,
   });
 }

@@ -58,6 +58,10 @@ export interface DispatchWork {
   retentionDays?: number;
   timeoutSeconds?: number;
   resources?: { cpu?: number; memory?: number };
+  /** Per-dispatch input artifacts by reference: input key -> already-pinned
+   *  agora://…/sha256:… URI of an upstream product (typed-product handoff, spec §5).
+   *  Pass-through refs — the blobs already exist in storage. */
+  inputRefs?: Record<string, string>;
 }
 
 /**

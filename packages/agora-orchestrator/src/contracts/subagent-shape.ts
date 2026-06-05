@@ -13,6 +13,11 @@ export interface SubagentShape {
   inputSchema: z.ZodType<unknown>;
   outputSchema: z.ZodType<unknown>;        // declared now; enforced via .agora/output.json in PR6
   capability: Capability;
+  /** Edge-type tag of this shape's primary product (e.g. 'patch-ref'). Optional;
+   *  when both ends of a needs edge declare tags, validateRun requires a match. */
+  outputEdgeType?: string;
+  /** Expected edge-type tag per typed input key (e.g. { patch: 'patch-ref' }). */
+  inputEdgeTypes?: Record<string, string>;
 }
 
 const ID_RE = /^[a-z0-9-]+\.[a-z0-9-]+$/;  // pack-prefixed
@@ -25,4 +30,12 @@ export function validateShape(s: SubagentShape): void {
     throw new Error(`SubagentShape ${s.id}: invalid effectTier ${s.effectTier}`);
   if (!s.capability?.imageDigest)
     throw new Error(`SubagentShape ${s.id}: capability.imageDigest required`);
+  if (s.outputEdgeType !== undefined && s.outputEdgeType === "")
+    throw new Error(`SubagentShape ${s.id}: outputEdgeType must be a non-empty string`);
+  if (s.inputEdgeTypes !== undefined) {
+    for (const [key, val] of Object.entries(s.inputEdgeTypes)) {
+      if (val === "")
+        throw new Error(`SubagentShape ${s.id}: inputEdgeTypes["${key}"] must be a non-empty string`);
+    }
+  }
 }

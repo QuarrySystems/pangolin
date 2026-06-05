@@ -160,3 +160,33 @@ describe('run-scoped item ids', () => {
     expect(st.find((s) => s.id === 'step2')!.runId).toBe('dep-run');
   });
 });
+
+describe('submitRun validation gate', () => {
+  it('rejects a run whose needs reference a missing item', () => {
+    const store = new SqliteRunStateStore();
+    const orch = makeOrch(store);
+    expect(() => orch.submitRun({ id: 'r', queue: 'default', items: [
+      { id: 'b', executor: 'x', inputs: {}, depends_on: [], resourceLocks: [],
+        needs: { patch: { from: 'ghost', select: { kind: 'patch' } } } }] }, 'human:t'))
+      .toThrow(/ghost/);
+    expect(store.getItems('r')).toHaveLength(0); // nothing persisted on validation failure
+  });
+
+  it('auto-unions and namespaces needs.from so resolution works post-ingestion', () => {
+    const store = new SqliteRunStateStore();
+    const orch = makeOrch(store);
+    // submit a->b via needs only (no explicit depends_on on b)
+    orch.submitRun({ id: 'r', queue: 'default', items: [
+      { id: 'a', executor: 'fake', inputs: {}, depends_on: [], resourceLocks: [] },
+      { id: 'b', executor: 'fake', inputs: {}, depends_on: [], resourceLocks: [],
+        needs: { patch: { from: 'a', select: { kind: 'patch' } } } },
+    ] });
+    // after ingestion the stored 'b' should have depends_on containing the namespaced 'a' id
+    const items = store.getItems('r');
+    const storedB = items.find((i) => i.id === 'r\x1fb')!;
+    expect(storedB.depends_on).toContain('r\x1fa'); // namespaced upstream
+    // and needs.patch.from must be the same namespaced id so tick's resolver finds it
+    expect(storedB.needs?.patch.from).toBe('r\x1fa');
+    store.close();
+  });
+});

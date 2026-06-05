@@ -5,6 +5,7 @@ import type { PackRegistry } from '../packs/registry.js';
 import { computeNewlyReady, computeSkipped } from './dep-resolver.js';
 import { selectRunnable } from './lock-manager.js';
 import type { AuditLog } from '../audit/audit-log.js';
+import { resolveInputRefs } from './needs-resolver.js';
 
 /** Advance one queue by a single tick. Returns counts for observability/tests. */
 export async function tick(
@@ -53,6 +54,7 @@ export async function tick(
         store.setStatus(it.id, res.status, res.status === 'failed' ? 'executor reported failed' : undefined);
         if (res.status === 'done' && res.resultRef) store.setResultRef(it.id, res.resultRef);
         if (res.status === 'done' && res.verify) store.setVerify(it.id, res.verify);
+        if (res.status === 'done' && res.outputRefs) store.setOutputRefs(it.id, res.outputRefs);
         store.releaseLocks(it.id);
         if (res.status === 'done') {
           audit({ kind: 'item.reconciled', runId: it.runId, itemId: deNs(it.id), status: 'done', ...(res.resultRef ? { resultRef: res.resultRef } : {}), at: auditAt });
@@ -78,8 +80,21 @@ export async function tick(
     (i) => i.queue === queue && i.status === 'ready' && (i.nextAttemptAt ?? 0) <= now,
   );
   const runnable = selectRunnable(ready, store.heldLockKeys(), Math.max(0, slots));
+  // Build a snapshot of all items for needs resolution (hoist ONCE outside the loop).
+  const byId = new Map(store.getItems().map((i) => [i.id, i]));
   let fired = 0;
   for (const it of runnable) {
+    // Needs resolution: resolve typed-product bindings before input validation (spec §4).
+    let fireItem = it;
+    if (it.needs && Object.keys(it.needs).length > 0) {
+      const r = resolveInputRefs(it, byId);
+      if ('error' in r) {
+        store.setStatus(it.id, 'failed', r.error);
+        store.releaseLocks(it.id);
+        continue;
+      }
+      fireItem = { ...it, inputs: { ...it.inputs, inputRefs: r.inputRefs } };
+    }
     // Shape resolution + input validation (before acquiring locks to avoid lock leaks).
     if (it.subagentShape) {
       const shape = packs?.get(it.subagentShape);
@@ -88,7 +103,7 @@ export async function tick(
         store.releaseLocks(it.id);
         continue;
       }
-      const parsed = shape.inputSchema.safeParse(it.inputs);
+      const parsed = shape.inputSchema.safeParse(fireItem.inputs);
       if (!parsed.success) {
         store.setStatus(it.id, 'failed', `inputs failed ${shape.id} schema`);
         store.releaseLocks(it.id);
@@ -104,7 +119,7 @@ export async function tick(
       continue;
     }
     try {
-      const { dispatchHash, manifestRef } = await ex.fire(it, {
+      const { dispatchHash, manifestRef } = await ex.fire(fireItem, {
         runId: it.runId, actor: it.actor, submittedAt: it.submittedAt,
       });
       store.setRunning(it.id, dispatchHash);

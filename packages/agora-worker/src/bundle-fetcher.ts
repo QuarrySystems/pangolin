@@ -33,6 +33,7 @@ export interface FetchedBundles {
   subagentDef: Record<string, unknown>;
   capabilities: FetchedCapability[];
   envs: FetchedEnv[];
+  inputs: Array<{ key: string; bytes: Uint8Array }>;
 }
 
 /**
@@ -101,6 +102,18 @@ export async function constructStorageProvider(
   );
 }
 
+/** Fetch raw bytes and verify their content hash (capability/input-style raw-bytes check). */
+async function fetchVerified(
+  uri: string,
+  contentHash: string,
+  storage: StorageProvider,
+): Promise<Uint8Array> {
+  const bytes = await storage.get(uri);
+  const actual = computeContentHash(bytes);
+  if (actual !== contentHash) throw new IntegrityMismatchError(contentHash, actual);
+  return bytes;
+}
+
 /**
  * Fetch every bundle referenced by `refs` from `storage` and verify each
  * against its advertised content hash.
@@ -112,6 +125,8 @@ export async function constructStorageProvider(
  *     would be wrong here).
  *   - Envs: raw bytes are decoded as UTF-8 JSON; parsed value is hashed via
  *     canonical JSON and compared.
+ *   - Inputs: raw packed bytes hashed directly (same as capabilities —
+ *     upstream products are opaque bytes, not JSON).
  *
  * Throws {@link IntegrityMismatchError} on the first mismatch; the worker
  * is expected to translate that into `reason: 'integrity-failed'`.
@@ -129,14 +144,10 @@ export async function fetchBundles(
 
   // 2. Capabilities, in declared order. Capability blobs are opaque packed
   //    bytes (tarballs etc.), so we hash the bytes directly rather than
-  //    canonicalize.
+  //    canonicalize. Uses fetchVerified for DRY raw-bytes verification.
   const capabilities: FetchedCapability[] = [];
   for (const cap of refs.capabilities) {
-    const bytes = await storage.get(cap.uri);
-    const actualHash = computeContentHash(bytes);
-    if (actualHash !== cap.contentHash) {
-      throw new IntegrityMismatchError(cap.contentHash, actualHash);
-    }
+    const bytes = await fetchVerified(cap.uri, cap.contentHash, storage);
     capabilities.push({
       name: deriveNameFromUri(cap.uri),
       bytes,
@@ -160,7 +171,15 @@ export async function fetchBundles(
     });
   }
 
-  return { subagentDef, capabilities, envs };
+  // 4. Inputs: opaque bytes (upstream products — patches, artifacts, etc.).
+  //    Verified by raw-bytes hash, same style as capabilities.
+  const inputs: Array<{ key: string; bytes: Uint8Array }> = [];
+  for (const inp of refs.inputs ?? []) {
+    const bytes = await fetchVerified(inp.uri, inp.contentHash, storage);
+    inputs.push({ key: inp.key, bytes });
+  }
+
+  return { subagentDef, capabilities, envs, inputs };
 }
 
 /**

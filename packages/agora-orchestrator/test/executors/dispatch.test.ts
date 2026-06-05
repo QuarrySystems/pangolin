@@ -769,6 +769,174 @@ describe('DispatchExecutor', () => {
     expect(Object.prototype.hasOwnProperty.call(Object.prototype, 'polluted')).toBe(false);
   });
 
+  // -------------------------------------------------------------------------
+  // Wave B: inputs.inputRefs threading (typed-product handoff, spec §4)
+  // -------------------------------------------------------------------------
+
+  it('threads inputs.inputRefs into the dispatch work', async () => {
+    const capturedTaskSpecs: import('@quarry-systems/agora-core').TaskSpec[] = [];
+    const { compute: baseCompute, resolveExit } = makeDeferredCompute();
+    // Wrap compute to capture TaskSpec passed to run()
+    const capturingCompute: import('@quarry-systems/agora-core').ComputeProvider = {
+      name: 'capturing',
+      async run(spec, ctx) {
+        capturedTaskSpecs.push(spec);
+        return baseCompute.run(spec, ctx);
+      },
+      awaitExit: baseCompute.awaitExit.bind(baseCompute),
+    };
+
+    const storage = makeMemoryStorage();
+    storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
+    const client = new AgoraClient({
+      namespace: 'ns',
+      compute: { default: capturingCompute },
+      credentials: { default: makeCredentials() },
+      storage,
+      targets: { prod: { compute: 'default', credentials: 'default' } },
+    });
+    const executor = new DispatchExecutor({ client, target: 'prod', workerImage: 'img' });
+
+    const inputRefs = { patch: 'agora://ns/artifact/d/sha256:' + 'a'.repeat(64) };
+    const item: WorkItem = {
+      ...baseItem,
+      inputs: { subagent: 's', inputRefs },
+    };
+
+    await executor.fire(item);
+
+    expect(capturedTaskSpecs).toHaveLength(1);
+    const bundleRefs = JSON.parse(capturedTaskSpecs[0].env.AGORA_BUNDLE_REFS_JSON);
+    // inputs array should contain the inputRef entry
+    const inputsArr: Array<{ key: string; uri: string; contentHash: string }> = bundleRefs.inputs;
+    expect(inputsArr).toHaveLength(1);
+    expect(inputsArr[0].key).toBe('patch');
+    expect(inputsArr[0].uri).toBe(inputRefs.patch);
+
+    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+  });
+
+  it('omits inputRefs from the dispatch work when the carrier is absent', async () => {
+    const capturedTaskSpecs: import('@quarry-systems/agora-core').TaskSpec[] = [];
+    const { compute: baseCompute, resolveExit } = makeDeferredCompute();
+    const capturingCompute: import('@quarry-systems/agora-core').ComputeProvider = {
+      name: 'capturing',
+      async run(spec, ctx) {
+        capturedTaskSpecs.push(spec);
+        return baseCompute.run(spec, ctx);
+      },
+      awaitExit: baseCompute.awaitExit.bind(baseCompute),
+    };
+
+    const storage = makeMemoryStorage();
+    storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
+    const client = new AgoraClient({
+      namespace: 'ns',
+      compute: { default: capturingCompute },
+      credentials: { default: makeCredentials() },
+      storage,
+      targets: { prod: { compute: 'default', credentials: 'default' } },
+    });
+    const executor = new DispatchExecutor({ client, target: 'prod', workerImage: 'img' });
+
+    // baseItem has no inputRefs in inputs
+    await executor.fire(baseItem);
+
+    expect(capturedTaskSpecs).toHaveLength(1);
+    const bundleRefs = JSON.parse(capturedTaskSpecs[0].env.AGORA_BUNDLE_REFS_JSON);
+    // inputs array should be empty when no inputRefs
+    expect(bundleRefs.inputs).toEqual([]);
+
+    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+  });
+
+  it('omits inputRefs from the dispatch work when the carrier is present but empty', async () => {
+    const capturedTaskSpecs: import('@quarry-systems/agora-core').TaskSpec[] = [];
+    const { compute: baseCompute, resolveExit } = makeDeferredCompute();
+    const capturingCompute: import('@quarry-systems/agora-core').ComputeProvider = {
+      name: 'capturing',
+      async run(spec, ctx) {
+        capturedTaskSpecs.push(spec);
+        return baseCompute.run(spec, ctx);
+      },
+      awaitExit: baseCompute.awaitExit.bind(baseCompute),
+    };
+
+    const storage = makeMemoryStorage();
+    storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
+    const client = new AgoraClient({
+      namespace: 'ns',
+      compute: { default: capturingCompute },
+      credentials: { default: makeCredentials() },
+      storage,
+      targets: { prod: { compute: 'default', credentials: 'default' } },
+    });
+    const executor = new DispatchExecutor({ client, target: 'prod', workerImage: 'img' });
+
+    // inputRefs carrier is present but empty — should behave the same as absent
+    const item: WorkItem = {
+      ...baseItem,
+      inputs: { subagent: 's', inputRefs: {} },
+    };
+
+    await executor.fire(item);
+
+    expect(capturedTaskSpecs).toHaveLength(1);
+    const bundleRefs = JSON.parse(capturedTaskSpecs[0].env.AGORA_BUNDLE_REFS_JSON);
+    // inputs array should be empty when inputRefs is present but empty
+    expect(bundleRefs.inputs).toEqual([]);
+
+    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+  });
+
+  it('drops non-string values in inputs.inputRefs without failing the dispatch', async () => {
+    const capturedTaskSpecs: import('@quarry-systems/agora-core').TaskSpec[] = [];
+    const { compute: baseCompute, resolveExit } = makeDeferredCompute();
+    const capturingCompute: import('@quarry-systems/agora-core').ComputeProvider = {
+      name: 'capturing',
+      async run(spec, ctx) {
+        capturedTaskSpecs.push(spec);
+        return baseCompute.run(spec, ctx);
+      },
+      awaitExit: baseCompute.awaitExit.bind(baseCompute),
+    };
+
+    const storage = makeMemoryStorage();
+    storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
+    const client = new AgoraClient({
+      namespace: 'ns',
+      compute: { default: capturingCompute },
+      credentials: { default: makeCredentials() },
+      storage,
+      targets: { prod: { compute: 'default', credentials: 'default' } },
+    });
+    const executor = new DispatchExecutor({ client, target: 'prod', workerImage: 'img' });
+
+    const pinnedUri = 'agora://ns/artifact/d/sha256:' + 'b'.repeat(64);
+    const item: WorkItem = {
+      ...baseItem,
+      inputs: {
+        subagent: 's',
+        inputRefs: {
+          good: pinnedUri,
+          bad: 42 as unknown as string,  // non-string → should be dropped
+        },
+      },
+    };
+
+    // Should not throw
+    await expect(executor.fire(item)).resolves.toBeDefined();
+
+    expect(capturedTaskSpecs).toHaveLength(1);
+    const bundleRefs = JSON.parse(capturedTaskSpecs[0].env.AGORA_BUNDLE_REFS_JSON);
+    const inputsArr: Array<{ key: string; uri: string }> = bundleRefs.inputs;
+    // Only the good entry should be present
+    expect(inputsArr).toHaveLength(1);
+    expect(inputsArr[0].key).toBe('good');
+
+    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+  });
+
   it('reconcile with absent outputs field yields no outputRefs field', async () => {
     const { compute, resolveExit } = makeDeferredCompute();
     const storage = makeMemoryStorage();

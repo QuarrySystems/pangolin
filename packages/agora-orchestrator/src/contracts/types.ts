@@ -8,6 +8,17 @@ export type TerminalStatus = 'done' | 'failed' | 'skipped' | 'cancelled';
 
 export type EffectTier = 'pure' | 'read-impure' | 'write-impure';
 
+/** Selects WHICH typed product of an upstream item a binding consumes (spec §3). */
+export type OutputSelector =
+  | { kind: 'patch' }                 // the upstream's resultRef (dev patchRef) — degenerate dev case
+  | { kind: 'output'; path: string }; // a file the upstream wrote to outputs/ (Wave A outputRefs)
+
+/** One typed-product handoff edge: input key -> upstream product. */
+export interface InputBinding {
+  from: string;            // upstream WorkItem id in the same Run
+  select: OutputSelector;
+}
+
 /** A single dispatchable unit (skeleton shape — packs/effect-policy/budget deferred). */
 export interface WorkItem {
   id: string;
@@ -20,6 +31,9 @@ export interface WorkItem {
   resourceLocks: string[];
   /** Optional id of a registered SubagentShape; when set, inputs are validated against its inputSchema. */
   subagentShape?: string;
+  /** Typed-product handoff wiring: input key -> upstream product (spec §3).
+   *  Auto-unioned into depends_on at submit-normalization. */
+  needs?: Record<string, InputBinding>;
 }
 
 /** One plan submission: a set of WorkItems + their edges, placed on a queue. */

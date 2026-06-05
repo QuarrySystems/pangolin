@@ -6,10 +6,17 @@ export interface BundleRef {
   contentHash: string;
 }
 
+export interface InputRefEntry {
+  key: string;
+  uri: string;
+  contentHash: string;
+}
+
 export interface BundleRefs {
   subagent: BundleRef;
   capabilities: BundleRef[];
   env: BundleRef[];
+  inputs?: InputRefEntry[];
 }
 
 export interface WorkerConfig {
@@ -89,6 +96,28 @@ export function parseWorkerEnv(
     throw new Error(
       `agora-worker: AGORA_BUNDLE_REFS_JSON missing subagent / capabilities / env fields`,
     );
+  }
+
+  // Validate inputs field if present
+  if (bundleRefs.inputs !== undefined) {
+    if (!Array.isArray(bundleRefs.inputs)) {
+      throw new Error(
+        `agora-worker: AGORA_BUNDLE_REFS_JSON inputs field must be an array`,
+      );
+    }
+    for (const entry of bundleRefs.inputs) {
+      if (
+        !entry ||
+        typeof entry !== "object" ||
+        typeof entry.key !== "string" ||
+        typeof entry.uri !== "string" ||
+        typeof entry.contentHash !== "string"
+      ) {
+        throw new Error(
+          `agora-worker: AGORA_BUNDLE_REFS_JSON inputs entries must have key, uri, and contentHash fields as strings`,
+        );
+      }
+    }
   }
 
   let inputJson: Record<string, unknown> = {};

@@ -222,6 +222,146 @@ describe('client.dispatch.fire', () => {
     }
   });
 
+  it('threads inputRefs into bundleRefs.inputs with the hash from the pinned URI', async () => {
+    const storage = makeMemoryStorage();
+    storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
+
+    let capturedSpec: import('@quarry-systems/agora-core').TaskSpec | undefined;
+    const compute: ComputeProvider = {
+      name: 'fake-compute',
+      async run(spec, _ctx) {
+        capturedSpec = spec;
+        return { providerTaskId: 'prov-inputrefs-test' };
+      },
+      async awaitExit(_handle, _ctx): Promise<TaskExit> {
+        return { exitCode: 0, startedAt: new Date(0), finishedAt: new Date(1000), stdout: 'done', stderr: '' };
+      },
+    };
+
+    const client = new AgoraClient({
+      namespace: 'ns',
+      compute: { default: compute },
+      credentials: { default: makeCredentials() },
+      storage,
+      targets: { prod: { compute: 'default', credentials: 'default' } },
+    });
+
+    const uri = 'agora://ns/artifact/d-up/sha256:' + 'a'.repeat(64);
+    const inflight = await client.dispatch.fire({
+      subagent: 's',
+      target: 'prod',
+      workerImage: 'img',
+      inputRefs: { patch: uri },
+    });
+
+    expect(capturedSpec).toBeDefined();
+    const bundleRefs = JSON.parse(capturedSpec!.env.AGORA_BUNDLE_REFS_JSON);
+    expect(bundleRefs.inputs).toEqual([{ key: 'patch', uri, contentHash: 'sha256:' + 'a'.repeat(64) }]);
+    expect(inflight.resolved.inputRefs).toEqual({ patch: uri });
+  });
+
+  it('throws before container starts when inputRefs contains an unpinned URI (no contentHash)', async () => {
+    const storage = makeMemoryStorage();
+    storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
+
+    const compute: ComputeProvider = {
+      name: 'fake-compute',
+      async run(_spec, _ctx) {
+        return { providerTaskId: 'never' };
+      },
+      async awaitExit(_handle, _ctx): Promise<TaskExit> {
+        return { exitCode: 0, startedAt: new Date(0), finishedAt: new Date(0), stdout: '', stderr: '' };
+      },
+    };
+
+    const client = new AgoraClient({
+      namespace: 'ns',
+      compute: { default: compute },
+      credentials: { default: makeCredentials() },
+      storage,
+      targets: { prod: { compute: 'default', credentials: 'default' } },
+    });
+
+    const unpinnedUri = 'agora://ns/artifact/d-up'; // no contentHash segment
+    await expect(
+      client.dispatch.fire({
+        subagent: 's',
+        target: 'prod',
+        workerImage: 'img',
+        inputRefs: { patch: unpinnedUri },
+      }),
+    ).rejects.toThrow(/inputRefs\['patch'\].*pinned/);
+  });
+
+  it('throws before container starts when inputRefs contains a malformed URI', async () => {
+    const storage = makeMemoryStorage();
+    storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
+
+    const compute: ComputeProvider = {
+      name: 'fake-compute',
+      async run(_spec, _ctx) {
+        return { providerTaskId: 'never' };
+      },
+      async awaitExit(_handle, _ctx): Promise<TaskExit> {
+        return { exitCode: 0, startedAt: new Date(0), finishedAt: new Date(0), stdout: '', stderr: '' };
+      },
+    };
+
+    const client = new AgoraClient({
+      namespace: 'ns',
+      compute: { default: compute },
+      credentials: { default: makeCredentials() },
+      storage,
+      targets: { prod: { compute: 'default', credentials: 'default' } },
+    });
+
+    const malformedUri = 'not-an-agora-uri';
+    await expect(
+      client.dispatch.fire({
+        subagent: 's',
+        target: 'prod',
+        workerImage: 'img',
+        inputRefs: { patch: malformedUri },
+      }),
+    ).rejects.toThrow(); // parseAgoraUri throws on malformed URIs
+  });
+
+  it('omitting inputRefs yields inputs: [] in bundleRefs (additive, old workers tolerate it)', async () => {
+    const storage = makeMemoryStorage();
+    storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
+
+    let capturedSpec: import('@quarry-systems/agora-core').TaskSpec | undefined;
+    const compute: ComputeProvider = {
+      name: 'fake-compute',
+      async run(spec, _ctx) {
+        capturedSpec = spec;
+        return { providerTaskId: 'prov-no-inputs-test' };
+      },
+      async awaitExit(_handle, _ctx): Promise<TaskExit> {
+        return { exitCode: 0, startedAt: new Date(0), finishedAt: new Date(1000), stdout: 'done', stderr: '' };
+      },
+    };
+
+    const client = new AgoraClient({
+      namespace: 'ns',
+      compute: { default: compute },
+      credentials: { default: makeCredentials() },
+      storage,
+      targets: { prod: { compute: 'default', credentials: 'default' } },
+    });
+
+    await client.dispatch.fire({
+      subagent: 's',
+      target: 'prod',
+      workerImage: 'img',
+      // no inputRefs
+    });
+
+    expect(capturedSpec).toBeDefined();
+    const bundleRefs = JSON.parse(capturedSpec!.env.AGORA_BUNDLE_REFS_JSON);
+    expect(bundleRefs.inputs).toEqual([]);
+  });
+
   it('client.dispatch.fire is a method on the dispatch callable (not a standalone fn)', () => {
     const storage = makeMemoryStorage();
     const compute: ComputeProvider = {

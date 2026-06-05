@@ -11,6 +11,7 @@ export const devCodeEdit: SubagentShape = {
   inputSchema: z.object({ baseCommit: z.string(), instructions: z.string() }),
   outputSchema: z.object({ patch: patchSchema, intents: z.array(intentSchema).optional() }),
   capability: { imageDigest: WORKER_IMAGE, permissions: {}, contextShape: "repo worktree at baseCommit" },
+  outputEdgeType: "patch-ref",
 };
 
 export const devVerify: SubagentShape = {
@@ -19,6 +20,7 @@ export const devVerify: SubagentShape = {
   inputSchema: z.object({ patch: patchSchema }),
   outputSchema: z.object({ passed: z.boolean(), report: z.string() }),
   capability: { imageDigest: WORKER_IMAGE, permissions: {}, contextShape: "repo snapshot + patch applied" },
+  inputEdgeTypes: { patch: "patch-ref" },
 };
 
 export const devPack: SubagentShape[] = [devCodeEdit, devVerify];

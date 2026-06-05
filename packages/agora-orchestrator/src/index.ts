@@ -31,3 +31,5 @@ export { renderVerification } from './audit/render.js';
 export { verifyBundle } from './audit/verify-bundle.js';
 export { CronScheduler, nextDueAfter } from './scheduling/cron-scheduler.js';
 export { SqliteScheduleStore } from './runstate/sqlite-schedule-store.js';
+export { validateRun, normalizeRun } from './engine/run-validator.js';
+export { resolveInputRefs, selectProductRef } from './engine/needs-resolver.js';

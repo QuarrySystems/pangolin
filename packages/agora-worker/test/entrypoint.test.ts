@@ -115,6 +115,12 @@ async function setupHarness(opts?: {
   verify?: { command: string; timeout?: number };
   /** Called inside the stub adapter's invoke(), after incrementing the counter. */
   onInvoke?: (spec: RuntimeInvocation) => Promise<void>;
+  /**
+   * Input blobs to seed: each entry is stored in FakeStorage and added to
+   * bundleRefs.inputs. `hashCorrect` defaults to true; set false to simulate
+   * a tampered input (hash mismatch -> integrity-failed).
+   */
+  inputs?: Array<{ key: string; bytes: Uint8Array; hashCorrect?: boolean }>;
 }): Promise<Harness> {
   const workDir = await mkdtemp(join(tmpdir(), 'entrypoint-work-'));
   const adaptersRoot = await mkdtemp(join(tmpdir(), 'entrypoint-adapters-'));
@@ -153,7 +159,22 @@ async function setupHarness(opts?: {
   storage.set(subagentUri, asJsonBytes(subagentDef));
   storage.set(capUri, capBytes);
 
-  const bundleRefs = {
+  const inputRefs: Array<{ key: string; uri: string; contentHash: string }> = [];
+  if (opts?.inputs) {
+    for (const inp of opts.inputs) {
+      // synthetic uri; the contentHash field below is what's verified
+      const inputUri = `agora://ns/input/${inp.key}/sha256:${inp.key}`;
+      const correctHash = computeContentHash(inp.bytes);
+      storage.set(inputUri, inp.bytes);
+      inputRefs.push({
+        key: inp.key,
+        uri: inputUri,
+        contentHash: inp.hashCorrect === false ? 'sha256:tampered' : correctHash,
+      });
+    }
+  }
+
+  const bundleRefs: Record<string, unknown> = {
     subagent: { uri: subagentUri, contentHash: subagentHash },
     capabilities: [
       {
@@ -165,6 +186,7 @@ async function setupHarness(opts?: {
       },
     ],
     env: [],
+    ...(inputRefs.length > 0 ? { inputs: inputRefs } : {}),
   };
 
   const env: Record<string, string> = {
@@ -657,5 +679,85 @@ describe('runWorker', () => {
     const sentinelUri = buildDispatchRecordUri('ns', 'd-1', 'output.json');
     const parsed = JSON.parse(new TextDecoder().decode(await h.storage.get(sentinelUri)));
     expect(parsed.outputs).toBeUndefined();
+  });
+
+  it('materializes input refs at workspace/inputs/<key> before the adapter runs', async () => {
+    const inputBytes = new TextEncoder().encode('diff --git a/x b/x');
+    const h = await setupHarness({
+      inputs: [{ key: 'patch.diff', bytes: inputBytes }],
+      onInvoke: async (spec) => {
+        const staged = await readFile(join(spec.workspaceDir, 'inputs', 'patch.diff'), 'utf8');
+        if (!staged.startsWith('diff --git')) throw new Error('input not materialized before invoke');
+      },
+    });
+    cleanupDirs.push(h.workDir, h.adaptersRoot);
+    expect(await runWorker(h.env, makeDeps(h))).toBe(0);
+  });
+
+  it('integrity failure: tampered input must NOT have the adapter invoked', async () => {
+    const h = await setupHarness({
+      inputs: [{ key: 'patch.diff', bytes: new TextEncoder().encode('hello'), hashCorrect: false }],
+    });
+    cleanupDirs.push(h.workDir, h.adaptersRoot);
+
+    const code = await runWorker(h.env, makeDeps(h));
+
+    expect(code).not.toBe(0);
+    const failed = h.events.find((e) => e.kind === 'dispatch.failed');
+    expect(failed).toBeDefined();
+    expect(failed && 'reason' in failed && failed.reason).toBe('integrity-failed');
+    expect(h.invokeCalls).toBe(0);
+  });
+
+  it('rejects input key with path traversal and emits integrity-failed without invoking the adapter', async () => {
+    const h = await setupHarness({
+      inputs: [{ key: '../escape.txt', bytes: new TextEncoder().encode('bad') }],
+    });
+    cleanupDirs.push(h.workDir, h.adaptersRoot);
+
+    const code = await runWorker(h.env, makeDeps(h));
+
+    expect(code).not.toBe(0);
+    const failed = h.events.find((e) => e.kind === 'dispatch.failed');
+    expect(failed).toBeDefined();
+    expect(failed && 'reason' in failed && failed.reason).toBe('integrity-failed');
+    // The adapter must NOT have been invoked — traversal is caught before overlay.
+    expect(h.invokeCalls).toBe(0);
+  });
+
+  it('materialized input does not appear in the workspace patch (baseline captured after overlay)', async () => {
+    // The adapter writes a NEW file so there is always a non-empty diff. This
+    // ensures patchRef is present and the core assertion below always runs — the
+    // test is deterministic whether or not git is available (if git is absent the
+    // whole run is best-effort and the sentinel won't be stored; that is a
+    // distinct concern covered by the best-effort escape path).
+    const inputBytes = new TextEncoder().encode('diff --git a/x b/x\n');
+    const h = await setupHarness({
+      inputs: [{ key: 'patch.diff', bytes: inputBytes }],
+      onInvoke: async (spec) => {
+        // Write a new file the adapter "produced" — this produces a real diff.
+        await writeFile(join(spec.workspaceDir, 'agent-output.txt'), 'result\n');
+      },
+    });
+    cleanupDirs.push(h.workDir, h.adaptersRoot);
+    h.setRuntimeExit({ exitCode: 0, stdout: '', stderr: '' });
+
+    const code = await runWorker(h.env, makeDeps(h));
+    expect(code).toBe(0);
+
+    // The sentinel must have been stored (writeSentinel always runs on success).
+    const sentinelUri = buildDispatchRecordUri('ns', 'd-1', 'output.json');
+    expect(h.storage.has(sentinelUri)).toBe(true);
+    const parsed = JSON.parse(new TextDecoder().decode(await h.storage.get(sentinelUri)));
+
+    // The adapter wrote a new file so a patch must exist.
+    expect(parsed.patchRef).toBeDefined();
+    const patchBytes = await h.storage.get(parsed.patchRef);
+    const patchText = new TextDecoder().decode(patchBytes);
+    // The patch must show the new agent-produced file.
+    expect(patchText).toContain('agent-output.txt');
+    // The pre-existing input file (overlaid before baseline) must NOT appear
+    // as a change — it was staged into the baseline tree, so the diff is clean.
+    expect(patchText).not.toContain('inputs/patch.diff');
   });
 });

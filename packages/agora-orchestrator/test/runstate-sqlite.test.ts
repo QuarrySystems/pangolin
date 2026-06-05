@@ -305,4 +305,23 @@ describe('SqliteRunStateStore', () => {
     expect(it.resultRef).toBeUndefined();
     expect(it.manifestRef).toBeUndefined();
   });
+
+  it('persists and reads back needs through saveRun', () => {
+    const store = new SqliteRunStateStore();
+    store.ensureQueue('default', 1);
+    store.saveRun({ id: 'rn', queue: 'default', items: [
+      { id: 'b', executor: 'x', inputs: {}, depends_on: ['a'], resourceLocks: [],
+        needs: { patch: { from: 'a', select: { kind: 'patch' } } } }] });
+    expect(store.getItems('rn').find((i) => i.id === 'b')!.needs)
+      .toEqual({ patch: { from: 'a', select: { kind: 'patch' } } });
+  });
+
+  it('item without needs reads back undefined', () => {
+    const store = new SqliteRunStateStore();
+    store.ensureQueue('default', 1);
+    store.saveRun({ id: 'rnn', queue: 'default', items: [
+      { id: 'b', executor: 'x', inputs: {}, depends_on: [], resourceLocks: [] }] });
+    const it = store.getItems('rnn').find((i) => i.id === 'b')!;
+    expect(it.needs).toBeUndefined();
+  });
 });
