@@ -22,6 +22,8 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { runWorker, type RunWorkerDeps } from '../src/entrypoint.js';
 import {
   computeContentHash,
@@ -32,6 +34,8 @@ import {
   type RuntimeExit,
   type LifecycleEvent,
 } from '@quarry-systems/agora-core';
+
+const execFileAsync = promisify(execFile);
 
 // ---------------------------------------------------------------------------
 // FakeStorage — identical to the one in entrypoint.test.ts
@@ -122,6 +126,26 @@ async function setupHarness(opts?: {
 }): Promise<Harness> {
   const workDir = await mkdtemp(join(tmpdir(), 'golden-work-'));
   const adaptersRoot = await mkdtemp(join(tmpdir(), 'golden-adapters-'));
+
+  // Pre-initialize a git repo in workDir so captureBaseline (which runs
+  // git init -q idempotently) always has a fully functional repo. This
+  // makes patchRef presence DETERMINISTIC — no conditional branches needed.
+  await execFileAsync('git', [
+    '-C', workDir,
+    '-c', 'safe.directory=*',
+    '-c', 'user.email=agora@local',
+    '-c', 'user.name=agora',
+    '-c', 'commit.gpgsign=false',
+    'init', '-q',
+  ]);
+  await execFileAsync('git', [
+    '-C', workDir,
+    '-c', 'safe.directory=*',
+    '-c', 'user.email=agora@local',
+    '-c', 'user.name=agora',
+    '-c', 'commit.gpgsign=false',
+    'commit', '--allow-empty', '-m', 'init',
+  ]);
 
   // Write a stub adapter on disk (adapter-loader still exercises discovery).
   const adapterDir = join(adaptersRoot, 'claude-code');
@@ -282,17 +306,10 @@ describe('pipeline-golden: sentinel byte-shape parity', () => {
     const bytesStr = new TextDecoder().decode(bytes);
     const parsed = JSON.parse(bytesStr) as Record<string, unknown>;
 
-    // When git is available, patchRef will be present. If git is unavailable
-    // (CI environment without git), the sentinel degrades to ['schemaVersion'].
-    // In either case, 'blocks' must be absent and round-trip must hold.
+    // Git is pre-initialized in setupHarness, so patchRef MUST always be
+    // present when the adapter writes a file. Assert unconditionally.
     const keys = Object.keys(parsed);
-    if (keys.includes('patchRef')) {
-      // Golden: edit was captured → keys exactly [schemaVersion, patchRef]
-      expect(keys).toEqual(['schemaVersion', 'patchRef']);
-    } else {
-      // Degraded (git unavailable): still valid, just no patchRef
-      expect(keys).toEqual(['schemaVersion']);
-    }
+    expect(keys).toEqual(['schemaVersion', 'patchRef']);
 
     expect('blocks' in parsed).toBe(false);
     expect(JSON.stringify(parsed)).toBe(bytesStr);
@@ -326,18 +343,10 @@ describe('pipeline-golden: sentinel byte-shape parity', () => {
     const bytesStr = new TextDecoder().decode(bytes);
     const parsed = JSON.parse(bytesStr) as Record<string, unknown>;
 
+    // Git is pre-initialized in setupHarness, so patchRef MUST always be
+    // present when the adapter writes a file. Assert unconditionally.
     const keys = Object.keys(parsed);
-    // verify is always present when configured (the verify block always runs on success path)
-    expect(keys).toContain('schemaVersion');
-    expect(keys).toContain('verify');
-
-    // Golden key-order for the full case (with patchRef when git available):
-    if (keys.includes('patchRef')) {
-      expect(keys).toEqual(['schemaVersion', 'patchRef', 'verify']);
-    } else {
-      // Git unavailable: no patchRef, but verify is still appended in order
-      expect(keys).toEqual(['schemaVersion', 'verify']);
-    }
+    expect(keys).toEqual(['schemaVersion', 'patchRef', 'verify']);
 
     // verify.passed must be true (passing command)
     const verify = parsed['verify'] as { passed: boolean };
@@ -380,18 +389,11 @@ describe('pipeline-golden: sentinel byte-shape parity', () => {
     const bytesStr = new TextDecoder().decode(bytes);
     const parsed = JSON.parse(bytesStr) as Record<string, unknown>;
 
+    // Git is pre-initialized in setupHarness, so patchRef MUST always be
+    // present when the adapter writes a file. Assert the full key sequence
+    // unconditionally.
     const keys = Object.keys(parsed);
-    expect(keys).toContain('schemaVersion');
-    expect(keys).toContain('verify');
-    expect(keys).toContain('outputs');
-
-    // Golden key-order assertions:
-    // schemaVersion is always first.
-    expect(keys[0]).toBe('schemaVersion');
-    // verify comes before outputs (that is the writeSentinel field-assignment order).
-    const verifyIdx = keys.indexOf('verify');
-    const outputsIdx = keys.indexOf('outputs');
-    expect(verifyIdx).toBeLessThan(outputsIdx);
+    expect(keys).toEqual(['schemaVersion', 'patchRef', 'verify', 'outputs']);
 
     // 'blocks' absent
     expect('blocks' in parsed).toBe(false);
