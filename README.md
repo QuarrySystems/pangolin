@@ -101,7 +101,7 @@ Thirteen packages under `packages/`:
 | [`agora-providers-aws-creds`](packages/agora-providers-aws-creds/) | `CredentialProvider` wrapping the AWS SDK default credential chain. Lazy resolution, no extra caching. |
 | [`agora-storage-s3`](packages/agora-storage-s3/) | `StorageProvider` backed by S3. Content-addressed object layout, integrity-verified on read. Production target. |
 | [`agora-storage-local`](packages/agora-storage-local/) | `StorageProvider` backed by the local filesystem. Pairs with `agora-providers-local-docker` for the local stack. |
-| [`agora-secret-store`](packages/agora-secret-store/) | `SecretStore` seam plus impls — `InlineSecretStager` (AWS Secrets Manager) and `LocalSecretStore` (on-disk staging). `agora-client` auto-selects local vs AWS by storage backend when staging per-dispatch inline secrets. |
+| [`agora-secret-store`](packages/agora-secret-store/) | `SecretStore` seam plus impls — `AwsSecretStore` (AWS Secrets Manager), `LocalSecretStore` (on-disk), and a `storeFromConfig` factory. `agora-client` takes injected per-target stores (`secretStores`); the worker builds its store via `storeFromConfig`. |
 | [`agora-orchestrator`](packages/agora-orchestrator/) | Orchestrator engine (codename *agora-offload*): named queues, `depends_on` resolution, resource locks, a fire-and-reconcile tick loop, SQLite run-state, typed-product handoff (`needs` → content-addressed `inputRefs`), per-queue execution patterns with audited dynamic spawn, and provenance-closure verification, behind pluggable `Executor` / `Trigger` seams. |
 
 Plus:
@@ -188,7 +188,11 @@ graph TD
   client --> secretstore
   cli --> client
   mcp --> client
+  mcp --> orch
   worker --> core
+  worker --> secretstore
+  worker --> ss3
+  worker --> slocal
   runtime --> core
   pfargate --> core
   plocal --> core
@@ -197,6 +201,7 @@ graph TD
   slocal --> core
   secretstore --> core
   orch --> core
+  orch --> client
 ```
 
 ASCII rendering of the same graph:
@@ -207,16 +212,16 @@ agora-core                              (types only)
    ├── agora-client                     (caller-side SDK)
    │     ▲
    │     ├── agora-cli                  (binary `agora`)
-   │     └── agora-mcp                  (stdio MCP server, run-time tools only)
-   ├── agora-worker                     (container-side runtime)
+   │     ├── agora-mcp                  (stdio MCP server, run-time tools only; also depends on agora-orchestrator)
+   │     └── agora-orchestrator         (offload engine — queues/deps/locks, serve, operations API, tamper-evident audit; CLI `agora orch` + client MCP tools)
+   ├── agora-worker                     (container-side runtime; also depends on agora-secret-store + both storage packages)
    ├── agora-runtime-claude-code        (RuntimeAdapter impl)
    ├── agora-providers-fargate          (ComputeProvider, AWS Fargate)
    ├── agora-providers-local-docker     (ComputeProvider, local Docker)
    ├── agora-providers-aws-creds        (CredentialProvider, AWS)
    ├── agora-storage-s3                 (StorageProvider, S3)
    ├── agora-storage-local              (StorageProvider, local FS)
-   ├── agora-secret-store               (SecretStore seam: Inline/AWS + Local; agora-client also depends on it)
-   └── agora-orchestrator               (offload engine — queues/deps/locks, serve, operations API, tamper-evident audit; CLI `agora orch` + client MCP tools)
+   └── agora-secret-store               (SecretStore seam: AWS + Local; agora-client and agora-worker also depend on it)
 ```
 
 No agora package depends on another Quarry Systems library (Stoa,

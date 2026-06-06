@@ -171,7 +171,8 @@ the table above are the most common case for each reason, not the only one.
 | `worker-failed` | Step 9 / 13 | `agora-setup.sh` exited non-zero or timed out; OR the needs_input sentinel was malformed (unparseable JSON, missing `question`, >1 MiB serialized). |
 | `provider-failed` | Step 11 | Runtime adapter (claude binary) exited non-zero with no sentinel. Most common cause in dev: missing `ANTHROPIC_API_KEY`. |
 
-Each terminal event includes `durationMs` measured from `dispatch.started`.
+Each terminal event includes `durationMs` measured from worker start
+(`runWorker` entry), which slightly precedes `dispatch.started`.
 
 ## Reading worker stdout
 

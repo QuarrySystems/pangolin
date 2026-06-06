@@ -14,7 +14,8 @@
 //   - `dispatch.cancelled`    — terminal: cancelled by caller
 //
 // `at` is an ISO-8601 timestamp; `durationMs` is wall-clock duration from
-// `dispatch.started` to the event in question.
+// worker start (`runWorker` entry, which slightly precedes
+// `dispatch.started`) to the event in question.
 
 import type { CapabilityRef } from './refs.js';
 
