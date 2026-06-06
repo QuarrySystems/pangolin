@@ -1,0 +1,99 @@
+diff --git a/packages/agora-cli/test/sync.test.ts b/packages/agora-cli/test/sync.test.ts
+new file mode 100644
+index 0000000..fc31e99
+--- /dev/null
++++ b/packages/agora-cli/test/sync.test.ts
+@@ -0,0 +1,93 @@
++import { runSync } from '../src/sync.js';
++import { describe, it, expect, vi } from 'vitest';
++
++describe('runSync', () => {
++  it('prints a (dry-run) line per item and never calls register', async () => {
++    const register = vi.fn();
++    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
++    try {
++      await runSync({
++        kind: 'subagent',
++        items: [{ name: 'alpha' }, { name: 'beta' }],
++        dryRun: true,
++        register,
++      });
++      expect(register).not.toHaveBeenCalled();
++      expect(log).toHaveBeenCalledTimes(2);
++      expect(log).toHaveBeenNthCalledWith(1, '(dry-run) subagent alpha');
++      expect(log).toHaveBeenNthCalledWith(2, '(dry-run) subagent beta');
++    } finally {
++      log.mockRestore();
++    }
++  });
++
++  it('registers each item and prints name + content hash', async () => {
++    const register = vi.fn(async (item: { name: string }) => ({
++      name: item.name,
++      contentHash: `hash-${item.name}`,
++    }));
++    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
++    try {
++      await runSync({
++        kind: 'capability',
++        items: [{ name: 'one' }, { name: 'two' }],
++        dryRun: false,
++        register,
++      });
++      expect(register).toHaveBeenCalledTimes(2);
++      expect(register).toHaveBeenNthCalledWith(1, { name: 'one' });
++      expect(register).toHaveBeenNthCalledWith(2, { name: 'two' });
++      expect(log).toHaveBeenNthCalledWith(1, 'synced capability one\thash-one');
++      expect(log).toHaveBeenNthCalledWith(2, 'synced capability two\thash-two');
++    } finally {
++      log.mockRestore();
++    }
++  });
++
++  it('is a no-op when items is empty', async () => {
++    const register = vi.fn();
++    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
++    try {
++      await runSync({ kind: 'subagent', items: [], dryRun: false, register });
++      expect(register).not.toHaveBeenCalled();
++      expect(log).not.toHaveBeenCalled();
++    } finally {
++      log.mockRestore();
++    }
++  });
++
++  it('propagates errors thrown by register', async () => {
++    const register = vi.fn(async () => {
++      throw new Error('boom');
++    });
++    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
++    try {
++      await expect(
++        runSync({
++          kind: 'subagent',
++          items: [{ name: 'x' }],
++          dryRun: false,
++          register,
++        }),
++      ).rejects.toThrow(/boom/);
++    } finally {
++      log.mockRestore();
++    }
++  });
++
++  it('prints the registered ref name even when it differs from the input name', async () => {
++    const register = vi.fn(async () => ({ name: 'canonical', contentHash: 'abc123' }));
++    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
++    try {
++      await runSync({
++        kind: 'capability',
++        items: [{ name: 'input-name' }],
++        dryRun: false,
++        register,
++      });
++      expect(log).toHaveBeenCalledWith('synced capability canonical\tabc123');
++    } finally {
++      log.mockRestore();
++    }
++  });
++});

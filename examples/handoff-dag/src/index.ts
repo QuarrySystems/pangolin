@@ -2,7 +2,7 @@
 //
 // Drives the typed-product handoff flow end-to-end against real containers:
 //   AgoraOrchestrator.tick → DispatchExecutor.fire (edit-a produces patch → apply-patch
-//   binds it via `needs` and applies it with `git apply inputs/patch.diff`).
+//   binds it via `needs` and applies it with `git apply inputs/patch`).
 //   After completion: assemble the audit bundle + verifyBundle for provenance-closure proof.
 //
 // Prerequisites (this is a LIVE run, not a unit test):
@@ -87,10 +87,10 @@ async function main(): Promise<void> {
     // 2. Register subagents:
     //    code-edit: edits src/main.ts in the workspace (produces a patch artifact = result_ref).
     //    apply-patch: receives the upstream patch via `needs.patch` → inputs.inputRefs.patch
-    //      and applies it with `git apply inputs/patch.diff` via agora-setup.sh.
+    //      and applies it with `git apply inputs/patch` via agora-setup.sh.
     //
     // The `apply-patch` capability ships agora-setup.sh which runs before the agent adapter,
-    // AFTER the inputs/ overlay — so inputs/patch.diff is already present when setup runs.
+    // AFTER the inputs/ overlay — so inputs/patch is already present when setup runs.
     const srcContent = '// main.ts\nexport const GREETING = "hello";\n';
     await client.capabilities.register({
       name: 'handoff-cap-edit',
@@ -114,8 +114,8 @@ async function main(): Promise<void> {
       capabilities: ['handoff-cap-edit'],
     });
 
-    // apply-patch: the patch from edit-a is overlaid as inputs/patch.diff before agora-setup.sh
-    // runs `git apply inputs/patch.diff`, building on the upstream edit.
+    // apply-patch: the patch from edit-a is overlaid as inputs/patch before agora-setup.sh
+    // runs `git apply inputs/patch`, building on the upstream edit.
     await client.subagent.register({
       name: 'apply-patch',
       systemPrompt:

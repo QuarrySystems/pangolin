@@ -1,0 +1,42 @@
+{
+  "id": "dogfood-handoff-run2",
+  "queue": "default",
+  "items": [
+    {
+      "id": "readme-handoff-section",
+      "executor": "dispatch",
+      "inputs": {
+        "subagent": "code-edit",
+        "workerInput": {
+          "instructions": "In `README.md` (present in your workspace), find the `## Offload` section. Immediately after its closing paragraph (the one pointing at `examples/offload-fanout/`), add a new `### Typed-product handoff` subsection (3-6 sentences; a short JSON snippet is welcome). It must state, accurately: tasks in a plan can now declare dependent inputs with `needs` (e.g. \"needs\": { \"patch\": { \"from\": \"edit-a\", \"select\": { \"kind\": \"patch\" } } }) instead of hand-wiring `depends_on`; the orchestrator validates the whole DAG at submit, resolves the upstream task content-addressed product at fire time, and the worker materializes it under `inputs/` before the agent runs; consumed and produced refs are sealed into the audit evidence, and `agora verify` proves PROVENANCE CLOSURE - every consumed input ref must be a sealed product of a completed task in the same run (a fifth `handoff` check row). Point at `examples/handoff-dag/` as the runnable demo. Use `CHANGELOG.md` (also in your workspace; see the Typed-product handoff Wave A-C entry) for accurate wording. Edit ONLY `README.md`; change nothing else; then stop."
+        }
+      },
+      "depends_on": [],
+      "resourceLocks": [
+        "README.md"
+      ]
+    },
+    {
+      "id": "docs-handoff-page",
+      "executor": "dispatch",
+      "inputs": {
+        "subagent": "apply-edit",
+        "workerInput": {
+          "instructions": "The patch from the upstream `readme-handoff-section` task has ALREADY been applied to your workspace: `README.md` now contains a new `### Typed-product handoff` subsection - read it first; your page must stay consistent with its wording and claims. Create a NEW documentation page at `docs-site/src/content/docs/explanation/typed-product-handoff.md`. Match the frontmatter + heading conventions of the existing page `docs-site/src/content/docs/explanation/how-offload-runs.md` (also in your workspace). Explain, for an operator audience: (1) what a typed-product handoff is (dependent tasks receive an upstream task output by content-addressed reference - dev passes a patch ref; the same seam carries any artifact); (2) the `needs` declaration on a plan item and submit-time whole-DAG validation; (3) what the worker does (fetch-verified bytes materialized at `inputs/<key>` before the agent runs; anything written to `outputs/` is captured as content-addressed refs); (4) the provenance-closure guarantee `agora verify` enforces and how to read the `handoff` check row; (5) a short runnable pointer to `examples/handoff-dag/`. Create ONLY that one new file; modify nothing else; then stop."
+        }
+      },
+      "depends_on": [],
+      "needs": {
+        "patch": {
+          "from": "readme-handoff-section",
+          "select": {
+            "kind": "patch"
+          }
+        }
+      },
+      "resourceLocks": [
+        "docs-site/src/content/docs/explanation/typed-product-handoff.md"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+diff --git a/packages/agora-client/src/dispatch.ts b/packages/agora-client/src/dispatch.ts
+index a7797e5..ad3144d 100644
+--- a/packages/agora-client/src/dispatch.ts
++++ b/packages/agora-client/src/dispatch.ts
+@@ -213,7 +213,7 @@ export async function fireWork(
+   const envVars: Record<string, string> = {
+     AGORA_DISPATCH_ID: dispatchId,
+     AGORA_NAMESPACE: client.namespace,
+-    AGORA_STORAGE_URI: (client.storage as unknown as { rootUri?: string }).rootUri ?? '',
++    AGORA_STORAGE_URI: hasRootUri(client.storage) ? client.storage.rootUri : '',
+     AGORA_BUNDLE_REFS_JSON: JSON.stringify(bundleRefs),
+     AGORA_INPUT_JSON: JSON.stringify(work.input ?? {}),
+     AGORA_RUNTIME_ADAPTER: 'claude-code',
+@@ -370,6 +370,17 @@ function isSecretRef(v: SecretRef | InlineSecret): v is SecretRef {
+   return 'ref' in v;
+ }
+ 
++/** Narrowing guard: storage implementations may optionally expose a `rootUri`
++ *  string (used to populate `AGORA_STORAGE_URI`). */
++function hasRootUri(x: unknown): x is { rootUri: string } {
++  return (
++    typeof x === 'object' &&
++    x !== null &&
++    'rootUri' in x &&
++    typeof (x as { rootUri: unknown }).rootUri === 'string'
++  );
++}
++
+ /**
+  * Resolve a subagent reference. Short-name form is looked up via
+  * `storage.resolveLatest`; pre-built `SubagentRef`s pass through. Throws

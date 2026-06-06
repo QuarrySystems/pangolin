@@ -12,4 +12,4 @@
  * repo ourselves before calling `git apply`.
  */
 export const APPLY_PATCH_SETUP_SH =
-  '#!/bin/sh\nset -e\ngit init -q\ngit apply inputs/patch.diff\n';
+  '#!/bin/sh\nset -e\ngit init -q\ngit apply inputs/patch\n';

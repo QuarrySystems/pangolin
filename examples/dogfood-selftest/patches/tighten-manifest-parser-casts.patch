@@ -1,0 +1,42 @@
+diff --git a/packages/agora-cli/src/manifest-parser.ts b/packages/agora-cli/src/manifest-parser.ts
+index 68bd72e..24bdf33 100644
+--- a/packages/agora-cli/src/manifest-parser.ts
++++ b/packages/agora-cli/src/manifest-parser.ts
+@@ -30,6 +30,10 @@ export interface AgoraManifest {
+   envs?: EnvDecl[];
+ }
+ 
++function asArray(x: unknown): unknown[] {
++  return Array.isArray(x) ? x : [];
++}
++
+ export async function parseManifest(path: string): Promise<AgoraManifest> {
+   const raw = await readFile(path, 'utf8');
+   const obj = parseYaml(raw) as unknown;
+@@ -41,7 +45,7 @@ export async function parseManifest(path: string): Promise<AgoraManifest> {
+   if (m.capabilities !== undefined && !Array.isArray(m.capabilities)) {
+     throw new Error(`agora-cli: manifest.capabilities must be an array (at ${path})`);
+   }
+-  for (const cap of (m.capabilities ?? []) as unknown[]) {
++  for (const cap of asArray(m.capabilities)) {
+     if (
+       typeof cap !== 'object' ||
+       cap === null ||
+@@ -55,7 +59,7 @@ export async function parseManifest(path: string): Promise<AgoraManifest> {
+   if (m.subagents !== undefined && !Array.isArray(m.subagents)) {
+     throw new Error(`agora-cli: manifest.subagents must be an array (at ${path})`);
+   }
+-  for (const sub of (m.subagents ?? []) as unknown[]) {
++  for (const sub of asArray(m.subagents)) {
+     if (typeof sub !== 'object' || sub === null) {
+       throw new Error(`agora-cli: subagent missing 'name' (at ${path})`);
+     }
+@@ -73,7 +77,7 @@ export async function parseManifest(path: string): Promise<AgoraManifest> {
+   if (m.envs !== undefined && !Array.isArray(m.envs)) {
+     throw new Error(`agora-cli: manifest.envs must be an array (at ${path})`);
+   }
+-  for (const env of (m.envs ?? []) as unknown[]) {
++  for (const env of asArray(m.envs)) {
+     if (
+       typeof env !== 'object' ||
+       env === null ||

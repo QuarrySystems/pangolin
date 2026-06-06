@@ -12,7 +12,7 @@ patch, with every byte provenance-sealed and verifiable.
 - **Content-addressed handoff**: A's `result_ref` (a content-addressed patch artifact) is
   resolved at fire time and passed to B as `inputs.inputRefs.patch`. B's
   `agora-setup.sh` initialises the repo (`git init -q`) and then runs
-  `git apply inputs/patch.diff` so the downstream worker literally builds on the upstream
+  `git apply inputs/patch` so the downstream worker literally builds on the upstream
   edit.
 - **Provenance closure**: after both items complete, `verifyBundle` proves the chain —
   every `inputRefs` value in every dispatch manifest must be a sealed `resultRef` (or
@@ -39,8 +39,8 @@ pnpm --filter handoff-dag-example start
 The demo:
 1. Registers a `code-edit` subagent that renames `GREETING → SALUTATION` in `src/main.ts`
    and an `apply-patch` subagent whose `agora-setup.sh` first initialises the repo
-   (`git init -q`) then applies the patch (`git apply inputs/patch.diff`).  Setup runs
-   after the inputs/ overlay (so `inputs/patch.diff` is already present) but before the
+   (`git init -q`) then applies the patch (`git apply inputs/patch`).  Setup runs
+   after the inputs/ overlay (so `inputs/patch` is already present) but before the
    adapter, which is why the repo must be initialised inside the script.
 2. Submits `plan.json` (2 items, `apply-patch` wired via `needs` only).
 3. The `serve` driver ticks the AgoraOrchestrator until both items are terminal.
