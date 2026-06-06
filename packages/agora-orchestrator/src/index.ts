@@ -11,6 +11,7 @@ export { DispatchExecutor } from './executors/dispatch.js';
 export type { DispatchExecutorOptions } from './executors/dispatch.js';
 export { PackRegistry } from './packs/registry.js';
 export { devPack, devCodeEdit, devVerify, devRegistry } from './packs/dev.js';
+export { dataPack, dataSplit, dataTransform, dataAggregate, dataRegistry } from './packs/data.js';
 export { MailboxSubmissionTransport } from './transport/storage-transport.js';
 export { LocalDirMailbox } from './mailbox/local-dir.js';
 export { S3Mailbox } from './mailbox/s3.js';

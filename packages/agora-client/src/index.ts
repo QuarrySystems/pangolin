@@ -46,6 +46,12 @@ export {
   type RegisterSubagentOpts,
 } from './subagent-register.js';
 
+// ── Pipeline registration ──────────────────────────────────────────────────
+export {
+  registerPipeline,
+  type PipelineRef,
+} from './pipeline-register.js';
+
 // ── Env registration ───────────────────────────────────────────────────────
 export {
   registerEnv,
@@ -105,11 +111,12 @@ export {
 //   client.dispatch.cancel(id)           — method on the callable
 // ─────────────────────────────────────────────────────────────────────────
 
-import type { CapabilityRef, DispatchResult, SubagentRef, SubagentHandle } from '@quarry-systems/agora-core';
+import type { CapabilityRef, DispatchResult, SubagentRef, SubagentHandle, PipelineSpec } from '@quarry-systems/agora-core';
 import { AgoraClient } from './client.js';
 import { registerCapability, type RegisterCapabilityOpts } from './capabilities-register.js';
 import { listCapabilities, getCapability, listSubagents, getSubagent, listEnvs, getEnv } from './catalog.js';
 import { registerSubagent, type RegisterSubagentOpts } from './subagent-register.js';
+import { registerPipeline, type PipelineRef } from './pipeline-register.js';
 import { registerEnv, type RegisterEnvOpts } from './env-register.js';
 import { dispatchWork, fireWork, type ClientDispatchOpts, type InFlightDispatch } from './dispatch.js';
 import { describeDispatch } from './describe.js';
@@ -140,6 +147,11 @@ export interface AgoraClientEnvAPI {
   get(name: string): Promise<import('@quarry-systems/agora-core').EnvRef | null>;
 }
 
+/** Shape of `client.pipeline`. */
+export interface AgoraClientPipelineAPI {
+  register(spec: PipelineSpec): Promise<PipelineRef>;
+}
+
 /**
  * A callable dispatch function that also has `.describe` and `.cancel`
  * properties. `work` merges the fields from `DispatchWork` and
@@ -162,6 +174,8 @@ declare module './client.js' {
     readonly subagent: AgoraClientSubagentAPI;
     /** Namespaced env API (register / list / get). */
     readonly env: AgoraClientEnvAPI;
+    /** Namespaced pipeline API (register). */
+    readonly pipeline: AgoraClientPipelineAPI;
     /**
      * Callable dispatch function. Also exposes `.describe(id)` and
      * `.cancel(id)` as direct properties so callers can use the compact
@@ -213,6 +227,16 @@ Object.defineProperty(AgoraClient.prototype, 'env', {
       register: (opts: RegisterEnvOpts) => registerEnv(this, opts),
       list: () => listEnvs(this),
       get: (name: string) => getEnv(this, name),
+    };
+  },
+});
+
+Object.defineProperty(AgoraClient.prototype, 'pipeline', {
+  configurable: true,
+  enumerable: false,
+  get(this: AgoraClient): AgoraClientPipelineAPI {
+    return {
+      register: (spec: PipelineSpec) => registerPipeline(this, spec),
     };
   },
 });
