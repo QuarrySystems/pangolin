@@ -220,6 +220,15 @@ async function runScriptBlock(
 
   const isFailure = result.timedOut || result.startError !== undefined || result.exitCode !== 0;
 
+  // Emit gate diagnostics (symmetric with entrypoint's setup-script.ran / runtime.adapter.ran).
+  ctx.log({
+    kind: 'script.gate.ran',
+    exitCode: result.exitCode,
+    durationMs,
+    stdout,
+    stderr,
+  });
+
   const outcome: BlockOutcome = {
     kind: 'script',
     ordinal,
@@ -227,13 +236,6 @@ async function runScriptBlock(
     exitCode: result.exitCode !== 0 ? result.exitCode : undefined,
     durationMs,
   };
-
-  // Attach redacted output to outcome for visibility (as metadata not in the type,
-  // but we can store it implicitly; the type only has the declared fields).
-  // The stdout/stderr are used for gate diagnostics but BlockOutcome doesn't have them.
-  // We silence the lint for the variables rather than introducing non-spec fields.
-  void stdout;
-  void stderr;
 
   return {
     outcome,
@@ -410,6 +412,11 @@ export async function runPipeline(
       if (captureResult.outputs !== undefined) {
         lastOutputs = captureResult.outputs;
       }
+    } else {
+      // Unrecognized block kind — log and fail the pipeline immediately.
+      // Prevents invisible data loss when a future/corrupt spec reaches runtime.
+      ctx.log({ kind: 'pipeline.unknown-block', ordinal, blockKind: (block as { kind?: string }).kind });
+      return { kind: 'failed', outcomes, exitCode: 1 };
     }
     // Note: 'seal' is never authored — reserved, runner-appended (validated away by validatePipelineSpec)
   }

@@ -316,6 +316,55 @@ describe('runPipeline — completed path', () => {
 });
 
 // ---------------------------------------------------------------------------
+// runPipeline — gate script emits script.gate.ran log with redacted output
+// ---------------------------------------------------------------------------
+
+describe('runPipeline — gate script logging', () => {
+  it('gate script emits script.gate.ran with exitCode, durationMs, and redacted stdout/stderr', async () => {
+    const dir = await makeTempDir();
+    const storage = new FakeStorage();
+    // Set up a redact function that replaces "SECRET" with "[REDACTED]"
+    const logs: Array<Record<string, unknown>> = [];
+    const baseline = { unavailable: true } as const;
+    const ctx: BlockContext = {
+      workspaceDir: dir,
+      env: {},
+      storage,
+      namespace: 'ns',
+      dispatchId: 'd-gate',
+      adapter: makeFakeAdapter(),
+      subagent: {},
+      baseline,
+      redact: (s) => s.replace(/SECRET/g, '[REDACTED]'),
+      log: (event) => { logs.push(event); },
+    };
+
+    // Script writes "SECRET text" to stdout and exits 0
+    const spec: PipelineSpec = {
+      schemaVersion: 1,
+      id: 'dev.test',
+      blocks: [
+        { kind: 'script', command: 'node -e "process.stdout.write(\'SECRET text\')"', lens: 'gate' },
+      ],
+    };
+
+    await runPipeline(spec, ctx, { declared: false });
+    await cleanupTempDirs();
+
+    const gateLog = logs.find((l) => l['kind'] === 'script.gate.ran');
+    expect(gateLog).toBeDefined();
+    expect(gateLog!['exitCode']).toBe(0);
+    expect(typeof gateLog!['durationMs']).toBe('number');
+    // stdout must be redacted — "SECRET" replaced with "[REDACTED]"
+    expect(gateLog!['stdout']).toBe('[REDACTED] text');
+    // stderr should be present (empty string is fine)
+    expect(typeof gateLog!['stderr']).toBe('string');
+    // Confirm the secret itself is NOT in the log
+    expect(JSON.stringify(gateLog)).not.toContain('SECRET');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // runPipeline — gate failure (script block)
 // ---------------------------------------------------------------------------
 
@@ -472,17 +521,23 @@ describe('runPipeline — adapter throw propagation', () => {
 // ---------------------------------------------------------------------------
 
 describe('runPipeline — capture block is not a gate', () => {
-  it('capture(patch) failure logs escape.failed and pipeline continues (non-gate)', async () => {
+  it('capture(outputs) throw logs escape.failed, subsequent block still runs, pipeline completes, sentinel put succeeds', async () => {
     const dir = await makeTempDir();
-    // Storage that fails on artifact puts (triggering capturePatch failure)
-    // but succeeds on sentinel
-    let putCount = 0;
-    const failFirstPutStorage: StorageProvider = {
-      name: 'partial-fail',
-      put: async (uri: string, contents: Uint8Array) => {
-        putCount++;
-        // The first put will be the patch artifact — let it fail
-        if (putCount === 1) throw new Error('patch upload failed');
+    const { mkdir: fsMkdir, writeFile: fsWriteFile } = await import('node:fs/promises');
+    const { join: pathJoin } = await import('node:path');
+
+    // Create outputs/file.txt so captureOutputs walks outputs/ and calls storage.put on artifact URIs.
+    const outputsDir = pathJoin(dir, 'outputs');
+    await fsMkdir(outputsDir, { recursive: true });
+    await fsWriteFile(pathJoin(outputsDir, 'file.txt'), 'hello output');
+
+    // Storage that throws ONLY on artifact URIs (capture uploads), succeeds on dispatch record URIs.
+    // Artifact URIs look like: agora://<ns>/artifact/...
+    // Dispatch record URIs look like: agora://<ns>/dispatch/...
+    const artifactThrowStorage: StorageProvider = {
+      name: 'artifact-throw',
+      put: async (uri: string, _contents: Uint8Array) => {
+        if (uri.includes('/artifact/')) throw new Error('artifact upload failed');
         return { contentHash: 'sha256:fake' };
       },
       get: async () => { throw new Error('no'); },
@@ -490,46 +545,108 @@ describe('runPipeline — capture block is not a gate', () => {
       list: async () => [],
       resolveByHash: async () => null,
     };
-    const { ctx, logs } = await makeCtx(dir, { storage: failFirstPutStorage });
 
-    // spec: [agent, capture(patch), agent again to verify capture failure doesn't abort]
-    // Actually: agent → capture(patch) → capture(outputs)
-    // The capture(patch) will call capturePatch which tries to computeWorkspacePatch
-    // (returns null because baseline is unavailable) so it won't actually throw.
-    // Instead we test capture(outputs) failure which requires outputs/ to exist.
-    // A simpler approach: use a script block after a failing capture to verify it ran.
+    const sentinelPuts: string[] = [];
+    const trackingSentinelStorage: StorageProvider = {
+      name: 'tracking',
+      put: async (uri: string, contents: Uint8Array) => {
+        if (uri.includes('/artifact/')) throw new Error('artifact upload failed');
+        sentinelPuts.push(uri);
+        return { contentHash: 'sha256:fake' };
+      },
+      get: async () => { throw new Error('no'); },
+      resolveLatest: async () => null,
+      list: async () => [],
+      resolveByHash: async () => null,
+    };
 
-    // The scenario: capture(patch) fails because patch upload fails.
-    // But with unavailable baseline, computeWorkspacePatch returns null,
-    // so capturePatch returns undefined (no throw).
-    // We need another approach: use a capture(outputs) with a failing storage.
+    const { ctx, logs } = await makeCtx(dir, { storage: trackingSentinelStorage });
 
-    // Actually the cleanest way is to verify that even if capture throws (e.g.,
-    // the writeSentinel's put fails for the capture block), the pipeline continues.
-    // But the capture blocks themselves call capturePatch/captureOutputs which
-    // are best-effort internally. Let's test: even if captureOutputs THROWS,
-    // the pipeline continues.
+    // spec: [agent, capture(outputs) — will throw on artifact put, capture(patch)]
+    // The second agent block (after the failing capture) should still run,
+    // proving capture failure is not a gate.
+    const secondAdapter = makeFakeAdapter({ exitCode: 0, stdout: 'second ran', stderr: '' });
+    const spec: PipelineSpec = {
+      schemaVersion: 1,
+      id: 'dev.test',
+      blocks: [
+        { kind: 'agent' },
+        { kind: 'capture', what: 'outputs' }, // throws → logs escape.failed, continues
+        { kind: 'agent' },                      // must still run
+      ],
+    };
+
+    // Use an adapter that can be invoked twice
+    let invokeCount = 0;
+    const countingAdapter: RuntimeAdapter = {
+      name: 'counting',
+      reservedPaths: [],
+      invoke: async () => {
+        invokeCount++;
+        return { exitCode: 0, stdout: `call-${invokeCount}`, stderr: '' };
+      },
+    };
+
+    const { ctx: ctx2, logs: logs2 } = await makeCtx(dir, {
+      storage: trackingSentinelStorage,
+      adapter: countingAdapter,
+    });
+
+    const result = await runPipeline(spec, ctx2, { declared: false });
+    await cleanupTempDirs();
+
+    // escape.failed must have been logged (capture threw on artifact put)
+    const escapeFailed = logs2.find((l) => l['kind'] === 'escape.failed');
+    expect(escapeFailed).toBeDefined();
+    expect(escapeFailed!['detail']).toContain('artifact upload failed');
+
+    // The subsequent agent block still ran (invokeCount === 2)
+    expect(invokeCount).toBe(2);
+
+    // Pipeline completed (not failed)
+    expect(result.kind).toBe('completed');
+
+    // The final sentinel put (dispatch record URI) succeeded
+    expect(sentinelPuts.length).toBeGreaterThan(0);
+    expect(sentinelPuts.some((u) => u.includes('output.json'))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// runPipeline — unknown block kind
+// ---------------------------------------------------------------------------
+
+describe('runPipeline — unknown block kind', () => {
+  it('unknown block kind → result.kind failed, exitCode 1, pipeline.unknown-block log emitted, no sentinel put', async () => {
+    const dir = await makeTempDir();
+    const storage = new FakeStorage();
+    const { ctx, logs } = await makeCtx(dir, { storage });
 
     const spec: PipelineSpec = {
       schemaVersion: 1,
       id: 'dev.test',
       blocks: [
         { kind: 'agent' },
-        { kind: 'capture', what: 'outputs' }, // may fail (no outputs/ dir, baseline unavailable)
-        { kind: 'capture', what: 'patch' },   // should still run after outputs capture
+        { kind: 'unknown-future-block' } as never,
       ],
     };
 
-    // The pipeline should complete even if captures fail/return undefined
     const result = await runPipeline(spec, ctx, { declared: false });
     await cleanupTempDirs();
 
-    // Even with capture failures, we complete (not fail)
-    expect(result.kind).toBe('completed');
-    // logs should show any escape.failed events if captures threw
-    const _escapeFailedCount = logs.filter((l) => l['kind'] === 'escape.failed').length;
-    // We don't assert specific count here since baseline is unavailable → no throw
-    expect(result.kind).toBe('completed');
+    expect(result.kind).toBe('failed');
+    if (result.kind === 'failed') {
+      expect(result.exitCode).toBe(1);
+    }
+
+    // Log event must have been emitted
+    const unknownLog = logs.find((l) => l['kind'] === 'pipeline.unknown-block');
+    expect(unknownLog).toBeDefined();
+    expect(unknownLog!['ordinal']).toBe(1);
+    expect(unknownLog!['blockKind']).toBe('unknown-future-block');
+
+    // No sentinel put (pipeline aborted)
+    expect(storage.puts.filter((p) => p.uri.includes('output.json')).length).toBe(0);
   });
 });
 
@@ -538,7 +655,7 @@ describe('runPipeline — capture block is not a gate', () => {
 // ---------------------------------------------------------------------------
 
 describe('runPipeline — verify lens', () => {
-  it('verify lens never fails the pipeline even on non-zero exit', async () => {
+  it('verify lens never fails the pipeline even on non-zero exit, ordinals are sequential', async () => {
     const dir = await makeTempDir();
     const storage = new FakeStorage();
     const { ctx } = await makeCtx(dir, { storage });
@@ -559,6 +676,9 @@ describe('runPipeline — verify lens', () => {
     expect(result.kind).toBe('completed');
     if (result.kind === 'completed') {
       expect(result.outcomes.length).toBe(2); // verify block + agent block
+      // Ordinals must be sequential (0-based)
+      expect(result.outcomes[0]!.ordinal).toBe(0);
+      expect(result.outcomes[1]!.ordinal).toBe(1);
     }
   });
 
