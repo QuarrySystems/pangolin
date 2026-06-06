@@ -23,8 +23,10 @@ A handoff is **typed** because each upstream task declares the *kinds* of
 products it can produce (e.g. `patch`), and each downstream `needs` entry
 selects against that kind — not against a file path, and not against opaque
 stdout. It is a **product** because what crosses the seam is the immutable,
-content-addressed output of a completed task: the bytes the producer wrote to
-`outputs/`, uploaded to the `StorageProvider` and named by their hash. And it
+content-addressed output of a completed task — for `kind: "patch"`, the
+workspace-diff patch the producer escaped; for `kind: "output"`, a named file
+the producer wrote to `outputs/` — uploaded to the `StorageProvider` and named
+by its hash. And it
 is a **handoff** because the consumer never reaches into the producer's
 workspace — the orchestrator resolves the ref, hands the bytes to the consumer's
 sandbox, and records the edge in the audit evidence.
@@ -54,17 +56,19 @@ Two things are happening at once. First, `from` names the upstream WorkItem id
 — so the engine can derive the `depends_on` edge from `apply-patch` to
 `edit-a` automatically, without the author also hand-writing `depends_on:
 ["edit-a"]`. Second, `select.kind` names the *product kind* the consumer wants
-— the upstream task must declare a producer for that kind, or the plan is
-rejected.
+— `patch` selects the producer's escaped workspace-diff patch; `output` (with
+a `path`) selects a named entry from the producer's `outputs/` channel.
 
 Validation runs at **submit time**, against the whole DAG, before a single
 worker fires:
 
 - Every `from` must resolve to a WorkItem in the same run.
-- Every `select.kind` must match a product kind the producer declares.
 - The induced edges, together with any explicit `depends_on`, must remain
   acyclic.
-- An input name (`patch` above) must be unique within the consuming item.
+- When both producer and consumer declare typed shapes, the edge's
+  product-type tags must be compatible — a mismatch is rejected with an error
+  naming the edge. (A `select` the producer cannot furnish at all is caught at
+  fire time, before the worker dispatches.)
 
 A failure at this phase rejects the submission with a structured error — the
 same path as any other plan-shape violation — so a malformed handoff never
@@ -80,9 +84,8 @@ view, two things change relative to a no-handoff dispatch:
 
 - **Inputs are pre-staged.** Before the agent runs, the worker fetches each
   input ref through the `StorageProvider`, verifies the content hash matches
-  the ref, and writes the bytes into the workspace at `inputs/<key>` —
-  preserving the producer's filename extension where the product kind carries
-  one (`patch` → `inputs/patch.diff`). The agent sees a normal file in a
+  the ref, and writes the bytes into the workspace at exactly `inputs/<key>` —
+  for the declaration above, `inputs/patch`. The agent sees a normal file in a
   normal directory; it does not know or care that the bytes came from another
   task.
 - **Outputs are captured by ref.** Anything the agent writes under `outputs/`
@@ -107,7 +110,8 @@ anchor (S3 Object Lock) matches the local epoch. Typed-product handoff adds a
 fifth:
 
 > **Provenance closure.** Every `inputRef` consumed by any item in the run must
-> be the sealed `outputRef` of a `done` item in the **same run**.
+> be a sealed product — the `resultRef` patch or an `outputRefs` value — of a
+> `done` item in the **same run**.
 
 This is what makes the run self-contained as evidence. An auditor handed the
 bundle does not need to trust the storage layer or the orchestrator's word for
@@ -120,11 +124,11 @@ In the `agora verify` output the new check appears as a fifth row alongside
 the existing four:
 
 ```
-chain       OK
-root        OK
-signature   OK
-anchor      OK
-handoff     OK   3 inputRefs closed against 2 producers
+✓ chain        12 entries, hash-linked, no gaps
+✓ root         merkle = anchored root
+✓ signature    true
+✓ anchor       local  (detect)
+✓ handoff      1 input ref accounted for
 ```
 
 Reading the `handoff` row:
@@ -147,11 +151,11 @@ footing as the chain and root checks.
 
 The minimal worked example lives at
 [`examples/handoff-dag/`](https://github.com/quarrysystems/agora/tree/main/examples/handoff-dag/).
-It is a two-task plan: `edit-a` runs a small editor agent that writes a patch
-to `outputs/patch.diff`, and `apply-patch` binds that product via `needs` and
-runs `git apply inputs/patch.diff` against its own workspace. The example
-prints the resolved `inputRefs` and `outputRefs` on each task's audit record,
-and ends by running `agora verify` so you can see the `handoff` row in real
+It is a two-task plan: `edit-a` runs a small editor agent whose workspace edit
+escapes as its content-addressed patch product, and `apply-patch` binds that
+product via `needs` — a setup script applies it with `git apply inputs/patch`
+before the agent runs. The example ends by re-verifying the assembled audit
+bundle, printing the `handoff` check so you can see provenance closure in real
 output before going back to your own plans.
 
 ## See also

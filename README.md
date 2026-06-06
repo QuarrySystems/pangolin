@@ -96,10 +96,10 @@ automatically:
 ```
 
 The orchestrator validates the whole DAG at submit (every `needs` must
-resolve to a real producer and a declared product kind), then at fire
-time resolves each upstream task's content-addressed product and hands it
-to the worker, which materializes it under `inputs/` before the agent
-runs (e.g. `inputs/patch.diff`). Both consumed `inputRefs` and produced
+resolve to a real upstream item and the graph must stay acyclic), then at
+fire time resolves each upstream task's content-addressed product and hands
+it to the worker, which materializes it under `inputs/` before the agent
+runs (e.g. `inputs/patch`). Both consumed `inputRefs` and produced
 `outputRefs` are sealed into the dispatch manifest and the audit
 evidence, and `agora verify` proves **provenance closure** — every
 consumed input ref must be a sealed product of a completed task in the
@@ -107,7 +107,7 @@ same run — surfaced as a fifth `handoff` check row alongside the
 existing chain / root / signature / anchor checks. See
 [`examples/handoff-dag/`](examples/handoff-dag/) for the runnable demo —
 a two-task plan where `edit-a` produces a patch and `apply-patch` binds
-it via `needs` and applies it with `git apply inputs/patch.diff`.
+it via `needs` and applies it with `git apply inputs/patch`.
 
 ## What's in this repo
 
