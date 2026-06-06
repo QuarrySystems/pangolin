@@ -201,9 +201,9 @@ export interface BlockOutcome {
 }
 
 export type PipelineResult =
-  | { kind: 'completed'; outcomes: BlockOutcome[] }                          // all blocks ok → seal
-  | { kind: 'failed'; outcomes: BlockOutcome[]; exitCode: number }           // gate failure → no seal
-  | { kind: 'needs-input'; sentinelPath: string; outcomes: BlockOutcome[] }; // agent surfaced needs_input
+  | { kind: 'completed'; outcomes: BlockOutcome[]; sentinel?: OutputSentinel } // sealed (best-effort)
+  | { kind: 'failed'; outcomes: BlockOutcome[]; exitCode: number }             // gate failure → no seal
+  | { kind: 'needs-input'; sentinelPath: string; outcomes: BlockOutcome[] };   // agent surfaced needs_input
 
 export async function runPipeline(spec: PipelineSpec, ctx: BlockContext): Promise<PipelineResult>
 ```
@@ -219,7 +219,8 @@ export async function runPipeline(spec: PipelineSpec, ctx: BlockContext): Promis
       { kind: 'agent' },
       { kind: 'capture', what: 'patch' },
       ...(subagent.verify ? [{ kind: 'script', command: subagent.verify.command,
-            timeoutSeconds: subagent.verify.timeout, lens: 'verify' }] : []),
+            // reproduce the entrypoint's guard EXACTLY: falsy/non-positive timeout → 600
+            timeoutSeconds: (typeof t === 'number' && t > 0) ? t : 600, lens: 'verify' }] : []),
       { kind: 'capture', what: 'outputs' },
     ],
   }
@@ -227,9 +228,12 @@ export async function runPipeline(spec: PipelineSpec, ctx: BlockContext): Promis
 
   The entrypoint's success path becomes `runPipeline(declared ?? buildDefaultPipeline(subagent), ctx)`.
   Behavior-identity is a data equality plus golden tests, not a code-path argument.
-- **Auto-seal**: on `completed`, the runner (entrypoint) calls `writeSentinel` with the
-  aggregated `{ patchRef, verify, outputs }` from capture/verify outcomes — `seal` is
-  structural, not a registry entry, so it cannot be omitted or reordered.
+- **Auto-seal lives INSIDE `runPipeline`** (one unambiguous owner): on the completed path
+  the runner itself calls `writeSentinel` with the aggregated `{ patchRef, verify, outputs }`
+  from capture/verify outcomes — `seal` is structural, not a registry entry, so it cannot
+  be omitted or reordered by any caller. Seal failures keep today's best-effort contract:
+  logged via `ctx.log` (`escape.failed`), the result stays `completed`, the exit code and
+  `dispatch.finished` are unchanged.
 - **Behavior-identical pins** (each a golden test):
   1. needs_input: agent block surfaces `needsInputSentinelPath` → runner returns
      `needs-input` → entrypoint's existing step-13 branch runs unchanged (no further
@@ -266,7 +270,9 @@ export async function runPipeline(spec: PipelineSpec, ctx: BlockContext): Promis
 - **Dispatch**: a new bundle kind rides the existing `AGORA_BUNDLE_REFS_JSON` channel
   (`bundleRefs.pipeline: { uri, contentHash }`); `bundle-fetcher` routes it through the
   shared `fetchVerified`; the worker parses + **re-validates with the same
-  `validatePipelineSpec`** before running. Orchestrator-side the ref travels via a
+  `validatePipelineSpec`** before running — a parse or validation failure routes through
+  the established `integrity-failed` path (it is a bundle problem, exactly like a
+  malformed capability bundle). Orchestrator-side the ref travels via a
   reserved `inputs.pipeline` key (joining `inputs.{subagent, env, workerInput, inputRefs,
   gate, mapReduce}`) that `DispatchExecutor` threads into `bundleRefs` — engine,
   `validateRun`, pattern layer, `Executor` contract untouched.
@@ -293,10 +299,18 @@ the pack decision's posture, unchanged.)
 block over portable `node -e` scripts (cross-platform, no toolchain assumptions):
 
 ```
-data.split:      [script: read inputs/dataset.csv → write outputs/part-<i>.csv]   (N data-dependent)
-data.transform:  [script: read inputs/part.csv → group-and-sum → outputs/result.json]
-data.aggregate:  [script: read inputs/part-*.json → merge → outputs/total.json]
+data.split:      [script: read inputs/dataset → write outputs/part-<i>.csv]   (N data-dependent)
+data.transform:  [script: read inputs/part    → group-and-sum → outputs/result.json]
+data.aggregate:  [script: read EVERY file under inputs/ → merge → outputs/total.json]
 ```
+
+**Read-path convention (pinned by the handoff mechanics):** inputs materialize at
+`inputs/<needsKey>`, NOT at their original filenames — so the scripts read by needs KEY.
+The split item's seed CSV binds as `needs: { dataset: ... }` → `inputs/dataset`; map
+templates use `needsKey: 'part'` → `inputs/part`; the reduce's spawn-time-concretized keys
+are `<keyPrefix>-<splitter-output-path>` (mechanical, unlovely — e.g.
+`part-part-0.csv`), so the aggregate script simply reads every regular file under
+`inputs/` rather than computing key names.
 
 **The map→reduce wiring is the shipped machinery, unchanged**: the splitter item completes
 with N `outputRefs`; the map-reduce pattern spawns N transform items (each `needs` one
