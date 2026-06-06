@@ -20,7 +20,8 @@ pipelines with zero engine changes. The entire orchestration engine
 (pattern, needs-resolver, audit chain, verifyBundle) is reused unchanged
 from the dev-domain dogfood example.
 
-Reference spec: `docs/superpowers/specs/2026-05-28-*.md` (orchestrator design).
+Reference spec: `docs/superpowers/specs/2026-06-05-agora-block-runner-data-pack-design.md`
+(the block-pipeline runner + data pack design this example demonstrates).
 
 ## How it works
 

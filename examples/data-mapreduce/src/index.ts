@@ -478,7 +478,7 @@ async function main(): Promise<void> {
     // ---------------------------------------------------------------------------
     const EXPECTED_SUM = 100;
     const sumOk = Number(aggregateResult) === EXPECTED_SUM;
-    const handoffOk = report.intact && report.checks.handoff.ok !== false;
+    const handoffOk = report.intact && report.checks.handoff.ok === true;
     const reduceDone = itemById.get('reduce')?.status === 'done';
 
     if (!handoffOk || !sumOk || !reduceDone) {
