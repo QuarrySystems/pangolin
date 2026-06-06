@@ -17,6 +17,7 @@ export interface BundleRefs {
   capabilities: BundleRef[];
   env: BundleRef[];
   inputs?: InputRefEntry[];
+  pipeline?: BundleRef;
 }
 
 export interface WorkerConfig {
@@ -117,6 +118,21 @@ export function parseWorkerEnv(
           `agora-worker: AGORA_BUNDLE_REFS_JSON inputs entries must have key, uri, and contentHash fields as strings`,
         );
       }
+    }
+  }
+
+  // Validate pipeline field if present
+  if (bundleRefs.pipeline !== undefined) {
+    const p = bundleRefs.pipeline as unknown as Record<string, unknown>;
+    if (
+      !p ||
+      typeof p !== "object" ||
+      typeof p.uri !== "string" ||
+      typeof p.contentHash !== "string"
+    ) {
+      throw new Error(
+        `agora-worker: AGORA_BUNDLE_REFS_JSON pipeline field must be an object with string uri and contentHash`,
+      );
     }
   }
 

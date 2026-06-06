@@ -1,0 +1,48 @@
+{
+  "id": "data-mapreduce-demo",
+  "queue": "default",
+  "items": [
+    {
+      "id": "seed",
+      "executor": "dispatch",
+      "inputs": {
+        "subagent": "<filled-at-runtime>",
+        "pipeline": "<filled-at-runtime>"
+      },
+      "depends_on": [],
+      "resourceLocks": []
+    },
+    {
+      "id": "split",
+      "executor": "dispatch",
+      "inputs": {
+        "subagent": "<filled-at-runtime>",
+        "pipeline": "<filled-at-runtime>",
+        "mapReduce": {
+          "map": {
+            "executor": "dispatch",
+            "inputs": {
+              "subagent": "<filled-at-runtime>",
+              "pipeline": "<filled-at-runtime>"
+            }
+          },
+          "reduce": {
+            "executor": "dispatch",
+            "inputs": {
+              "subagent": "<filled-at-runtime>",
+              "pipeline": "<filled-at-runtime>"
+            }
+          }
+        }
+      },
+      "depends_on": [],
+      "resourceLocks": [],
+      "needs": {
+        "input": {
+          "from": "seed",
+          "select": { "kind": "output", "path": "data.csv" }
+        }
+      }
+    }
+  ]
+}

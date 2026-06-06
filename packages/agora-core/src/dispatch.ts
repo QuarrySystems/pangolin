@@ -62,6 +62,11 @@ export interface DispatchWork {
    *  agora://…/sha256:… URI of an upstream product (typed-product handoff, spec §5).
    *  Pass-through refs — the blobs already exist in storage. */
   inputRefs?: Record<string, string>;
+  /** Pinned agora:// URI of the pipeline definition that triggered this dispatch.
+   *  Must be a content-addressed URI (include a sha256:… contentHash segment).
+   *  Recorded in bundleRefs.pipeline and the audit manifest so every dispatch is
+   *  traceable back to the exact pipeline version that produced it. */
+  pipelineRef?: string;
 }
 
 /**

@@ -43,7 +43,9 @@ import type {
   StorageProvider,
   NotificationConfig,
   SecretStore,
+  PipelineSpec,
 } from '@quarry-systems/agora-core';
+import { validatePipelineSpec } from '@quarry-systems/agora-core';
 import { storeFromConfig } from '@quarry-systems/agora-secret-store';
 import { SecretsManagerClient } from '@aws-sdk/client-secrets-manager';
 
@@ -223,6 +225,21 @@ export async function runWorker(
       'integrity-failed',
       `bundle fetch/verify failed: ${(err as Error).message}`,
     );
+  }
+
+  // Step 3b: if a declared pipeline spec was fetched, validate it structurally
+  // before anything runs. An invalid spec is a bundle integrity problem — the
+  // dispatcher is responsible for registering only valid specs, so a malformed
+  // one indicates a corrupted or tampered bundle. Fail before the adapter is
+  // ever invoked so no side-effects occur on an invalid spec.
+  if (bundles.pipeline !== undefined) {
+    const pipelineErrors = validatePipelineSpec(bundles.pipeline as unknown as PipelineSpec);
+    if (pipelineErrors.length > 0) {
+      return failWith(
+        'integrity-failed',
+        `declared pipeline spec is invalid: ${pipelineErrors.join('; ')}`,
+      );
+    }
   }
 
   // Construct the SecretStore ONCE before Step 4 so it can serve all three
@@ -450,10 +467,16 @@ export async function runWorker(
     verify?: VerifyConfig;
   };
 
+  // Choose the pipeline: declared (fetched + validated in step 3b) or default.
+  const declaredPipeline = bundles.pipeline !== undefined;
+  const pipelineSpec: PipelineSpec = declaredPipeline
+    ? (bundles.pipeline as unknown as PipelineSpec)
+    : buildDefaultPipeline(subagent);
+
   let result;
   try {
     result = await runPipeline(
-      buildDefaultPipeline(subagent),
+      pipelineSpec,
       {
         workspaceDir,
         env: mergedEnv,
@@ -470,7 +493,7 @@ export async function runWorker(
         redact: (s) => logger.redactString(s),
         log: (e) => logger.log(e),
       },
-      { declared: false },
+      { declared: declaredPipeline },
     );
   } catch (err) {
     // The runtime adapter itself blew up — that is a worker failure, not a

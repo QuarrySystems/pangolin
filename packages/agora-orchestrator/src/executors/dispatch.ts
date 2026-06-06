@@ -55,6 +55,13 @@ export class DispatchExecutor implements Executor {
           ) as Record<string, string>)
         : undefined;
 
+    // Read the optional pipeline carrier. Shape guard: must be a non-empty string.
+    // Non-string or empty-string values are IGNORED (not thrown) — matching the
+    // inputRefs posture.
+    const rawPipeline = item.inputs.pipeline;
+    const pipelineRef =
+      typeof rawPipeline === 'string' && rawPipeline.length > 0 ? rawPipeline : undefined;
+
     // Container starts HERE. Anything that throws BEFORE this is a clean pre-start
     // failure. Anything AFTER must NOT throw, or tick fails the item without
     // recording the dispatchHash and the running container is orphaned.
@@ -66,6 +73,7 @@ export class DispatchExecutor implements Executor {
       workerImage: this.opts.workerImage,
       secrets: this.opts.secrets,
       ...(inputRefs && Object.keys(inputRefs).length ? { inputRefs } : {}),
+      ...(pipelineRef !== undefined ? { pipelineRef } : {}),
     });
     const entry: InFlightEntry = { inflight: flight, settled: null };
     // Detached background await — never throws out; records terminal state for reconcile().
@@ -96,6 +104,7 @@ export class DispatchExecutor implements Executor {
         firedAt: new Date().toISOString(),
         submittedAt: ctx?.submittedAt,
         ...(inputRefs && Object.keys(inputRefs).length ? { inputRefs } : {}),
+        ...(r.pipelineRef !== undefined ? { pipelineRef: r.pipelineRef } : {}),
       });
       // Content-address: compute hash FIRST, build pinned URI, put to it (mirrors
       // subagent-register.ts — round-trips on real LocalStorageProvider AND on the

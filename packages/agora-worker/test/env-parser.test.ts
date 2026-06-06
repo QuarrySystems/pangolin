@@ -237,6 +237,82 @@ describe("parseWorkerEnv", () => {
     });
   });
 
+  describe("bundle refs pipeline", () => {
+    it("tolerates absent pipeline field (old clients)", () => {
+      const cfg = parseWorkerEnv(baseEnv());
+      expect(cfg.bundleRefs.pipeline).toBeUndefined();
+    });
+
+    it("parses bundleRefs.pipeline when present", () => {
+      const env = baseEnv();
+      env.AGORA_BUNDLE_REFS_JSON = JSON.stringify({
+        subagent: { uri: "s3://b/sub", contentHash: "sha256:aaa" },
+        capabilities: [],
+        env: [],
+        pipeline: { uri: "agora://ns/pipeline/p/sha256:pp", contentHash: "sha256:pp" },
+      });
+      expect(parseWorkerEnv(env).bundleRefs.pipeline).toEqual({
+        uri: "agora://ns/pipeline/p/sha256:pp",
+        contentHash: "sha256:pp",
+      });
+    });
+
+    it("throws when pipeline is not an object", () => {
+      const env = baseEnv();
+      env.AGORA_BUNDLE_REFS_JSON = JSON.stringify({
+        subagent: { uri: "s3://b/sub", contentHash: "sha256:aaa" },
+        capabilities: [],
+        env: [],
+        pipeline: "not-an-object",
+      });
+      expect(() => parseWorkerEnv(env)).toThrow(/AGORA_BUNDLE_REFS_JSON.*pipeline/);
+    });
+
+    it("throws when pipeline is missing uri", () => {
+      const env = baseEnv();
+      env.AGORA_BUNDLE_REFS_JSON = JSON.stringify({
+        subagent: { uri: "s3://b/sub", contentHash: "sha256:aaa" },
+        capabilities: [],
+        env: [],
+        pipeline: { contentHash: "sha256:pp" },
+      });
+      expect(() => parseWorkerEnv(env)).toThrow(/AGORA_BUNDLE_REFS_JSON.*pipeline/);
+    });
+
+    it("throws when pipeline is missing contentHash", () => {
+      const env = baseEnv();
+      env.AGORA_BUNDLE_REFS_JSON = JSON.stringify({
+        subagent: { uri: "s3://b/sub", contentHash: "sha256:aaa" },
+        capabilities: [],
+        env: [],
+        pipeline: { uri: "agora://ns/pipeline/p/sha256:pp" },
+      });
+      expect(() => parseWorkerEnv(env)).toThrow(/AGORA_BUNDLE_REFS_JSON.*pipeline/);
+    });
+
+    it("throws when pipeline uri is not a string", () => {
+      const env = baseEnv();
+      env.AGORA_BUNDLE_REFS_JSON = JSON.stringify({
+        subagent: { uri: "s3://b/sub", contentHash: "sha256:aaa" },
+        capabilities: [],
+        env: [],
+        pipeline: { uri: 42, contentHash: "sha256:pp" },
+      });
+      expect(() => parseWorkerEnv(env)).toThrow(/AGORA_BUNDLE_REFS_JSON.*pipeline/);
+    });
+
+    it("throws when pipeline contentHash is not a string", () => {
+      const env = baseEnv();
+      env.AGORA_BUNDLE_REFS_JSON = JSON.stringify({
+        subagent: { uri: "s3://b/sub", contentHash: "sha256:aaa" },
+        capabilities: [],
+        env: [],
+        pipeline: { uri: "agora://ns/pipeline/p/sha256:pp", contentHash: 123 },
+      });
+      expect(() => parseWorkerEnv(env)).toThrow(/AGORA_BUNDLE_REFS_JSON.*pipeline/);
+    });
+  });
+
   describe("bundle refs inputs", () => {
     it("parses bundleRefs.inputs when present", () => {
       const env = baseEnv();
