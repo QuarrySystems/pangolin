@@ -22,7 +22,10 @@ design and shapes everything below.
 The local-Docker acceptance path is proven live: safe fan-out under resource locks,
 a per-edit patch artifact (`result_ref`), and a verifiable **tamper-detecting**
 audit bundle. Delivered across five waves (PRs #18, #19, #21, #22, #23; V1 marked
-shipped in #24).
+shipped in #24). Since the V1 cut, three more waves have landed on `main`
+(unreleased): the typed-product handoff (#39–#41), the pattern layer (#43/#45),
+and the block-pipeline runner + `data` pack (#46/#47) — the last three bullets
+below.
 
 - **`serve` driver** — the long-running process; sole writer of the SQLite
   run-state, polls the submission inbox, runs the reconcile tick loop, exits
@@ -75,6 +78,35 @@ shipped in #24).
   feeding the existing submission inbox — no new Trigger primitive. Catch-up
   coalesces to one run after downtime; runIds are deterministic per slot. UTC /
   minute granularity; single-`serve` assumption.
+- **Typed-product handoff** — WorkItems declare `needs`
+  (`{ from, select: patch | output }`, auto-unioned into `depends_on`); products
+  are resolved at fire time, materialized into the consumer's workspace at
+  `inputs/<key>`, sealed into the dispatch manifest as content-addressed
+  `inputRefs`, and `agora verify` proves **provenance closure** — every consumed
+  ref is a sealed product of a completed item in the same run. This also closes
+  the previously-deferred per-dispatch artifact I/O gap (content-addressed
+  `outputs/` capture in, `inputs/<key>` overlay out, both in the manifest).
+  Pre-flight: `agora orch validate plan.json`. Demo:
+  [`examples/handoff-dag`](examples/handoff-dag/).
+- **Per-queue execution patterns** — `QueueConfig.pattern`: `staticDag`
+  (identity; the default), `pipeline` (auto-chaining plus an `inputs.gate` policy
+  with bounded circle-back), `mapReduce` (splitter → N data-derived map items →
+  reduce). Dynamic work flows through the audited `extendRun` append seam
+  (id-skip idempotent, validated merged graph, `'run.extended'` audit entries
+  with actor `pattern:<queue>`); it is **spawn** — new forward arcs, never
+  in-graph cycles — and provenance closure covers spawned graphs. Demos:
+  [`examples/pattern-mapreduce`](examples/pattern-mapreduce/),
+  [`examples/pattern-dogfood`](examples/pattern-dogfood/).
+- **Block-pipeline worker runtime + the `data` pack** — the worker's hardcoded
+  steps are now a pipeline runner over typed blocks (`agent` / `script` /
+  `capture`; script lens `gate | verify`), byte-identical to the old path
+  (golden-tested), with seal auto-appended; declared pipelines register via
+  `registerPipeline` / `agora pipeline register|validate|list`, are sealed into
+  the manifest as `pipelineRef` at fire, and emit per-block `blocks[]` evidence.
+  The **`data` pack** (`data.split` / `data.transform` / `data.aggregate` shapes,
+  `dataset-ref` edge tags) is the second pack — domain-generality with zero
+  engine changes. Demo: [`examples/data-mapreduce`](examples/data-mapreduce/)
+  (fully offline, real end-to-end).
 
 ### Known gap in V1
 
@@ -102,10 +134,18 @@ V1 ships.
 > license. The engine runs fully standalone without them; that is the point of
 > the seams. Items carrying this split are tagged **[seam free · impl Enterprise]**.
 
-- **`cron` trigger** — recurring scheduling via the existing `Trigger` seam.
-  `serve` + manual `submit` already delivers *unattended* offload (submit once,
-  walk away); `cron` adds *recurring*. **This is the first item to pull into
-  V1.1.**
+- **Live worker dogfood** — run a real DAG plan end-to-end with LLM workers.
+  The shipped demos prove the engine offline (scripted executors); the next step
+  is the same plans driven by actual agent dispatches. **This is the first item
+  to pull into V1.1.**
+- **Adapter blocks** — a fourth block kind in the pipeline runner that delegates
+  to an adapter rather than `agent` / `script` / `capture`. Deferred with a named
+  trigger — pulled when a concrete adapter use case arrives.
+- **Tier-2 custom code blocks** — user-supplied code blocks in declared
+  pipelines, beyond the shipped block kinds. Deferred.
+- **`oneOf` needs selectors** — OR-readiness on `needs` (consume whichever of
+  several producers completes first). Deferred — needs an OR-readiness design
+  pass first.
 - **Operationalize the `dev` pack** — the `dev.code-edit` / `dev.verify` shapes and
   the `PackRegistry` already exist in code (see "Now"), but the shapes are **not
   dispatchable yet**: pin the real worker-image digest (currently a `PLACEHOLDER`)
@@ -116,20 +156,6 @@ V1 ships.
   Deferred: validating the sentinel against each shape's `outputSchema`, and the
   richer `output` / `intents` / `signals` products (the types exist; nothing
   enforces or consumes them yet).
-- **Per-dispatch artifact I/O** — V1 carries files *into* a worker only via
-  register-once capability bundles (already binary-capable:
-  `files: Record<string, Uint8Array | string>`), and escapes results *out* only as
-  a workspace diff (`result_ref`, a unified patch). Two symmetric gaps remain for
-  *artifact-shaped* work — a worker that consumes or produces a binary deliverable
-  (a PDF, an image, a build output) rather than editing code: there is no
-  per-dispatch **input** blob materialized into the workspace, and no **binary
-  output** channel (the git-diff patch records binary changes as
-  `Binary files … differ`, dropping the bytes). V1.1 adds a content-addressed
-  artifact seam — per-dispatch inputs materialized into the workspace at a known
-  path, declared outputs captured and content-addressed on write — both folded into
-  the audit manifest, sitting **alongside** the existing code-edit patch (which is
-  correct as-is for the editing path). Additive via the existing storage +
-  overlay/capture machinery; pulled when an artifact-generation use case needs it.
 - **The autonomous-PR layer** — `Intent` / `IntentInterpreter`, the `dev.open-pr`
   interpreter, the auto-merge-test-only / human-approve policy, and the CLI
   `approve` verb. The `Intent` *type* exists; no interpreter ships yet. This is the
@@ -167,7 +193,7 @@ V1 ships.
 These require **no refactor** when pulled — that is what the architecture bought.
 
 - Additional executors: `shell`, `batch-api`, `dag-plan`.
-- Additional packs beyond `dev`.
+- Additional packs beyond `dev` and `data`.
 - Predicate / signal / event triggers.
 - Named queues beyond `default`; rate-limiting.
 - `pause` / `resume`.

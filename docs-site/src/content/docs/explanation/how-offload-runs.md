@@ -160,6 +160,32 @@ consumed attempt, has its locks released, and is requeued, so the run resumes
 rather than wedging. `serve` also does one reconcile-first tick before entering its
 loop.
 
+## Execution patterns and audited spawn
+
+A queue may carry an **execution pattern** (`static-dag`, `pipeline`, or
+`map-reduce`) — a per-queue strategy object layered *above* the unchanged
+engine. After each engine tick, the orchestrator runs a **pattern phase**: it
+scans the terminal items of every unsealed run on a pattern-bound queue, and
+the pattern may answer with new items to **spawn**. Spawns are applied through
+the audited `extendRun` seam — validated against the merged graph (same
+`validateRun` as submit), attributed to the actor `pattern:<queue>`, and
+recorded as `run.extended` audit entries naming the cause item — before the
+same tick's seal check, so a run that just grew structurally cannot seal that
+tick. This is what lets a map→reduce fan out to an N unknown at submit time
+(one map per file the splitter wrote to `outputs/`), or a pipeline gate
+circle back with a fix.
+
+- **Forward arcs, never cycles.** Spawned items only point backward at
+  existing items; "circle-back" is a *new* lineage of items appended to the
+  run — the failed branch stays as sealed history, and the graph stays acyclic.
+- **Replay-safe by construction.** Patterns are pure and keep no state; spawn
+  ids are deterministic, and `extendRun` skips already-present ids — a crash
+  and re-scan re-derives the same directive as a no-op.
+- **Provenance closure still holds.** Spawned items append to the *same* run
+  and consume upstream products through the same `needs` machinery, so
+  `agora verify`'s closure check covers dynamically grown graphs with zero
+  new verification code.
+
 ## Recurring submission (cron)
 
 `agora orch serve` + `agora orch submit` delivers *unattended* offload — you

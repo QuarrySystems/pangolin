@@ -114,4 +114,19 @@ describe('buildManifest', () => {
       inputRefs: { patch: 'agora://ns/artifact/d/sha256:' + 'b'.repeat(64) } });
     expect(manifest.manifestHash).not.toBe(manifest2.manifestHash);
   });
+
+  it('adding pipelineRef does not perturb the hash of a manifest without it', () => {
+    const base = { runId: 'r', itemId: 'i', executor: 'dispatch', executorManifest: {},
+      secretRefs: [], actor: 'human:test', firedAt: '2026-06-05T00:00:00.000Z' };
+    // A manifest without pipelineRef and one with pipelineRef: undefined should have the same hash
+    const without = buildManifest(base);
+    const withUndefined = buildManifest({ ...base, pipelineRef: undefined });
+    expect(without.manifest.manifestHash).toBe(withUndefined.manifest.manifestHash);
+
+    // A manifest WITH a pipelineRef value should have a different hash AND expose the field
+    const pipelineUri = 'agora://ns/pipeline/my-pipe/sha256:' + 'c'.repeat(64);
+    const { manifest: withPipeline } = buildManifest({ ...base, pipelineRef: pipelineUri });
+    expect(withPipeline.manifestHash).not.toBe(without.manifest.manifestHash);
+    expect(withPipeline.pipelineRef).toBe(pipelineUri);
+  });
 });

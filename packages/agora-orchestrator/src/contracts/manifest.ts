@@ -21,6 +21,8 @@ export interface DispatchManifest {
    *  upstream product this dispatch consumed. Sealed at fire; absent when the item
    *  has no needs. REFERENCES only — refs are sha256 content hashes. */
   inputRefs?: Record<string, string>;
+  /** Pinned pipeline-definition URI sealed at fire; absent for default-pipeline dispatches. */
+  pipelineRef?: string;
   firedAt: string;           // ISO-8601, when this item was fired
   manifestHash: string;      // sha256:<hex> self-hash over all fields above
   signature?: ManifestSignature; // offload-audit; omitted in offload-escape

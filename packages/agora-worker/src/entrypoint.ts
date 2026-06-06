@@ -13,7 +13,7 @@
 //   8.  merge env (base + bundles + per-dispatch secrets)
 //   9.  run agora-setup.sh (if present, time-bounded)
 //   10. start the channel subscription (background)
-//   11. invoke the runtime adapter
+//   11. run the block pipeline (agent → captures → verify → auto-seal via runPipeline)
 //   12. stop the channel subscription
 //   13. resolve the needs_input sentinel (if reported by the adapter)
 //   14. fire the appropriate terminal lifecycle event + return exit code
@@ -43,7 +43,9 @@ import type {
   StorageProvider,
   NotificationConfig,
   SecretStore,
+  PipelineSpec,
 } from '@quarry-systems/agora-core';
+import { validatePipelineSpec } from '@quarry-systems/agora-core';
 import { storeFromConfig } from '@quarry-systems/agora-secret-store';
 import { SecretsManagerClient } from '@aws-sdk/client-secrets-manager';
 
@@ -77,12 +79,8 @@ import {
 import { LifecycleEmitter } from './lifecycle.js';
 import { StructuredLogger } from './logger.js';
 import { captureBaseline, type WorkspaceBaseline } from './patch-capture.js';
-import { capturePatch, captureOutputs, writeSentinel, type OutputEntry } from './output-sentinel.js';
-import { runVerify } from './verify.js';
-import type { VerifyOutcome, VerifyConfig } from '@quarry-systems/agora-core';
-
-/** Default ceiling for the self-verify command (install + build + test). */
-const DEFAULT_VERIFY_TIMEOUT_SECONDS = 600;
+import type { VerifyConfig } from '@quarry-systems/agora-core';
+import { buildDefaultPipeline, runPipeline } from './pipeline-runner.js';
 
 /**
  * Injection seam for tests. Every field is optional; production callers
@@ -227,6 +225,21 @@ export async function runWorker(
       'integrity-failed',
       `bundle fetch/verify failed: ${(err as Error).message}`,
     );
+  }
+
+  // Step 3b: if a declared pipeline spec was fetched, validate it structurally
+  // before anything runs. An invalid spec is a bundle integrity problem — the
+  // dispatcher is responsible for registering only valid specs, so a malformed
+  // one indicates a corrupted or tampered bundle. Fail before the adapter is
+  // ever invoked so no side-effects occur on an invalid spec.
+  if (bundles.pipeline !== undefined) {
+    const pipelineErrors = validatePipelineSpec(bundles.pipeline as unknown as PipelineSpec);
+    if (pipelineErrors.length > 0) {
+      return failWith(
+        'integrity-failed',
+        `declared pipeline spec is invalid: ${pipelineErrors.join('; ')}`,
+      );
+    }
   }
 
   // Construct the SecretStore ONCE before Step 4 so it can serve all three
@@ -444,30 +457,43 @@ export async function runWorker(
     });
   }
 
-  // Step 11: invoke the runtime adapter. Channel teardown (step 12) lives
-  // in a `finally` block so it runs whether invoke succeeds, throws, or
-  // returns a non-zero exit.
+  // Step 11–14: run the pipeline (agent + capture + verify + seal).
+  // Channel teardown (step 12) lives in a `finally` block so it runs whether
+  // runPipeline completes, throws (adapter blew up), or returns needs-input/failed.
   const subagent = bundles.subagentDef as {
     systemPrompt?: string;
     promptTemplate?: string;
     model?: string;
     verify?: VerifyConfig;
   };
-  let runtimeExit;
-  const runtimeStartedAt = Date.now();
+
+  // Choose the pipeline: declared (fetched + validated in step 3b) or default.
+  const declaredPipeline = bundles.pipeline !== undefined;
+  const pipelineSpec: PipelineSpec = declaredPipeline
+    ? (bundles.pipeline as unknown as PipelineSpec)
+    : buildDefaultPipeline(subagent);
+
+  let result;
   try {
-    runtimeExit = await adapter.invoke(
+    result = await runPipeline(
+      pipelineSpec,
       {
-        systemPrompt: subagent.systemPrompt,
-        promptTemplate: subagent.promptTemplate,
-        input: cfg.inputJson,
-        model: subagent.model,
         workspaceDir,
-      },
-      {
-        dispatchId: cfg.dispatchId,
         env: mergedEnv,
+        storage,
+        namespace: cfg.namespace,
+        dispatchId: cfg.dispatchId,
+        adapter,
+        subagent,
+        // cfg.inputJson is a parsed Record<string,unknown> from env-parser;
+        // BlockContext.inputJson is a string the runner JSON-parses before
+        // passing to adapter.invoke — re-serialize to preserve the invariant.
+        inputJson: JSON.stringify(cfg.inputJson),
+        baseline,
+        redact: (s) => logger.redactString(s),
+        log: (e) => logger.log(e),
       },
+      { declared: declaredPipeline },
     );
   } catch (err) {
     // The runtime adapter itself blew up — that is a worker failure, not a
@@ -482,25 +508,11 @@ export async function runWorker(
     if (channel) await channel.stop();
   }
 
-  // Emit the runtime adapter's captured stdout/stderr as a worker-internal
-  // structured-log event, symmetric with `setup-script.ran`. This is the
-  // ONLY place the adapter's output reaches the dispatch result — without
-  // it, the orchestrator sees only worker events and runtime work is opaque.
-  // Not a lifecycle event (the §5.7 vocabulary is closed at six per ADR-0004);
-  // travels the same worker-stdout channel as `worker.boot` / `setup-script.ran`.
-  logger.log({
-    kind: 'runtime.adapter.ran',
-    exitCode: runtimeExit.exitCode,
-    durationMs: Date.now() - runtimeStartedAt,
-    stdout: runtimeExit.stdout,
-    stderr: runtimeExit.stderr,
-  });
+  // Map PipelineResult back onto the existing terminal branches.
 
-  // Step 13: needs_input sentinel resolution.
-  if (runtimeExit.needsInputSentinelPath) {
-    const outcome = await resolveNeedsInputSentinel(
-      runtimeExit.needsInputSentinelPath,
-    );
+  // needs-input: resolve the sentinel, emit dispatch.needs_input or worker-failed.
+  if (result.kind === 'needs-input') {
+    const outcome = await resolveNeedsInputSentinel(result.sentinelPath);
     if (outcome.kind === 'malformed') {
       return failWith('worker-failed', `needs_input sentinel malformed: ${outcome.detail}`);
     }
@@ -525,119 +537,32 @@ export async function runWorker(
     return 0;
   }
 
-  // Step 14: terminal lifecycle event + exit code.
-  if (runtimeExit.exitCode === 0) {
-    // Capture the patch FIRST — the agent's edit, before self-verify runs — so
-    // verify's build artifacts (node_modules, caches) never pollute the patch.
-    // Best-effort: a failure logs escape.failed and never changes the outcome.
-    let patchRef: string | undefined;
-    try {
-      patchRef = await capturePatch({
-        workspaceDir,
-        storage,
-        namespace: cfg.namespace,
-        dispatchId: cfg.dispatchId,
-        baseline,
-      });
-    } catch (err) {
-      logger.log({ kind: 'escape.failed', dispatchId: cfg.dispatchId, detail: (err as Error).message });
-    }
-
-    // Step 13b (Gap A): self-verify, AFTER patch capture. If the subagent
-    // declares a verify command, run it over the agent's edit and seal the
-    // pass/fail signal. Report-only: a failed (or absent) verify never changes
-    // the dispatch outcome — it only adds evidence so the operator can read
-    // green/red without re-running by hand.
-    let verify: VerifyOutcome | undefined;
-    const verifyCommand = subagent.verify?.command;
-    if (verifyCommand) {
-      // Guard falsy/invalid timeouts: 0 or negative would SIGKILL instantly.
-      const t = subagent.verify?.timeout;
-      const timeoutSeconds = typeof t === 'number' && t > 0 ? t : DEFAULT_VERIFY_TIMEOUT_SECONDS;
-      verify = await runVerify({
-        workspaceDir,
-        command: verifyCommand,
-        env: mergedEnv,
-        timeoutSeconds,
-      });
-      // The report can echo the secret-bearing env (a test that prints env, a
-      // failing assertion dumping config). Redact registered secrets before it
-      // is sealed into the sentinel and surfaced to the operator.
-      if (verify.report !== undefined) {
-        verify = { ...verify, report: logger.redactString(verify.report) };
-      }
-      logger.log({
-        kind: 'verify.ran',
-        dispatchId: cfg.dispatchId,
-        passed: verify.passed,
-        durationMs: verify.durationMs,
-      });
-    }
-
-    // Capture outputs/ deliverables after self-verify. Best-effort: a failure
-    // logs escape.failed and never changes the dispatch outcome.
-    let outputs: OutputEntry[] | undefined;
-    try {
-      outputs = await captureOutputs({
-        workspaceDir,
-        storage,
-        namespace: cfg.namespace,
-        dispatchId: cfg.dispatchId,
-      });
-    } catch (err) {
-      logger.log({ kind: 'escape.failed', dispatchId: cfg.dispatchId, detail: (err as Error).message });
-    }
-
-    // Write the sentinel with the pre-verify patchRef + the verify signal + outputs.
-    // Best-effort: a failure logs escape.failed but must NOT change the exit
-    // code or terminal event.
-    try {
-      await writeSentinel({
-        workspaceDir,
-        storage,
-        namespace: cfg.namespace,
-        dispatchId: cfg.dispatchId,
-        patchRef,
-        verify,
-        outputs,
-      });
-    } catch (err) {
-      logger.log({
-        kind: 'escape.failed',
-        dispatchId: cfg.dispatchId,
-        detail: (err as Error).message,
-      });
-    }
-
-    await emit({
-      kind: 'dispatch.finished',
+  // failed: adapter non-zero exit — carry the exit code as worker exit code.
+  if (result.kind === 'failed') {
+    logger.log({
+      kind: 'dispatch.failed',
       dispatchId: cfg.dispatchId,
-      exitCode: 0,
-      durationMs: Date.now() - startTime,
+      reason: 'provider-failed',
+      detail: `runtime exited with code ${result.exitCode}`,
+    });
+    await emit({
+      kind: 'dispatch.failed',
+      dispatchId: cfg.dispatchId,
+      reason: 'provider-failed',
       at: new Date().toISOString(),
     });
-    return 0;
+    return result.exitCode;
   }
 
-  // Non-zero runtime exit with no sentinel is a `dispatch.failed`. We carry
-  // the runtime's exit code out as the worker's exit code so the compute
-  // layer can surface application-level non-zero exits accurately. The
-  // canonical reason is `provider-failed` (per §4.3) — the runtime ran but
-  // produced a non-zero exit unrelated to worker infrastructure.
-  logger.log({
-    kind: 'dispatch.failed',
-    dispatchId: cfg.dispatchId,
-    reason: 'provider-failed',
-    detail: `runtime exited with code ${runtimeExit.exitCode}`,
-    stderr: runtimeExit.stderr.slice(0, 500),
-  });
+  // completed: runner already sealed the sentinel (best-effort). Emit finished.
   await emit({
-    kind: 'dispatch.failed',
+    kind: 'dispatch.finished',
     dispatchId: cfg.dispatchId,
-    reason: 'provider-failed',
+    exitCode: 0,
+    durationMs: Date.now() - startTime,
     at: new Date().toISOString(),
   });
-  return runtimeExit.exitCode;
+  return 0;
 }
 
 /**

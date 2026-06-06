@@ -64,7 +64,7 @@ it('dispatch run calls client.dispatch and prints result as JSON', async () => {
       capabilities: ['cap1'],
       addCapabilities: undefined,
       target: 'prod',
-      workerImage: 'ghcr.io/anthropic/claude-code:latest',
+      workerImage: 'ghcr.io/quarrysystems/agora-worker:latest',
     });
 
     expect(logs.length).toBeGreaterThan(0);

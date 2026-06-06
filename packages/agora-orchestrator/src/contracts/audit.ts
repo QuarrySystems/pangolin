@@ -22,7 +22,8 @@ export interface AuditAnchor {
 // agora-pinned entry (epoch = run; chain is per-run):
 export type AuditEntryKind =
   | 'run.submitted' | 'item.fired' | 'item.reconciled'
-  | 'item.retried' | 'item.skipped' | 'run.cancelled' | 'run.completed';
+  | 'item.retried' | 'item.skipped' | 'run.cancelled' | 'run.completed'
+  | 'run.extended';
 
 export interface AuditEntry {
   runId: string; seq: number; kind: AuditEntryKind;

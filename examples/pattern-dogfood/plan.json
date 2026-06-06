@@ -1,0 +1,42 @@
+{
+  "id": "dogfood-demo",
+  "queue": "default",
+  "items": [
+    {
+      "id": "implement",
+      "executor": "dispatch",
+      "inputs": {},
+      "depends_on": [],
+      "resourceLocks": []
+    },
+    {
+      "id": "review",
+      "executor": "dispatch",
+      "inputs": {
+        "gate": {
+          "onRed": "spawn-fix",
+          "subject": "implement",
+          "fixTemplate": {
+            "executor": "dispatch",
+            "inputs": {}
+          }
+        }
+      },
+      "depends_on": [],
+      "resourceLocks": []
+    },
+    {
+      "id": "package",
+      "executor": "dispatch",
+      "inputs": {},
+      "depends_on": [],
+      "resourceLocks": [],
+      "needs": {
+        "work": {
+          "from": "implement",
+          "select": { "kind": "patch" }
+        }
+      }
+    }
+  ]
+}

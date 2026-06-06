@@ -81,6 +81,8 @@ export interface InFlightDispatch {
     secretRefs: Record<string, string>; // envName -> ref (references, never values)
     workerImage: string;
     inputRefs: Record<string, string>; // key -> already-pinned agora:// URI (Wave-C manifest)
+    /** for the audit manifest — the pinned pipeline definition URI that triggered this dispatch */
+    pipelineRef?: string;
   };
   awaitExit(): Promise<TaskExit>;
   reconcile(exit: TaskExit): Promise<DispatchResult>;
@@ -198,6 +200,19 @@ export async function fireWork(
       return { key, uri, contentHash };
     });
 
+  // Validate pipelineRef when present — EXACTLY like inputRefs entries.
+  // parseAgoraUri throws on malformed; missing contentHash is an explicit error.
+  let resolvedPipelineRef: { uri: string; contentHash: string } | undefined;
+  if (work.pipelineRef !== undefined) {
+    const { contentHash } = parseAgoraUri(work.pipelineRef); // throws on malformed
+    if (!contentHash) {
+      throw new Error(
+        `dispatch: pipelineRef must be a pinned agora:// URI (missing content hash): ${work.pipelineRef}`,
+      );
+    }
+    resolvedPipelineRef = { uri: work.pipelineRef, contentHash };
+  }
+
   const bundleRefs = {
     subagent: {
       uri: buildAgoraUri({
@@ -227,6 +242,7 @@ export async function fireWork(
       contentHash: e.contentHash,
     })),
     inputs: resolvedInputRefs,
+    ...(resolvedPipelineRef !== undefined ? { pipeline: resolvedPipelineRef } : {}),
   };
 
   const envVars: Record<string, string> = {
@@ -358,6 +374,7 @@ export async function fireWork(
       secretRefs,
       workerImage: opts.workerImage,
       inputRefs: work.inputRefs ?? {},
+      ...(resolvedPipelineRef !== undefined ? { pipelineRef: resolvedPipelineRef.uri } : {}),
     },
     awaitExit,
     reconcile,

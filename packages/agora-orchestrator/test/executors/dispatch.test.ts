@@ -1102,6 +1102,173 @@ describe('DispatchExecutor', () => {
     resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
   });
 
+  // -------------------------------------------------------------------------
+  // Wave 2: inputs.pipeline threading (pipelineRef, spec §manifest-pipeline)
+  // -------------------------------------------------------------------------
+
+  it('threads inputs.pipeline into the dispatch work as pipelineRef', async () => {
+    const capturedTaskSpecs: import('@quarry-systems/agora-core').TaskSpec[] = [];
+    const { compute: baseCompute, resolveExit } = makeDeferredCompute();
+    const capturingCompute: import('@quarry-systems/agora-core').ComputeProvider = {
+      name: 'capturing',
+      async run(spec, ctx) {
+        capturedTaskSpecs.push(spec);
+        return baseCompute.run(spec, ctx);
+      },
+      awaitExit: baseCompute.awaitExit.bind(baseCompute),
+    };
+
+    const storage = makeMemoryStorage();
+    storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
+    const client = new AgoraClient({
+      namespace: 'ns',
+      compute: { default: capturingCompute },
+      credentials: { default: makeCredentials() },
+      storage,
+      targets: { prod: { compute: 'default', credentials: 'default' } },
+    });
+    const executor = new DispatchExecutor({ client, target: 'prod', workerImage: 'img' });
+
+    const pipelineUri = 'agora://ns/pipeline/my-pipe/sha256:' + 'c'.repeat(64);
+    const item: WorkItem = {
+      ...baseItem,
+      inputs: { subagent: 's', pipeline: pipelineUri },
+    };
+
+    await executor.fire(item);
+
+    expect(capturedTaskSpecs).toHaveLength(1);
+    const bundleRefs = JSON.parse(capturedTaskSpecs[0].env.AGORA_BUNDLE_REFS_JSON);
+    expect(bundleRefs.pipeline).toBeDefined();
+    expect(bundleRefs.pipeline.uri).toBe(pipelineUri);
+
+    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+  });
+
+  it('does not include pipeline in bundleRefs when inputs.pipeline is absent', async () => {
+    const capturedTaskSpecs: import('@quarry-systems/agora-core').TaskSpec[] = [];
+    const { compute: baseCompute, resolveExit } = makeDeferredCompute();
+    const capturingCompute: import('@quarry-systems/agora-core').ComputeProvider = {
+      name: 'capturing',
+      async run(spec, ctx) {
+        capturedTaskSpecs.push(spec);
+        return baseCompute.run(spec, ctx);
+      },
+      awaitExit: baseCompute.awaitExit.bind(baseCompute),
+    };
+
+    const storage = makeMemoryStorage();
+    storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
+    const client = new AgoraClient({
+      namespace: 'ns',
+      compute: { default: capturingCompute },
+      credentials: { default: makeCredentials() },
+      storage,
+      targets: { prod: { compute: 'default', credentials: 'default' } },
+    });
+    const executor = new DispatchExecutor({ client, target: 'prod', workerImage: 'img' });
+
+    // baseItem has no pipeline in inputs
+    await executor.fire(baseItem);
+
+    expect(capturedTaskSpecs).toHaveLength(1);
+    const bundleRefs = JSON.parse(capturedTaskSpecs[0].env.AGORA_BUNDLE_REFS_JSON);
+    expect(bundleRefs.pipeline).toBeUndefined();
+
+    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+  });
+
+  it('ignores non-string inputs.pipeline (does not throw)', async () => {
+    const capturedTaskSpecs: import('@quarry-systems/agora-core').TaskSpec[] = [];
+    const { compute: baseCompute, resolveExit } = makeDeferredCompute();
+    const capturingCompute: import('@quarry-systems/agora-core').ComputeProvider = {
+      name: 'capturing',
+      async run(spec, ctx) {
+        capturedTaskSpecs.push(spec);
+        return baseCompute.run(spec, ctx);
+      },
+      awaitExit: baseCompute.awaitExit.bind(baseCompute),
+    };
+
+    const storage = makeMemoryStorage();
+    storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
+    const client = new AgoraClient({
+      namespace: 'ns',
+      compute: { default: capturingCompute },
+      credentials: { default: makeCredentials() },
+      storage,
+      targets: { prod: { compute: 'default', credentials: 'default' } },
+    });
+    const executor = new DispatchExecutor({ client, target: 'prod', workerImage: 'img' });
+
+    const item: WorkItem = {
+      ...baseItem,
+      inputs: { subagent: 's', pipeline: 42 as unknown as string },
+    };
+
+    // Should not throw — non-string pipeline is IGNORED
+    await expect(executor.fire(item)).resolves.toBeDefined();
+
+    expect(capturedTaskSpecs).toHaveLength(1);
+    const bundleRefs = JSON.parse(capturedTaskSpecs[0].env.AGORA_BUNDLE_REFS_JSON);
+    expect(bundleRefs.pipeline).toBeUndefined();
+
+    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+  });
+
+  it('fire with inputs.pipeline seals pipelineRef into the manifest', async () => {
+    const { compute, resolveExit } = makeDeferredCompute();
+    const storage = makeMemoryStorage();
+    storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
+    const client = new AgoraClient({
+      namespace: 'ns',
+      compute: { default: compute },
+      credentials: { default: makeCredentials() },
+      storage,
+      targets: { prod: { compute: 'default', credentials: 'default' } },
+    });
+    const executor = new DispatchExecutor({ client, target: 'prod', workerImage: 'img:v1' });
+
+    const pipelineUri = 'agora://ns/pipeline/my-pipe/sha256:' + 'd'.repeat(64);
+    const item: WorkItem = {
+      ...baseItem,
+      inputs: { subagent: 's', pipeline: pipelineUri },
+    };
+
+    const ctx: FireContext = { runId: 'r1', actor: 'human:brett' };
+    const { manifestRef } = await executor.fire(item, ctx);
+    expect(manifestRef).toBeDefined();
+
+    const stored = JSON.parse(new TextDecoder().decode(await storage.get(manifestRef!)));
+    expect(stored.pipelineRef).toBe(pipelineUri);
+
+    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+  });
+
+  it('fire without inputs.pipeline stores manifest with NO pipelineRef key', async () => {
+    const { compute, resolveExit } = makeDeferredCompute();
+    const storage = makeMemoryStorage();
+    storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
+    const client = new AgoraClient({
+      namespace: 'ns',
+      compute: { default: compute },
+      credentials: { default: makeCredentials() },
+      storage,
+      targets: { prod: { compute: 'default', credentials: 'default' } },
+    });
+    const executor = new DispatchExecutor({ client, target: 'prod', workerImage: 'img:v1' });
+
+    const ctx: FireContext = { runId: 'r1', actor: 'human:brett' };
+    const { manifestRef } = await executor.fire(baseItem, ctx);
+    expect(manifestRef).toBeDefined();
+
+    const stored = JSON.parse(new TextDecoder().decode(await storage.get(manifestRef!)));
+    expect(stored.pipelineRef).toBeUndefined();
+    expect(Object.prototype.hasOwnProperty.call(stored, 'pipelineRef')).toBe(false);
+
+    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+  });
+
   it('model best-effort: unreadable subagent blob yields model { id: empty string } without failing fire', async () => {
     const { compute, resolveExit } = makeDeferredCompute();
     // Use a storage where get throws for the subagent pinned URI but resolveLatest works.

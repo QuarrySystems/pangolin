@@ -12,3 +12,4 @@ export * from './audit.js';
 export * from './privilege.js';
 export * from './schedule.js';
 export * from './schedule-store.js';
+export * from './pattern.js';

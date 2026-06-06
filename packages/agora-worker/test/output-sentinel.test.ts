@@ -18,6 +18,7 @@ import {
   captureOutputs,
   MAX_OUTPUT_FILE_BYTES,
   MAX_OUTPUT_ENTRIES,
+  type BlockOutcome,
 } from '../src/output-sentinel.js';
 
 // ---------------------------------------------------------------------------
@@ -439,5 +440,93 @@ describe('captureOutputs + writeSentinel outputs field', () => {
     expect(paths).toEqual(['legit.txt']); // only the legitimate file
     expect(paths.some((p) => p.includes('secret'))).toBe(false);
     expect(paths.some((p) => p.includes('leaked-link'))).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// blocks field (§5 pin 3)
+// ---------------------------------------------------------------------------
+
+describe('blocks field on OutputSentinel / writeSentinel', () => {
+  let dir: string;
+  let storage: MemoryStorage;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'blocks-test-'));
+    storage = new MemoryStorage();
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('a sentinel without blocks is byte-identical to the pre-blocks shape', async () => {
+    // Write two sentinels with identical inputs — one via old opts surface (no
+    // blocks key at all), one with blocks: undefined — assert the STORED BYTES
+    // are identical (hash-stability contract).
+    const optsBase = {
+      workspaceDir: dir,
+      storage,
+      namespace: 'ns',
+      dispatchId: 'b1',
+      patchRef: 'agora://ns/artifact/b1/sha256:' + 'a'.repeat(64),
+      summary: 'test',
+    } as const;
+
+    // First sentinel: classic opts, no blocks key.
+    const s1 = await writeSentinel(optsBase);
+
+    // Use a second temp dir so the .agora/output.json write doesn't collide.
+    const dir2 = await mkdtemp(join(tmpdir(), 'blocks-test2-'));
+    try {
+      const storage2 = new MemoryStorage();
+      const s2 = await writeSentinel({
+        ...optsBase,
+        workspaceDir: dir2,
+        storage: storage2,
+        dispatchId: 'b1',
+        blocks: undefined,
+      });
+
+      // Compare raw stored bytes (not JSON.parse — the bytes must be identical).
+      const { buildDispatchRecordUri } = await import('@quarry-systems/agora-core');
+      const uri = buildDispatchRecordUri('ns', 'b1', 'output.json');
+      const bytes1 = await storage.get(uri);
+      const bytes2 = await storage2.get(uri);
+      expect(bytes1).toEqual(bytes2);
+
+      // Also confirm the parsed shapes match.
+      expect(s1).toEqual(s2);
+      expect('blocks' in s1).toBe(false);
+      expect('blocks' in s2).toBe(false);
+    } finally {
+      await rm(dir2, { recursive: true, force: true });
+    }
+  });
+
+  it('blocks are serialized when provided', async () => {
+    const block: BlockOutcome = {
+      kind: 'script',
+      ordinal: 0,
+      status: 'ok',
+      durationMs: 5,
+    };
+
+    const sentinel = await writeSentinel({
+      workspaceDir: dir,
+      storage,
+      namespace: 'ns',
+      dispatchId: 'b2',
+      blocks: [block],
+    });
+
+    // In-memory return value
+    expect(sentinel.blocks).toEqual([block]);
+
+    // Stored bytes round-trip
+    const { buildDispatchRecordUri } = await import('@quarry-systems/agora-core');
+    const uri = buildDispatchRecordUri('ns', 'b2', 'output.json');
+    const parsed = JSON.parse(new TextDecoder().decode(await storage.get(uri)));
+    expect(parsed.blocks).toEqual([block]);
   });
 });

@@ -62,7 +62,7 @@ Dispatch and observe workers.
 
 | Subcommand | Args / options | Behavior |
 |---|---|---|
-| `run` | `--subagent <name>` (required), `--target <name>` (required), `--env <names...>`, `--input <json>` (default `{}`), `--capability <names...>`, `--add-capability <names...>`, `--worker-image <digest>` | Parses `--input` as JSON (invalid JSON → error + exit `1`). Calls `client.dispatch`. `--worker-image` defaults to `ghcr.io/anthropic/claude-code:latest`. Prints the `DispatchResult` as pretty JSON. **Exits `1` if `result.failure` is set.** |
+| `run` | `--subagent <name>` (required), `--target <name>` (required), `--env <names...>`, `--input <json>` (default `{}`), `--capability <names...>`, `--add-capability <names...>`, `--worker-image <digest>` | Parses `--input` as JSON (invalid JSON → error + exit `1`). Calls `client.dispatch`. `--worker-image` defaults to `ghcr.io/quarrysystems/agora-worker:latest` (the published worker image). Prints the `DispatchResult` as pretty JSON. **Exits `1` if `result.failure` is set.** |
 | `describe <id>` | — | Calls `client.dispatch.describe(id)`, prints the full `DispatchResult` as pretty JSON. |
 | `cancel <id>` | — | Calls `client.dispatch.cancel(id)`, prints `cancelled: <id>`. |
 
@@ -93,6 +93,7 @@ it.
 | Subcommand | Args / options | Behavior |
 |---|---|---|
 | `submit <plan.json>` | `--queue <name>`, `--actor <id>` | Reads and parses the plan JSON. `--queue` overrides the plan's `queue`. Submits via `OperationsApi.submit`. Prints the run id. |
+| `validate <plan.json>` | — | Static whole-DAG pre-flight: normalizes the plan (`needs[*].from` unioned into `depends_on`), then runs the same `validateRun` the submit path enforces — structural checks, duplicate ids, reference existence, `needs ⊆ depends_on`, cycle detection, and edge-type-tag compatibility. Every error prints on stderr (collect-all) and **exit code is `1` on an invalid plan**; a valid plan prints `{"valid":true,"items":N}`. Does not touch the store. |
 | `status [run-id]` | — | Prints the latest status record for the run as pretty JSON (or `null`). |
 | `watch <run-id>` | — | Follows the run, printing each status update as JSON until a terminal state. Ctrl-C to stop. |
 | `cancel <target>` | `--actor <id>` | Requests cancellation of a run/item. Prints `cancel requested: <target>`. |
@@ -104,6 +105,19 @@ it.
 
 The actor for `submit`, `cancel`, and `schedule add` resolves as: the `--actor` flag, else
 `$AGORA_ACTOR`, else `human:<os-username>`.
+
+## `agora pipeline`
+
+Manage declared block-pipeline specs (see
+[Dispatch lifecycle → The block-pipeline runner](/agora/reference/dispatch-lifecycle/#the-block-pipeline-runner)).
+Pipeline verbs are client/CLI surface — they are not orchestrator operations and
+are not MCP-reachable.
+
+| Subcommand | Args / options | Behavior |
+|---|---|---|
+| `register <file>` | — | Reads a `PipelineSpec` JSON file and calls `client.pipeline.register`. The spec is validated (collect-all), content-addressed over its canonical-JSON form, and stored as a pinned immutable version. Prints `{ id, contentHash, registeredAt, pinnedUri }` as JSON — `pinnedUri` is the `agora://<namespace>/pipeline/<id>@<hash>` ref a dispatch pins. Missing file, invalid JSON, or an invalid spec → error + exit `1`. Re-registering the identical spec is idempotent (same hash, original `registeredAt`). |
+| `validate <file>` | — | **Storage-free** structural validation — no `agora.config`, no client, no network. Runs the same `validatePipelineSpec` check as `register` (known block kinds, reserved `seal` rejected, `<pack>.<name>` id form, non-empty `blocks`, script/capture parameter validity, edge-type tags). Collect-all: every error prints on stderr and **exit code is `1` on an invalid spec**; a valid spec prints `OK`. |
+| `list` | — | Prints one tab-delimited line per pipeline: `id\tcontentHash\tregisteredAt` — mirroring the `subagent` / `capabilities` list surface. Catalog enumeration is not yet implemented in the storage layer, so today this surfaces the same "not yet implemented" error those resource types would. |
 
 ## `agora verify`
 

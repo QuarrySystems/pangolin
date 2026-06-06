@@ -11,11 +11,39 @@ workspace. See [RELEASING.md](./RELEASING.md) for how a release is cut.
 
 ### Added
 
+- **Block-pipeline worker runtime + the `data` pack (#46, #47).** The worker's
+  hardcoded step sequence is now a pipeline runner executing a `PipelineSpec` of
+  typed blocks (`agent` / `script` / `capture`; script blocks carry a
+  `lens: gate | verify`), with the seal step auto-appended — the default pipeline
+  reproduces the previous worker behavior **byte-identically** (golden-tested).
+  Declared pipelines register via `registerPipeline` / `client.pipeline.register`
+  and the new `agora pipeline register | validate | list` CLI verbs; the chosen
+  pipeline is sealed into the dispatch manifest as `pipelineRef` at fire time, and
+  declared pipelines emit per-block `blocks[]` evidence in the output sentinel.
+  On top of it ships the **`data` pack** — `data.split` / `data.transform` /
+  `data.aggregate` shapes and `dataset-ref` edge tags — the second pack, proving
+  the engine is domain-general with **zero engine changes**. The
+  `examples/data-mapreduce` demo runs a real data job end-to-end, fully offline.
+
+- **Pattern layer — per-queue execution patterns (#43, #45).** A queue can now
+  declare an execution pattern (`QueueConfig.pattern`): `staticDag` (identity;
+  today's default behavior), `pipeline` (auto-chains the submitted items into a
+  linear chain, with a gate policy via `inputs.gate` — a failed gate circles back
+  by spawning a bounded fix → re-gate arc), and `mapReduce` (splitter → N map
+  items → reduce, where N is data-derived at run time). All dynamic work flows
+  through the audited `extendRun` append seam: deterministic ids make replays
+  id-skip idempotent, the merged graph is re-validated, and every append lands a
+  `'run.extended'` audit entry with actor `pattern:<queue>`. Dynamic work is
+  **spawn** — new forward arcs, never in-graph cycles — and provenance closure
+  covers spawned graphs the same as static ones. Demos: `examples/pattern-mapreduce`
+  (one item grows to five, provenance-verified) and `examples/pattern-dogfood`
+  (gated circle-back via spawn).
+
 - **Typed-product handoff (Wave A–C).** Dependent DAGs now hand products node-to-node
   by content-addressed ref: Wave A (#39) added the `outputs/` / `outputRefs` producer
   seam; Wave B (#40) added the `needs` consumer wiring (auto-unioned into `depends_on`
   at submit-normalization, resolved at fire time into `inputs.inputRefs`) plus
-  `buildManifest` sealing of those refs; Wave C (this PR) closes the provenance loop —
+  `buildManifest` sealing of those refs; Wave C (#41) closes the provenance loop —
   `verifyBundle(bundle, { anchor })` now checks that every `inputRefs` value in every
   dispatch manifest is a sealed `resultRef` or `outputRef` of a completed item in the
   same run (`checks.handoff.ok`), and `agora verify` proves the chain end-to-end. The

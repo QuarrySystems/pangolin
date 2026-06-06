@@ -49,6 +49,51 @@ Most of what you see in stdout is the worker's structured-log stream.
 Everything after step 5 is bracketed by the appropriate lifecycle event so
 the orchestrator can attribute failures.
 
+Steps 1–10 and 12–13 are the worker's **chassis** — fetch, overlay, env,
+setup, channels. Step 11 plus the success-path capture/verify/seal work is the
+**payload**, and the payload is now executed by a block-pipeline runner
+(next section). The step list above still describes exactly what runs by
+default.
+
+## The block-pipeline runner
+
+The worker's execution core is a **runner of typed block-pipelines**. The
+legacy hardcoded steps did not change behavior — they became the **default
+pipeline**, built per-dispatch:
+
+```
+[ agent → capture(patch) → script(verify lens, if subagent.verify) → capture(outputs) ] + seal
+```
+
+This default is **byte-identical** to the pre-runner worker — golden tests pin
+the output sentinel's bytes against the legacy path, so dev-pack consumers see
+no hash changes. Three block kinds exist:
+
+| Kind | What it runs | Failure semantics |
+|---|---|---|
+| `agent` | The registered subagent's runtime adapter (`claude --print …`) | Non-zero exit aborts the pipeline (`provider-failed`); a *throw* stays `worker-failed`, as before. |
+| `script` | A shell command via the bounded-command primitive (time-bounded, output-capped, secret-redacted), in the workspace with the firewalled merged env | `lens: 'gate'` (default): non-zero exit / timeout aborts the pipeline → the dispatch fails with `provider-failed`, exit code carried. `lens: 'verify'`: report-only — never fails the dispatch (the [Self-verify](#self-verify-optional) contract, same primitive). |
+| `capture` | `what: 'patch'` captures the workspace diff; `what: 'outputs'` content-addresses files under `outputs/` | n/a — capture is evidence collection. |
+
+`seal` is **structural, not a block**: the runner itself always appends it as
+the terminal step. It is never authored in a spec (`validatePipelineSpec`
+rejects a literal `seal` block), and no caller can omit or reorder it — every
+successful pipeline ends with the sealed output sentinel.
+
+A **declared pipeline** replaces the default: register a spec with
+[`agora pipeline register`](/agora/reference/cli/#agora-pipeline) (or
+[`client.pipeline.register`](/agora/reference/agora-client-api/#clientpipeline)),
+then pin its ref on the work item's reserved `inputs.pipeline` key. The pinned
+spec rides the existing bundle channel (`AGORA_BUNDLE_REFS_JSON`), is
+integrity-verified against its content hash, and is **re-validated by the
+worker** before running — a parse or validation failure routes through the
+established `integrity-failed` path, like any malformed bundle. Declared
+pipelines additionally write per-block evidence into the output sentinel as
+`blocks[]` (kind, ordinal, status, exit code, duration per block); the implicit
+default writes the legacy sentinel unchanged. The pipeline ref itself is sealed
+into the dispatch manifest (`pipelineRef`), so "this exact pipeline ran" —
+every block, command, and lens — is provable from the audit bundle.
+
 ## Self-verify (optional)
 
 If the subagent declares a `verify.command` (via
@@ -126,7 +171,8 @@ the table above are the most common case for each reason, not the only one.
 | `worker-failed` | Step 9 / 13 | `agora-setup.sh` exited non-zero or timed out; OR the needs_input sentinel was malformed (unparseable JSON, missing `question`, >1 MiB serialized). |
 | `provider-failed` | Step 11 | Runtime adapter (claude binary) exited non-zero with no sentinel. Most common cause in dev: missing `ANTHROPIC_API_KEY`. |
 
-Each terminal event includes `durationMs` measured from `dispatch.started`.
+Each terminal event includes `durationMs` measured from worker start
+(`runWorker` entry), which slightly precedes `dispatch.started`.
 
 ## Reading worker stdout
 

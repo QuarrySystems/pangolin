@@ -1,0 +1,24 @@
+{
+  "id": "pattern-mapreduce-demo",
+  "queue": "default",
+  "items": [
+    {
+      "id": "split",
+      "executor": "dispatch",
+      "inputs": {
+        "mapReduce": {
+          "map": {
+            "executor": "dispatch",
+            "inputs": {}
+          },
+          "reduce": {
+            "executor": "dispatch",
+            "inputs": {}
+          }
+        }
+      },
+      "depends_on": [],
+      "resourceLocks": []
+    }
+  ]
+}

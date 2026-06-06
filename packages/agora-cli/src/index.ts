@@ -18,6 +18,7 @@ import { attachDeployCmd } from './cmd-deploy.js';
 import { attachOrchCmd } from './cmd-orch.js';
 import type { OrchContext } from './cmd-orch.js';
 import { attachVerifyCmd } from './cmd-verify.js';
+import { attachPipelineCmd } from './cmd-pipeline.js';
 
 export interface CliContext {
   /** Lazily-loaded AgoraClient instance (from agora.config.ts in cwd). */
@@ -38,6 +39,7 @@ export function buildProgram(ctx: CliContext): Command {
   attachDeployCmd(program, ctx);
   attachOrchCmd(program, ctx);
   attachVerifyCmd(program, ctx);
+  attachPipelineCmd(program, ctx);
   return program;
 }
 

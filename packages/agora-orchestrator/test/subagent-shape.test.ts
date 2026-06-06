@@ -42,4 +42,32 @@ describe('validateShape', () => {
       outputEdgeType: 'patch-ref', inputEdgeTypes: { patch: 'patch-ref' },
     }))).not.toThrow();
   });
+
+  it('accepts and rejects the same ids as core isPackScopedId', () => {
+    // Valid ids should pass
+    expect(() => validateShape(makeShape({ id: 'dev.code-edit' }))).not.toThrow();
+    expect(() => validateShape(makeShape({ id: 'x.y' }))).not.toThrow();
+    expect(() => validateShape(makeShape({ id: 'foo-bar.baz-qux' }))).not.toThrow();
+    expect(() => validateShape(makeShape({ id: 'a123.b456' }))).not.toThrow();
+
+    // Invalid ids should throw with the exact message
+    expect(() => validateShape(makeShape({ id: 'nodot' }))).toThrow(
+      /SubagentShape: id "nodot" must be "<pack>\.<name>"/
+    );
+    expect(() => validateShape(makeShape({ id: 'too.many.dots' }))).toThrow(
+      /SubagentShape: id "too\.many\.dots" must be "<pack>\.<name>"/
+    );
+    expect(() => validateShape(makeShape({ id: '.dot' }))).toThrow(
+      /must be "<pack>\.<name>"/
+    );
+    expect(() => validateShape(makeShape({ id: 'dot.' }))).toThrow(
+      /must be "<pack>\.<name>"/
+    );
+    expect(() => validateShape(makeShape({ id: 'upper.Case' }))).toThrow(
+      /must be "<pack>\.<name>"/
+    );
+    expect(() => validateShape(makeShape({ id: 'pack.name_with_underscore' }))).toThrow(
+      /must be "<pack>\.<name>"/
+    );
+  });
 });

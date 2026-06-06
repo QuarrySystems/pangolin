@@ -1,0 +1,24 @@
+{
+  "name": "data-mapreduce-example",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Offline data-domain demo: seed→split→transform(×N)→aggregate over a small CSV, proving the map-reduce pattern works for a second domain (data) with zero engine changes. Uses InprocWorkerExecutor (test fixture) to run real pipeline scripts without Docker.",
+  "type": "module",
+  "license": "BUSL-1.1",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --esModuleInterop --skipLibCheck --strict src/index.ts",
+    "build": "tsc --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --esModuleInterop --skipLibCheck --strict src/index.ts"
+  },
+  "dependencies": {
+    "@quarry-systems/agora-orchestrator": "workspace:*",
+    "@quarry-systems/agora-client": "workspace:*",
+    "@quarry-systems/agora-worker": "workspace:*",
+    "@quarry-systems/agora-storage-local": "workspace:*",
+    "@quarry-systems/agora-secret-store": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.2"
+  }
+}

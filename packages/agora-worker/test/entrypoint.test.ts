@@ -15,12 +15,14 @@ import { runWorker, type RunWorkerDeps } from '../src/entrypoint.js';
 import { LocalSecretStore } from '@quarry-systems/agora-secret-store';
 import {
   computeContentHash,
+  canonicalJsonString,
   buildDispatchRecordUri,
   type StorageProvider,
   type RuntimeAdapter,
   type RuntimeInvocation,
   type RuntimeExit,
   type LifecycleEvent,
+  type PipelineSpec,
 } from '@quarry-systems/agora-core';
 
 /**
@@ -359,7 +361,7 @@ describe('runWorker', () => {
 
     // Make storage.put throw so the escape upload fails (logged as escape.failed)
     const throws: FakeStorage = h.storage as unknown as FakeStorage;
-    throws.put = async (uri: string) => {
+    throws.put = async (_uri: string) => {
       throw new Error('storage unavailable');
     };
 
@@ -759,5 +761,94 @@ describe('runWorker', () => {
     // The pre-existing input file (overlaid before baseline) must NOT appear
     // as a change — it was staged into the baseline tree, so the diff is clean.
     expect(patchText).not.toContain('inputs/patch.diff');
+  });
+
+  it('declared valid script-only pipeline: runs without invoking the adapter, emits dispatch.finished, sentinel carries blocks[]', async () => {
+    const h = await setupHarness();
+    cleanupDirs.push(h.workDir, h.adaptersRoot);
+
+    // Build a script-only pipeline that writes a sentinel-visible output file.
+    // The outputs/ dir is inside workDir (injected as workspaceDir).
+    const outputsPath = join(h.workDir, 'outputs', 'result.txt').replace(/\\/g, '/');
+    const pipelineSpec: PipelineSpec = {
+      schemaVersion: 1,
+      id: 'test.script-only',
+      blocks: [
+        {
+          kind: 'script',
+          command: `node -e "require('fs').mkdirSync('${join(h.workDir, 'outputs').replace(/\\/g, '/')}', {recursive:true}); require('fs').writeFileSync('${outputsPath}', 'done')"`,
+        },
+        { kind: 'capture', what: 'outputs' },
+      ],
+    };
+
+    // Seed the pipeline spec in fake storage. The bundle-fetcher JSON.parses
+    // the bytes, then calls verifyContentHash(parsedObj, contentHash). The
+    // client stores canonicalJsonString bytes; the hash is over the parsed object.
+    const pipelineBytes = new TextEncoder().encode(canonicalJsonString(pipelineSpec));
+    const pipelineHash = computeContentHash(pipelineSpec); // object hash, not bytes hash
+    const pipelineUri = 'agora://ns/pipeline/test.script-only/sha256:p';
+    h.storage.set(pipelineUri, pipelineBytes);
+
+    // Inject the pipeline ref into bundleRefs.
+    const bundleRefs = JSON.parse(h.env.AGORA_BUNDLE_REFS_JSON!) as Record<string, unknown>;
+    bundleRefs.pipeline = { uri: pipelineUri, contentHash: pipelineHash };
+    h.env.AGORA_BUNDLE_REFS_JSON = JSON.stringify(bundleRefs);
+
+    const code = await runWorker(h.env, makeDeps(h));
+
+    // dispatch.finished, not failed.
+    expect(code).toBe(0);
+    const kinds = h.events.map((e) => e.kind);
+    expect(kinds).toContain('dispatch.finished');
+    expect(kinds).not.toContain('dispatch.failed');
+
+    // Adapter was NEVER invoked — no agent block in the pipeline.
+    expect(h.invokeCalls).toBe(0);
+
+    // Sentinel carries blocks[] (declared: true) and outputs.
+    const sentinelUri = buildDispatchRecordUri('ns', 'd-1', 'output.json');
+    expect(h.storage.has(sentinelUri)).toBe(true);
+    const parsed = JSON.parse(new TextDecoder().decode(await h.storage.get(sentinelUri)));
+    expect(Array.isArray(parsed.blocks)).toBe(true);
+    expect(parsed.blocks.length).toBeGreaterThan(0);
+  });
+
+  it('declared invalid spec (empty blocks) seeded in storage → integrity-failed, exit 1, adapter never invoked, no sentinel', async () => {
+    const h = await setupHarness();
+    cleanupDirs.push(h.workDir, h.adaptersRoot);
+
+    // Build an INVALID pipeline spec: blocks: [] fails validatePipelineSpec.
+    const invalidSpec = {
+      schemaVersion: 1,
+      id: 'test.invalid',
+      blocks: [],
+    };
+
+    const pipelineBytes = new TextEncoder().encode(canonicalJsonString(invalidSpec));
+    const pipelineHash = computeContentHash(invalidSpec);
+    const pipelineUri = 'agora://ns/pipeline/test.invalid/sha256:q';
+    h.storage.set(pipelineUri, pipelineBytes);
+
+    const bundleRefs = JSON.parse(h.env.AGORA_BUNDLE_REFS_JSON!) as Record<string, unknown>;
+    bundleRefs.pipeline = { uri: pipelineUri, contentHash: pipelineHash };
+    h.env.AGORA_BUNDLE_REFS_JSON = JSON.stringify(bundleRefs);
+
+    const code = await runWorker(h.env, makeDeps(h));
+
+    // Must exit non-zero.
+    expect(code).toBe(1);
+
+    // dispatch.failed with integrity-failed reason.
+    const failed = h.events.find((e) => e.kind === 'dispatch.failed');
+    expect(failed).toBeDefined();
+    expect(failed && 'reason' in failed && failed.reason).toBe('integrity-failed');
+
+    // Adapter must never have been invoked.
+    expect(h.invokeCalls).toBe(0);
+
+    // No sentinel stored.
+    const sentinelUri = buildDispatchRecordUri('ns', 'd-1', 'output.json');
+    expect(h.storage.has(sentinelUri)).toBe(false);
   });
 });

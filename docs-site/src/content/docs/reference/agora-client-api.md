@@ -8,8 +8,8 @@ sidebar:
 `AgoraClient` (from `@quarry-systems/agora-client`) is the single caller-side
 entry point integrators construct. The constructor validates the option shape
 and holds the wired-in providers; namespaced sub-APIs
-(`capabilities`, `subagent`, `env`, `dispatch`) are installed on the prototype
-when the barrel is imported.
+(`capabilities`, `subagent`, `env`, `pipeline`, `dispatch`) are installed on
+the prototype when the barrel is imported.
 
 ## Constructor options
 
@@ -114,6 +114,48 @@ interface RegisterEnvOpts {
 Inline secrets are staged via the named `SecretStore`; only the resulting
 opaque ref is recorded in the bundle — the inline value never crosses into
 storage.
+
+## `client.pipeline`
+
+```typescript
+register(spec: PipelineSpec): Promise<PipelineRef>
+```
+
+Registers a declared block-pipeline spec (see
+[Dispatch lifecycle → The block-pipeline runner](/agora/reference/dispatch-lifecycle/#the-block-pipeline-runner)).
+The spec is structurally validated first — **collect-all**: every error is
+surfaced in one throw, not just the first — then content-addressed over its
+canonical-JSON (sorted-key) serialization and stored as a pinned immutable
+version. Re-registering the identical spec is **idempotent**: the same content
+hash returns the original `registeredAt` with no duplicate write; a *different*
+spec under the same `id` produces a new pinned version, and both coexist
+immutably.
+
+```typescript
+interface PipelineRef {
+  id: string;            // '<pack>.<name>'
+  registeredAt: string;  // storage-authoritative timestamp
+  contentHash: string;   // sha256 over the canonical spec
+}
+```
+
+A minimal `PipelineSpec` — one script block (the runner always auto-appends
+the terminal `seal`; it is never authored):
+
+```typescript
+const ref = await client.pipeline.register({
+  schemaVersion: 1,
+  id: 'data.transform',
+  blocks: [
+    { kind: 'script', command: 'node transform.js', timeoutSeconds: 120 },
+  ],
+  outputEdgeType: 'dataset-ref',
+});
+```
+
+`list()` is a deferred catalog surface — like `capabilities` / `subagent` /
+`env` enumeration, it waits on a `listNames` extension to `StorageProvider`;
+use `agora pipeline register`'s printed ref (or a known id) in the meantime.
 
 ## `client.dispatch`
 

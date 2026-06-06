@@ -34,6 +34,7 @@ export interface FetchedBundles {
   capabilities: FetchedCapability[];
   envs: FetchedEnv[];
   inputs: Array<{ key: string; bytes: Uint8Array }>;
+  pipeline?: Record<string, unknown>;
 }
 
 /**
@@ -179,7 +180,22 @@ export async function fetchBundles(
     inputs.push({ key: inp.key, bytes });
   }
 
-  return { subagentDef, capabilities, envs, inputs };
+  // 5. Pipeline spec (optional). Fetched + object-hash-verified via the same
+  //    canonical-JSON path as the subagentDef: fetch bytes → JSON.parse →
+  //    verifyContentHash over the parsed object. The content hash is computed
+  //    over the spec object (not raw bytes) by the registration side, so both
+  //    hash domains cohere through canonical JSON.
+  let pipeline: Record<string, unknown> | undefined;
+  if (refs.pipeline !== undefined) {
+    const pipelineBytes = await storage.get(refs.pipeline.uri);
+    const pipelineDef = JSON.parse(
+      new TextDecoder().decode(pipelineBytes),
+    ) as Record<string, unknown>;
+    verifyContentHash(pipelineDef, refs.pipeline.contentHash);
+    pipeline = pipelineDef;
+  }
+
+  return { subagentDef, capabilities, envs, inputs, pipeline };
 }
 
 /**

@@ -30,6 +30,34 @@ audit bundle.
   Deterministic per-slot run id (`<scheduleId>@<slotISO>`) deduplicates
   double-emits via `submitRun`'s existing idempotency guard. Schedules persist
   in a `schedules` table on the run-state SQLite DB.
+- **Typed-product handoff** — dependent DAG nodes consume upstream products by
+  content-addressed reference: `needs` wiring on the `WorkItem`
+  (auto-unioned into `depends_on` at submit), the `outputs/` capture seam
+  (content-addressed `outputRefs` per item) and the `inputs/<key>`
+  materialization seam in the worker, consumed refs sealed in the dispatch
+  manifest, and a **provenance-closure** check in `agora verify` proving every
+  consumed ref equals a sealed product of a verified item in the same run. See
+  the [plan.json reference](/agora/reference/plan-json/#needs--typed-product-handoff).
+- **The execution-pattern layer** — per-queue execution patterns
+  (`static-dag`, `pipeline`, `map-reduce`) over the unchanged engine. Dynamic
+  fan-out and circle-back are **audited spawn** through the internal
+  `extendRun` seam: spawned items are validated against the merged graph,
+  actor-attributed as `pattern:<queue>`, and recorded as `run.extended` audit
+  entries naming the cause item. Growth is always new forward arcs — never
+  cycles — and provenance closure covers spawned graphs with zero new
+  verification code. See
+  [How an offload run executes](/agora/explanation/how-offload-runs/#execution-patterns-and-audited-spawn).
+- **The block-pipeline runner + the data pack** — the worker's execution core
+  is a runner of typed block-pipelines (`PipelineSpec`: `agent` / `script` /
+  `capture` blocks over a structural, auto-appended `seal`). The legacy steps
+  are the default pipeline, **byte-identical** to before (golden-tested);
+  declared pipelines are registered (`agora pipeline register|validate|list`,
+  `client.pipeline.register`), pinned by content hash, sealed into the
+  manifest as `pipelineRef`, and add per-block `blocks[]` evidence to the
+  output sentinel. The `data` pack (CSV split → transform → aggregate riding
+  map-reduce, scripts only, fully offline) is the **second-domain proof** the
+  pack architecture demanded. See
+  [Dispatch lifecycle](/agora/reference/dispatch-lifecycle/#the-block-pipeline-runner).
 - **`serve` driver** — long-running process; sole writer of the SQLite run-state,
   polls the submission inbox, runs the reconcile tick loop, exits cleanly on signal.
 - **Submission transport** — clients write a Run spec to a storage prefix; `serve`
@@ -99,9 +127,24 @@ standalone without them — that is the point of the seams. Items carrying this
 split are tagged **[seam free · impl Enterprise]**.
 :::
 
-- **`cron` trigger** — recurring scheduling via the existing `Trigger` seam.
-  `serve` + manual `submit` already delivers *unattended* offload; `cron` adds
-  *recurring*. **First item to pull into V1.1.**
+- **Live worker dogfood** — the handoff / pattern / block-runner stack is
+  proven offline (fake and in-process executors, zero API credits); the first
+  real DAG-plan run against live workers is the actual validation. **First
+  item to pull into V1.1.**
+- **Adapter blocks** — constructing edge-type adapters where typed-product
+  tags mismatch (today a mismatch is rejected with a precise error naming the
+  gap). *Named trigger:* a pack declaring tags that actually mismatch.
+- **Tier-2 custom code blocks** — `agora block register`, module loading /
+  sandboxing / conformance in the worker. The id namespace and
+  content-addressing posture are already reserved by the block-runner design.
+  *Named trigger:* a third-party pack needing behavior the built-in blocks
+  can't express.
+- **`oneOf` needs selectors** — a richer declarative `select` for a
+  **pre-submitted** item whose source varies at runtime (consume the
+  fast-path's product, else the fallback's), resolved by the same pure
+  resolve-at-fire with the chosen ref sealed as today. The real cost is
+  OR-readiness semantics in the engine. *Named trigger:* a concrete consumer
+  with pre-submitted conditional wiring.
 - **Operationalize the `dev` pack** — the `dev.code-edit` / `dev.verify` shapes and
   the `PackRegistry` already exist in code (see "Now"), but aren't dispatchable yet:
   pin the real worker-image digest (currently a `PLACEHOLDER`) and enforce each
@@ -142,7 +185,7 @@ split are tagged **[seam free · impl Enterprise]**.
 No refactor required when pulled — that is what the architecture bought.
 
 - Additional executors: `shell`, `batch-api`, `dag-plan`.
-- Additional packs beyond `dev`.
+- Additional packs beyond `dev` and `data`.
 - Predicate / signal / event triggers.
 - Named queues beyond `default`; rate-limiting.
 - `pause` / `resume`.

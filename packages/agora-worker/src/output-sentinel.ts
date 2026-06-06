@@ -38,6 +38,24 @@ export interface OutputEntry {
   ref: string;
 }
 
+/**
+ * Per-block runtime evidence (spec §5 pin 3). Written ONLY for explicitly
+ * declared pipelines — the implicit default pipeline writes the legacy sentinel
+ * byte-for-byte. Placed here (beside OutputSentinel) to prevent a
+ * runner↔sentinel circular import; sibling runners import BlockOutcome from
+ * this file.
+ */
+export interface BlockOutcome {
+  kind: string;
+  ordinal: number;
+  status: 'ok' | 'failed';
+  exitCode?: number;
+  durationMs: number;
+  verify?: VerifyOutcome;
+  patchRef?: string;
+  outputs?: OutputEntry[];
+}
+
 /** The on-disk and in-storage sentinel shape (D7 strict subset). */
 export interface OutputSentinel {
   schemaVersion: 1;
@@ -59,6 +77,12 @@ export interface OutputSentinel {
    * MAX_OUTPUT_ENTRIES. Entries are sorted deterministically (posix path).
    */
   outputs?: OutputEntry[];
+  /**
+   * Per-block runtime evidence (spec §5 pin 3). Optional + additive — absence
+   * leaves the sentinel hash unchanged (byte-identical to pre-blocks shape).
+   * Written only for explicitly declared pipelines.
+   */
+  blocks?: BlockOutcome[];
 }
 
 /**
@@ -179,14 +203,17 @@ export async function writeSentinel(opts: {
   verify?: VerifyOutcome;
   /** Wave A (§5): content-addressed deliverables from workspace/outputs/. */
   outputs?: OutputEntry[];
+  /** §5 pin 3: per-block runtime evidence. Optional + additive. */
+  blocks?: BlockOutcome[];
 }): Promise<OutputSentinel> {
-  const { workspaceDir, storage, namespace, dispatchId, patchRef, summary, verify, outputs } = opts;
+  const { workspaceDir, storage, namespace, dispatchId, patchRef, summary, verify, outputs, blocks } = opts;
 
   const sentinel: OutputSentinel = { schemaVersion: 1 };
   if (patchRef !== undefined) sentinel.patchRef = patchRef;
   if (summary !== undefined) sentinel.summary = summary;
   if (verify !== undefined) sentinel.verify = verify;
   if (outputs !== undefined) sentinel.outputs = outputs;
+  if (blocks !== undefined) sentinel.blocks = blocks;
 
   const sentinelBytes = new TextEncoder().encode(JSON.stringify(sentinel));
 

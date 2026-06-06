@@ -292,6 +292,54 @@ describe("fetchBundles", () => {
 
     expect(result.inputs).toEqual([]);
   });
+
+  it("fetches and object-hash-verifies the pipeline bundle; tampered bytes throw", async () => {
+    const spec = { version: "1", steps: [{ name: "build" }] };
+    const storage = new FakeStorage();
+    const uri = "agora://ns/pipeline/p/sha256:pp";
+
+    // Store canonicalJsonString(spec) bytes at the pinned URI
+    const { canonicalJsonString } = await import("@quarry-systems/agora-core");
+    const specBytes = new TextEncoder().encode(canonicalJsonString(spec));
+    storage.set(uri, specBytes);
+
+    const refs: BundleRefs = {
+      subagent: subRef(storage),
+      capabilities: [],
+      env: [],
+      pipeline: { uri, contentHash: computeContentHash(spec) },
+    };
+
+    const result = await fetchBundles(refs, storage);
+    expect(result.pipeline).toEqual(spec);
+
+    // Corrupt stored bytes → fetchBundles should throw integrity error
+    const tamperedStorage = new FakeStorage();
+    subRef(tamperedStorage);
+    tamperedStorage.set(uri, new TextEncoder().encode(JSON.stringify({ tampered: true })));
+    const refs2: BundleRefs = {
+      subagent: subRef(tamperedStorage),
+      capabilities: [],
+      env: [],
+      pipeline: { uri, contentHash: computeContentHash(spec) },
+    };
+    await expect(fetchBundles(refs2, tamperedStorage)).rejects.toBeInstanceOf(
+      IntegrityMismatchError,
+    );
+  });
+
+  it("returns pipeline: undefined when refs.pipeline is absent", async () => {
+    const storage = new FakeStorage();
+    const refs: BundleRefs = {
+      subagent: subRef(storage),
+      capabilities: [],
+      env: [],
+    };
+
+    const result = await fetchBundles(refs, storage);
+
+    expect(result.pipeline).toBeUndefined();
+  });
 });
 
 describe("constructStorageProvider", () => {
