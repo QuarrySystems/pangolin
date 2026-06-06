@@ -5,12 +5,12 @@ created: 2026-06-05
 
 ```mermaid
 flowchart TD
-    task-pipeline-contract["task-pipeline-contract: core pipeline contract<br/>files: agora-core/src/pipeline.ts +2 more"]
-    task-sentinel-blocks["task-sentinel-blocks: sentinel blocks evidence field<br/>files: agora-worker/src/output-sentinel.ts +1 more"]
-    task-shape-id-reuse["task-shape-id-reuse: shape id regex reuse<br/>files: agora-orchestrator/src/contracts/subagent-shape.ts +1 more"]
-    task-pipeline-runner["task-pipeline-runner: pipeline runner + built-ins<br/>files: agora-worker/src/pipeline-runner.ts +1 more"]
-    task-entrypoint-swap["task-entrypoint-swap: entrypoint success-path swap<br/>files: agora-worker/src/entrypoint.ts"]
-    task-golden-byte-compat["task-golden-byte-compat: golden byte-compat tests<br/>files: agora-worker/test/pipeline-golden.test.ts"]
+    task-pipeline-contract["task-pipeline-contract: core pipeline contract<br/>files: agora-core/src/pipeline.ts +2 more"]:::done
+    task-sentinel-blocks["task-sentinel-blocks: sentinel blocks evidence field<br/>files: agora-worker/src/output-sentinel.ts +1 more"]:::done
+    task-shape-id-reuse["task-shape-id-reuse: shape id regex reuse<br/>files: agora-orchestrator/src/contracts/subagent-shape.ts +1 more"]:::done
+    task-pipeline-runner["task-pipeline-runner: pipeline runner + built-ins<br/>files: agora-worker/src/pipeline-runner.ts +1 more"]:::done
+    task-entrypoint-swap["task-entrypoint-swap: entrypoint success-path swap<br/>files: agora-worker/src/entrypoint.ts"]:::done
+    task-golden-byte-compat["task-golden-byte-compat: golden byte-compat tests<br/>files: agora-worker/test/pipeline-golden.test.ts"]:::done
 
     task-pipeline-contract --> task-shape-id-reuse
     task-pipeline-contract --> task-pipeline-runner
@@ -79,7 +79,7 @@ files:
   - packages/agora-core/src/pipeline.ts
   - packages/agora-core/src/index.ts
   - packages/agora-core/test/pipeline.test.ts
-status: pending
+status: done
 ```
 
 The pipeline contract as DATA in agora-core (spec §4): `BlockSpec` union, `PipelineSpec`,
@@ -169,7 +169,7 @@ depends_on: []
 files:
   - packages/agora-worker/src/output-sentinel.ts
   - packages/agora-worker/test/output-sentinel.test.ts
-status: pending
+status: done
 ```
 
 The additive per-block evidence channel (spec §5 pin 3): `BlockOutcome` is DEFINED HERE
@@ -228,7 +228,7 @@ depends_on: [task-pipeline-contract]
 files:
   - packages/agora-orchestrator/src/contracts/subagent-shape.ts
   - packages/agora-orchestrator/test/subagent-shape.test.ts
-status: pending
+status: done
 model_hint: cheap
 ```
 
@@ -271,7 +271,7 @@ depends_on: [task-pipeline-contract, task-sentinel-blocks]
 files:
   - packages/agora-worker/src/pipeline-runner.ts
   - packages/agora-worker/test/pipeline-runner.test.ts
-status: pending
+status: done
 ```
 
 The interpreter runner (spec §5): registry of built-in `BlockImpl`s keyed by `kind`
@@ -371,7 +371,7 @@ id: task-entrypoint-swap
 depends_on: [task-pipeline-runner]
 files:
   - packages/agora-worker/src/entrypoint.ts
-status: pending
+status: done
 is_wiring_task: true
 ```
 
@@ -410,7 +410,7 @@ id: task-golden-byte-compat
 depends_on: [task-entrypoint-swap]
 files:
   - packages/agora-worker/test/pipeline-golden.test.ts
-status: pending
+status: done
 ```
 
 The load-bearing proof (spec §9/§11): for identical inputs, the runner-backed worker
