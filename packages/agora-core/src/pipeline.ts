@@ -95,6 +95,11 @@ export function validatePipelineSpec(spec: PipelineSpec): string[] {
     errors.push('blocks must be a non-empty array');
   } else {
     for (const [i, b] of spec.blocks.entries()) {
+      if (b === null || typeof b !== 'object') {
+        errors.push(`blocks[${i}]: must be an object, got ${b === null ? 'null' : typeof b}`);
+        continue;
+      }
+
       const kind = (b as { kind?: string }).kind;
 
       // Reserved: seal is auto-appended by the runner

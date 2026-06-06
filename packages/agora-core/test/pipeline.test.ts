@@ -163,7 +163,17 @@ describe('validatePipelineSpec — blocks errors', () => {
       id: 'data.split',
       blocks: [{ kind: 'unknown-kind' } as never],
     });
-    expect(errors.some((e) => e.includes('unknown') || e.includes('kind'))).toBe(true);
+    expect(errors.some((e) => e.includes('unknown') && e.includes('kind'))).toBe(true);
+  });
+
+  it('rejects a null block element without throwing', () => {
+    const errors = validatePipelineSpec({ schemaVersion: 1, id: 'data.split', blocks: [null as never] });
+    expect(errors.some((e) => e.includes('blocks[0]'))).toBe(true);
+  });
+
+  it('rejects a non-object block element (number) without throwing', () => {
+    const errors = validatePipelineSpec({ schemaVersion: 1, id: 'data.split', blocks: [42 as never] });
+    expect(errors.some((e) => e.includes('blocks[0]'))).toBe(true);
   });
 });
 
