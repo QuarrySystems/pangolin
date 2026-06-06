@@ -13,7 +13,7 @@
 //   8.  merge env (base + bundles + per-dispatch secrets)
 //   9.  run agora-setup.sh (if present, time-bounded)
 //   10. start the channel subscription (background)
-//   11. invoke the runtime adapter
+//   11. run the block pipeline (agent → captures → verify → auto-seal via runPipeline)
 //   12. stop the channel subscription
 //   13. resolve the needs_input sentinel (if reported by the adapter)
 //   14. fire the appropriate terminal lifecycle event + return exit code

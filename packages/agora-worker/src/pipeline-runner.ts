@@ -44,7 +44,7 @@ export interface BlockContext {
   inputJson?: string;
   baseline: WorkspaceBaseline;
   redact(s: string): string;
-  log(event: Record<string, unknown>): void;
+  log(event: { kind: string; [k: string]: unknown }): void;
 }
 
 /** Terminal result of running a pipeline. */
