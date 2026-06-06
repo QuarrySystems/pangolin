@@ -11,7 +11,7 @@ export function attachDispatchCmd(program: Command, ctx: CliContext): void {
     .option('--capability <names...>', "override the subagent's capability set")
     .option('--add-capability <names...>', "append capabilities to the subagent's set")
     .requiredOption('--target <name>', 'target name from AgoraClient.targets')
-    .option('--worker-image <digest>', 'worker image (digest-pinned)')
+    .option('--worker-image <digest>', 'worker image (digest-pinned; defaults to ghcr.io/quarrysystems/agora-worker:latest)')
     .action(async (opts) => {
       let parsedInput: Record<string, unknown>;
       try {
@@ -29,7 +29,7 @@ export function attachDispatchCmd(program: Command, ctx: CliContext): void {
         capabilities: opts.capability,
         addCapabilities: opts.addCapability,
         target: opts.target,
-        workerImage: opts.workerImage || 'ghcr.io/anthropic/claude-code:latest',
+        workerImage: opts.workerImage || 'ghcr.io/quarrysystems/agora-worker:latest',
       });
       console.log(JSON.stringify(result, null, 2));
       if (result.failure) process.exit(1);

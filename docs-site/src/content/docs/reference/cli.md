@@ -62,7 +62,7 @@ Dispatch and observe workers.
 
 | Subcommand | Args / options | Behavior |
 |---|---|---|
-| `run` | `--subagent <name>` (required), `--target <name>` (required), `--env <names...>`, `--input <json>` (default `{}`), `--capability <names...>`, `--add-capability <names...>`, `--worker-image <digest>` | Parses `--input` as JSON (invalid JSON → error + exit `1`). Calls `client.dispatch`. `--worker-image` defaults to `ghcr.io/anthropic/claude-code:latest`. Prints the `DispatchResult` as pretty JSON. **Exits `1` if `result.failure` is set.** |
+| `run` | `--subagent <name>` (required), `--target <name>` (required), `--env <names...>`, `--input <json>` (default `{}`), `--capability <names...>`, `--add-capability <names...>`, `--worker-image <digest>` | Parses `--input` as JSON (invalid JSON → error + exit `1`). Calls `client.dispatch`. `--worker-image` defaults to `ghcr.io/quarrysystems/agora-worker:latest` (the published worker image). Prints the `DispatchResult` as pretty JSON. **Exits `1` if `result.failure` is set.** |
 | `describe <id>` | — | Calls `client.dispatch.describe(id)`, prints the full `DispatchResult` as pretty JSON. |
 | `cancel <id>` | — | Calls `client.dispatch.cancel(id)`, prints `cancelled: <id>`. |
 
