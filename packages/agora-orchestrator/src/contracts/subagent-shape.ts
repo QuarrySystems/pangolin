@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isPackScopedId } from "@quarry-systems/agora-core";
 import type { EffectTier } from "./types.js";
 
 export interface Capability {
@@ -20,11 +21,9 @@ export interface SubagentShape {
   inputEdgeTypes?: Record<string, string>;
 }
 
-const ID_RE = /^[a-z0-9-]+\.[a-z0-9-]+$/;  // pack-prefixed
-
 /** Throws on a malformed shape. Used at registry construction (D8). */
 export function validateShape(s: SubagentShape): void {
-  if (!ID_RE.test(s.id))
+  if (!isPackScopedId(s.id))
     throw new Error(`SubagentShape: id "${s.id}" must be "<pack>.<name>"`);
   if (!["pure", "read-impure", "write-impure"].includes(s.effectTier))
     throw new Error(`SubagentShape ${s.id}: invalid effectTier ${s.effectTier}`);
