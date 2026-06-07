@@ -5,8 +5,9 @@
 // fixture that wires the orchestrator engine against the real worker lifecycle
 // (bundle-fetch, overlay, pipeline-runner, sentinel-write) without Docker.
 //
-// NOT safe for production use. The stub RuntimeAdapter throws on any agent
-// block invocation — script-only and capture-only pipelines run to completion.
+// NOT safe for production use. By default the stub RuntimeAdapter throws on
+// any agent block invocation — script-only and capture-only pipelines run to
+// completion. Inject `adapter` to exercise agent blocks (model/usage evidence).
 //
 // Usage: provide a shared LocalStorageProvider and namespace; register bundles
 // via the real client APIs (registerSubagent / registerPipeline) before firing.
@@ -30,6 +31,10 @@ export interface InprocWorkerExecutorOptions {
   storage: StorageProvider;
   /** Agora namespace matching the one used during registration. */
   namespace: string;
+  /** Inject a RuntimeAdapter for agent blocks (default: reject as today). */
+  adapter?: RuntimeAdapter;
+  /** Authorization-side default, mirroring DispatchExecutor.defaultModel. */
+  defaultModel?: string;
 }
 
 interface DispatchRecord {
@@ -89,12 +94,16 @@ export class InprocWorkerExecutor implements Executor {
 
   private readonly storage: StorageProvider;
   private readonly namespace: string;
+  private readonly adapter: RuntimeAdapter | undefined;
+  private readonly defaultModel: string | undefined;
   private readonly records = new Map<string, DispatchRecord>();
   private attemptCounter = 0;
 
   constructor(opts: InprocWorkerExecutorOptions) {
     this.storage = opts.storage;
     this.namespace = opts.namespace;
+    this.adapter = opts.adapter;
+    this.defaultModel = opts.defaultModel;
   }
 
   async fire(
@@ -145,7 +154,13 @@ export class InprocWorkerExecutor implements Executor {
     const storageUri = (this.storage as unknown as { rootUri?: string }).rootUri
       ?? 'file:///inproc-storage';
 
-    // Construct the worker env.
+    // Pre-fire model resolution (authorization side) — mirrors DispatchExecutor:
+    // def.model (empty string treated as unset) falls back to defaultModel.
+    const requestedModel = await this.resolveRequestedModel(subagentRef.uri);
+
+    // Construct the worker env. AGORA_MODEL is emitted whenever the effective
+    // requested model is set — WITHOUT this the manifest below would claim a
+    // model the in-proc worker never received (the chain must be real).
     const workerEnv: Record<string, string> = {
       AGORA_DISPATCH_ID: dispatchId,
       AGORA_NAMESPACE: this.namespace,
@@ -155,6 +170,7 @@ export class InprocWorkerExecutor implements Executor {
         (item.inputs.workerInput as Record<string, unknown> | undefined) ?? {},
       ),
       AGORA_SECRET_STORE_KIND: 'aws-secrets-manager', // irrelevant — secretStore injected
+      ...(requestedModel !== undefined ? { AGORA_MODEL: requestedModel } : {}),
     };
 
     // Allocate a fresh workspace per fire.
@@ -162,7 +178,7 @@ export class InprocWorkerExecutor implements Executor {
 
     const deps: Parameters<typeof runWorker>[1] = {
       storage: this.storage,
-      adapter: stubAdapter,
+      adapter: this.adapter ?? stubAdapter,
       workspaceDir,
       secretStore: noopSecretStore,
     };
@@ -191,7 +207,11 @@ export class InprocWorkerExecutor implements Executor {
         runId: ctx?.runId ?? '',
         itemId: item.id,
         executor: this.id,
-        executorManifest: {},
+        // Requested-model evidence — same shape DispatchExecutor seals:
+        // id is the effective requested string, '' when unpinned (pin-optional).
+        executorManifest: {
+          model: { id: requestedModel ?? '', temperature: 0, maxTokens: 0 },
+        },
         secretRefs: [],
         actor: ctx?.actor ?? 'human:test',
         firedAt: new Date().toISOString(),
@@ -264,6 +284,25 @@ export class InprocWorkerExecutor implements Executor {
     } catch {
       // Sentinel missing or malformed — treat as done with no outputs.
       return { status: 'done' };
+    }
+  }
+
+  /**
+   * Best-effort pre-fire model resolution mirroring DispatchExecutor's
+   * resolveRequestedModel: read the subagent def from the PINNED uri carried
+   * in item.inputs.subagent and return `def.model ?? defaultModel`, with an
+   * empty-string def model treated as unset. NEVER throws — any failure
+   * returns the defaultModel, which may be undefined.
+   */
+  private async resolveRequestedModel(pinnedSubagentUri: string): Promise<string | undefined> {
+    try {
+      const bytes = await this.storage.get(pinnedSubagentUri);
+      const def = JSON.parse(new TextDecoder().decode(bytes)) as { model?: unknown };
+      return typeof def.model === 'string' && def.model.length > 0
+        ? def.model
+        : this.defaultModel;
+    } catch {
+      return this.defaultModel;
     }
   }
 }
