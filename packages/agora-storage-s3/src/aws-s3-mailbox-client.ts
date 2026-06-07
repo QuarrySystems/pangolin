@@ -1,5 +1,5 @@
 import { S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command, DeleteObjectCommand, NoSuchKey } from '@aws-sdk/client-s3';
-import type { MailboxS3Client } from '@quarry-systems/agora-orchestrator';
+import type { MailboxS3Client } from '@quarry-systems/agora-core';
 
 export interface AwsS3MailboxClientOpts { client: S3Client; bucket: string; prefix?: string; }
 

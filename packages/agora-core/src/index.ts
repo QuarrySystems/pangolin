@@ -18,3 +18,4 @@ export * from './dispatch.js';
 export * from './result-sink.js';
 export * from './verify.js';
 export * from './pipeline.js';
+export * from './s3-clients.js';

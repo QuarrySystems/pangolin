@@ -8,11 +8,8 @@ export interface MailboxStore {
   delete(key: string): Promise<void>;                   // idempotent (no-op if absent)
 }
 
-/** Minimal injected S3 seam for S3Mailbox — keeps agora-orchestrator AWS-SDK-free.
- *  Keys are '/'-delimited logical paths under a bucket+prefix the impl owns. */
-export interface MailboxS3Client {
-  put(key: string, bytes: Uint8Array): Promise<void>;
-  get(key: string): Promise<Uint8Array | null>;
-  list(prefix: string): Promise<string[]>;   // returns full logical keys
-  delete(key: string): Promise<void>;          // idempotent
-}
+// MailboxS3Client moved to @quarry-systems/agora-core (s3-clients.ts) so the
+// agora-storage-s3 implementations need no orchestrator dependency (a dev-edge
+// cycle broke pnpm's topological build order on clean CI). Re-exported here for
+// compatibility — existing consumers keep importing it from this package.
+export type { MailboxS3Client } from '@quarry-systems/agora-core';

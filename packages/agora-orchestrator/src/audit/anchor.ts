@@ -26,11 +26,10 @@ export class LocalAnchor implements AuditAnchor {
   }
 }
 
-/** Minimal injected S3 seam — keeps the orchestrator dep-free + testable. */
-export interface S3LockClient {
-  putObject(key: string, body: Uint8Array, opts: { retainUntil: Date; mode: 'COMPLIANCE' }): Promise<void>;
-  getObject(key: string): Promise<Uint8Array | undefined>;
-}
+// S3LockClient moved to @quarry-systems/agora-core (s3-clients.ts) — see the
+// note in contracts/mailbox.ts. Re-exported here for compatibility.
+export type { S3LockClient } from '@quarry-systems/agora-core';
+import type { S3LockClient } from '@quarry-systems/agora-core';
 
 export class S3ObjectLockAnchor implements AuditAnchor {
   readonly id: string;

@@ -478,10 +478,6 @@ importers:
       '@quarry-systems/agora-core':
         specifier: workspace:*
         version: link:../agora-core
-    devDependencies:
-      '@quarry-systems/agora-orchestrator':
-        specifier: workspace:*
-        version: link:../agora-orchestrator
 
   packages/agora-worker:
     dependencies:

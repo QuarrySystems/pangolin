@@ -1,5 +1,5 @@
 import { S3Client, PutObjectCommand, GetObjectCommand, NoSuchKey } from '@aws-sdk/client-s3';
-import type { S3LockClient } from '@quarry-systems/agora-orchestrator';
+import type { S3LockClient } from '@quarry-systems/agora-core';
 
 export interface AwsS3LockClientOpts { client: S3Client; bucket: string; }
 
