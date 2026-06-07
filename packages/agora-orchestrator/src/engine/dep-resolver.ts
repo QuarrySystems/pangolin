@@ -1,23 +1,44 @@
 import type { ItemState } from '../contracts/index.js';
 
-/** ids of currently-`pending` items whose every dependency is `done`. */
+/** §7 (run-3 spec): a red GATE blocks its dependents. Failed-like = done +
+ *  verify.passed === false + the item declares inputs.gate.onRed === 'spawn-fix'.
+ *  Red verify on any non-gate item remains report-only (never blocks). */
+function isBlockingRedGate(item: ItemState): boolean {
+  if (item.status !== 'done' || item.verify?.passed !== false) return false;
+  const gate = (item.inputs as { gate?: { onRed?: string } } | undefined)?.gate;
+  return gate?.onRed === 'spawn-fix';
+}
+
+/** ids of currently-`pending` items whose every dependency is `done`
+ *  AND is not a blocking red gate. */
 export function computeNewlyReady(items: ItemState[]): string[] {
-  const status = new Map(items.map((i) => [i.id, i.status]));
+  const byId = new Map(items.map((i) => [i.id, i]));
   return items
-    .filter((i) => i.status === 'pending' && i.depends_on.every((d) => status.get(d) === 'done'))
+    .filter((i) =>
+      i.status === 'pending' &&
+      i.depends_on.every((d) => {
+        const dep = byId.get(d);
+        return dep?.status === 'done' && !isBlockingRedGate(dep);
+      }),
+    )
     .map((i) => i.id);
 }
 
-/** ids of `pending` items with at least one dependency already `failed`, `skipped`, or `cancelled`
- *  (they can never ready, so they cascade to `skipped`). Single-pass; the tick re-invokes
- *  across ticks so transitive chains fully settle. */
+/** ids of `pending` items with at least one dependency already `failed`, `skipped`, `cancelled`,
+ *  OR a blocking red gate (done + verify.passed===false + inputs.gate.onRed==='spawn-fix').
+ *  Single-pass; the tick re-invokes across ticks so transitive chains fully settle. */
 export function computeSkipped(items: ItemState[]): string[] {
-  const status = new Map(items.map((i) => [i.id, i.status]));
+  const byId = new Map(items.map((i) => [i.id, i]));
   return items
-    .filter((i) => i.status === 'pending' && i.depends_on.some((d) => {
-      const s = status.get(d);
-      return s === 'failed' || s === 'skipped' || s === 'cancelled';
-    }))
+    .filter((i) =>
+      i.status === 'pending' &&
+      i.depends_on.some((d) => {
+        const dep = byId.get(d);
+        if (!dep) return false;
+        const s = dep.status;
+        return s === 'failed' || s === 'skipped' || s === 'cancelled' || isBlockingRedGate(dep);
+      }),
+    )
     .map((i) => i.id);
 }
 

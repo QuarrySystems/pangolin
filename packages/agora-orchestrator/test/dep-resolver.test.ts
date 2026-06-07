@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { computeNewlyReady, computeSkipped, isSettled } from '../src/engine/dep-resolver.js';
 import type { ItemState } from '../src/contracts/index.js';
+import type { VerifyOutcome } from '@quarry-systems/agora-core';
 
 const mk = (id: string, deps: string[], status: ItemState['status']): ItemState =>
   ({ id, executor: 'fake', inputs: {}, depends_on: deps, resourceLocks: [], runId: 'r', queue: 'default', status });
@@ -84,5 +85,77 @@ describe('isSettled', () => {
   });
   it('is true for an empty list', () => {
     expect(isSettled([])).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §7 gate-skip predicate tests (run-3 spec)
+// ---------------------------------------------------------------------------
+
+/** Object-literal helper that builds a fully-typed ItemState with sensible defaults.
+ *  Accepts any subset of ItemState fields; `id` is required. */
+function gateItem(over: Partial<ItemState> & { id: string }): ItemState {
+  return {
+    executor: 'fake',
+    inputs: {},
+    depends_on: [],
+    resourceLocks: [],
+    runId: 'r',
+    queue: 'default',
+    status: 'pending',
+    ...over,
+  } as ItemState;
+}
+
+/** Minimal gate inputs that satisfy the spawn-fix predicate. */
+const SPAWN_FIX_GATE = {
+  gate: {
+    onRed: 'spawn-fix' as const,
+    subject: 's',
+    fixTemplate: { executor: 'dispatch', inputs: {} },
+  },
+};
+
+describe('§7 gate-skip predicate', () => {
+  it('a done-but-red GATE blocks readiness and cascades skip to its dependents', () => {
+    const gate = gateItem({ id: 'g', status: 'done', verify: { passed: false }, inputs: SPAWN_FIX_GATE });
+    const dep = gateItem({ id: 'd', status: 'pending', depends_on: ['g'] });
+    expect(computeNewlyReady([gate, dep])).toEqual([]);
+    expect(computeSkipped([gate, dep])).toEqual(['d']);
+  });
+
+  it('a done-but-red NON-gate item does NOT block (report-only verify)', () => {
+    const red = gateItem({ id: 'n', status: 'done', verify: { passed: false } });
+    const dep = gateItem({ id: 'd', status: 'pending', depends_on: ['n'] });
+    expect(computeNewlyReady([red, dep])).toEqual(['d']);
+    expect(computeSkipped([red, dep])).toEqual([]);
+  });
+
+  it('a green gate (verify absent) passes its dependent normally', () => {
+    const gate = gateItem({ id: 'g', status: 'done', inputs: SPAWN_FIX_GATE }); // no verify field
+    const dep = gateItem({ id: 'd', status: 'pending', depends_on: ['g'] });
+    expect(computeNewlyReady([gate, dep])).toEqual(['d']);
+    expect(computeSkipped([gate, dep])).toEqual([]);
+  });
+
+  it('a green gate (verify.passed === true) passes its dependent normally', () => {
+    const gate = gateItem({ id: 'g', status: 'done', verify: { passed: true }, inputs: SPAWN_FIX_GATE });
+    const dep = gateItem({ id: 'd', status: 'pending', depends_on: ['g'] });
+    expect(computeNewlyReady([gate, dep])).toEqual(['d']);
+    expect(computeSkipped([gate, dep])).toEqual([]);
+  });
+
+  it('a gate copy (id suffixed with ~2) carrying the same inputs.gate blocks identically', () => {
+    const gate = gateItem({ id: 'g~2', status: 'done', verify: { passed: false }, inputs: SPAWN_FIX_GATE });
+    const dep = gateItem({ id: 'd', status: 'pending', depends_on: ['g~2'] });
+    expect(computeNewlyReady([gate, dep])).toEqual([]);
+    expect(computeSkipped([gate, dep])).toEqual(['d']);
+  });
+
+  it('a done-but-red gate with onRed !== spawn-fix does NOT block (report-only)', () => {
+    const gate = gateItem({ id: 'g', status: 'done', verify: { passed: false }, inputs: { gate: { onRed: 'report', subject: 's', fixTemplate: { executor: 'dispatch', inputs: {} } } } });
+    const dep = gateItem({ id: 'd', status: 'pending', depends_on: ['g'] });
+    expect(computeNewlyReady([gate, dep])).toEqual(['d']);
+    expect(computeSkipped([gate, dep])).toEqual([]);
   });
 });
