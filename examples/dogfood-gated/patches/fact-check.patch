@@ -1,0 +1,43 @@
+diff --git a/outputs/findings b/outputs/findings
+new file mode 100644
+index 0000000..087a646
+--- /dev/null
++++ b/outputs/findings
+@@ -0,0 +1,37 @@
++[
++  {
++    "claim": "The run.extended audit entry has shape { type: 'run.extended', runId, pattern, queue, causeItemId, spawnedIds, actor, ts }.",
++    "reality": "The actual audit append uses { kind: 'run.extended', runId, itemId: <cause>, actor, at }. The field is 'kind' (not 'type'), the cause-item field is 'itemId' (not 'causeItemId'), the timestamp field is 'at' (not 'ts'), and there are no 'pattern', 'queue', or 'spawnedIds' fields. The queue is encoded only implicitly through the actor string 'pattern:<queueName>'.",
++    "evidence": "packages/agora-orchestrator/src/orchestrator.ts:157-163 — `this.auditLog?.append({ kind: 'run.extended', runId, ...(causeItemId ? { itemId: causeItemId } : {}), actor, at: new Date().toISOString() });`"
++  },
++  {
++    "claim": "Pipelines declare stages on the queue (`pattern: { type: 'pipeline', stages: [ { name, executor, gate } ], maxRespawns: 3 }`), and gate/fix policy lives on the queue config.",
++    "reality": "There is no `stages`/`maxRespawns` queue-config schema. Pipelines are configured by the Pattern object itself, and the gate policy rides on each gate item's reserved `inputs.gate` key (`{ onRed, subject, fixTemplate, maxFixAttempts }`). The pipeline `plan()` only auto-chains submitted items by injecting `depends_on: [previousItem.id]` into items with empty deps.",
++    "evidence": "packages/agora-orchestrator/src/patterns/pipeline.ts:11-18 (plan auto-chains, no stages concept); packages/agora-orchestrator/src/contracts/pattern.ts:35-40 (GateConfig is per-item with `maxFixAttempts`, not queue-level `maxRespawns`); packages/agora-orchestrator/src/orchestrator.ts:18 (`QueueConfig { concurrency: number; pattern?: Pattern; }` — no stages/maxRespawns)."
++  },
++  {
++    "claim": "Map-reduce is configured at queue level via `pattern: { type: 'map-reduce', splitterExecutor, mapExecutor, reduceExecutor }`.",
++    "reality": "There is no queue-level splitter/map/reduce executor config. Map-reduce config lives on the splitter item's reserved `inputs.mapReduce` key as `{ map: { executor, inputs, ... }, reduce: { executor, inputs, ... } }`. The splitter item itself is submitted in the run; the pattern reads its inputs at tick time.",
++    "evidence": "packages/agora-orchestrator/src/contracts/pattern.ts:42-46 (MapReduceConfig with `map` and `reduce` SpawnTemplates); packages/agora-orchestrator/src/patterns/map-reduce.ts:42-50,55-58 (`splitters = run.items.filter((i) => i.inputs['mapReduce'] !== undefined)`; `cfg = splitter.inputs['mapReduce']`)."
++  },
++  {
++    "claim": "A pipeline gate signals pass/fail via `outputs/gate.json` containing `{ \"passed\": true }` or `{ \"passed\": false }`, which the pattern phase reads after the gate item reaches a terminal state.",
++    "reality": "The pipeline pattern reads the red signal from the gate item's `verify.passed` field on ItemState (the engine's per-item verify outcome), not from any `outputs/gate.json` file. There is no `gate.json` convention in the code. The fix-spawn fires when `status === 'failed'` OR `(status === 'done' && verify.passed === false)`.",
++    "evidence": "packages/agora-orchestrator/src/patterns/pipeline.ts:23 — `const red = item.status === 'failed' || (item.status === 'done' && item.verify?.passed === false);` Also respawn.ts:150 — `const isDoneButRed = gate.status === 'done' && gate.verify?.passed === false;`"
++  },
++  {
++    "claim": "The pipeline pattern grows the run forward stage-by-stage at runtime: each gate's pass emits the next stage's items as a spawn directive (\"the run grows forward by one stage\").",
++    "reality": "Pipelines do not grow forward. All stages are pre-declared at submit time as items in the Run; `pipeline.plan()` only auto-chains them via `depends_on`. `pipeline.onTaskDone` is a no-op on gate pass (returns null) and only ever spawns when the gate is red (the fix/respawn lineage). The engine, not the pattern, advances through the pre-declared chain via the normal dep-resolver.",
++    "evidence": "packages/agora-orchestrator/src/patterns/pipeline.ts:19-27 — onTaskDone returns null unless `red` is true and `onRed === 'spawn-fix'`; the only spawn path calls `respawnLineage`. There is no code path that emits next-stage items on gate pass."
++  },
++  {
++    "claim": "Spawn ids are deterministic with the format `<runId>/<causeItemId>/<sequenceN>`.",
++    "reality": "Spawn ids are pattern-specific and do not use that path-like format. Pipeline respawn uses `${base}-fix-${attempt}` for fix items and `${base}~${next}` for gate/descendant copies. Map-reduce uses `map-${outputKey}` and `reduce`. After append, ids are namespaced in the store as `${runId}\\x1f${id}` (U+001F separator), not with `/`.",
++    "evidence": "packages/agora-orchestrator/src/patterns/respawn.ts:159-161 — `const fixId = \\`${base}-fix-${attempt}\\`; const gateCopyId = \\`${base}~${next}\\`;`. patterns/map-reduce.ts:65 (`id: \\`map-${k}\\``) and :92 (`id: 'reduce'`). orchestrator.ts:12-14 — `ns = (runId, id) => \\`${runId}${NS}${id}\\`` with `NS = '\\x1f'`."
++  },
++  {
++    "claim": "After the splitter is done, the pattern \"reads the splitter's resultRef, fetches the output manifest, and emits one map item per key.\"",
++    "reality": "The pattern reads `splitter.outputRefs` directly from the in-memory ItemState (already populated by the engine). There is no resultRef-based lookup and no manifest fetch step in the map-reduce pattern; the keys are derived from `Object.keys(splitter.outputRefs).sort()`.",
++    "evidence": "packages/agora-orchestrator/src/patterns/map-reduce.ts:4 (`sortedKeys = (o) => Object.keys(o).sort()`); :59 — `const keys = sortedKeys(splitter.outputRefs ?? {});`. resultRef is never read in this file."
++  }
++]

@@ -22,15 +22,18 @@ Plan id: `dogfood-gated-run3`. Queue: `default`. Pattern: `pipeline`. One gate.
 | Item | Subagent | Model | What |
 |---|---|---|---|
 | `write-page` | `page-writer` | standard | Creates `docs-site/src/content/docs/explanation/execution-patterns.md` from a **deliberately partial** seed view (the pattern-layer spec, `examples/pattern-dogfood/README.md`, and one style-reference page — not the source code). |
-| `fact-check` | `fact-checker` | **max** | The **gate**. Subject's patch materialized at `inputs/work`, git-applied pre-agent. Fact-checks every claim against the seeded source files under the strict bar: any claim not literally supported by source is a finding, suggestion-severity included. Findings → `outputs/findings` (exact path, no extension) as a JSON array of `{ claim, reality, evidence }`. Writes the file only if findings exist. Subagent-level verify: `test ! -s outputs/findings` — flips `verify.passed=false` when findings are non-empty (the done-but-red state that triggers the circle-back). |
+| `fact-check` | `fact-checker` | **max** | The **gate**. Subject's patch materialized at `inputs/work`, git-applied pre-agent. Fact-checks every claim against the seeded source files under the **material-accuracy bar**: a finding is a claim that would mislead a reader about actual behavior — invented APIs/fields/config shapes, wrong semantics, wrong names or sequencing (wording imprecision and incompleteness are NOT findings; the four-attempt calibration record in the run-3 spec §10 explains why the original any-unsupported-claim bar made green structurally unreachable). Findings → `outputs/findings` (exact path, no extension) as a JSON array of `{ claim, reality, evidence }`. Writes the file only if findings exist. Subagent-level verify: `test ! -s outputs/findings` — flips `verify.passed=false` when findings are non-empty (the done-but-red state that triggers the circle-back). |
 | `announce` | `announcer` | standard | Adds a CHANGELOG.md entry. On a red gate this item is **skipped** (§7 engine PR), then respawned as `announce~2` with `needs.work` remapped to the fix's patch. |
 
 The fix item (`fact-check-fix-1`) is spawned automatically by the pattern layer
-when the gate fires. Its subagent is `page-fixer` (model standard). The
-`page-fixer` receives `inputs/work` (the page-creating patch) and
-`inputs/findings` as data. It reconstructs the full corrected page from the
-patch's `+` lines — it does NOT git-apply the patch — so its escaped patch is a
-clean cumulative new-file patch that applies downstream.
+when the gate fires. Its subagent is `page-fixer` (model **max**, with the SAME
+source seeds the gate judges against — a source-blind fixer's rewritten prose
+drifts, and `maxFixAttempts: 1` is the only value the landed respawn semantics
+support, so the fix must converge in one round). The `page-fixer` receives
+`inputs/work` (the page-creating patch) and `inputs/findings` as data. It
+reconstructs the full corrected page from the patch's `+` lines — it does NOT
+git-apply the patch — so its escaped patch is a clean cumulative new-file patch
+that applies downstream.
 
 `page-fixer` deliberately omits the `apply-work-patch` capability. Applying the
 patch via setup would bake the page into the baseline, making the fix's escaped
@@ -134,6 +137,30 @@ code change:
 3. Re-run `pnpm start:env`.
 
 ---
+
+## Verify the proof — the auditor command (zero credits, separate process)
+
+A successful run persists two text artifacts beside this README:
+
+- `bundle.json` — the exported `AuditBundle` (the artifact you hand an auditor)
+- `verify-context.json` — the signer **public** key + the anchored root(s)
+
+`agora.config.mjs` here is a **verify-only** config: a read-only anchor serving
+the persisted roots and a `verifySignature` bound to the persisted public key.
+Any process holding the two files can re-verify the full proof — no store, no
+Docker, no API key, no access to the run that produced it:
+
+```sh
+# from this directory
+pnpm exec agora verify bundle.json --full
+```
+
+Expected: `✓ TAMPER-DETECTING` with all five rows green (chain / root /
+signature / anchor / handoff) and the full hash-linked ledger — including the
+`item.skipped` → `run.extended` sequence that IS the circle-back, readable
+straight off the proof. The committed `bundle.json` is a real run's sealed
+output (run id `dogfood-gated-run3`, 2026-06-07, $3.11 of real model spend):
+clone the repo and the command above works forever.
 
 ## After the run
 
