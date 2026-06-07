@@ -160,26 +160,34 @@ describe('run-scoped item ids', () => {
     expect(st.find((s) => s.id === 'step2')!.runId).toBe('dep-run');
   });
 
-  it('getStatus publishes full depends_on alongside blockedBy', () => {
+  it('getStatus publishes full depends_on alongside blockedBy', async () => {
     const store = new SqliteRunStateStore();
-    const orch = new AgoraOrchestrator({ store, executors: {}, triggers: { manual: new ManualTrigger() }, queues: { default: { concurrency: 2 } } });
+    const orch = makeOrch(store);
     const depRun = { id: 'dep-run', queue: 'default', items: [
-      { id: 'step1', executor: 'x', inputs: {}, depends_on: [], resourceLocks: [] },
-      { id: 'step2', executor: 'x', inputs: {}, depends_on: ['step1'], resourceLocks: [] },
-      { id: 'step3', executor: 'x', inputs: {}, depends_on: ['step2'], resourceLocks: [] },
+      { id: 'step1', executor: 'fake', inputs: {}, depends_on: [], resourceLocks: [] },
+      { id: 'step2', executor: 'fake', inputs: {}, depends_on: ['step1'], resourceLocks: [] },
+      { id: 'step3', executor: 'fake', inputs: {}, depends_on: ['step2'], resourceLocks: [] },
     ]};
     orch.submitRun(depRun);
-    const st = orch.getStatus('dep-run');
 
-    // step1 has no dependencies
-    expect(st.find((s) => s.id === 'step1')!.depends_on).toEqual([]);
+    // Before advancing: step2 depends on step1, not done yet, so blockedBy = depends_on
+    let st = orch.getStatus('dep-run');
+    const step2Before = st.find((s) => s.id === 'step2')!;
+    expect(step2Before.depends_on).toEqual(['step1']);
+    expect(step2Before.blockedBy).toEqual(['step1']);
 
-    // step2 depends on step1, and it is not done yet, so blockedBy = depends_on
-    const step2 = st.find((s) => s.id === 'step2')!;
-    expect(step2.depends_on).toEqual(['step1']);
-    expect(step2.blockedBy).toEqual(['step1']);
+    // Advance step1 to done: fire then reconcile
+    await orch.tick(); // fires step1
+    await orch.tick(); // reconciles step1 -> done, fires step2
 
-    // step3 depends on step2, and it is not done yet, so blockedBy = depends_on
+    // After step1 done: step2's depends_on still contains step1, but blockedBy does NOT
+    st = orch.getStatus('dep-run');
+    const step2After = st.find((s) => s.id === 'step2')!;
+    expect(step2After.depends_on).toEqual(['step1']); // still depends on step1
+    expect(step2After.blockedBy).not.toContain('step1'); // but step1 is done, not blocking
+    expect(step2After.status).toBe('running'); // step2 is now running
+
+    // step3 still depends on step2, not done yet, so blockedBy = depends_on
     const step3 = st.find((s) => s.id === 'step3')!;
     expect(step3.depends_on).toEqual(['step2']);
     expect(step3.blockedBy).toEqual(['step2']);
