@@ -20,7 +20,7 @@
       "inputs": {
         "subagent": "fact-checker",
         "workerInput": {
-          "instructions": "The upstream page patch is ALREADY applied to your workspace. Fact-check EVERY claim in the page against the seeded source files under the STRICT bar: any claim not literally supported by source is a finding, suggestion-severity included. Write findings to EXACTLY outputs/findings — no file extension, at the outputs/ root (the provenance binding looks up outputRefs['findings'] literally; findings.json would silently break it) — as a JSON array of { \"claim\": \"...\", \"reality\": \"...\", \"evidence\": \"file + brief quote/line\" }. Write the file ONLY if there is at least one finding. Create no other files. Do not edit the page. Then stop."
+          "instructions": "The upstream page patch is ALREADY applied to your workspace. Fact-check EVERY claim in the page against the seeded source files under the MATERIAL-ACCURACY bar: a finding is a claim that would mislead a reader about actual behavior — invented APIs/fields/config shapes, wrong semantics, wrong names, wrong sequencing or attribution. Do NOT file findings for wording imprecision, incompleteness, stylistic choices, or claims the source broadly supports; a materially accurate page gets NO findings file. Write findings to EXACTLY outputs/findings — no file extension, at the outputs/ root (the provenance binding looks up outputRefs['findings'] literally; findings.json would silently break it) — as a JSON array of { \"claim\": \"...\", \"reality\": \"...\", \"evidence\": \"file + brief quote/line\" }. Write the file ONLY if there is at least one finding. Create no other files. Do not edit the page. Then stop."
         },
         "gate": {
           "onRed": "spawn-fix",
