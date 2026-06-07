@@ -47,7 +47,9 @@ const anchorPlan = (): Run => mkRun([
 // ---------------------------------------------------------------------------
 
 it('StatusLike is assignable from StatusItem (compile-time pin)', () => {
-  const _pin: StatusLike[] = [] as unknown as StatusItem[];
+  // Direct cast (no `unknown` laundering) — the assignment itself IS the check:
+  // if StatusItem ever stops being a structural superset of StatusLike, this fails typecheck.
+  const _pin: StatusLike[] = [] as StatusItem[];
   expect(Array.isArray(_pin)).toBe(true);
 });
 
