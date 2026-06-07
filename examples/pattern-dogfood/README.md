@@ -22,21 +22,30 @@ pnpm --filter pattern-dogfood-example start
   items: implement, review, package
 
 === AFTER: graph status ===
-  implement:     done   (resultRef = fake sha256 impl artifact)
-  review:        failed (gate fired red → spawned fix branch)
-  package:       skipped
-  review-fix-1:  done   (resultRef = fake sha256 fix artifact)
-  review~2:      done   (re-gate passed)
-  package~2:     done   (needs.work remapped to review-fix-1's ref)
+  implement: done resultRef=agora://ns/artifact/impl/sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaa…
+  review: done verify.passed=false resultRef=agora://ns/artifact/findings/sha256:cccccccccccccccccccccccc…
+  package: skipped
+  review-fix-1: done resultRef=agora://ns/artifact/fix/sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbb…
+  review~2: done
+  package~2: done
 
 === run.extended entries ===
   kind=run.extended  causeItemId=review  actor=pattern:default
 
+=== review-fix-1 manifest inputRefs ===
+  work:     agora://ns/artifact/impl/sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  findings: agora://ns/artifact/findings/sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+
+=== package~2 provenance ===
+  inputRefs.work matches review-fix-1 resultRef: true
+
 === verifyBundle report ===
-  intact:        true
-  checks.chain:  {"ok":true}
-  checks.root:   {"ok":true}
-  checks.handoff: {"ok":true,"detail":"2 input refs accounted for"}
+  intact:           true
+  claim:            tamper-detecting
+  guarantee:        detect
+  checks.chain:     {"ok":true}
+  checks.root:      {"ok":true}
+  checks.handoff:   {"ok":true,"detail":"3 input refs accounted for"}
 
 === pattern-dogfood OK — circle-back spawned; sealed history preserved; provenance intact ===
 ```
@@ -45,26 +54,35 @@ Exit code 0.
 
 ## The circle-back-as-spawn model
 
-When `review` goes red the pipeline pattern calls `extendRun`, appending three new items:
+When `review` goes **done-but-red** (status `done`, `verify.passed === false`) the pipeline
+pattern calls `extendRun`, appending three new items:
 
-1. `review-fix-1` — the fix item (derived from `fixTemplate`; runs `implement`'s subject again)
+1. `review-fix-1` — the fix item; needs BOTH `work` (from `implement`'s result) and `findings`
+   (the gate's diagnostic output, sealed as its result ref for provenance)
 2. `review~2` — a copy of the gate item that re-evaluates after the fix
 3. `package~2` — a copy of the `package` item whose `needs.work` is remapped to
    `review-fix-1`'s `resultRef` (the fixed artifact)
 
+The original items `review: done-but-red` and `package: skipped` are **preserved as sealed
+history**. The run is never rewound. The new items are purely additive — a forward arc in the DAG.
+
+### Engine red-gate cascade (§7)
+
+When `review` is done-but-red, the dep-resolver's `§7 isBlockingRedGate` predicate treats it
+as failed-like. Downstream `package` (pending, depends on `review`) is cascaded to `skipped`
+in the **same tick** that `review` is reconciled. The pattern phase then sees a skipped
+descendant and the spawn directive includes the full `[fix, gate~2, dependent~2]` set.
+
 ### A NEW forward arc — never a cycle
 
-The original items `review: failed` and `package: skipped` are **preserved as sealed history**.
-The run is never rewound. The new items are purely additive — a forward arc in the DAG.
-
 ```
-ORIGINAL BRANCH (sealed)          RESPAWNED BRANCH (added forward)
-implement ──→ review (FAILED)      ┐
-             ↓ skipped             │  review-fix-1 (done)
-           package (SKIPPED)       │       ↓
-                                   └─→ review~2 (done)
-                                            ↓
-                                       package~2 (done)
+ORIGINAL BRANCH (sealed)                 RESPAWNED BRANCH (added forward)
+implement ──→ review (done-but-red)      ┐
+             ↓ cascade                   │  review-fix-1 (done)
+           package (SKIPPED)             │       ↓
+                                         └─→ review~2 (done-green)
+                                                  ↓
+                                             package~2 (done)
 ```
 
 ### Audited seam
@@ -77,8 +95,8 @@ recording:
 
 This entry is included in the sealed audit chain. `verifyBundle` checks the full
 provenance closure: `package~2`'s `inputs.inputRefs.work` must equal
-`review-fix-1`'s `resultRef`, which in turn must be sealed in the manifest blob
-produced at fire time.
+`review-fix-1`'s `resultRef`, and `review-fix-1`'s `inputRefs.findings` must equal
+the findings ref produced by the done-but-red gate — all checked across 3 handoff edges.
 
 ### Why zero credits needed
 
