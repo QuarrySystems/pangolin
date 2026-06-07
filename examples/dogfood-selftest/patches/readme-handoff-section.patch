@@ -1,0 +1,36 @@
+diff --git a/README.md b/README.md
+index c637095..8eed278 100644
+--- a/README.md
++++ b/README.md
+@@ -84,6 +84,31 @@ See [`examples/offload-fanout/`](examples/offload-fanout/) for the runnable
+ demo — a three-task fan-out plan that exercises parallel locks, patch
+ artifacts, and the audit command end-to-end.
+ 
++### Typed-product handoff
++
++Tasks in a plan can now declare dependent inputs with `needs` instead of
++hand-wiring `depends_on` — a downstream item names what it consumes and
++which upstream task produces it, and the dependency edge is derived
++automatically:
++
++```json
++"needs": { "patch": { "from": "edit-a", "select": { "kind": "patch" } } }
++```
++
++The orchestrator validates the whole DAG at submit (every `needs` must
++resolve to a real producer and a declared product kind), then at fire
++time resolves each upstream task's content-addressed product and hands it
++to the worker, which materializes it under `inputs/` before the agent
++runs (e.g. `inputs/patch.diff`). Both consumed `inputRefs` and produced
++`outputRefs` are sealed into the dispatch manifest and the audit
++evidence, and `agora verify` proves **provenance closure** — every
++consumed input ref must be a sealed product of a completed task in the
++same run — surfaced as a fifth `handoff` check row alongside the
++existing chain / root / signature / anchor checks. See
++[`examples/handoff-dag/`](examples/handoff-dag/) for the runnable demo —
++a two-task plan where `edit-a` produces a patch and `apply-patch` binds
++it via `needs` and applies it with `git apply inputs/patch.diff`.
++
+ ## What's in this repo
+ 
+ Thirteen packages under `packages/`:
