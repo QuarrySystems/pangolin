@@ -12,16 +12,13 @@
 // This demo is entirely in-memory (SqliteRunStateStore :memory:) — no Docker, no API key.
 // Run: pnpm start
 //
-// IMPLEMENTATION NOTE (engine limitation):
-//   The desired behavior table is:
-//     review (attempt 1): { status:'done', verify:{passed:false}, outputRefs:{findings:REF_FINDINGS} }
-//   However, when a gate has outputRefs.findings, respawnLineage adds needs.findings={from:gate.id}
-//   to the fix item, normalizeRun adds gate.id to fix.depends_on, and isBlockingRedGate causes
-//   the fix item to be skipped. This is an engine-level design gap (dep-resolver.ts §7 predicate
-//   does not exempt fix items reading outputRefs from the blocking gate).
-//   Workaround: seal findings as the gate's resultRef (equally valid for provenance — "resultRef
-//   or outputRefs value" per task spec); inject findings into the fix manifest in fire() directly.
-//   The fix manifest correctly shows both work and findings inputRefs; provenance closure passes.
+// DATA-EDGE EXEMPTION (dep-resolver §7, commit 9fb0ea7):
+//   review (attempt 1) returns outputRefs:{findings:REF_FINDINGS} as a true gate output.
+//   respawnLineage sees gate.outputRefs.findings and auto-binds needs.findings on the fix item:
+//     { from: 'review', select: { kind:'output', path:'findings' } }
+//   The dep-resolver's isBlockedBy predicate exempts this data-consumer edge — review-fix-1
+//   readies normally despite the red gate. The engine resolves findings via needs-resolver
+//   (selectProductRef → upstream.outputRefs['findings']) at fire time. No manual injection needed.
 
 import { readFile } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
@@ -56,9 +53,9 @@ const REF_FIX =
   'agora://ns/artifact/fix/sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 
 /** Findings artifact produced by the done-but-red 'review' gate.
- *  Sealed as review's resultRef (provenance closure accepts resultRef or outputRefs value).
- *  Per the run-3 spec, in a live run this would be gate.outputRefs.findings; the engine
- *  limitation described above requires sealing via resultRef in this offline demo. */
+ *  Returned as review's outputRefs.findings — a true gate output.
+ *  The engine auto-binds needs.findings on the fix item and resolves it via needs-resolver
+ *  (selectProductRef → upstream.outputRefs['findings']). */
 const REF_FINDINGS =
   'agora://ns/artifact/findings/sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
 
@@ -78,11 +75,11 @@ type ItemBehavior = {
 };
 
 function behavior(itemId: string): ItemBehavior {
-  // review (attempt 1): done-but-red — findings sealed as resultRef (engine workaround; see note above)
-  // Ideal: { status:'done', verify:{passed:false}, outputRefs:{findings:REF_FINDINGS} }
-  // Actual: resultRef = REF_FINDINGS (admitted by provenance closure; no outputRefs to avoid engine skip-cascade on fix)
+  // review (attempt 1): done-but-red — findings as a TRUE gate outputRef.
+  // respawnLineage sees outputRefs.findings and auto-binds needs.findings on the fix item.
+  // The data-edge exemption (dep-resolver §7) allows the fix item to ready itself.
   if (itemId === 'review')
-    return { status: 'done', verify: { passed: false }, resultRef: REF_FINDINGS };
+    return { status: 'done', verify: { passed: false }, outputRefs: { findings: REF_FINDINGS } };
   if (itemId === 'implement') return { status: 'done', resultRef: REF_IMPL };
   if (itemId === 'review-fix-1') return { status: 'done', resultRef: REF_FIX };
   // review~2, package, package~2 → done (green)
@@ -97,16 +94,12 @@ function makeIdKeyedExecutor(blobs: Map<string, Uint8Array>): Executor {
 
     async fire(item, ctx) {
       // Engine-resolved inputRefs from needs bindings.
-      let inputRefs = item.inputs['inputRefs'] as Record<string, string> | undefined;
-
-      // For the fix item: also inject findings ref.
-      // In a real run, this comes via needs.findings auto-bound by the pattern layer.
-      // In this demo, we inject it directly because the engine-level gate-skip predicate
-      // prevents the fix item from receiving it through the needs resolver
-      // (see IMPLEMENTATION NOTE at the top of this file).
-      if (item.id === 'review-fix-1') {
-        inputRefs = { ...inputRefs, findings: REF_FINDINGS };
-      }
+      // For review-fix-1: work comes from implement (needs.work, kind=patch → resultRef)
+      // and findings comes from review (needs.findings, kind=output → outputRefs.findings).
+      // Both are resolved by the engine's needs-resolver before fire() is called; no
+      // manual injection needed — the data-edge exemption (dep-resolver §7) ensures the
+      // fix item readies itself and receives the gate's findings ref through normal resolve.
+      const inputRefs = item.inputs['inputRefs'] as Record<string, string> | undefined;
 
       const { manifest, bytes } = buildManifest({
         runId: ctx?.runId ?? '',

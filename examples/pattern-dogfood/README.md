@@ -23,7 +23,7 @@ pnpm --filter pattern-dogfood-example start
 
 === AFTER: graph status ===
   implement: done resultRef=agora://ns/artifact/impl/sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaa…
-  review: done verify.passed=false resultRef=agora://ns/artifact/findings/sha256:cccccccccccccccccccccccc…
+  review: done verify.passed=false
   package: skipped
   review-fix-1: done resultRef=agora://ns/artifact/fix/sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbb…
   review~2: done
@@ -58,7 +58,7 @@ When `review` goes **done-but-red** (status `done`, `verify.passed === false`) t
 pattern calls `extendRun`, appending three new items:
 
 1. `review-fix-1` — the fix item; needs BOTH `work` (from `implement`'s result) and `findings`
-   (the gate's diagnostic output, sealed as its result ref for provenance)
+   (the gate's diagnostic output, returned as a true gate `outputRefs.findings`)
 2. `review~2` — a copy of the gate item that re-evaluates after the fix
 3. `package~2` — a copy of the `package` item whose `needs.work` is remapped to
    `review-fix-1`'s `resultRef` (the fixed artifact)
@@ -66,12 +66,19 @@ pattern calls `extendRun`, appending three new items:
 The original items `review: done-but-red` and `package: skipped` are **preserved as sealed
 history**. The run is never rewound. The new items are purely additive — a forward arc in the DAG.
 
-### Engine red-gate cascade (§7)
+### Engine red-gate cascade and data-edge exemption (§7)
 
-When `review` is done-but-red, the dep-resolver's `§7 isBlockingRedGate` predicate treats it
-as failed-like. Downstream `package` (pending, depends on `review`) is cascaded to `skipped`
-in the **same tick** that `review` is reconciled. The pattern phase then sees a skipped
-descendant and the spawn directive includes the full `[fix, gate~2, dependent~2]` set.
+When `review` is done-but-red, the dep-resolver's `§7 isBlockedBy` predicate treats it
+as failed-like for CONTROL-FLOW dependents. Downstream `package` (pending, depends on `review`
+with no `needs` binding to its outputs) is cascaded to `skipped` in the **same tick** that
+`review` is reconciled. The pattern phase then sees a skipped descendant and the spawn directive
+includes the full `[fix, gate~2, dependent~2]` set.
+
+`review-fix-1`, however, is exempt: its `needs.findings` binding has `from: 'review'` and
+`select.kind: 'output'`. The data-edge exemption in `isBlockedBy` (commit 9fb0ea7) recognises
+this as a data consumer of the gate's own output — red does not invalidate the findings, it
+IS the findings. The fix item readies normally and receives both `work` and `findings` refs
+via the engine's needs-resolver at fire time (no manual manifest injection needed).
 
 ### A NEW forward arc — never a cycle
 
