@@ -40,6 +40,8 @@ Gates before PR: `pnpm -r lint`, `pnpm -r typecheck`, `pnpm -r test`, docs-site 
 
 CONTROLLER PREREQUISITE (before dispatching task-cli-verbs): add `"@quarry-systems/agora-core": "workspace:*"` to packages/agora-cli/package.json dependencies and run `pnpm install` (lockfile delta confined to the new dep), committed controller-side — the implementer's scope stays inside packages/agora-cli src+test.
 
+STALE-DIST RULE (plan-audit C5): agora-cli tests and the dogfood-gated typecheck resolve orchestrator exports from its BUILT dist. After task-view-build/task-view-render land, run `pnpm --filter @quarry-systems/agora-orchestrator build` BEFORE dispatching task-cli-verbs / task-driver-adopt (controller does it; implementers should also rebuild if they see missing-export errors).
+
 ## Tasks
 
 ## Task: StatusItem gains depends_on
@@ -133,11 +135,19 @@ export function buildRunView(args: { plan: Run; pattern?: Pattern; status?: Stat
 // packages/agora-orchestrator/test/view/build.test.ts (anchor case)
 it('synthesizes one ghost generation under a spawn-fix gate, pruning data-edge-exempt consumers', () => {
   // plan: a -> gate(b, spawn-fix) -> c(control dep), d(needs {from: b, select:{kind:'output',path:'x'}})
-  // expect ghosts: b-fix-1, b~2, c~2 — and NO d~2 (exempt); ghost c~2 depends_on [b~2]
+  // expect ghosts: b-fix-1, b~2, c~2 — and NO d~2 (exempt);
+  // ghost c~2 depends_on [b~2];
+  // ghost b~2 depends_on [b-fix-1]  ← AUDIT-PINNED EXCEPTION: the SUBJECT is a
+  //   non-lineage upstream whose edge REMAPS to the fix id (respawnLineage does
+  //   S.set(config.subject, fixId), respawn.ts:174-175). "Non-lineage upstreams
+  //   keep original ids" applies to every OTHER outside upstream.
+  // ghost b-fix-1 depends_on [a]  (the subject itself).
 });
 ```
 
-Cover additionally: pipeline chain ordering after plan()+normalizeRun; fan layout selection; tree fallback (no pattern); ghost→real reconciliation; green collapse; bounded-red terminal state (gate~2 red ⇒ no ghost generation 3); spawned items placed via status depends_on; evidence attach; footer counts/cost/state.
+Cover additionally: pipeline chain ordering after plan()+normalizeRun; fan layout selection; tree fallback (no pattern); ghost→real reconciliation; green collapse; bounded-red terminal state (gate~2 red ⇒ no ghost generation 3); spawned items placed via status depends_on; evidence attach; footer counts/cost/state; a SCRIPTED STATUS PROGRESSION (pattern-harness fixture shapes) asserting frame-over-frame node-state transitions across ≥4 polls.
+
+Contract pins (plan-audit): the RunView shape here deliberately simplifies the spec §2.2 sketch (edges/generations folded into node fields; `verifyPassed`/`isGate` instead of nested objects) — this block is the binding contract. Footer state union is `'pre-run' | 'running' | 'terminal'` — deliberately NOT the spec's sealed/settled wording (sealing is audit-side, underivable from StatusItem[]). `StatusLike` is a deliberate structural subset of the exported `StatusItem` (doc-comment it) with a compile-time assignability pin (`const _pin: StatusLike[] = [] as StatusItem[]`) so surface drift fails typecheck.
 
 ## Acceptance criteria
 
@@ -190,7 +200,7 @@ it('renders the pipeline pre-run chain with a dotted ghost arc (no color, unicod
 });
 ```
 
-Goldens per spec §5: pipeline pre-run + ghost; red materialization mid-run; green collapse; bounded-red termination; map-reduce fan mid-run (+ `× ?` pre-run, `× N` collapse); tree with `↩`; exempt consumer un-ghosted; ASCII variant; no-color vs color (color frames assert containment of ANSI codes, not full pixel equality, mirroring how render.test.ts handles color today — read it first); evidence suffix on/off. Barrel: export `buildRunView`, types, `renderRunView`, `nextFrame` from `src/index.ts` (follow the existing export-section style).
+Goldens per spec §5: pipeline pre-run + ghost; red materialization mid-run; green collapse; bounded-red termination; map-reduce fan mid-run (+ `× ?` pre-run, `× N` collapse); tree with `↩`; exempt consumer un-ghosted; ASCII variant; no-color vs color (no-color asserts `not.toMatch(/\x1b\[/)` + content; color asserts `toMatch(/\x1b\[/)` only — the exact render.test.ts:102-125 convention). Barrel (`src/index.ts`, existing export-section style) — ENUMERATED (plan-audit B6, the driver imports `StatusLike`): `buildRunView`, `renderRunView`, `nextFrame`, and types `RunView`, `RunViewNode`, `RunViewLayout`, `NodeKind`, `StatusLike`, `RenderRunViewOpts`.
 
 ## Acceptance criteria
 
@@ -215,7 +225,9 @@ model_hint: opus
 Both verbs (spec §3) — one task because both live in `cmd-orch.ts`. The `@quarry-systems/agora-core` dependency is pre-installed controller-side (see Context) — import it directly.
 
 - **`orch render <plan.json> [--pattern <name>] [--no-color] [--ascii]`**: read+parse the plan; `--pattern` resolves via a local map to the exported `pipeline`/`mapReduce`/`staticDag`; omitted → no pattern (tree, no ghosts); `pattern.plan()` errors surface like `orch validate`'s. MUST NOT call `ctx.getOrchContext()` (throws without config). Print `renderRunView(buildRunView(...), { color: isTTY && !noColor, unicode: !ascii }).join('\n')`.
-- **`orch watch <run-id> [--json] [--interval <ms>] [--no-color] [--no-clear] [--ascii] [--pattern <name>]`**: `--json` → EXACTLY the previous behavior (one `JSON.stringify(rec)` per yield — keep the old loop verbatim). Default → live view: filter `rec.kind === 'status'`; build view from status (+ `--pattern` for layout; tree without); best-effort evidence per item with a `manifestRef` via the URI-derived recipe (`parseAgoraUri(manifestRef)` → `{namespace, name: dispatchId}` → `buildDispatchRecordUri(namespace, dispatchId, 'output.json')` → `oc.storage.get` → `.usage`; cache per item; storage absent on the context or any throw → skip silently). Frames via `nextFrame`; default mode reprints with ANSI cursor-up by previous frame height; `--no-clear` prints only non-null frames. On terminal: final frame, then bounded retry (≤15 × 1s) for `api.audit` → print `renderVerification` summary; never-appears → one-line note, exit per run state.
+- **`orch watch <run-id> [--json] [--interval <ms>] [--no-color] [--no-clear] [--ascii] [--pattern <name>]`**: `--json` → EXACTLY the previous behavior (one `JSON.stringify(rec)` per yield — keep the old loop verbatim). Default → live view: filter `rec.kind === 'status'`; build view from status (+ `--pattern` for layout; tree without); best-effort evidence per item with a `manifestRef` via the URI-derived recipe (`parseAgoraUri(manifestRef)` → `{namespace, name: dispatchId}` → `buildDispatchRecordUri(namespace, dispatchId, 'output.json')` → `oc.storage.get` → `.usage`; cache per item; storage absent on the context or any throw → skip silently). Frames via `nextFrame`; default mode reprints with ANSI cursor-up by previous frame height; `--no-clear` prints only non-null frames. Commander delivers `--interval` as a STRING — `Number()` it. On terminal: final frame, then bounded retry for `api.audit` → print `renderVerification` summary; never-appears → one-line note, exit per run state. **Retry count/delay are injectable parameters (module consts overridable internally; CLI default 15 × 1s) so the never-appears test runs with retries=2, delayMs=0 instead of sleeping 15 real seconds (plan-audit B4).**
+
+**Existing tests that BREAK and must be updated in this task (plan-audit C3):** (1) the exact command-list assertion at `test/cmd-orch.test.ts:95` gains `'render'`; (2) the raw-JSON watch test at `:283-321` becomes the `--json` format-pin test (it currently runs watch WITHOUT --json and parses the line as JSON).
 
 ## Implementation
 
@@ -229,7 +241,7 @@ const PATTERNS: Record<string, Pattern> = { pipeline, 'map-reduce': mapReduce, '
 ```typescript
 // packages/agora-cli/test/cmd-orch.test.ts (anchors; follow the file's makeFakeTransport/makeCtx/captureLog harness)
 it('watch --json preserves the raw stream format', async () => { /* pre-publish terminal status; assert one JSON.parse-able line per yield matching the old shape */ });
-it('watch renders frames and dedups identical polls', async () => { /* transport whose readOutbox advances: status A, A, B, terminal; --interval 0 --no-clear; assert frame count = distinct frames */ });
+it('watch renders frames and dedups identical polls', async () => { /* CUSTOM advancing readOutbox (the stock fake returns the full accumulated list and status() takes .at(-1) — build a per-call-counter fake): yields status A, A, B, terminal; --interval 0 --no-clear; assert frame count = distinct frames */ });
 it('render --pattern pipeline shows the ghost arc for a spawn-fix gate plan', async () => { /* plan fixture file via tmp; assert ghost lines present */ });
 ```
 
@@ -237,7 +249,7 @@ it('render --pattern pipeline shows the ghost arc for a spawn-fix gate plan', as
 
 - `--json` format pin green (the old loop, untouched semantics).
 - Default watch: kind-filter proven (a non-status record before first status does not crash/render); frame dedup proven; evidence best-effort proven (storage absent → frames still render).
-- `render` works with NO config file in cwd (test runs in a bare tmp cwd).
+- `render` never calls `getOrchContext` — tested with a ctx whose `getOrchContext` THROWS (the real seam; a bare tmp cwd is optional belt-and-braces).
 - Terminal verify-summary retry path covered (audit publishes late → summary still prints; never → note).
 - Full agora-cli suite green.
 
@@ -293,12 +305,13 @@ depends_on: [task-cli-verbs]
 files:
   - docs-site/src/content/docs/reference/cli.md
   - docs-site/src/content/docs/explanation/execution-patterns.md
+  - docs-site/src/content/docs/tutorials/first-offload-run.md
 status: pending
 model_hint: standard
 is_wiring_task: true
 ```
 
-Document the LANDED verbs (claims code-verified — read the merged cmd-orch.ts first): `orch render` (flags, the `--pattern` requirement for non-tree layouts, no-config operation), `orch watch`'s new default + `--json` migration note + flags. One cross-link in execution-patterns.md ("watch a pattern run live: `agora orch watch`"). docs-site build + links validator green.
+Document the LANDED verbs (claims code-verified — read the merged cmd-orch.ts first): `orch render` (flags, the `--pattern` requirement for non-tree layouts, no-config operation), `orch watch`'s new default + `--json` migration note + flags. One cross-link in execution-patterns.md ("watch a pattern run live: `agora orch watch`"). STALE-DOC FIX (plan-audit C4): `tutorials/first-offload-run.md:134` claims watch prints "each status update as a line of JSON" — false after the default flip; update to describe the live view + `--json` escape hatch. docs-site build + links validator green.
 
 ## Acceptance criteria
 
