@@ -1,0 +1,20 @@
+{
+  "name": "agora-serve-stack",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "BUSL-1.1",
+  "scripts": {
+    "smoke": "node client/smoke.mjs"
+  },
+  "dependencies": {
+    "@quarry-systems/agora-orchestrator": "workspace:*",
+    "@quarry-systems/agora-client": "workspace:*",
+    "@quarry-systems/agora-storage-s3": "workspace:*",
+    "@quarry-systems/agora-secret-store": "workspace:*",
+    "@quarry-systems/agora-providers-local-docker": "workspace:*"
+  },
+  "devDependencies": {
+    "@quarry-systems/agora-cli": "workspace:*"
+  }
+}

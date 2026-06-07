@@ -33,6 +33,28 @@ importers:
         specifier: ^2.1.9
         version: 2.1.9(@types/node@25.9.1)
 
+  deploy/serve-stack:
+    dependencies:
+      '@quarry-systems/agora-client':
+        specifier: workspace:*
+        version: link:../../packages/agora-client
+      '@quarry-systems/agora-orchestrator':
+        specifier: workspace:*
+        version: link:../../packages/agora-orchestrator
+      '@quarry-systems/agora-providers-local-docker':
+        specifier: workspace:*
+        version: link:../../packages/agora-providers-local-docker
+      '@quarry-systems/agora-secret-store':
+        specifier: workspace:*
+        version: link:../../packages/agora-secret-store
+      '@quarry-systems/agora-storage-s3':
+        specifier: workspace:*
+        version: link:../../packages/agora-storage-s3
+    devDependencies:
+      '@quarry-systems/agora-cli':
+        specifier: workspace:*
+        version: link:../../packages/agora-cli
+
   docs-site:
     dependencies:
       '@astrojs/starlight':
@@ -453,6 +475,10 @@ importers:
       '@quarry-systems/agora-core':
         specifier: workspace:*
         version: link:../agora-core
+    devDependencies:
+      '@quarry-systems/agora-orchestrator':
+        specifier: workspace:*
+        version: link:../agora-orchestrator
 
   packages/agora-worker:
     dependencies:
