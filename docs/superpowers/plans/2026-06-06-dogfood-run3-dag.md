@@ -5,15 +5,15 @@ created: 2026-06-06
 
 ```mermaid
 flowchart TD
-    task-engine-gate-skip["task-engine-gate-skip: red gate blocks dependents<br/>files: packages/agora-orchestrator/src/engine/dep-resolver.ts +1 more"]
-    task-engine-int["task-engine-int: one-tick red→skip→spawn int test<br/>files: packages/agora-orchestrator/test/pattern-phase.test.ts"]
-    task-offline-example["task-offline-example: pattern-dogfood gate → done-but-red<br/>files: examples/pattern-dogfood/src/index.ts +1 more"]
-    task-offline-int["task-offline-int: pattern-dogfood int test → done-but-red<br/>files: packages/agora-orchestrator/test/pattern-dogfood.int.test.ts"]
-    task-spec-amendment["task-spec-amendment: pattern-layer spec honesty note<br/>files: docs/superpowers/specs/2026-06-05-agora-pattern-layer-design.md"]
-    task-harness-scaffold["task-harness-scaffold: dogfood-gated package + plan.json + config<br/>files: examples/dogfood-gated/package.json +2 more"]
-    task-harness-driver["task-harness-driver: live driver with 4 acceptance rows<br/>files: examples/dogfood-gated/src/index.ts"]
-    task-harness-readme["task-harness-readme: run/rerun/merge protocol README<br/>files: examples/dogfood-gated/README.md"]
-    task-changelog["task-changelog: CHANGELOG entry<br/>files: CHANGELOG.md"]
+    task-engine-gate-skip["task-engine-gate-skip: red gate blocks dependents<br/>files: packages/agora-orchestrator/src/engine/dep-resolver.ts +1 more"]:::done
+    task-engine-int["task-engine-int: one-tick red→skip→spawn int test<br/>files: packages/agora-orchestrator/test/pattern-phase.test.ts"]:::done
+    task-offline-example["task-offline-example: pattern-dogfood gate → done-but-red<br/>files: examples/pattern-dogfood/src/index.ts +1 more"]:::done
+    task-offline-int["task-offline-int: pattern-dogfood int test → done-but-red<br/>files: packages/agora-orchestrator/test/pattern-dogfood.int.test.ts"]:::done
+    task-spec-amendment["task-spec-amendment: pattern-layer spec honesty note<br/>files: docs/superpowers/specs/2026-06-05-agora-pattern-layer-design.md"]:::done
+    task-harness-scaffold["task-harness-scaffold: dogfood-gated package + plan.json + config<br/>files: examples/dogfood-gated/package.json +2 more"]:::done
+    task-harness-driver["task-harness-driver: live driver with 4 acceptance rows<br/>files: examples/dogfood-gated/src/index.ts"]:::done
+    task-harness-readme["task-harness-readme: run/rerun/merge protocol README<br/>files: examples/dogfood-gated/README.md"]:::done
+    task-changelog["task-changelog: CHANGELOG entry<br/>files: CHANGELOG.md"]:::done
 
     task-engine-gate-skip --> task-engine-int
     task-engine-gate-skip --> task-offline-example
@@ -52,7 +52,7 @@ depends_on: []
 files:
   - packages/agora-orchestrator/src/engine/dep-resolver.ts
   - packages/agora-orchestrator/test/dep-resolver.test.ts
-status: pending
+status: done
 model_hint: standard
 ```
 
@@ -119,7 +119,7 @@ id: task-engine-int
 depends_on: [task-engine-gate-skip]
 files:
   - packages/agora-orchestrator/test/pattern-phase.test.ts
-status: pending
+status: done
 model_hint: standard
 ```
 
@@ -158,7 +158,7 @@ depends_on: [task-engine-gate-skip]
 files:
   - examples/pattern-dogfood/src/index.ts
   - examples/pattern-dogfood/README.md
-status: pending
+status: done
 model_hint: standard
 ```
 
@@ -205,7 +205,7 @@ id: task-offline-int
 depends_on: [task-engine-gate-skip]
 files:
   - packages/agora-orchestrator/test/pattern-dogfood.int.test.ts
-status: pending
+status: done
 model_hint: standard
 ```
 
@@ -243,7 +243,7 @@ id: task-spec-amendment
 depends_on: [task-engine-gate-skip]
 files:
   - docs/superpowers/specs/2026-06-05-agora-pattern-layer-design.md
-status: pending
+status: done
 model_hint: cheap
 is_wiring_task: true
 ```
@@ -265,7 +265,7 @@ files:
   - examples/dogfood-gated/package.json
   - examples/dogfood-gated/plan.json
   - examples/dogfood-gated/src/config.ts
-status: pending
+status: done
 model_hint: standard
 ```
 
@@ -308,7 +308,7 @@ id: task-harness-driver
 depends_on: [task-harness-scaffold, task-engine-gate-skip]
 files:
   - examples/dogfood-gated/src/index.ts
-status: pending
+status: done
 model_hint: opus
 ```
 
@@ -365,7 +365,7 @@ id: task-harness-readme
 depends_on: [task-harness-driver]
 files:
   - examples/dogfood-gated/README.md
-status: pending
+status: done
 model_hint: standard
 is_wiring_task: true
 ```
@@ -386,7 +386,7 @@ id: task-changelog
 depends_on: [task-engine-gate-skip, task-harness-driver]
 files:
   - CHANGELOG.md
-status: pending
+status: done
 model_hint: cheap
 is_wiring_task: true
 ```
