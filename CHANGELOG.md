@@ -90,6 +90,16 @@ workspace. See [RELEASING.md](./RELEASING.md) for how a release is cut.
   report; a new `verify.ran` worker event is emitted. Set it via
   `client.subagent.register({ verify: { command, timeout } })`.
 
+- **Red gates block dependents + live gated circle-back harness (spec: docs/superpowers/specs/2026-06-06-dogfood-run3-gated-circleback-design.md).**
+  Engine surface: `computeNewlyReady` and `computeSkipped` now treat a `done` + `verify.passed === false` + `inputs.gate.onRed === 'spawn-fix'` 
+  dependency as failed-like, blocking its dependents' readiness and triggering the skip cascade — closing the gap where findings-by-provenance and downstream 
+  skip+remap were mutually exclusive in the offline proof. Scoped gate-aware change with a data-edge exemption: dependents consuming the gate's own outputs 
+  (via `needs[*].from === gate` + `select.kind === 'output'`) remain unblocked, permitting the spawned fix to consume findings. 
+  Harness surface: **`examples/dogfood-gated`** ships the run-3 live harness — a 3-node gated plan on agora's own tree (docs explanation page → opus fact-check 
+  gate with `verify: test ! -s outputs/findings` → announce), pipeline pattern with spawn-fix, driver asserting provenance closure over the grown graph, the 
+  red-path remap (dependents skipped, fix spawned with gate outputs remapped), and live per-dispatch model/cost evidence (first table sealing manifest-requested + 
+  worker-captured models and costUsd). The harness is ready; the live run has not yet occurred.
+
 ## [0.1.0] - 2026-06-01
 
 First public, **source-available** release (BSL 1.1). All thirteen packages
