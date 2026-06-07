@@ -168,6 +168,11 @@ async function streamToUint8Array(body: unknown): Promise<Uint8Array> {
   return out;
 }
 
+export { AwsS3MailboxClient } from './aws-s3-mailbox-client.js';
+export type { AwsS3MailboxClientOpts } from './aws-s3-mailbox-client.js';
+export { AwsS3LockClient } from './aws-s3-lock-client.js';
+export type { AwsS3LockClientOpts } from './aws-s3-lock-client.js';
+
 export class S3StorageProvider implements StorageProvider {
   readonly name = 's3';
   private readonly s3: S3Client;
