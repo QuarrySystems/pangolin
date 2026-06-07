@@ -185,7 +185,11 @@ async function main(): Promise<void> {
       name: 'page-fixer',
       promptTemplate: PROMPT,
       model: 'standard',
-      capabilities: ['docs-seeds'],
+      // Attempt-2 tuning: the fixer also gets source-seeds so it can VERIFY its own
+      // rewritten prose against the code (attempt 1 converged 12→5 findings but the
+      // source-blind fixer's connective text drifted; see run-3 attempt-1 artifacts).
+      // Still deliberately NO apply-work-patch (cumulative-patch contract unchanged).
+      capabilities: ['docs-seeds', 'source-seeds'],
     });
     await client.subagent.register({
       name: 'announcer',
