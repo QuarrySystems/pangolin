@@ -95,7 +95,7 @@ it.
 | `submit <plan.json>` | `--queue <name>`, `--actor <id>` | Reads and parses the plan JSON. `--queue` overrides the plan's `queue`. Submits via `OperationsApi.submit`. Prints the run id. |
 | `validate <plan.json>` | — | Static whole-DAG pre-flight: normalizes the plan (`needs[*].from` unioned into `depends_on`), then runs the same `validateRun` the submit path enforces — structural checks, duplicate ids, reference existence, `needs ⊆ depends_on`, cycle detection, and edge-type-tag compatibility. Every error prints on stderr (collect-all) and **exit code is `1` on an invalid plan**; a valid plan prints `{"valid":true,"items":N}`. Does not touch the store. |
 | `status [run-id]` | — | Prints the latest status record for the run as pretty JSON (or `null`). |
-| `watch <run-id>` | — | Follows the run, printing each status update as JSON until a terminal state. Ctrl-C to stop. |
+| `watch <run-id>` | `--json`, `--interval <ms>`, `--no-color`, `--no-clear`, `--ascii`, `--pattern <name>` | Live pattern-aware view: status glyphs, ghost respawn arcs under `spawn-fix` gates until resolution, per-item model/cost evidence when storage is available, and a terminal verify-row summary. Redraws in place each poll cycle until the run reaches a terminal state (Ctrl-C to stop). See [`agora orch watch` — the live view](#agora-orch-watch--the-live-view) for details. |
 | `cancel <target>` | `--actor <id>` | Requests cancellation of a run/item. Prints `cancel requested: <target>`. |
 | `audit <run-id>` | `--out <path>` | Produces the audit bundle. Writes to `--out` if given, else prints JSON. **Sets exit code `1` when the bundle's `report.intact` is false.** Pair with the top-level [`agora verify`](#agora-verify) to re-check an exported bundle. See [Export & verify an audit bundle](/agora/how-to/verify-audit-bundle/). |
 | `serve` | — | Starts the long-running orchestrator driver via the config's `runService`. Errors if the `orch` export provides no `runService`. Wires `SIGINT`/`SIGTERM` to an `AbortController` for graceful shutdown. |
@@ -105,6 +105,48 @@ it.
 
 The actor for `submit`, `cancel`, and `schedule add` resolves as: the `--actor` flag, else
 `$AGORA_ACTOR`, else `human:<os-username>`.
+
+### `agora orch render` — preview a plan before submitting
+
+```sh
+agora orch render <plan.json> [--pattern <name>] [--no-color] [--ascii]
+```
+
+Renders the pre-run view of a plan file — ghost arcs dotted, item ids and
+dependency edges laid out in the chosen pattern — without reading an
+`agora.config` file. Useful for inspecting a plan before you have an
+orchestrator running.
+
+| Flag | Description |
+|---|---|
+| `--pattern <name>` | Layout pattern: `pipeline`, `map-reduce`, or `static-dag`. Omitting `--pattern` renders a generic dependency tree with no pattern-specific ghost arcs. |
+| `--no-color` | Disable ANSI color output. |
+| `--ascii` | Use pure-ASCII glyphs (no Unicode box-drawing characters). |
+
+Validation errors from `pattern.plan()` (for example, a missing splitter item
+for `map-reduce`) surface on stderr with a non-zero exit code, the same way
+`orch validate` surfaces them.
+
+### `agora orch watch` — the live view
+
+```sh
+agora orch watch <run-id> [--pattern <name>] [--interval <ms>] [--no-color] [--no-clear] [--ascii] [--json]
+```
+
+By default, `watch` renders a **live pattern-aware view** that redraws in place
+each poll cycle: status glyphs per item, ghost respawn arcs under `spawn-fix`
+gates until they resolve, per-item model/cost evidence when storage is
+available, and a terminal verify-row summary once the run seals. Ctrl-C stops
+the watch early.
+
+| Flag | Description |
+|---|---|
+| `--pattern <name>` | Layout pattern for the view: `pipeline`, `map-reduce`, or `static-dag`. |
+| `--interval <ms>` | Poll interval in milliseconds (default determined by the transport). |
+| `--no-color` | Disable ANSI color output. |
+| `--no-clear` | Append frames instead of redrawing in place. |
+| `--ascii` | Use pure-ASCII glyphs. |
+| `--json` | **Scripting escape hatch.** Raw record stream: one JSON line per poll, the previous default format. Use this when piping `watch` output to a downstream tool. |
 
 ## `agora pipeline`
 

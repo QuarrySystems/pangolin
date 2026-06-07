@@ -214,7 +214,8 @@ flowchart LR
 `lint` and `lint~2` are distinct item ids. Solid arrows are `depends_on`
 edges; the dotted arrow marks the pattern's spawn trigger, not a graph edge.
 The failed `lint` stays permanently in history; the fix and gate copy extend
-the run forward.
+the run forward. To watch these ghost respawn arcs appear and resolve in real
+time, see [`agora orch watch` — the live view](/agora/reference/cli/#agora-orch-watch--the-live-view).
 
 ## The forward-arc-never-rewind invariant
 

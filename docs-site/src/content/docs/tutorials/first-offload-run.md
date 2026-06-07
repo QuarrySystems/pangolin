@@ -131,10 +131,12 @@ the next two commands take it as an argument.
 agora orch watch <run-id>
 ```
 
-`watch` follows the run, printing each status update as a line of JSON until the
-run reaches a terminal state (Ctrl-C to stop early). You will see the three
-`edit-*` items move through to `done` — two at a time, since the queue
-concurrency is 2 — and then `verify` start once all three edits are done.
+`watch` renders a live pattern-aware view — status glyphs per item, redrawn
+in place each poll cycle — until the run reaches a terminal state (Ctrl-C to
+stop early). You will see the three `edit-*` items move through to `done` — two
+at a time, since the queue concurrency is 2 — and then `verify` start once all
+three edits are done. If you prefer the old raw JSON stream for scripting, pass
+`--json` to get one JSON record per poll instead.
 
 As each edit completes, its status carries a `resultRef`: a content-addressed
 storage URI for the patch that worker produced. **The patch itself never lives

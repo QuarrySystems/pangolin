@@ -11,6 +11,12 @@ workspace. See [RELEASING.md](./RELEASING.md) for how a release is cut.
 
 ### Added
 
+- **Pattern-aware CLI run view — `agora orch render` + live `agora orch watch` (spec: docs/superpowers/specs/2026-06-07-agora-run-view-design.md).**
+  Four surfaces landed: **(1) Pre-run view** — `agora orch render <plan.json> [--pattern]` shows the expected DAG incl. dotted ghost respawn arcs under spawn-fix gates; works without a config file. 
+  **(2) Live watch default** — `agora orch watch` now renders a pattern-aware live view (status glyphs, ghosts materializing on red, per-item model/cost evidence, terminal verify summary) instead of flat JSON; **MIGRATION NOTE:** the previous raw JSON stream is available verbatim via `--json` (new flags also available: `--interval`/`--no-color`/`--no-clear`/`--ascii`/`--pattern`). 
+  **(3) Additive status field** — status items now carry `depends_on: string[]` (resolved edges, full dependency graph beside the existing filtered `blockedBy`). 
+  **(4) Driver adoption** — the dogfood-gated harness renders the shared live view instead of flat per-item status lines.
+
 - **Model + cost evidence in dispatch (spec: docs/superpowers/specs/2026-06-06-agora-model-cost-evidence-design.md).** 
   Dogfood run 2's manifests sealed `model: { id: '' }` and discarded cost — evidence now answers "which model, at what cost."
   Four surfaces landed: **(1) Core contract** adds `DispatchWork.model?: string` and a shared `RuntimeUsage` type; 
