@@ -1,12 +1,13 @@
 // packages/agora-orchestrator/test/pattern-phase.test.ts
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { SqliteRunStateStore } from '../src/runstate/sqlite.js';
-import { idKeyedExecutor, makeOrch, driveUntilDone } from './fixtures/pattern-harness.js';
+import { idKeyedExecutor, makeOrch, driveUntilDone, storageFromBlobs } from './fixtures/pattern-harness.js';
 import { AgoraOrchestrator } from '../src/orchestrator.js';
 import { ManualTrigger } from '../src/triggers/manual.js';
 import { AuditLog } from '../src/audit/audit-log.js';
 import { NoneSigner } from '../src/audit/signer.js';
 import { LocalAnchor } from '../src/audit/anchor.js';
+import { assembleBundle } from '../src/audit/bundle.js';
 import { pipeline } from '../src/patterns/pipeline.js';
 import type { Pattern, SpawnDirective, GateConfig } from '../src/contracts/pattern.js';
 import type { ItemState, WorkItem } from '../src/contracts/index.js';
@@ -371,10 +372,11 @@ describe('pattern-phase: spawned item actor is pattern:default in audit export',
  *
  * maxFixAttempts:1 so that gate~2 done-but-red terminates without further respawn.
  *
- * Note: the fixTemplate has NO needs.findings binding — that is, the gate behavior
- * does NOT produce outputRefs.findings. This keeps gate-fix-1.depends_on limited to
- * ['subject'] after normalizeRun, avoiding a dep on the done-but-red gate which
- * would cause gate-fix-1 itself to be cascaded-skipped.
+ * The baseline same-tick test (behaviorDoneButRed) does NOT set outputRefs.findings
+ * on the gate, so the fix has no needs.findings binding and depends_on=['subject'] only.
+ * The separate findings-present test below (§7 data-edge exemption) adds
+ * outputRefs.findings to the gate behavior; the dep-resolver's data-edge exemption
+ * (commit 9fb0ea7) allows the fix to ready and complete despite depending on the red gate.
  */
 const DONE_BUT_RED_GATE_CONFIG: GateConfig = {
   onRed: 'spawn-fix',
@@ -402,11 +404,10 @@ describe('pattern-phase: §7 done-but-red gate → same-tick skip + spawn includ
     const store = new SqliteRunStateStore();
 
     /**
-     * Behavior:
+     * Behavior (no findings): gate is done-but-red without outputRefs.findings.
      *   'subject' → done + resultRef (needs-resolver requires a patch ref for gate-fix-1.needs.work)
-     *   'gate'    → done + verify.passed===false (done-but-red on first attempt)
-     *               No outputRefs.findings: this keeps gate-fix-1.depends_on=['subject'] only
-     *               (no dep on the gate itself) so the cascade-skip doesn't reach gate-fix-1.
+     *   'gate'    → done + verify.passed===false (done-but-red; no outputRefs.findings)
+     *               fix.depends_on=['subject'] only, so cascade-skip doesn't reach it.
      *   'gate~2'  → done (green on second attempt — gate passes)
      *   everything else ('gate-fix-1', 'downstream', 'downstream~2') → done
      */
@@ -459,6 +460,98 @@ describe('pattern-phase: §7 done-but-red gate → same-tick skip + spawn includ
     const extendedEntries = exp.entries.filter((e) => e.kind === 'run.extended');
     expect(extendedEntries).toHaveLength(1);
     expect(extendedEntries[0]!.itemId).toBe('gate');
+
+    store.close();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §7 data-edge exemption: findings-present case
+// ---------------------------------------------------------------------------
+
+describe('pattern-phase: §7 data-edge exemption — done-but-red gate with outputRefs.findings', () => {
+  it('fix readies and completes when gate produces findings; downstream skipped; downstream~2 done; fix manifest has findings inputRef', async () => {
+    const blobs = new Map<string, Uint8Array>();
+    const store = new SqliteRunStateStore();
+
+    /**
+     * Behavior (findings present): gate is done-but-red AND produces outputRefs.findings.
+     *   respawn.ts adds needs.findings = { from: 'gate', select: { kind:'output', path:'findings' } }
+     *   to fix item; normalizeRun unions gate.id into fix.depends_on.
+     *   The dep-resolver's data-edge exemption (commit 9fb0ea7) allows the fix to ready despite
+     *   gate being a blocking red gate: fix's needs.findings binding uses kind='output' from gate,
+     *   exempting that edge from the blocking predicate.
+     *
+     *   Expected arc:
+     *     subject    → done (resultRef = REF_SUBJECT_F)
+     *     gate       → done-but-red (verify.passed=false, outputRefs.findings = REF_FINDINGS)
+     *     downstream → skipped (blocked by red gate)
+     *     gate-fix-1 → done (data-edge exempt; inputRefs.findings = REF_FINDINGS; inputRefs.work = REF_SUBJECT_F)
+     *     gate~2     → done (green)
+     *     downstream~2 → done
+     */
+    const REF_SUBJECT_F = 'agora://ns/artifact/subject/sha256:cccc';
+    const REF_FINDINGS  = 'agora://ns/artifact/gate/findings/sha256:dddd';
+
+    function behaviorWithFindings(itemId: string) {
+      if (itemId === 'subject') return { status: 'done' as const, resultRef: REF_SUBJECT_F };
+      if (itemId === 'gate') {
+        return {
+          status: 'done' as const,
+          verify: { passed: false },
+          outputRefs: { findings: REF_FINDINGS },
+        };
+      }
+      return { status: 'done' as const };
+    }
+
+    const executor = idKeyedExecutor(blobs, behaviorWithFindings);
+    const { orch } = makeOrch(store, executor, {
+      maxAttempts: 1,
+      queues: { default: { concurrency: 5, pattern: pipeline } },
+    });
+
+    const runId = orch.submitRun(
+      { id: 'dbr-findings', queue: 'default', items: DONE_BUT_RED_ITEMS },
+      'human:test',
+    );
+
+    await driveUntilDone(orch, 64, runId);
+
+    const statuses = orch.getStatus(runId);
+    const statusById = new Map(statuses.map((s) => [s.id, s.status]));
+    const ids = statuses.map((s) => s.id);
+
+    // subject and gate complete
+    expect(statusById.get('subject')).toBe('done');
+    expect(statusById.get('gate')).toBe('done');
+
+    // downstream was skipped (gate was done-but-red, control-flow blocking)
+    expect(statusById.get('downstream')).toBe('skipped');
+
+    // fix, gate~2, downstream~2 all spawned and complete
+    expect(ids).toContain('gate-fix-1');
+    expect(ids).toContain('gate~2');
+    expect(ids).toContain('downstream~2');
+
+    // Fix MUST complete (not skipped) — data-edge exemption applied
+    expect(statusById.get('gate-fix-1')).toBe('done');
+    expect(statusById.get('gate~2')).toBe('done');
+    expect(statusById.get('downstream~2')).toBe('done');
+
+    // Run seals
+    const exp = orch.getAuditExport(runId);
+    expect(exp.root).toBeDefined();
+
+    // Provenance: fix manifest inputRefs.findings === REF_FINDINGS, inputRefs.work === REF_SUBJECT_F
+    const storage = storageFromBlobs(blobs);
+    const anchor = new LocalAnchor(store);
+    const bundle = await assembleBundle(exp, { anchor, storage });
+
+    const fixManifest = bundle.manifests.find((m) => m.itemId === 'gate-fix-1');
+    expect(fixManifest).toBeDefined();
+    expect(fixManifest!.inputRefs?.['findings']).toBe(REF_FINDINGS);
+    expect(fixManifest!.inputRefs?.['work']).toBe(REF_SUBJECT_F);
 
     store.close();
   });
