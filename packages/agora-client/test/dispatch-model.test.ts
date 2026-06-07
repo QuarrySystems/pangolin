@@ -83,29 +83,6 @@ function makeCredentials(): CredentialProvider {
   };
 }
 
-/**
- * Helper that fires a dispatch, captures the TaskSpec passed to compute.run,
- * and returns both the inflight handle and the captured spec.
- */
-async function fireCapturingTaskSpec(args: {
-  subagent: string;
-  target: string;
-  model?: string;
-  workerImage?: string;
-  storage: StorageProvider & {
-    seed(name: string, type: string, namespace: string, contentHash: string, payload: unknown): void;
-  };
-  client: AgoraClient;
-  capturedRef: { spec?: TaskSpec };
-}): Promise<void> {
-  await args.client.dispatch.fire({
-    subagent: args.subagent,
-    target: args.target,
-    model: args.model,
-    workerImage: args.workerImage ?? 'img:latest',
-  });
-}
-
 beforeEach(() => {
   vi.restoreAllMocks();
 });
