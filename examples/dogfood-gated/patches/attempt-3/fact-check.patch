@@ -1,0 +1,63 @@
+diff --git a/outputs/findings b/outputs/findings
+new file mode 100644
+index 0000000..d96461b
+--- /dev/null
++++ b/outputs/findings
+@@ -0,0 +1,57 @@
++[
++  {
++    "claim": "Queue config carries pattern shape `pattern: { type: 'pipeline', stages: ['lint','test','deploy'], maxGateRetries: 2 }`",
++    "reality": "QueueConfig.pattern holds a Pattern object `{ id, plan, onTaskDone }`, not a `{ type, stages, maxGateRetries }` config object. No `type`, `stages`, or `maxGateRetries` field exists anywhere; the pipeline pattern has no `stages` concept. The retry bound is `maxFixAttempts` and lives on the gate item's `inputs.gate.fixTemplate`/`maxFixAttempts`, not on the queue's pattern.",
++    "evidence": "packages/agora-orchestrator/src/orchestrator.ts:18 `QueueConfig { concurrency: number; pattern?: Pattern; }`; contracts/pattern.ts:14-24 `Pattern { id, plan(run), onTaskDone(item, ctx) }`; contracts/pattern.ts:35-40 GateConfig has `maxFixAttempts?: number`."
++  },
++  {
++    "claim": "Map-reduce queue config is `pattern: { type: 'map-reduce', splitter: 'split', reducer: 'aggregate' }`",
++    "reality": "MapReduceConfig has fields `map` and `reduce` (each a SpawnTemplate), not `splitter`/`reducer`, and these are templates for SPAWNED items, not ids of existing items. The config rides on a splitter ITEM's `inputs.mapReduce` (any id), not on the queue's pattern object.",
++    "evidence": "packages/agora-orchestrator/src/contracts/pattern.ts:42-46 `MapReduceConfig { map: SpawnTemplate & {...}; reduce: SpawnTemplate & {...} }`; patterns/map-reduce.ts:42 `splitters = run.items.filter(i => i.inputs['mapReduce'] !== undefined)` — splitter identified by `inputs.mapReduce`, no required id."
++  },
++  {
++    "claim": "\"The pipeline pattern\" \"drives a linear sequence of named stages. After each stage's gate item reaches `done`, the pattern emits the next stage's items.\"",
++    "reality": "pipeline.onTaskDone only spawns when the cause item is a gate AND red (failed, or done with verify.passed === false) AND `gate.onRed === 'spawn-fix'`. A green/done gate returns null — no \"next stage's items\" are ever emitted at runtime. The linear chaining happens once at submit time in plan() via depends_on synthesis, not via per-stage runtime emission.",
++    "evidence": "packages/agora-orchestrator/src/patterns/pipeline.ts:19-27 `onTaskDone` returns null unless `red` is true; pipeline.ts:11-18 `plan` only chains depends_on at submit."
++  },
++  {
++    "claim": "\"The pattern object is validated at startup, not at submit time.\"",
++    "reality": "The orchestrator constructor performs no pattern validation — only `ensureQueue(name, concurrency)`. Pattern config validation (e.g. `assertMapReduceConfig`) runs inside `pattern.plan(run)` which is called by submitRun on each submission.",
++    "evidence": "packages/agora-orchestrator/src/orchestrator.ts:53-71 constructor does not call plan; orchestrator.ts:110-111 `const pat = this.patterns[run.queue]; const planned = pat ? pat.plan(run) : run;`; patterns/map-reduce.ts:41-50 `plan` calls `assertMapReduceConfig`."
++  },
++  {
++    "claim": "extendRun \"Records a `run.extended` audit event for each spawned item, naming the cause item ... The event carries the full item spec, so the audit bundle is self-contained.\"",
++    "reality": "extendRun appends ONE `run.extended` audit entry per call (i.e. per spawn batch / cause), not one per spawned item. The entry shape is `{ kind: 'run.extended', runId, itemId: <cause>, actor, at }` — there is no \"full item spec\" carried in the audit entry.",
++    "evidence": "packages/agora-orchestrator/src/orchestrator.ts:157-163 `this.auditLog?.append({ kind: 'run.extended', runId, ...(causeItemId ? { itemId: causeItemId } : {}), actor, at: new Date().toISOString() });` — single append per extendRun call, no item-spec payload."
++  },
++  {
++    "claim": "On respawn, \"the new gate item `depends_on` the new fix items, and the new fix items `depends_on` the original (failed) gate.\"",
++    "reality": "The fix item's depends_on is `[config.subject]` — the SUBJECT (the upstream item whose product is being gated), not the failed gate. The substitution map S maps `subject → fixId`, so the gate copy's remapped depends_on points to the fix, but no spawned item depends on the original failed gate.",
++    "evidence": "packages/agora-orchestrator/src/patterns/respawn.ts:190-200 `fixItem: { depends_on: [config.subject], ... }`; respawn.ts:73-78 S has `gate.id → gateCopyId` and skipped→`base~next`, plus respawn.ts:175 `S.set(config.subject, fixId)` — original gate is never a depends_on target of the new fix."
++  },
++  {
++    "claim": "\"Because those `depends_on` edges point *backward* at already-terminal items, the new items are immediately `ready` after `extendRun` inserts them.\"",
++    "reality": "Only the fix item is immediately ready (it depends on the subject, which is already done). The gate copy depends on the fix (via S subject→fix substitution), and skipped-descendant copies depend on the gate copy / other new items. All these depend on freshly-spawned PENDING siblings, so they are not immediately ready.",
++    "evidence": "packages/agora-orchestrator/src/patterns/respawn.ts:203-208 gate copy `depends_on` is `remapEdges(gate.depends_on, gate.needs, S)` — original `gate.depends_on` includes the subject, S maps subject→fixId, so gate copy depends on the new (pending) fix item."
++  },
++  {
++    "claim": "Forward-arc invariant: \"every id in every spawned item's `depends_on` must be present in the run's item set as it existed at time *t* (before the spawn is applied) ... a spawn that references a not-yet-existing item id is rejected\" and \"New items can only depend on older items.\"",
++    "reality": "extendRun validates the MERGED graph (existing items ∪ spawned items together) with validateRun, so intra-batch dependencies are allowed and routinely produced. The respawn lineage spawns a fix plus a gate copy in the same batch, where the gate copy depends on the just-spawned fix.",
++    "evidence": "packages/agora-orchestrator/src/orchestrator.ts:148-153 `merged: Run = { id, queue, items: [...existing.map(toLogicalItem), ...normalized] }; const errors = validateRun(merged, this.packs);` — validation is over merged graph including new items; respawn.ts:203-208 gate copy depends on same-batch fix."
++  },
++  {
++    "claim": "\"The pipeline pattern sees a `failed` gate with `gateRetries < maxGateRetries`\"",
++    "reality": "Neither `gateRetries` nor `maxGateRetries` exists in the source. The bound is `maxFixAttempts` (default 1, not 2), and the check is against the cause item's attempt parsed from its id (e.g. 'review~2' = attempt 2): `if (attempt > maxFixAttempts) return [];`.",
++    "evidence": "packages/agora-orchestrator/src/contracts/pattern.ts:39 `maxFixAttempts?: number; // default 1`; patterns/respawn.ts:154-156 `const { base, attempt } = parseAttempt(gate.id); const maxFixAttempts = config.maxFixAttempts ?? 1; if (attempt > maxFixAttempts) return [];`."
++  },
++  {
++    "claim": "Submitting to a pattern-bound queue requires items the pattern expects as anchors, e.g. \"a `split` item for `map-reduce`, or a stage-gate item for `pipeline`\"",
++    "reality": "Map-reduce has no required `split` id — the splitter is any item whose `inputs.mapReduce` is set. Pipeline has no \"stage-gate item\" concept; a gate is any item carrying `inputs.gate` config, and pipeline.plan() doesn't require one at all (it just chains by submission order).",
++    "evidence": "packages/agora-orchestrator/src/patterns/map-reduce.ts:42 splitter identified by `inputs['mapReduce'] !== undefined` (no id constraint); patterns/pipeline.ts:11-18,19-27 plan chains by index, onTaskDone keys on `inputs['gate']` (no required item)."
++  },
++  {
++    "claim": "Patterns are configured in `agora.config.ts` using `defineConfig({ orchestrator: { queues: [ { name: 'default', concurrency: 4 }, ... ] } })`",
++    "reality": "No `agora.config.ts`, no `defineConfig`, and no array-with-`name` queue shape exists in the seeded sources. AgoraOrchestrator accepts `queues: Record<string, QueueConfig>` keyed by queue name, with `pattern?: Pattern` (a Pattern object), at construction.",
++    "evidence": "packages/agora-orchestrator/src/orchestrator.ts:19-29 `AgoraOrchestratorOptions { ... queues: Record<string, QueueConfig> ... }`; orchestrator.ts:62-63 `for (const [name, q] of Object.entries(opts.queues)) this.store.ensureQueue(name, q.concurrency);`."
++  }
++]

@@ -104,3 +104,15 @@ A failed ITEM does not by itself fail the harness (Tier-0 posture: patches are r
 | `serve` on an always-on host | Its own friction (manual kickoff still cheap) |
 | GHCR package visibility | Ops, GitHub UI |
 | Generalizing failed-like gating beyond `onRed: 'spawn-fix'` (e.g. verify-gates on non-pattern items) | A consumer that wants red-verify to block without a fix loop |
+| **Multi-round respawn chaining** (observed live, attempt 2): generation N's substitution never advances `subject` to fix-(N-1) and leaves the gate copy's fix-(N-1) edges unmapped — fix-2 reworked the ORIGINAL patch while gate~3 re-judged fix-1's page concurrently. `maxFixAttempts: 1` is the only value the landed semantics support. | First run genuinely needing >1 fix round (a `respawnLineage` design pass: advance subject per generation + remap prior-fix edges) |
+
+## 10. Live-run calibration record (2026-06-07 — four attempts, $13.50 total)
+
+| Attempt | Config delta | Outcome |
+|---|---|---|
+| 1 ($2.91) | As specced (strict bar, sonnet source-blind fixer, maxFixAttempts 1) | Mechanics ALL green (same-tick skip, findings-by-provenance, bounded termination, closure over grown graph, evidence table). Re-gate red: 12 → 5 findings — converging but not in one round. |
+| 2 (~$3.5, timeout) | + source-seeded fixer, maxFixAttempts 2 | Surfaced the multi-round chaining flaw (§8 row above): fix-2/gate~3 ran concurrently on stale lineage. |
+| 3 ($3.64) | opus fixer, maxFixAttempts back to 1 | Re-gate still red: 2 suggestion-grade findings — the strict bar is asymptotically unsatisfiable for an opus reviewer on fresh prose. |
+| 4 ($3.65) | **Material-accuracy bar** (findings = claims that would mislead about behavior; no wording/incompleteness nitpicks) | **ALL FOUR ROWS GREEN.** Full red→fix→green→remap arc sealed; `announce~2.inputRefs.work ≡ fix.resultRef`; closure over 5 input refs. |
+
+R6's strict bar is hereby amended to the material-accuracy bar as the operational calibration (the strict bar guarantees red but makes green structurally unreachable in the single supported round). The work product (the execution-patterns page + CHANGELOG entry) merged per the §6 protocol.

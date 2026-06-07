@@ -1,0 +1,33 @@
+diff --git a/outputs/findings b/outputs/findings
+new file mode 100644
+index 0000000..aaf62de
+--- /dev/null
++++ b/outputs/findings
+@@ -0,0 +1,27 @@
++[
++  {
++    "claim": "When a gate item reaches `failed` and the pipeline pattern's retry budget is not yet exhausted, the pattern's `onTaskDone` call returns a respawn directive.",
++    "reality": "The page restricts the respawn trigger to gates that 'reach failed', but the code also respawns on done-but-red gates (status === 'done' with verify.passed === false). Both states are treated as 'red' by the pipeline pattern.",
++    "evidence": "packages/agora-orchestrator/src/patterns/pipeline.ts:23 — `const red = item.status === 'failed' || (item.status === 'done' && item.verify?.passed === false);` and respawn.ts:150-151 explicitly allow `isDoneButRed` as eligible."
++  },
++  {
++    "claim": "A fix item (`${base}-fix-${attempt}`, e.g. `review-gate-fix-1`) that `depends_on` the original subject item. The gate's `reason` string is merged into the fix item's `inputs` as `gateReason`.",
++    "reality": "The page presents `gateReason` merging as a general property of the fix item, but the code only merges `gateReason` when the gate status is `failed` AND `gate.reason` is defined. In the done-but-red case, the fix item instead binds `needs.findings` from the gate's `outputRefs.findings` (and no `gateReason` is added to inputs).",
++    "evidence": "packages/agora-orchestrator/src/patterns/respawn.ts:184-188 — `if (isDoneButRed && gate.outputRefs?.['findings']) { fixNeeds['findings'] = ... } else if (gate.status === 'failed' && gate.reason !== undefined) { fixInputs['gateReason'] = gate.reason; }`"
++  },
++  {
++    "claim": "Copies of any skipped downstream items (`${descendant}~${next}`), with `depends_on` edges similarly remapped.",
++    "reality": "The page's id formula `${descendant}~${next}` is incorrect when the descendant id already carries a `~N` attempt suffix. The code first strips any existing `~N` from the descendant id via `parseAttempt(d.id).base` before appending `~${next}` — so a descendant `package~2` becomes `package~3`, not `package~2~3`.",
++    "evidence": "packages/agora-orchestrator/src/patterns/respawn.ts:75-78 — `for (const d of skippedDescendants) { const { base } = parseAttempt(d.id); S.set(d.id, \\`${base}~${next}\\`); }`, where parseAttempt strips a trailing `~<digits>` (respawn.ts:5-8)."
++  },
++  {
++    "claim": "The gate/respawn circle-back: when a gate item reaches `failed`... the pattern's `onTaskDone` call returns a respawn directive. The stage to retry from is the `subject` declared in the gate's `inputs.gate` config.",
++    "reality": "The page omits the `onRed: 'spawn-fix'` config requirement. The pipeline pattern only returns a respawn directive when `inputs.gate.onRed === 'spawn-fix'`. A gate with the default `onRed: 'advance'` (red is informational) does not trigger any respawn even when failed.",
++    "evidence": "packages/agora-orchestrator/src/patterns/pipeline.ts:21-22 — `const gate = item.inputs['gate']; if (!isGateConfig(gate) || gate.onRed !== 'spawn-fix') return null;`"
++  },
++  {
++    "claim": "When a gate item reaches `failed` and the pipeline pattern's retry budget is not yet exhausted...",
++    "reality": "The retry budget is not the pipeline pattern's — it is per-gate-item config (`maxFixAttempts` on the gate's `inputs.gate`, defaulting to 1). The pattern object carries no retry budget of its own; each gate carries and is checked against its own bound.",
++    "evidence": "packages/agora-orchestrator/src/patterns/respawn.ts:155-156 — `const maxFixAttempts = config.maxFixAttempts ?? 1; if (attempt > maxFixAttempts) return [];` where `config` is the `GateConfig` read from the gate's `inputs.gate`."
++  }
++]

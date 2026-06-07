@@ -58,6 +58,8 @@ export default defineConfig({
             { slug: 'explanation/project-status-roadmap' },
             { slug: 'explanation/architecture-overview' },
             { slug: 'explanation/how-offload-runs' },
+            { slug: 'explanation/typed-product-handoff' },
+            { slug: 'explanation/execution-patterns' },
             { slug: 'explanation/sandboxing-ai-agents' },
             { slug: 'explanation/audit-guarantee-tiers' },
             { slug: 'explanation/privilege-boundary' },

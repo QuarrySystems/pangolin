@@ -1,0 +1,38 @@
+diff --git a/outputs/findings b/outputs/findings
+new file mode 100644
+index 0000000..688b335
+--- /dev/null
++++ b/outputs/findings
+@@ -0,0 +1,32 @@
++[
++  {
++    "claim": "After every tick() call, the orchestrator runs the pattern phase as one call to `pattern.deriveSpawns(run, terminalItems)` which returns a list of spawn directives.",
++    "reality": "There is no `deriveSpawns` method. The actual Pattern contract is `onTaskDone(item: ItemState, ctx: PatternContext): SpawnDirective | null`, called once per terminal item (not once per run with a batch), returning a single `SpawnDirective | null`. `PatternContext` carries `runItems` (all of the run's items de-namespaced), not just newly terminal ones.",
++    "evidence": "packages/agora-orchestrator/src/contracts/pattern.ts:14-24 (`onTaskDone(item, ctx)` returns `SpawnDirective | null`); packages/agora-orchestrator/src/patterns/scan.ts:8-16 (`pattern.onTaskDone(it, { runItems })` looped per terminal item)"
++  },
++  {
++    "claim": "Patterns are configured in `agora.config.ts` via `defineConfig({ queues: [{ name, concurrency, pattern: { type: 'map-reduce', splitterExecutor, mapExecutor, reduceExecutor } }] })` (and analogously for pipeline with `stages` + `gateExecutor`).",
++    "reality": "No such `defineConfig` API or string-keyed `pattern.type` config shape exists. The binding is `QueueConfig = { concurrency: number; pattern?: Pattern }` where `pattern` is a `Pattern` object (e.g. `mapReduce`, `pipeline`, `staticDag`) passed programmatically via `AgoraOrchestratorOptions.queues`. There are no `splitterExecutor`/`mapExecutor`/`reduceExecutor`/`stages`/`gateExecutor` queue-level config keys.",
++    "evidence": "packages/agora-orchestrator/src/orchestrator.ts:18 (`export interface QueueConfig { concurrency: number; pattern?: Pattern; }`); no occurrence of `defineConfig` or `agora.config.ts` in source"
++  },
++  {
++    "claim": "The pattern object is validated at `serve` startup — a misconfigured pattern is a fatal startup error, not a per-run runtime failure. The orchestrator holds a `PatternRegistry` keyed by queue name.",
++    "reality": "There is no startup pattern-config validation and no `PatternRegistry`. The orchestrator constructor only ensures queue rows exist; pattern config (e.g. `inputs.mapReduce` shape) is validated when a run is submitted, inside `pattern.plan(run)` (which `submitRun` calls before `validateRun`). The orchestrator stores patterns in a plain `Record<string, Pattern | undefined>` field named `patterns`.",
++    "evidence": "packages/agora-orchestrator/src/orchestrator.ts:52 (`private readonly patterns: Record<string, Pattern | undefined>`); orchestrator.ts:110-116 (`pat.plan(run)` runs inside `submitRun`); packages/agora-orchestrator/src/patterns/map-reduce.ts:41-50 (`assertMapReduceConfig` is invoked from `plan`, i.e. at submit time)"
++  },
++  {
++    "claim": "The `run.extended` audit entry has fields `type`, `runId`, `queueName`, `actor`, `causeItemId`, `causeResultRef`, and a `spawnedItems` array listing each appended item's `{id, executor, depends_on}`.",
++    "reality": "The actual audit entry written by `extendRun` is `{ kind: 'run.extended', runId, itemId: <causeItemId>, actor, at }`. The field is `kind` (not `type`); the cause item is named `itemId` (not `causeItemId`); there is no `queueName`, no `causeResultRef`, and no `spawnedItems` payload at all.",
++    "evidence": "packages/agora-orchestrator/src/orchestrator.ts:157-163 (`this.auditLog?.append({ kind: 'run.extended', runId, ...(causeItemId ? { itemId: causeItemId } : {}), actor, at: new Date().toISOString() })`)"
++  },
++  {
++    "claim": "For each spawned item, `extendRun` writes a `run.extended` audit entry that records the spawned item's id, the cause item, the actor, and the directive's content-addressed ref.",
++    "reality": "`extendRun` writes one `run.extended` audit entry per call (per spawn batch), not one per spawned item. The entry contains no per-item ids, no list of spawned items, and no content-addressed directive ref.",
++    "evidence": "packages/agora-orchestrator/src/orchestrator.ts:156-163 (single `auditLog.append` per `extendRun` invocation, with only `runId`/`itemId`/`actor`/`at`)"
++  },
++  {
++    "claim": "Spawn ids are deterministic because the pattern derives them from the cause item id and the queue name.",
++    "reality": "Spawn ids never incorporate the queue name. `map-reduce` derives `map-<outputKey>` from the splitter's `outputRefs` keys and uses the literal id `reduce`. The pipeline's `respawnLineage` derives ids from the gate id and attempt counter (`${base}-fix-${attempt}`, `${base}~${attempt+1}`).",
++    "evidence": "packages/agora-orchestrator/src/patterns/map-reduce.ts:65-67,91-92 (ids `map-${k}` and `reduce`); packages/agora-orchestrator/src/patterns/respawn.ts:159-161 (`fixId = `${base}-fix-${attempt}``, `gateCopyId = `${base}~${next}``)"
++  }
++]

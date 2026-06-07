@@ -1,0 +1,18 @@
+diff --git a/outputs/findings b/outputs/findings
+new file mode 100644
+index 0000000..dff8dc3
+--- /dev/null
++++ b/outputs/findings
+@@ -0,0 +1,12 @@
++[
++  {
++    "claim": "map-reduce.plan accepts a run with zero splitters (and rejects only if more than one item carries inputs.mapReduce).",
++    "reality": "map-reduce.plan rejects in TWO cases, not one: (a) when more than one item carries inputs.mapReduce, and (b) when the single splitter's inputs.mapReduce is malformed. The 'only if' qualifier in the page is provably false — assertMapReduceConfig throws descriptive Errors for a non-object config, a missing/non-string map.executor, missing/non-object map.inputs, and the equivalents on reduce. The page even acknowledges this earlier ('map-reduce.plan calls assertMapReduceConfig … and throws a descriptive Error'), so the two claims internally contradict.",
++    "evidence": "packages/agora-orchestrator/src/patterns/map-reduce.ts:41-50 — `if (splitters.length === 1) { assertMapReduceConfig(splitters[0]!.inputs['mapReduce']); }`; assertMapReduceConfig at lines 7-36 throws on malformed config (e.g. `throw new Error('map-reduce: mapReduce.map.executor is required and must be a string')`)."
++  },
++  {
++    "claim": "The substitution map for the gate copy is `S = { subject → fixId, gate.id → gateCopyId, ...skippedDescendantId → ${base}~${next} }`, where `base` was bound two bullets earlier as the base parsed from the failed gate's id (e.g. `review` for a gate `review~2`).",
++    "reality": "In the source, each skipped descendant's S entry uses ITS OWN base parsed from the descendant's id, not the failed gate's base. With the page's binding of `base` carried over from the fix-item bullet, the formula `${base}~${next}` would map every skipped descendant `package` to `review~2` (the gate's base), but the implementation maps `package` to `package~2`. The page's formula should read `${parseAttempt(d).base}~${next}` to be literally correct; as written it conflates the gate's base with each descendant's base.",
++    "evidence": "packages/agora-orchestrator/src/patterns/respawn.ts:75-78 — `for (const d of skippedDescendants) { const { base } = parseAttempt(d.id); S.set(d.id, \\`${base}~${next}\\`); }` (base is rebound per-descendant via parseAttempt(d.id), not taken from the gate). The dogfood example confirms the actual mapping: examples/pattern-dogfood/README.md:30 shows `package~2` (not `review~2`) for the skipped `package` descendant of gate `review`."
++  }
++]

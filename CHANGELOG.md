@@ -100,6 +100,8 @@ workspace. See [RELEASING.md](./RELEASING.md) for how a release is cut.
   red-path remap (dependents skipped, fix spawned with gate outputs remapped), and live per-dispatch model/cost evidence (first table sealing manifest-requested + 
   worker-captured models and costUsd). The harness is ready; the live run has not yet occurred.
 
+- **Execution patterns** — new explanation page (`docs-site/src/content/docs/explanation/execution-patterns.md`) documenting how queue-level execution patterns (`staticDag`, `pipeline`, `mapReduce`) layer above the tick engine: the Pattern contract, the `extendRun` seam, `run.extended` audit entries, the gate/respawn circle-back, and the forward-arc-never-rewind invariant; see the design spec at docs/superpowers/specs/2026-06-06-dogfood-run3-gated-circleback-design.md.
+
 ## [0.1.0] - 2026-06-01
 
 First public, **source-available** release (BSL 1.1). All thirteen packages

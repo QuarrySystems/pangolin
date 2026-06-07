@@ -1,0 +1,103 @@
+diff --git a/outputs/findings b/outputs/findings
+new file mode 100644
+index 0000000..bc82b3b
+--- /dev/null
++++ b/outputs/findings
+@@ -0,0 +1,97 @@
++[
++  {
++    "claim": "For each run, call `pattern.inspect(run)` — a pure function that sees the current item statuses and their `outputs`.",
++    "reality": "There is no `inspect` method on the Pattern contract. The contract defines `onTaskDone(item, ctx)`, which is called per terminal item (not per run), receives a single ItemState plus a PatternContext containing `runItems`, and returns `SpawnDirective | null`.",
++    "evidence": "packages/agora-orchestrator/src/contracts/pattern.ts:14-24 — `export interface Pattern { id: string; plan(run: Run): Run; onTaskDone(item: ItemState, ctx: PatternContext): SpawnDirective | null; }`"
++  },
++  {
++    "claim": "If `inspect` returns a non-empty spawn directive, apply it through the audited `extendRun` seam.",
++    "reality": "The method called is `onTaskDone`, not `inspect`; the orchestrator iterates per-terminal-item and calls `pattern.onTaskDone(it, { runItems })` via `collectSpawns`.",
++    "evidence": "packages/agora-orchestrator/src/patterns/scan.ts:12 — `const d = pattern.onTaskDone(it, { runItems });`"
++  },
++  {
++    "claim": "Because patterns are pure and keep no state of their own, the same `inspect` call is safe to repeat after a crash.",
++    "reality": "There is no `inspect` method anywhere in the codebase; the replay-safe per-terminal hook is `onTaskDone`.",
++    "evidence": "packages/agora-orchestrator/src/contracts/pattern.ts:21-23 — `onTaskDone` is the only hook besides `plan`."
++  },
++  {
++    "claim": "Queue config example: `pattern: { type: 'map-reduce' }` (and similarly `{ type: 'pipeline' }`).",
++    "reality": "`QueueConfig.pattern` is typed as a `Pattern` object (with `id`, `plan`, `onTaskDone`), not a `{ type: '...' }` discriminator. The built-in patterns are exported as Pattern objects (`staticDag`, `pipeline`, `mapReduce`); the user is expected to pass one of those objects as `pattern`, not a `{ type }` config sugar.",
++    "evidence": "packages/agora-orchestrator/src/orchestrator.ts:18 — `export interface QueueConfig { concurrency: number; pattern?: Pattern; }`; and e.g. packages/agora-orchestrator/src/patterns/map-reduce.ts:38 — `export const mapReduce: Pattern = { id: 'map-reduce', ... }`."
++  },
++  {
++    "claim": "`map-reduce` accepts `mapExecutor` and `reduceExecutor` to name the capability to dispatch for each role (via the queue config's `options` object).",
++    "reality": "There is no queue-level `options` object for patterns, and there are no fields named `mapExecutor` / `reduceExecutor`. The map-reduce config lives on the splitter item under `inputs.mapReduce` and has shape `{ map: { executor, inputs, ... }, reduce: { executor, inputs, ... } }` — executor is named `map.executor` / `reduce.executor`.",
++    "evidence": "packages/agora-orchestrator/src/contracts/pattern.ts:43-46 — `MapReduceConfig { map: SpawnTemplate & { needsKey?; outputPath? }; reduce: SpawnTemplate & { keyPrefix? } }`; packages/agora-orchestrator/src/patterns/map-reduce.ts:55-58 reads `splitter.inputs['mapReduce']` and `cfg.map.executor` / `cfg.reduce.executor`."
++  },
++  {
++    "claim": "A failed gate signals which stage to circle back to via an `outputs/retry-from` sentinel (e.g. `outputs/retry-from: lint`).",
++    "reality": "There is no `retry-from` sentinel in source. The respawn lineage is derived structurally: lineage = gate + all transitively skipped (or cancelled) descendants found by walking `depends_on` edges in the current run. The starting stage isn't named by the gate — it's the `subject` declared in the gate's `inputs.gate` config.",
++    "evidence": "packages/agora-orchestrator/src/patterns/respawn.ts:37-59 (lineage built by BFS over `depends_on` of skipped items) and respawn.ts:175 — `S.set(config.subject, fixId)`; gate config in contracts/pattern.ts:35-40 has no `retry-from` field."
++  },
++  {
++    "claim": "The fix prompt is adjusted via an `outputs/retry-hint` sentinel.",
++    "reality": "There is no `retry-hint` mechanism. In the failed-gate case, the gate's `reason` string is merged into the fix item's plain `inputs` as `gateReason`; in the done-but-red case, the gate's `outputRefs.findings` is bound as a `needs.findings` ref. Neither involves an `outputs/retry-hint` sentinel.",
++    "evidence": "packages/agora-orchestrator/src/patterns/respawn.ts:184-188 — `if (isDoneButRed && gate.outputRefs?.['findings']) { fixNeeds['findings'] = ...; } else if (gate.status === 'failed' && gate.reason !== undefined) { fixInputs['gateReason'] = gate.reason; }`."
++  },
++  {
++    "claim": "The pattern spawns a new `lint-2` item (and a new `review-gate-2`).",
++    "reality": "Spawned gate copies use the `~` suffix (`${base}~${next}`), not `-2`. Respawned skipped descendants follow the same `~N` convention. Also, in the page's example `lint` is an upstream of the failed `review-gate`, not a skipped descendant, so it would not be respawned at all — only the gate and downstream skipped items are copied. The spawn set is `[fix, gateCopy, ...skippedCopies]`; the fix id is `${base}-fix-${attempt}` (e.g. `review-gate-fix-1`).",
++    "evidence": "packages/agora-orchestrator/src/patterns/respawn.ts:160-161 — `const fixId = \\`${base}-fix-${attempt}\\`; const gateCopyId = \\`${base}~${next}\\`;`; respawn.ts:75-78 builds skipped-descendant copy ids as `${base}~${next}`; respawn.ts:221 returns `[fixItem, gateCopy, ...skippedCopies]`."
++  },
++  {
++    "claim": "run.extended audit entry has fields `type`, `runId`, `actor`, `causeItemId`, `spawnedItemIds`, `ts`.",
++    "reality": "The audit entry uses `kind` (not `type`), `itemId` (not `causeItemId`), and `at` (not `ts`). There is no `spawnedItemIds` field at all — only `{ kind: 'run.extended', runId, itemId?, actor, at }` is appended.",
++    "evidence": "packages/agora-orchestrator/src/orchestrator.ts:158-162 — `this.auditLog?.append({ kind: 'run.extended', runId, ...(causeItemId ? { itemId: causeItemId } : {}), actor, at: new Date().toISOString(), });`"
++  },
++  {
++    "claim": "When `extendRun` succeeds it writes a `run.extended` audit entry before the engine sees the new items.",
++    "reality": "Order is reversed: `store.saveRun(...)` persists the items first, then the audit append happens. The audit append is also wrapped in a try/catch so a failing append is silently swallowed (best-effort).",
++    "evidence": "packages/agora-orchestrator/src/orchestrator.ts:154-163 — saveRun on line 155, audit append in try/catch on lines 157-163."
++  },
++  {
++    "claim": "The audit entry is written unconditionally before any engine tick sees the new items.",
++    "reality": "The audit append is best-effort, wrapped in try/catch with the comment `/* best-effort */`. It is not unconditional — a failure during append is silently swallowed while the items remain in the store.",
++    "evidence": "packages/agora-orchestrator/src/orchestrator.ts:157-163 — `try { this.auditLog?.append({...}); } catch { /* best-effort */ }`"
++  },
++  {
++    "claim": "Every item in the final graph either appears in the original `run.submitted` entry or in exactly one `run.extended` entry.",
++    "reality": "Neither audit entry enumerates item ids. `run.submitted` is appended as `{ kind: 'run.submitted', runId, actor, at }` with no item list; `run.extended` only records the cause `itemId`, not a `spawnedItemIds` list. Items themselves are not literally `in` either audit entry.",
++    "evidence": "packages/agora-orchestrator/src/orchestrator.ts:126 — `this.auditLog?.append({ kind: 'run.submitted', runId: run.id, actor, at: new Date().toISOString() })`; orchestrator.ts:158-162 — `run.extended` payload contains no spawn list."
++  },
++  {
++    "claim": "Item ids must be unique across the merged graph. ... a re-inspect after a crash re-derives the same ids, `extendRun` finds them already present, and the validation succeeds with a no-op.",
++    "reality": "Validation is never reached when all spawn ids are already present: `extendRun` filters out already-namespaced ids first and returns `[]` immediately if nothing fresh remains — there is no merged-graph validation pass in the no-op replay path.",
++    "evidence": "packages/agora-orchestrator/src/orchestrator.ts:137-139 — `const fresh = items.filter((it) => !have.has(ns(runId, it.id))); if (fresh.length === 0) return [];` (occurs before the `validateRun` call on line 152)."
++  },
++  {
++    "claim": "If the orchestrator crashes between writing a `run.extended` entry and ticking the engine, the next startup's pattern phase re-inspects ... calls `extendRun` again, and the transaction is a no-op — the ids already exist.",
++    "reality": "When ids already exist there is no transaction at all — `extendRun` short-circuits and returns `[]` before opening any DB write. Also, the audit append happens *after* `saveRun`, so the described `run.extended`-then-crash window is opposite the actual ordering.",
++    "evidence": "packages/agora-orchestrator/src/orchestrator.ts:137-139 (early `return []` on full id-skip); orchestrator.ts:155-163 (saveRun before audit append)."
++  },
++  {
++    "claim": "The built-in `map-reduce` pattern derives mapper ids as `map-${hashOfFileKey}` so they are stable across re-inspections.",
++    "reality": "Mapper ids are `map-${k}` where `k` is the raw sorted output key from `splitter.outputRefs` — no hashing.",
++    "evidence": "packages/agora-orchestrator/src/patterns/map-reduce.ts:65-66 — `items: keys.map((k) => ({ id: \\`map-${k}\\`, ... }))`; map-reduce.ts:59 — `const keys = sortedKeys(splitter.outputRefs ?? {});`"
++  },
++  {
++    "claim": "`static-dag` ... This is the default; it opts into explicit pattern machinery without enabling dynamic spawning.",
++    "reality": "An unbound queue is the actual default — `applyPatternPhase` short-circuits with `if (!pattern) return;`. No implicit `static-dag` Pattern object is installed for queues without a `pattern` field. This also contradicts the page's own earlier statement that 'A queue without a pattern entry uses the engine's default behavior'.",
++    "evidence": "packages/agora-orchestrator/src/orchestrator.ts:171-172 — `const pattern = this.patterns[q]; if (!pattern) return;`; staticDag defined separately in patterns/static-dag.ts but never auto-bound."
++  },
++  {
++    "claim": "Pattern config is declared per-queue in `agora.config.ts`.",
++    "reality": "No `agora.config.ts` is referenced in the seeded source. The orchestrator accepts a `queues` record (typed `Record<string, QueueConfig>`) directly through `AgoraOrchestratorOptions`; the page's filename is unsupported by the seeded sources.",
++    "evidence": "packages/agora-orchestrator/src/orchestrator.ts:19-23 — `AgoraOrchestratorOptions { ... queues: Record<string, QueueConfig>; ... }`. No `agora.config.ts` is imported or referenced in the seeded files."
++  },
++  {
++    "claim": "A respawn directive's spawned items have `depends_on` pointing at the *original* upstream items (not the failed gate).",
++    "reality": "The new gate copy's `depends_on` is remapped through the substitution map `S = { subject → fixId, gate → gateCopyId, each skipped d → d~next }`. The original upstream `subject` reference is rewritten to point at the new *fix* item, not at the original upstream — so spawned gate/skipped copies depend on the freshly spawned fix, which in turn depends on the original subject.",
++    "evidence": "packages/agora-orchestrator/src/patterns/respawn.ts:174-208 — `S.set(config.subject, fixId); ... const gateEdges = remapEdges(gate.depends_on, gate.needs, S);` and respawn.ts:193-194 — `fixItem: { ... depends_on: [config.subject], ... }`."
++  },
++  {
++    "claim": "The map-reduce splitter `emits a variable-length list of keys into `outputs/`, and the pattern spawns one mapper item per key, then a single reducer after all mappers finish.`",
++    "reality": "The pattern only spawns the reducer when ALL mappers are `done` (not merely terminal); if any mapper failed/skipped/cancelled, no reducer is spawned. The page says 'after all mappers finish', which is true for the success path but elides the all-`done` requirement.",
++    "evidence": "packages/agora-orchestrator/src/patterns/map-reduce.ts:87 — `if (!keys.every((k) => byId.get(\\`map-${k}\\`)?.status === 'done')) return null;`"
++  }
++]

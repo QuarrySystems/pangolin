@@ -1,0 +1,63 @@
+diff --git a/outputs/findings b/outputs/findings
+new file mode 100644
+index 0000000..386bb4d
+--- /dev/null
++++ b/outputs/findings
+@@ -0,0 +1,57 @@
++[
++  {
++    "claim": "The orchestrator calls pattern.onTerminal(terminalItems, currentGraph) after each engine tick (intro at lines 25-27, repeated at 156-157).",
++    "reality": "The pattern hook is named onTaskDone, takes a single ItemState plus a PatternContext (whose only field is runItems), and returns SpawnDirective | null. It is called once per terminal item by collectSpawns, not once with the whole set.",
++    "evidence": "packages/agora-orchestrator/src/contracts/pattern.ts:23 — 'onTaskDone(item: ItemState, ctx: PatternContext): SpawnDirective | null'; pattern.ts:8-12 — PatternContext only carries runItems; packages/agora-orchestrator/src/patterns/scan.ts:12 — 'const d = pattern.onTaskDone(it, { runItems });'"
++  },
++  {
++    "claim": "Pipeline gate config uses maxRepairPasses (default 1) — both in the example config (line 62) and the prose at line 122.",
++    "reality": "The actual gate-policy field is maxFixAttempts (default 1). No 'maxRepairPasses' identifier exists anywhere in the code or spec.",
++    "evidence": "packages/agora-orchestrator/src/contracts/pattern.ts:39 — 'maxFixAttempts?: number;      // default 1'; packages/agora-orchestrator/src/patterns/respawn.ts:155 — 'const maxFixAttempts = config.maxFixAttempts ?? 1;'"
++  },
++  {
++    "claim": "map-reduce queue config takes splitterItemId and reduceItemId options (lines 64-65), and 'map-reduce without a splitterItemId' is an example of a validatable startup error (line 78).",
++    "reality": "Neither key exists in the contract or pattern code. The splitter is identified at runtime by the presence of inputs.mapReduce on an item, and the reduce item's id is hard-coded to the string 'reduce'.",
++    "evidence": "packages/agora-orchestrator/src/patterns/map-reduce.ts:42 — 'const splitters = run.items.filter((i) => i.inputs[\\'mapReduce\\'] !== undefined);'; map-reduce.ts:92 — 'id: \\'reduce\\','; contracts/pattern.ts:43-46 defines MapReduceConfig with only { map, reduce } templates"
++  },
++  {
++    "claim": "Pattern options are validated at serve startup; an unknown type or an inconsistent option set is a hard startup error, not a runtime one (lines 83-85).",
++    "reality": "No pattern-option validation runs in the AgoraOrchestrator constructor. Validation of pattern-specific config (e.g. assertMapReduceConfig) happens inside pattern.plan(run) at submitRun time. The orchestrator constructor only checks that the default queue exists and that an AuditStore is present when auditLog is configured.",
++    "evidence": "packages/agora-orchestrator/src/orchestrator.ts:53-71 — constructor body (no pattern validation); orchestrator.ts:108-111 — 'const pat = this.patterns[run.queue]; const planned = pat ? pat.plan(run) : run;' runs inside submitRun; packages/agora-orchestrator/src/patterns/map-reduce.ts:41-50 — assertMapReduceConfig is only invoked from plan()"
++  },
++  {
++    "claim": "The repair item's depends_on points backward at the failed gate (line 100-101).",
++    "reality": "The fix item's depends_on is [config.subject] — i.e. the upstream subject item, not the failed gate. The gate copy is what depends on the fix.",
++    "evidence": "packages/agora-orchestrator/src/patterns/respawn.ts:190-200 — 'const fixItem: WorkItem = { id: fixId, ..., depends_on: [config.subject], ... }'; respawn.ts:73-78 — S maps gate.id -> gateCopyId and config.subject -> fixId (added at line 175)"
++  },
++  {
++    "claim": "After lint-gate fails the pattern emits two new items (line 111: 'pattern emits two new items: repair-lint, lint-gate-retry'), with downstream wired forward to the original next stage. The original downstream stage's depends_on is amended to accept either the original gate or the retry gate as its predecessor (lines 102-104).",
++    "reality": "respawnLineage returns [fixItem, gateCopy, ...skippedDescendantCopies] — a fix item, a gate copy, and one copy of every skipped descendant. In the page's fetch→lint-gate→deploy example, deploy would be cascaded to skipped and a deploy~2 copy would be spawned. Existing items' depends_on are never mutated; copies of skipped descendants are spawned with their depends_on remapped via S.",
++    "evidence": "packages/agora-orchestrator/src/patterns/respawn.ts:221 — 'return [fixItem, gateCopy, ...skippedCopies];'; respawn.ts:211-219 — skippedCopies built from skippedDescendants with remapped edges; orchestrator.ts:155 — extendRun's saveRun only appends new items, never modifies existing rows"
++  },
++  {
++    "claim": "The reduce item is created by the pattern the tick after the splitter finishes (lines 40-41).",
++    "reality": "The reduce item is created only when all map-<key> items are done, not the tick after the splitter finishes. Phase 1 of onTaskDone spawns the maps when the cause is the splitter; Phase 2 spawns the reduce only when the cause is a map AND every map has reached 'done'.",
++    "evidence": "packages/agora-orchestrator/src/patterns/map-reduce.ts:82-87 — 'Phase 2 — cause is a map: when ALL maps are done and no reduce exists, spawn it.' and 'if (!keys.every((k) => byId.get(`map-${k}`)?.status === \\'done\\')) return null;'"
++  },
++  {
++    "claim": "extendRun writes a run.extended audit entry that names the actor (pattern:<queueName>), the cause item, and the ids of every newly added item (lines 138-140).",
++    "reality": "The run.extended entry written by extendRun carries only kind, runId, itemId (the cause), actor, and at. The ids of newly added items are returned from extendRun but are not part of the audit entry.",
++    "evidence": "packages/agora-orchestrator/src/orchestrator.ts:157-163 — 'this.auditLog?.append({ kind: \\'run.extended\\', runId, ...(causeItemId ? { itemId: causeItemId } : {}), actor, at: new Date().toISOString(), });' — no field listing the newly added ids"
++  },
++  {
++    "claim": "agora verify works by reading the audit log in sequence, applying submitRun entries and run.extended entries in order, and reconstructing the full graph as it existed at each point in time (lines 147-151).",
++    "reality": "Neither the design spec nor how-offload-runs.md describes verify reconstructing the graph from audit-log entries. The supported mechanism is that spawned items append to the same run and consume upstream products via the same needs machinery, so checkHandoffClosure already sees them — 'zero new verification code'. No log-replay graph reconstruction is described.",
++    "evidence": "docs/superpowers/specs/2026-06-05-agora-pattern-layer-design.md:258-260 — 'Provenance closure extends to spawned graphs by construction: spawned items append to the same run, consume upstream refs via the same needs ... checkHandoffClosure does not change by one line.'; docs-site/src/content/docs/explanation/how-offload-runs.md:184-187 — same posture ('zero new verification code')"
++  },
++  {
++    "claim": "Every edge in a spawned item's depends_on must point at an item that already exists in the graph (lines 170-171).",
++    "reality": "Spawned items routinely depend on OTHER newly-spawned items in the same extendRun batch. respawnLineage's gateCopy depends on the fix (also new) and skippedCopies depend on the gateCopy (also new). extendRun validates the merged graph (existing + new together) for acyclicity, not the stricter invariant the page asserts.",
++    "evidence": "packages/agora-orchestrator/src/patterns/respawn.ts:73-78,175,203-219 — S maps gate→gateCopyId and subject→fixId, then gateCopy.depends_on is remapped through S (a [subject] dep becomes [fixId], i.e. a dep on the freshly-spawned fix); orchestrator.ts:148-153 — validateRun is run over merged = existing ∪ normalized new items, not new-only"
++  },
++  {
++    "claim": "A queue with no pattern key defaults to static-dag (line 79).",
++    "reality": "There is no default-to-static-dag assignment. The orchestrator stores q.pattern verbatim — undefined when not configured — and the pattern phase early-returns on a falsy pattern. The static-dag pattern object exists but is never installed as a fallback.",
++    "evidence": "packages/agora-orchestrator/src/orchestrator.ts:65 — 'this.patterns = Object.fromEntries(Object.entries(opts.queues).map(([n, q]) => [n, q.pattern]));' (no default); orchestrator.ts:170-172 — 'const pattern = this.patterns[q]; if (!pattern) return;'"
++  }
++]

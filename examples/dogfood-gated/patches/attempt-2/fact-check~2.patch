@@ -1,0 +1,23 @@
+diff --git a/outputs/findings b/outputs/findings
+new file mode 100644
+index 0000000..75aa62a
+--- /dev/null
++++ b/outputs/findings
+@@ -0,0 +1,17 @@
++[
++  {
++    "claim": "Pattern-specific config (the `inputs.mapReduce` object on a splitter item, the `inputs.gate` object on a gate item) is validated inside `pat.plan(run)`, which runs during `submitRun` — before any item is written to the store. A malformed config therefore surfaces as a submission error, not a runtime one, leaving the store clean.",
++    "reality": "Only the map-reduce pattern validates its config in plan(). The pipeline pattern's plan() does NOT validate the `inputs.gate` config at all — it only auto-chains depends_on edges. A malformed gate config would therefore NOT surface as a submission error from pat.plan(); it would only be (partially) noticed at runtime by the `isGateConfig` type-guard check inside pipeline.onTaskDone.",
++    "evidence": "packages/agora-orchestrator/src/patterns/pipeline.ts lines 11–18: `plan: (run) => ({ ...run, items: run.items.map((it, i) => i > 0 && it.depends_on.length === 0 ? { ...it, depends_on: [run.items[i - 1]!.id] } : it) })` — no gate validation. Contrast packages/agora-orchestrator/src/patterns/map-reduce.ts lines 41–50 where plan() calls `assertMapReduceConfig`."
++  },
++  {
++    "claim": "Queue config example (in `agora.config.ts`): `\"queues\": [ { \"name\": \"pipeline-q\", \"concurrency\": 2, \"pattern\": { \"type\": \"pipeline\" } }, { \"name\": \"fanout-q\", \"concurrency\": 8, \"pattern\": { \"type\": \"map-reduce\" } } ]`",
++    "reality": "The orchestrator's queues option is a `Record<string, QueueConfig>` (object keyed by queue name), not an array of objects with an explicit `name` field. `QueueConfig` is `{ concurrency: number; pattern?: Pattern }` — `pattern` is a Pattern object (carrying `id`, `plan`, `onTaskDone`), not a `{ type: 'pipeline' }` discriminator. No source in the seeded files defines the array-of-objects-with-name shape or a `{ type: ... }` config-discriminator translation layer.",
++    "evidence": "packages/agora-orchestrator/src/orchestrator.ts lines 18–21: `export interface QueueConfig { concurrency: number; pattern?: Pattern; }` and `queues: Record<string, QueueConfig>;`. Constructor at line 63 uses `Object.entries(opts.queues)` confirming keyed-record shape."
++  },
++  {
++    "claim": "Spawn item ids are deterministic — computed from the cause item id and the attempt number, not from a counter or timestamp — so running `onTaskDone` twice on the same input produces the same ids.",
++    "reality": "Only the pipeline pattern's spawn ids are derived from the cause item id and an attempt number. The map-reduce pattern's spawn ids are derived from the splitter's output-ref KEYS (`map-${k}`) for the map phase, and a hardcoded `reduce` literal for the reduce phase. Neither map nor reduce ids use the cause item id or an attempt number.",
++    "evidence": "packages/agora-orchestrator/src/patterns/map-reduce.ts lines 59 and 66 (`const keys = sortedKeys(splitter.outputRefs ?? {});` … `id: \\`map-${k}\\``) and line 92 (`id: 'reduce'`). Contrast packages/agora-orchestrator/src/patterns/respawn.ts lines 160–161: `const fixId = \\`${base}-fix-${attempt}\\`; const gateCopyId = \\`${base}~${next}\\`;` — these alone use cause id + attempt."
++  }
++]
