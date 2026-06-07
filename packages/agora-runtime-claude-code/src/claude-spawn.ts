@@ -1,7 +1,7 @@
-// Spawns `claude --print "<prompt>" [...extraArgs]` with the workspace as
-// cwd and the merged env per §5.8. Captures stdout/stderr in memory and
-// returns the exit code. Used by the adapter's `invoke()` after prompt
-// rendering and plugin install.
+// Spawns `claude --print --output-format json [...flags] "<prompt>" [...extraArgs]`
+// with the workspace as cwd and the merged env per §5.8. Captures stdout/stderr
+// in memory and returns the exit code. Used by the adapter's `invoke()` after
+// prompt rendering and plugin install.
 //
 // `env` is passed through verbatim — the caller is responsible for the
 // merge policy (no implicit inheritance from `process.env`).
@@ -26,24 +26,40 @@ export interface SpawnClaudeOptions {
   /** Additional arguments appended after `--print <prompt>`. */
   extraArgs?: ReadonlyArray<string>;
   /**
-   * When true, inserts `--dangerously-skip-permissions` between `--print`
+   * When true, inserts `--dangerously-skip-permissions` between `--output-format json`
    * and the prompt so claude bypasses the interactive tool-call gate.
    * The adapter chooses this based on `AGORA_CLAUDE_PERMISSION_MODE`
    * (see adapter.ts). Spawn itself is policy-free.
    */
   dangerouslySkipPermissions?: boolean;
+  /**
+   * When provided, passes `--model <model>` to the claude CLI.
+   * The caller is responsible for resolving level aliases (fast/standard/max)
+   * to actual model IDs before passing here. See adapter.ts + model-map.ts.
+   */
+  model?: string;
+}
+
+/** Pure arg construction — exported for platform-independent testing. */
+export function buildClaudeArgs(
+  opts: Pick<SpawnClaudeOptions, "prompt" | "dangerouslySkipPermissions" | "model" | "extraArgs">,
+): string[] {
+  return [
+    "--print",
+    "--output-format",
+    "json",
+    ...(opts.dangerouslySkipPermissions ? ["--dangerously-skip-permissions"] : []),
+    ...(opts.model ? ["--model", opts.model] : []),
+    opts.prompt,
+    ...(opts.extraArgs ?? []),
+  ];
 }
 
 export async function spawnClaude(
   opts: SpawnClaudeOptions,
 ): Promise<ClaudeSpawnResult> {
   const bin = opts.claudeBin ?? "claude";
-  const args = [
-    "--print",
-    ...(opts.dangerouslySkipPermissions ? ["--dangerously-skip-permissions"] : []),
-    opts.prompt,
-    ...(opts.extraArgs ?? []),
-  ];
+  const args = buildClaudeArgs(opts);
 
   return new Promise<ClaudeSpawnResult>((resolve, reject) => {
     const child = spawn(bin, args, {

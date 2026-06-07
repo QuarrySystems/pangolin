@@ -94,6 +94,65 @@ default writes the legacy sentinel unchanged. The pipeline ref itself is sealed
 into the dispatch manifest (`pipelineRef`), so "this exact pipeline ran" —
 every block, command, and lens — is provable from the audit bundle.
 
+## Model selection and cost evidence
+
+### Requested model in the dispatch manifest
+
+Before firing the worker container, the orchestrator resolves which model was
+requested and seals it into the **dispatch manifest** (`executorManifest.model.id`).
+The precedence chain (highest to lowest):
+
+1. The subagent definition's stored `model` field (read at fire time from
+   the subagent blob via `resolveLatest`).
+2. The `DispatchExecutor`'s configured `defaultModel`.
+3. Unset — `executorManifest.model.id` is sealed as `''`.
+
+An empty string is treated the same as unset at every step. The resolution is
+best-effort: if the subagent blob is unresolvable or unparseable, the executor
+falls back to `defaultModel` (which may be undefined) and the fire proceeds.
+The `AGORA_MODEL` env var is only injected into the worker when the resolved
+model is a non-empty string.
+
+For the level vocabulary (`fast` / `standard` / `max` and pass-through
+provider-native ids), see the
+[model field and level vocabulary table](/agora/reference/agora-client-api/#model-field-and-level-vocabulary).
+
+### Actual usage in the output sentinel
+
+After the runtime adapter exits, the worker seals an **`OutputSentinel`** to
+`.agora/output.json` (and uploads it to the per-dispatch dispatch-record URI).
+The sentinel optionally carries an additive `usage` block:
+
+```typescript
+interface RuntimeUsage {
+  models: string[];   // actual model ids that served the invocation
+  costUsd?: number;
+  turns?: number;
+  durationMs?: number;  // MODEL time as reported by the runtime CLI
+}
+```
+
+`usage` is **best-effort**: it is absent whenever the runtime's output cannot
+be parsed. Its absence leaves the sentinel byte-identical to the pre-usage
+shape; when present it is additive and backward-compatible — older readers
+ignore the extra key.
+
+#### Three durations distinguished
+
+Three different `durationMs` values appear in the response chain; they measure
+different things:
+
+| Field | What it measures |
+|---|---|
+| `usage.durationMs` (in the sentinel) | Model time as reported by the runtime CLI for that invocation. |
+| `DispatchResult.durationMs` | Worker wall time (container start to result collection). |
+| `BlockOutcome.durationMs` (declared pipelines only) | Wall time for a single block within the pipeline. |
+
+`usage` is a **capture-only** boundary: it is sealed into the sentinel and
+readable from the dispatch record, but it is not forwarded into
+`ExecutionResult` (the orchestrator's normalized result type). Use the
+dispatch record directly to read cost evidence after a run.
+
 ## Self-verify (optional)
 
 If the subagent declares a `verify.command` (via

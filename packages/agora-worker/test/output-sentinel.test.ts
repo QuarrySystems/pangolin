@@ -20,6 +20,7 @@ import {
   MAX_OUTPUT_ENTRIES,
   type BlockOutcome,
 } from '../src/output-sentinel.js';
+import type { RuntimeUsage } from '@quarry-systems/agora-core';
 
 // ---------------------------------------------------------------------------
 // Minimal in-memory StorageProvider stub
@@ -528,5 +529,117 @@ describe('blocks field on OutputSentinel / writeSentinel', () => {
     const uri = buildDispatchRecordUri('ns', 'b2', 'output.json');
     const parsed = JSON.parse(new TextDecoder().decode(await storage.get(uri)));
     expect(parsed.blocks).toEqual([block]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// usage field (wave: model-cost-evidence)
+// ---------------------------------------------------------------------------
+
+describe('usage field on OutputSentinel / writeSentinel', () => {
+  let dir: string;
+  let storage: MemoryStorage;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'usage-test-'));
+    storage = new MemoryStorage();
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('includes usage after outputs and before blocks in key order, and omits it entirely when absent', async () => {
+    const usage: RuntimeUsage = { models: ['claude-opus-4-7'], costUsd: 0.05 };
+    const outputs = [{ path: 'report.txt', ref: 'agora://ns/artifact/u1/sha256:' + 'b'.repeat(64) }];
+    const blocks: BlockOutcome[] = [{ kind: 'script', ordinal: 0, status: 'ok', durationMs: 3 }];
+
+    // With usage, outputs, and blocks: verify key ordering.
+    const { buildDispatchRecordUri } = await import('@quarry-systems/agora-core');
+    const withUsage = await writeSentinel({
+      workspaceDir: dir,
+      storage,
+      namespace: 'ns',
+      dispatchId: 'u1',
+      outputs,
+      usage,
+      blocks,
+    });
+    const uri1 = buildDispatchRecordUri('ns', 'u1', 'output.json');
+    const parsed1 = JSON.parse(new TextDecoder().decode(await storage.get(uri1)));
+    const keys = Object.keys(parsed1);
+    expect(keys.indexOf('usage')).toBeGreaterThan(keys.indexOf('outputs'));
+    expect(keys.indexOf('usage')).toBeLessThan(keys.indexOf('blocks'));
+
+    // In-memory return also carries usage.
+    expect(withUsage.usage).toEqual(usage);
+
+    // Without usage: the key must be absent entirely (hash-stable additive field).
+    const dir2 = await mkdtemp(join(tmpdir(), 'usage-test2-'));
+    try {
+      const storage2 = new MemoryStorage();
+      const withoutUsage = await writeSentinel({
+        workspaceDir: dir2,
+        storage: storage2,
+        namespace: 'ns',
+        dispatchId: 'u2',
+      });
+      expect(withoutUsage.usage).toBeUndefined();
+      const uri2 = buildDispatchRecordUri('ns', 'u2', 'output.json');
+      const parsed2 = JSON.parse(new TextDecoder().decode(await storage2.get(uri2)));
+      expect(Object.keys(parsed2)).not.toContain('usage');
+    } finally {
+      await rm(dir2, { recursive: true, force: true });
+    }
+  });
+
+  it('usage round-trips stably (stored bytes match in-memory shape)', async () => {
+    const usage: RuntimeUsage = { models: ['claude-haiku-3-5'], costUsd: 0.001, turns: 3, durationMs: 1200 };
+    const sentinel = await writeSentinel({
+      workspaceDir: dir,
+      storage,
+      namespace: 'ns',
+      dispatchId: 'u3',
+      usage,
+    });
+    expect(sentinel.usage).toEqual(usage);
+
+    const { buildDispatchRecordUri } = await import('@quarry-systems/agora-core');
+    const uri = buildDispatchRecordUri('ns', 'u3', 'output.json');
+    const parsed = JSON.parse(new TextDecoder().decode(await storage.get(uri)));
+    expect(parsed.usage).toEqual(usage);
+  });
+
+  it('a sentinel without usage is byte-identical to the pre-usage shape (golden discipline)', async () => {
+    const optsBase = {
+      workspaceDir: dir,
+      storage,
+      namespace: 'ns',
+      dispatchId: 'u4',
+      patchRef: 'agora://ns/artifact/u4/sha256:' + 'c'.repeat(64),
+      summary: 'baseline',
+    } as const;
+
+    // Classic opts, no usage key.
+    await writeSentinel(optsBase);
+
+    const dir2 = await mkdtemp(join(tmpdir(), 'usage-test3-'));
+    try {
+      const storage2 = new MemoryStorage();
+      await writeSentinel({
+        ...optsBase,
+        workspaceDir: dir2,
+        storage: storage2,
+        usage: undefined,
+      });
+
+      const { buildDispatchRecordUri } = await import('@quarry-systems/agora-core');
+      const uri = buildDispatchRecordUri('ns', 'u4', 'output.json');
+      const bytes1 = await storage.get(uri);
+      const bytes2 = await storage2.get(uri);
+      expect(bytes1).toEqual(bytes2);
+    } finally {
+      await rm(dir2, { recursive: true, force: true });
+    }
   });
 });

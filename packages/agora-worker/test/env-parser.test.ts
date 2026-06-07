@@ -402,4 +402,12 @@ describe("parseWorkerEnv", () => {
       expect(parseWorkerEnv(env).bundleRefs.inputs?.[1]?.key).toBe("config");
     });
   });
+
+  describe("model", () => {
+    it("parses AGORA_MODEL when present and omits it when absent or empty", () => {
+      expect(parseWorkerEnv({ ...baseEnv(), AGORA_MODEL: "max" }).model).toBe("max");
+      expect(parseWorkerEnv(baseEnv()).model).toBeUndefined();
+      expect(parseWorkerEnv({ ...baseEnv(), AGORA_MODEL: "" }).model).toBeUndefined();
+    });
+  });
 });

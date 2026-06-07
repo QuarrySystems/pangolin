@@ -12,6 +12,7 @@ import type {
   StorageProvider,
   RuntimeAdapter,
   RuntimeExit,
+  RuntimeInvocation,
   VerifyConfig,
 } from '@quarry-systems/agora-core';
 import {
@@ -704,6 +705,121 @@ describe('runPipeline — verify lens', () => {
       expect(result.sentinel!.verify).toBeDefined();
       expect(result.sentinel!.verify!.passed).toBe(true);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// runPipeline — usage aggregation (model-cost-evidence wave)
+// ---------------------------------------------------------------------------
+
+describe('runPipeline — usage aggregation', () => {
+  /** Adapter that returns exits[i] on the i-th invoke and records every invocation. */
+  function makeSequenceAdapter(exits: RuntimeExit[]): RuntimeAdapter & { invocations: RuntimeInvocation[] } {
+    const invocations: RuntimeInvocation[] = [];
+    let i = 0;
+    return {
+      name: 'sequence',
+      reservedPaths: [],
+      invocations,
+      invoke: async (spec) => {
+        invocations.push(spec);
+        const exit = exits[Math.min(i, exits.length - 1)]!;
+        i++;
+        return exit;
+      },
+    };
+  }
+
+  it('single agent block reporting usage → sentinel.usage equals it verbatim; invocation carries subagent.model', async () => {
+    const dir = await makeTempDir();
+    const storage = new FakeStorage();
+    const usage = { models: ['claude-haiku-4-5'], costUsd: 0.01, turns: 2, durationMs: 1234 };
+    const adapter = makeSequenceAdapter([{ exitCode: 0, stdout: 'ok\n', stderr: '', usage }]);
+    const { ctx } = await makeCtx(dir, { storage, adapter, subagent: { model: 'model-from-cfg' } });
+
+    const spec: PipelineSpec = { schemaVersion: 1, id: 'dev.test', blocks: [{ kind: 'agent' }] };
+    const result = await runPipeline(spec, ctx, { declared: false });
+    await cleanupTempDirs();
+
+    expect(result.kind).toBe('completed');
+    if (result.kind === 'completed') {
+      expect(result.sentinel).toBeDefined();
+      expect(result.sentinel!.usage).toEqual(usage);
+    }
+    // The model the subagent def feeds into BlockContext flows opaquely to the invocation.
+    expect(adapter.invocations[0]!.model).toBe('model-from-cfg');
+  });
+
+  it('two agent blocks reporting usage → models unioned first-seen, scalars summed, absent scalars skipped', async () => {
+    const dir = await makeTempDir();
+    const storage = new FakeStorage();
+    const adapter = makeSequenceAdapter([
+      { exitCode: 0, stdout: '', stderr: '', usage: { models: ['m-a'], costUsd: 0.25, turns: 2 } },
+      { exitCode: 0, stdout: '', stderr: '', usage: { models: ['m-b', 'm-a'], costUsd: 0.5, durationMs: 700 } },
+    ]);
+    const { ctx } = await makeCtx(dir, { storage, adapter });
+
+    const spec: PipelineSpec = {
+      schemaVersion: 1,
+      id: 'dev.test',
+      blocks: [{ kind: 'agent' }, { kind: 'agent' }],
+    };
+    const result = await runPipeline(spec, ctx, { declared: false });
+    await cleanupTempDirs();
+
+    expect(result.kind).toBe('completed');
+    if (result.kind === 'completed') {
+      expect(result.sentinel!.usage).toEqual({
+        models: ['m-a', 'm-b'],
+        costUsd: 0.75,
+        turns: 2,
+        durationMs: 700,
+      });
+    }
+  });
+
+  it('one reporting block + one silent block → silent one contributes nothing', async () => {
+    const dir = await makeTempDir();
+    const storage = new FakeStorage();
+    const usage = { models: ['m-a'], costUsd: 0.1, turns: 1, durationMs: 50 };
+    const adapter = makeSequenceAdapter([
+      { exitCode: 0, stdout: '', stderr: '' }, // silent — no usage
+      { exitCode: 0, stdout: '', stderr: '', usage },
+    ]);
+    const { ctx } = await makeCtx(dir, { storage, adapter });
+
+    const spec: PipelineSpec = {
+      schemaVersion: 1,
+      id: 'dev.test',
+      blocks: [{ kind: 'agent' }, { kind: 'agent' }],
+    };
+    const result = await runPipeline(spec, ctx, { declared: false });
+    await cleanupTempDirs();
+
+    expect(result.kind).toBe('completed');
+    if (result.kind === 'completed') {
+      expect(result.sentinel!.usage).toEqual(usage);
+    }
+  });
+
+  it('no agent block reports usage → sentinel has no usage key at all', async () => {
+    const dir = await makeTempDir();
+    const storage = new FakeStorage();
+    const { ctx } = await makeCtx(dir, { storage });
+
+    const spec: PipelineSpec = { schemaVersion: 1, id: 'dev.test', blocks: [{ kind: 'agent' }] };
+    const result = await runPipeline(spec, ctx, { declared: false });
+    await cleanupTempDirs();
+
+    expect(result.kind).toBe('completed');
+    if (result.kind === 'completed') {
+      expect(result.sentinel).toBeDefined();
+      expect('usage' in result.sentinel!).toBe(false);
+    }
+    // The stored bytes must not contain a usage key either.
+    const sentinelPut = storage.puts.find((p) => p.uri.includes('output.json'));
+    expect(sentinelPut).toBeDefined();
+    expect(new TextDecoder().decode(sentinelPut!.bytes)).not.toContain('"usage"');
   });
 });
 

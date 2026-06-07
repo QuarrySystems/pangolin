@@ -54,6 +54,21 @@ export interface RuntimeContext {
 }
 
 /**
+ * Actual model usage reported by the runtime CLI for one invocation.
+ * Best-effort: absent whenever the runtime's output is not parseable.
+ * `durationMs` is MODEL time as reported by the runtime — distinct from
+ * `DispatchResult.durationMs` (worker wall) and `BlockOutcome.durationMs`
+ * (block wall).
+ */
+export interface RuntimeUsage {
+  /** Actual model ids that served the invocation (e.g. keys of claude's modelUsage). */
+  models: string[];
+  costUsd?: number;
+  turns?: number;
+  durationMs?: number;
+}
+
+/**
  * Terminal result of an adapter invocation. `exitCode` is 0 for success.
  * `needsInputSentinelPath` is set when the adapter detected its
  * needs-input sentinel; see ADR-0009.
@@ -63,6 +78,8 @@ export interface RuntimeExit {
   stdout: string;
   stderr: string;
   needsInputSentinelPath?: string;
+  /** Best-effort usage capture. Optional + additive. */
+  usage?: RuntimeUsage;
 }
 
 /**

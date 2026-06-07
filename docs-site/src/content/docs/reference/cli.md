@@ -36,7 +36,7 @@ Manage subagents.
 
 | Subcommand | Args / options | Behavior |
 |---|---|---|
-| `register` | `--name <name>` (required), `--from <file>`, `--system-prompt <text>`, `--prompt-template <text>`, `--model <id>`, `--capability <names...>` (repeatable) | Registers a subagent from a YAML file (`--from`) **or** inline flags — not both. Supply `--from` or at least one inline field, else it errors. Prints `{ name, contentHash, registeredAt }` as JSON. |
+| `register` | `--name <name>` (required), `--from <file>`, `--system-prompt <text>`, `--prompt-template <text>`, `--model <id>`, `--capability <names...>` (repeatable) | Registers a subagent from a YAML file (`--from`) **or** inline flags — not both. Supply `--from` or at least one inline field, else it errors. Prints `{ name, contentHash, registeredAt }` as JSON. `--model <id>` pins the preferred model for this subagent; accepts a reserved level (`fast`, `standard`, `max`) or a provider-native id — see the [level vocabulary table](/agora/reference/agora-client-api/#reserved-level-vocabulary). Pin-optional: omitting it leaves the subagent model-agnostic. |
 | `assign <name>` | `--capabilities <list>` (required, comma-separated) | **Currently restricted.** Touches the client (so config errors surface), then throws a clear error directing you to re-register the subagent with the new capability list. Full assign-only flow is deferred to v1.5. |
 | `list` | — | Prints one tab-delimited line per subagent: `name\tcontentHash\tregisteredAt`. |
 | `get <name>` | — | Prints the named subagent ref as JSON, or `(not found)`. |

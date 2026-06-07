@@ -17,8 +17,8 @@ import {
   computeContentHash,
 } from '@quarry-systems/agora-core';
 import type { StorageProvider } from '@quarry-systems/agora-core';
+import type { VerifyOutcome, RuntimeUsage } from '@quarry-systems/agora-core';
 import { computeWorkspacePatch, type WorkspaceBaseline } from './patch-capture.js';
-import type { VerifyOutcome } from '@quarry-systems/agora-core';
 
 /** Per-file size ceiling for output captures. Files larger than this are skipped. */
 export const MAX_OUTPUT_FILE_BYTES = 100 * 1024 * 1024; // 100 MiB
@@ -77,6 +77,12 @@ export interface OutputSentinel {
    * MAX_OUTPUT_ENTRIES. Entries are sorted deterministically (posix path).
    */
   outputs?: OutputEntry[];
+  /**
+   * Wave: model-cost-evidence — best-effort actual usage (model ids, cost,
+   * turns, model time). Optional + additive — absence leaves the sentinel
+   * hash unchanged (byte-identical to pre-usage shape).
+   */
+  usage?: RuntimeUsage;
   /**
    * Per-block runtime evidence (spec §5 pin 3). Optional + additive — absence
    * leaves the sentinel hash unchanged (byte-identical to pre-blocks shape).
@@ -203,16 +209,19 @@ export async function writeSentinel(opts: {
   verify?: VerifyOutcome;
   /** Wave A (§5): content-addressed deliverables from workspace/outputs/. */
   outputs?: OutputEntry[];
+  /** Wave: model-cost-evidence — best-effort actual usage. Optional + additive. */
+  usage?: RuntimeUsage;
   /** §5 pin 3: per-block runtime evidence. Optional + additive. */
   blocks?: BlockOutcome[];
 }): Promise<OutputSentinel> {
-  const { workspaceDir, storage, namespace, dispatchId, patchRef, summary, verify, outputs, blocks } = opts;
+  const { workspaceDir, storage, namespace, dispatchId, patchRef, summary, verify, outputs, usage, blocks } = opts;
 
   const sentinel: OutputSentinel = { schemaVersion: 1 };
   if (patchRef !== undefined) sentinel.patchRef = patchRef;
   if (summary !== undefined) sentinel.summary = summary;
   if (verify !== undefined) sentinel.verify = verify;
   if (outputs !== undefined) sentinel.outputs = outputs;
+  if (usage !== undefined) sentinel.usage = usage;
   if (blocks !== undefined) sentinel.blocks = blocks;
 
   const sentinelBytes = new TextEncoder().encode(JSON.stringify(sentinel));

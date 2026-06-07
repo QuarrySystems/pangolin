@@ -14,7 +14,7 @@
 //   (c) No imports from agora-orchestrator.
 
 import type { PipelineSpec, BlockSpec } from '@quarry-systems/agora-core';
-import type { RuntimeAdapter, StorageProvider, VerifyConfig } from '@quarry-systems/agora-core';
+import type { RuntimeAdapter, RuntimeUsage, StorageProvider, VerifyConfig } from '@quarry-systems/agora-core';
 import { runBoundedCommand } from './bounded-command.js';
 import { runVerify } from './verify.js';
 import {
@@ -114,7 +114,7 @@ export function buildDefaultPipeline(
 async function runAgentBlock(
   ordinal: number,
   ctx: BlockContext,
-): Promise<{ outcome: BlockOutcome; needsInputSentinelPath?: string; shouldAbort?: boolean; exitCode?: number }> {
+): Promise<{ outcome: BlockOutcome; needsInputSentinelPath?: string; shouldAbort?: boolean; exitCode?: number; usage?: RuntimeUsage }> {
   const startedAt = Date.now();
 
   const runtimeExit = await ctx.adapter.invoke(
@@ -159,7 +159,29 @@ async function runAgentBlock(
     needsInputSentinelPath: runtimeExit.needsInputSentinelPath,
     shouldAbort: runtimeExit.exitCode !== 0 && !runtimeExit.needsInputSentinelPath,
     exitCode: runtimeExit.exitCode,
+    usage: runtimeExit.usage,
   };
+}
+
+/**
+ * Merge one agent block's reported usage into the running aggregate
+ * (model-cost-evidence wave): `models` unioned (deduped, first-seen order);
+ * `costUsd`/`turns`/`durationMs` summed across blocks that report them —
+ * absent values are skipped, not zeroed. When NO agent block reports usage,
+ * the aggregate stays undefined and the sentinel gets no `usage` key at all.
+ */
+function mergeUsage(acc: RuntimeUsage | undefined, u: RuntimeUsage): RuntimeUsage {
+  if (acc === undefined) {
+    // First reporter: copy verbatim (own arrays — never alias the adapter's object).
+    return { ...u, models: [...u.models] };
+  }
+  for (const m of u.models) {
+    if (!acc.models.includes(m)) acc.models.push(m);
+  }
+  if (u.costUsd !== undefined) acc.costUsd = (acc.costUsd ?? 0) + u.costUsd;
+  if (u.turns !== undefined) acc.turns = (acc.turns ?? 0) + u.turns;
+  if (u.durationMs !== undefined) acc.durationMs = (acc.durationMs ?? 0) + u.durationMs;
+  return acc;
 }
 
 /**
@@ -357,6 +379,7 @@ export async function runPipeline(
   let lastPatchRef: string | undefined;
   let firstVerifyOutcome: VerifyOutcome | undefined;
   let lastOutputs: OutputEntry[] | undefined;
+  let aggregatedUsage: RuntimeUsage | undefined;
 
   for (const [index, block] of spec.blocks.entries()) {
     const ordinal = index;
@@ -365,6 +388,11 @@ export async function runPipeline(
       // adapter.invoke throws → propagates (no catch here)
       const agentResult = await runAgentBlock(ordinal, ctx);
       outcomes.push(agentResult.outcome);
+
+      // Aggregate best-effort usage across agent blocks (for the seal).
+      if (agentResult.usage !== undefined) {
+        aggregatedUsage = mergeUsage(aggregatedUsage, agentResult.usage);
+      }
 
       // needs_input: stop immediately, return needs-input (no sentinel)
       if (agentResult.needsInputSentinelPath) {
@@ -432,6 +460,7 @@ export async function runPipeline(
       patchRef: lastPatchRef,
       verify: firstVerifyOutcome,
       outputs: lastOutputs,
+      usage: aggregatedUsage,
       ...(opts.declared && outcomes.length > 0 ? { blocks: outcomes } : {}),
     });
   } catch (err) {

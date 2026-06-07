@@ -85,6 +85,12 @@ interface RegisterSubagentOpts {
 `client.storage.resolveLatest`. `assign` re-registers the subagent under a new
 capability set, producing a NEW pinned version (old and new coexist immutably).
 
+`model`, when set on the subagent definition, pins the preferred model for all
+dispatches using this subagent (unless overridden at dispatch time — see
+[`DispatchWork.model`](#model-field-and-level-vocabulary) below). The value
+follows the same level vocabulary: reserved levels or provider-native ids.
+Pin-optional — nothing fails if a subagent has no model field.
+
 `verify`, when set, declares a language-agnostic shell command the worker runs
 over the agent's edit before sealing; its `{ passed, report, durationMs }` result
 is recorded in the output sentinel and surfaced on the dispatch result. It is
@@ -171,11 +177,37 @@ client.dispatch.cancel(dispatchId: string): Promise<void>
 `ClientDispatchOpts` carries `workerImage: string` (required) and
 `defaultDispatchTimeoutSeconds?: number`; the remaining fields (`subagent`,
 `target`, `env`, `input`, `capabilities`, `addCapabilities`, `secrets`,
-`callback`, `timeoutSeconds`, `retentionDays`, `resources`, `dispatchId`) come
-from `DispatchWork`. `capabilities` REPLACES the subagent's assigned set;
-`addCapabilities` APPENDS to it; combining both throws. See the
+`callback`, `timeoutSeconds`, `retentionDays`, `resources`, `dispatchId`,
+`model`) come from `DispatchWork`. `capabilities` REPLACES the subagent's
+assigned set; `addCapabilities` APPENDS to it; combining both throws. See the
 [Dispatch lifecycle](/agora/reference/dispatch-lifecycle/) for what happens
 after the call.
+
+### `model` field and level vocabulary
+
+`DispatchWork.model` is the authorized model level or provider-native id for
+this one dispatch. It is **pin-optional** — nothing fails if you omit it.
+
+The precedence chain (highest to lowest) is: `DispatchWork.model` >
+the subagent definition's stored `model` field > the `DispatchExecutor`'s
+configured `defaultModel` > unset (the runtime adapter's own default applies).
+An empty string is treated the same as unset at each step.
+
+#### Reserved level vocabulary
+
+The three portable levels are the single home for model selection across
+adapters. The claude-code adapter maps them to bare CLI aliases (version-free):
+
+| Level | claude-code alias | Meaning |
+|---|---|---|
+| `fast` | `haiku` | Fastest, most cost-effective model tier |
+| `standard` | `sonnet` | Balanced speed and capability |
+| `max` | `opus` | Highest capability |
+
+Any string that is **not** one of these three reserved levels is passed through
+verbatim to the underlying provider as a provider-native id (e.g.
+`claude-opus-4-5`, `gpt-4o`). A second adapter may define its own level
+mapping independently.
 
 ## Bundled implementations
 

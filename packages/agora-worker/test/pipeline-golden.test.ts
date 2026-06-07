@@ -419,6 +419,49 @@ describe('pipeline-golden: sentinel byte-shape parity', () => {
   });
 
   // -------------------------------------------------------------------------
+  // Scenario 4b — usage-reporting adapter (model-cost-evidence wave)
+  // Keys must be exactly ['schemaVersion','patchRef','verify','outputs','usage']
+  // — usage assigned AFTER outputs. 'blocks' stays absent (default pipeline).
+  // -------------------------------------------------------------------------
+  it('usage-reporting dispatch: sentinel keys exactly [schemaVersion,patchRef,verify,outputs,usage], usage verbatim, no blocks, round-trip stable', async () => {
+    const usage = { models: ['claude-haiku-4-5'], costUsd: 0.25, turns: 3, durationMs: 4200 };
+    const h = await setupHarness({
+      verify: { command: 'node -e "process.exit(0)"' },
+      onInvoke: async (spec) => {
+        await writeFile(join(spec.workspaceDir, 'agent-output.txt'), 'result\n');
+        const outputsDir = join(spec.workspaceDir, 'outputs');
+        await mkdir(outputsDir, { recursive: true });
+        await writeFile(join(outputsDir, 'r.txt'), 'output-content');
+      },
+    });
+    cleanupDirs.push(h.workDir, h.adaptersRoot);
+    h.setRuntimeExit({ exitCode: 0, stdout: '', stderr: '', usage });
+
+    const code = await runWorker(h.env, makeDeps(h));
+    expect(code).toBe(0);
+
+    const sentinelUri = buildDispatchRecordUri('ns', 'd-1', 'output.json');
+    expect(h.storage.has(sentinelUri)).toBe(true);
+    const bytes = await h.storage.get(sentinelUri);
+    const bytesStr = new TextDecoder().decode(bytes);
+    const parsed = JSON.parse(bytesStr) as Record<string, unknown>;
+
+    // Golden key-order pin: usage comes AFTER outputs ('blocks' is absent here —
+    // this file covers default pipelines only; the before-'blocks' position pin
+    // is owned by the output-sentinel tests).
+    expect(Object.keys(parsed)).toEqual(['schemaVersion', 'patchRef', 'verify', 'outputs', 'usage']);
+
+    // Single agent block: usage flows verbatim.
+    expect(parsed['usage']).toEqual(usage);
+
+    // 'blocks' absent — default pipeline is undeclared.
+    expect('blocks' in parsed).toBe(false);
+
+    // Round-trip stability.
+    expect(JSON.stringify(parsed)).toBe(bytesStr);
+  });
+
+  // -------------------------------------------------------------------------
   // Scenario 5 — failure parity
   // Non-zero adapter exit → dispatch.failed with reason 'provider-failed',
   // exit code carried, ZERO output.json sentinel puts.

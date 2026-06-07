@@ -24,6 +24,8 @@ import { renderPrompt } from "./prompt-renderer.js";
 import { installPluginsFromManifest } from "./plugin-installer.js";
 import { spawnClaude } from "./claude-spawn.js";
 import { detectNeedsInputSentinel } from "./sentinel-detector.js";
+import { resolveModelArg } from "./model-map.js";
+import { parseClaudeEnvelope } from "./envelope.js";
 
 export interface ClaudeCodeRuntimeAdapterOptions {
   /** Override the `claude` binary path (used by tests and exotic deploys). */
@@ -57,20 +59,24 @@ export class ClaudeCodeRuntimeAdapter implements RuntimeAdapter {
       env: ctx.env,
       claudeBin: this.opts.claudeBin,
     });
+    const modelArg = resolveModelArg(spec.model);
     const spawnResult = await spawnClaude({
       prompt,
       workspaceDir: spec.workspaceDir,
       env: ctx.env,
       claudeBin: this.opts.claudeBin,
       dangerouslySkipPermissions: resolveBypassFlag(ctx.env),
+      model: modelArg,
     });
     const sentinelPath = await detectNeedsInputSentinel(spec.workspaceDir);
+    const { text, usage } = parseClaudeEnvelope(spawnResult.stdout);
 
     return {
       exitCode: spawnResult.exitCode,
-      stdout: spawnResult.stdout,
+      stdout: text,
       stderr: spawnResult.stderr,
       needsInputSentinelPath: sentinelPath,
+      ...(usage ? { usage } : {}),
     };
   }
 }

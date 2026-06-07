@@ -1,8 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { AgoraClient } from '@quarry-systems/agora-client'; // barrel import installs prototype getters
+import type { ClientDispatchOpts, InFlightDispatch } from '@quarry-systems/agora-client';
 import type {
   ComputeProvider,
   CredentialProvider,
+  DispatchWork,
   SecretStore,
   StorageProvider,
   TaskExit,
@@ -187,6 +189,33 @@ function makeSetupWithStore(
   });
   const executor = new DispatchExecutor({ client, target: 'prod', workerImage: 'img' });
   return { client, executor };
+}
+
+// ---------------------------------------------------------------------------
+// Helper: capture the DispatchWork passed to client.dispatch.fire.
+// `dispatch` is a prototype getter that builds a fresh callable per access;
+// we shadow it with an own instance property whose `fire` records the work
+// object before delegating to the real implementation.
+// ---------------------------------------------------------------------------
+function captureDispatchFire(client: AgoraClient): { work?: DispatchWork & ClientDispatchOpts } {
+  const captured: { work?: DispatchWork & ClientDispatchOpts } = {};
+  const orig = client.dispatch;
+  Object.defineProperty(client, 'dispatch', {
+    configurable: true,
+    enumerable: false,
+    value: Object.assign(
+      (w: DispatchWork & ClientDispatchOpts) => orig(w),
+      {
+        fire: (w: DispatchWork & ClientDispatchOpts): Promise<InFlightDispatch> => {
+          captured.work = w;
+          return orig.fire(w);
+        },
+        describe: orig.describe,
+        cancel: orig.cancel,
+      },
+    ),
+  });
+  return captured;
 }
 
 const baseItem: WorkItem = {
@@ -1272,7 +1301,8 @@ describe('DispatchExecutor', () => {
   it('model best-effort: unreadable subagent blob yields model { id: empty string } without failing fire', async () => {
     const { compute, resolveExit } = makeDeferredCompute();
     // Use a storage where get throws for the subagent pinned URI but resolveLatest works.
-    // resolveModel catches the throw and returns { id: '', temperature: 0, maxTokens: 0 }.
+    // The pre-fire resolveRequestedModel catches the throw and (with no defaultModel
+    // configured) yields undefined — manifest model stays { id: '', ... }.
     // The manifest IS still written (put works) and manifestRef is set.
     const storage = makeMemoryStorage();
     storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
@@ -1306,6 +1336,200 @@ describe('DispatchExecutor', () => {
       const stored = JSON.parse(new TextDecoder().decode(await storage.get(result.manifestRef)));
       expect(stored.executorManifest.model.id).toBe('');
     }
+
+    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+  });
+
+  // -------------------------------------------------------------------------
+  // Pre-fire model resolution: defaultModel precedence + manifest ≡ work
+  // (authorization side, spec D3/D6)
+  // -------------------------------------------------------------------------
+
+  it('def-only: subagent def model is sealed into BOTH the dispatched work and the manifest', async () => {
+    const { compute, resolveExit } = makeDeferredCompute();
+    const storage = makeMemoryStorage();
+    storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's', model: 'claude-3-5-sonnet', capabilities: [] });
+    const client = new AgoraClient({
+      namespace: 'ns',
+      compute: { default: compute },
+      credentials: { default: makeCredentials() },
+      storage,
+      targets: { prod: { compute: 'default', credentials: 'default' } },
+    });
+    const captured = captureDispatchFire(client);
+    const executor = new DispatchExecutor({ client, target: 'prod', workerImage: 'img' });
+
+    const { manifestRef } = await executor.fire(baseItem, { runId: 'r1', actor: 'human:x' });
+    expect(manifestRef).toBeDefined();
+
+    expect(captured.work?.model).toBe('claude-3-5-sonnet');
+    const stored = JSON.parse(new TextDecoder().decode(await storage.get(manifestRef!)));
+    expect(stored.executorManifest.model.id).toBe(captured.work?.model ?? '');
+    expect(stored.executorManifest.model.id).toBe('claude-3-5-sonnet');
+
+    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+  });
+
+  it('seals defaultModel into manifest AND dispatched work when the subagent def has no model', async () => {
+    const { compute, resolveExit } = makeDeferredCompute();
+    const storage = makeMemoryStorage();
+    storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' }); // no model field
+    const client = new AgoraClient({
+      namespace: 'ns',
+      compute: { default: compute },
+      credentials: { default: makeCredentials() },
+      storage,
+      targets: { prod: { compute: 'default', credentials: 'default' } },
+    });
+    const captured = captureDispatchFire(client);
+    const executor = new DispatchExecutor({ client, target: 'prod', workerImage: 'img', defaultModel: 'standard' });
+
+    const { manifestRef } = await executor.fire(baseItem, { runId: 'r1', actor: 'human:x' });
+    expect(manifestRef).toBeDefined();
+
+    expect(captured.work?.model).toBe('standard');
+    const stored = JSON.parse(new TextDecoder().decode(await storage.get(manifestRef!)));
+    expect(stored.executorManifest.model.id).toBe(captured.work?.model ?? '');
+    expect(stored.executorManifest.model.id).toBe('standard');
+
+    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+  });
+
+  it('both def model and defaultModel set: the def wins', async () => {
+    const { compute, resolveExit } = makeDeferredCompute();
+    const storage = makeMemoryStorage();
+    storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's', model: 'max', capabilities: [] });
+    const client = new AgoraClient({
+      namespace: 'ns',
+      compute: { default: compute },
+      credentials: { default: makeCredentials() },
+      storage,
+      targets: { prod: { compute: 'default', credentials: 'default' } },
+    });
+    const captured = captureDispatchFire(client);
+    const executor = new DispatchExecutor({ client, target: 'prod', workerImage: 'img', defaultModel: 'standard' });
+
+    const { manifestRef } = await executor.fire(baseItem, { runId: 'r1', actor: 'human:x' });
+    expect(manifestRef).toBeDefined();
+
+    expect(captured.work?.model).toBe('max');
+    const stored = JSON.parse(new TextDecoder().decode(await storage.get(manifestRef!)));
+    expect(stored.executorManifest.model.id).toBe(captured.work?.model ?? '');
+    expect(stored.executorManifest.model.id).toBe('max');
+
+    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+  });
+
+  it('neither def model nor defaultModel: work carries NO model, manifest id is empty string', async () => {
+    const { compute, resolveExit } = makeDeferredCompute();
+    const storage = makeMemoryStorage();
+    storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' }); // no model field
+    const client = new AgoraClient({
+      namespace: 'ns',
+      compute: { default: compute },
+      credentials: { default: makeCredentials() },
+      storage,
+      targets: { prod: { compute: 'default', credentials: 'default' } },
+    });
+    const captured = captureDispatchFire(client);
+    const executor = new DispatchExecutor({ client, target: 'prod', workerImage: 'img' });
+
+    const { manifestRef } = await executor.fire(baseItem, { runId: 'r1', actor: 'human:x' });
+    expect(manifestRef).toBeDefined();
+
+    expect(captured.work?.model).toBeUndefined();
+    expect(Object.prototype.hasOwnProperty.call(captured.work, 'model')).toBe(false);
+    const stored = JSON.parse(new TextDecoder().decode(await storage.get(manifestRef!)));
+    expect(stored.executorManifest.model.id).toBe(captured.work?.model ?? '');
+    expect(stored.executorManifest.model.id).toBe('');
+
+    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+  });
+
+  it('unreadable def blob WITH defaultModel configured: defaultModel still applies to work and manifest', async () => {
+    const { compute, resolveExit } = makeDeferredCompute();
+    const storage = makeMemoryStorage();
+    storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
+    const origGet = storage.get.bind(storage);
+    const throwingGetStorage: StorageProvider = {
+      ...storage,
+      async get(uri: string) {
+        if (uri.includes('/subagent/s/sha256:s')) {
+          throw new Error('subagent blob missing');
+        }
+        return origGet(uri);
+      },
+    };
+    const client = new AgoraClient({
+      namespace: 'ns',
+      compute: { default: compute },
+      credentials: { default: makeCredentials() },
+      storage: throwingGetStorage,
+      targets: { prod: { compute: 'default', credentials: 'default' } },
+    });
+    const captured = captureDispatchFire(client);
+    const executor = new DispatchExecutor({ client, target: 'prod', workerImage: 'img', defaultModel: 'standard' });
+
+    // fire must NOT throw — best-effort posture preserved
+    const result = await executor.fire(baseItem, { runId: 'r1', actor: 'human:x' });
+    expect(result.dispatchHash).toMatch(/^[0-9a-f-]{36}$/);
+
+    expect(captured.work?.model).toBe('standard');
+    if (result.manifestRef) {
+      const stored = JSON.parse(new TextDecoder().decode(await storage.get(result.manifestRef)));
+      expect(stored.executorManifest.model.id).toBe('standard');
+    }
+
+    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+  });
+
+  it('fetches the subagent def blob exactly once from the executor — pre-fire, no post-fire duplicate', async () => {
+    const capturedTaskSpecs: import('@quarry-systems/agora-core').TaskSpec[] = [];
+    const { compute: baseCompute, resolveExit } = makeDeferredCompute();
+    let runCalled = false;
+    const trackingCompute: ComputeProvider = {
+      name: 'tracking',
+      async run(spec, ctx) {
+        runCalled = true;
+        capturedTaskSpecs.push(spec);
+        return baseCompute.run(spec, ctx);
+      },
+      awaitExit: baseCompute.awaitExit.bind(baseCompute),
+    };
+
+    const storage = makeMemoryStorage();
+    storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's', model: 'max', capabilities: [] });
+    let preRunSubagentGets = 0;
+    let postRunSubagentGets = 0;
+    const origGet = storage.get.bind(storage);
+    const countingStorage: StorageProvider = {
+      ...storage,
+      async get(uri: string) {
+        if (uri.includes('/subagent/s/sha256:s')) {
+          if (runCalled) postRunSubagentGets += 1;
+          else preRunSubagentGets += 1;
+        }
+        return origGet(uri);
+      },
+    };
+    const client = new AgoraClient({
+      namespace: 'ns',
+      compute: { default: trackingCompute },
+      credentials: { default: makeCredentials() },
+      storage: countingStorage,
+      targets: { prod: { compute: 'default', credentials: 'default' } },
+    });
+    const executor = new DispatchExecutor({ client, target: 'prod', workerImage: 'img' });
+
+    await executor.fire(baseItem, { runId: 'r1', actor: 'human:x' });
+
+    // The post-fire resolveModel fetch is REPLACED by the pre-fire one:
+    // after compute.run starts, the executor performs NO further subagent
+    // def-blob reads. Pre-run reads: exactly 2 — one by the executor's
+    // pre-fire model resolution, one by the client's own capability read
+    // (readSubagentCapabilities) inside dispatch.fire.
+    expect(postRunSubagentGets).toBe(0);
+    expect(preRunSubagentGets).toBe(2);
 
     resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
   });

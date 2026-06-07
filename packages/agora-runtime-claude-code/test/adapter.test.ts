@@ -168,8 +168,10 @@ describe("ClaudeCodeRuntimeAdapter — invoke()", () => {
       expect(exit.exitCode).toBe(0);
       const lines = exit.stdout.split("\n").filter((l) => l.length > 0);
       expect(lines[0]).toBe("--print");
-      expect(lines[1]).toBe("--dangerously-skip-permissions");
-      expect(lines[2]).toBe("hi world");
+      expect(lines[1]).toBe("--output-format");
+      expect(lines[2]).toBe("json");
+      expect(lines[3]).toBe("--dangerously-skip-permissions");
+      expect(lines[4]).toBe("hi world");
     },
   );
 

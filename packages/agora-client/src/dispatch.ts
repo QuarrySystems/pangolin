@@ -267,6 +267,9 @@ export async function fireWork(
       envVars.AGORA_SECRET_STORE_DIR = store.dir;
     }
   }
+  if (work.model !== undefined && work.model !== '') {
+    envVars.AGORA_MODEL = work.model;
+  }
   if (work.callback) {
     envVars.AGORA_CALLBACK_URL = work.callback.url;
     // mintCallbackHmac ran above iff work.callback was set, so callbackTokenRef

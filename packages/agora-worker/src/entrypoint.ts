@@ -473,6 +473,14 @@ export async function runWorker(
     ? (bundles.pipeline as unknown as PipelineSpec)
     : buildDefaultPipeline(subagent);
 
+  // Runtime-effect model override: the control plane's requested model
+  // (AGORA_MODEL → cfg.model) wins over the subagent def's default. The
+  // worker performs no level mapping — the string is opaque; levels resolve
+  // in the adapter. The trailing ?? undefined normalizes the canonical
+  // `model: null` a registered def carries when unpinned — RuntimeInvocation.model
+  // is typed `string | undefined`, never null.
+  const subagentForCtx = { ...subagent, model: cfg.model ?? subagent.model ?? undefined };
+
   let result;
   try {
     result = await runPipeline(
@@ -484,7 +492,7 @@ export async function runWorker(
         namespace: cfg.namespace,
         dispatchId: cfg.dispatchId,
         adapter,
-        subagent,
+        subagent: subagentForCtx,
         // cfg.inputJson is a parsed Record<string,unknown> from env-parser;
         // BlockContext.inputJson is a string the runner JSON-parses before
         // passing to adapter.invoke — re-serialize to preserve the invariant.

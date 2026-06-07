@@ -51,6 +51,10 @@ export interface WorkerConfig {
   runtimeAdapter: string;
   setupTimeoutSeconds: number;
   disableNeedsInputHelper: boolean;
+  /**
+   * Requested model (control-plane; work.model pass-through). Opaque string — levels resolve in the adapter.
+   */
+  model?: string;
 }
 
 function parsePositiveInteger(raw: string, varName: string): number {
@@ -200,5 +204,6 @@ export function parseWorkerEnv(
     runtimeAdapter,
     setupTimeoutSeconds,
     disableNeedsInputHelper,
+    ...(env.AGORA_MODEL ? { model: env.AGORA_MODEL } : {}),
   };
 }

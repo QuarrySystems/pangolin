@@ -20,6 +20,8 @@ export interface DispatchExecutorOptions {
    * a run-time/MCP-submitted item must not supply or read secret values (§10.6).
    */
   secrets?: DispatchWork['secrets'];
+  /** Authorization-side default when the subagent def pins no model (spec D3/D6). */
+  defaultModel?: string;
 }
 
 type Settled =
@@ -62,6 +64,18 @@ export class DispatchExecutor implements Executor {
     const pipelineRef =
       typeof rawPipeline === 'string' && rawPipeline.length > 0 ? rawPipeline : undefined;
 
+    // Pre-fire model resolution (authorization side): resolve the subagent's
+    // latest def blob and read its pinned model; fall back to the executor's
+    // configured defaultModel. Best-effort — any failure here yields just the
+    // defaultModel (possibly undefined) and the fire proceeds.
+    //
+    // Race caveat: this resolveLatest can race a concurrent re-registration
+    // relative to the client's OWN resolve inside dispatch.fire below. The
+    // guaranteed invariant is manifest ≡ dispatched work — both carry the
+    // model from THIS single pre-fire resolution. Manifest-vs-worker-blob
+    // equality is the deferred verify row's business.
+    const requestedModel = await this.resolveRequestedModel(subagent);
+
     // Container starts HERE. Anything that throws BEFORE this is a clean pre-start
     // failure. Anything AFTER must NOT throw, or tick fails the item without
     // recording the dispatchHash and the running container is orphaned.
@@ -72,6 +86,7 @@ export class DispatchExecutor implements Executor {
       target: this.opts.target,
       workerImage: this.opts.workerImage,
       secrets: this.opts.secrets,
+      ...(requestedModel !== undefined ? { model: requestedModel } : {}),
       ...(inputRefs && Object.keys(inputRefs).length ? { inputRefs } : {}),
       ...(pipelineRef !== undefined ? { pipelineRef } : {}),
     });
@@ -86,13 +101,14 @@ export class DispatchExecutor implements Executor {
     let manifestRef: string | undefined;
     try {
       const r = flight.resolved; // { subagent, capabilities, env, secretRefs, workerImage }
-      const model = await this.resolveModel(r.subagent);
+      // Manifest model is the SAME value sealed into the dispatched work above
+      // (single pre-fire resolution) — no post-fire re-fetch.
       const executorManifest: DispatchExecutorManifest = {
         subagent: { name: r.subagent.name, contentHash: r.subagent.contentHash },
         capabilities: r.capabilities.map((c) => ({ name: c.name, contentHash: c.contentHash })),
         env: r.env.map((e) => ({ name: e.name, contentHash: e.contentHash })),
         workerImage: r.workerImage,
-        model,
+        model: { id: requestedModel ?? '', temperature: 0, maxTokens: 0 },
       };
       const { bytes } = buildManifest({
         runId: ctx?.runId ?? '',
@@ -184,26 +200,24 @@ export class DispatchExecutor implements Executor {
   }
 
   /**
-   * Best-effort: fetch the subagent blob and extract the model field.
-   * NEVER throws — any failure returns the zero-value model.
+   * Best-effort pre-fire model resolution: resolveLatest the subagent's def
+   * blob and read `def.model`, falling back to the configured defaultModel.
+   * NEVER throws — any failure (unresolvable name, unreadable blob, bad
+   * JSON) returns the defaultModel, which may be undefined.
    */
-  private async resolveModel(
-    subagentRef: { name: string; contentHash: string },
-  ): Promise<{ id: string; temperature: number; maxTokens: number }> {
-    const zero = { id: '', temperature: 0, maxTokens: 0 };
+  private async resolveRequestedModel(subagentName: string): Promise<string | undefined> {
     try {
       const ns = this.opts.client.namespace;
-      const uri = buildAgoraUri({
-        namespace: ns,
-        type: 'subagent',
-        name: subagentRef.name,
-        contentHash: subagentRef.contentHash,
-      });
-      const bytes = await this.opts.client.storage.get(uri);
+      const baseUri = buildAgoraUri({ namespace: ns, type: 'subagent', name: subagentName });
+      const latest = await this.opts.client.storage.resolveLatest(baseUri);
+      if (!latest) return this.opts.defaultModel;
+      const bytes = await this.opts.client.storage.get(latest.uri);
       const def = JSON.parse(new TextDecoder().decode(bytes)) as { model?: unknown };
-      return { id: typeof def.model === 'string' ? def.model : '', temperature: 0, maxTokens: 0 };
+      return typeof def.model === 'string' && def.model.length > 0
+        ? def.model
+        : this.opts.defaultModel;
     } catch {
-      return zero;
+      return this.opts.defaultModel;
     }
   }
 }

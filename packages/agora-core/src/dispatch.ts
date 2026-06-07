@@ -43,6 +43,13 @@ export interface NotificationConfig {
  * `secrets` is a map of env-var name to either a `SecretRef` (resolved
  * out-of-band against a secrets manager) or an `InlineSecret` (literal
  * value bound for the lifetime of this one dispatch).
+ *
+ * `model` is the authorized model level or provider-native id for this
+ * dispatch (spec §2 grammar). Reserved levels: `fast` | `standard` | `max`
+ * — adapters map these to adapter-native models (e.g. claude-code maps them
+ * to haiku/sonnet/opus). Anything else is passed through as a provider-native
+ * id. Pin-optional: nothing fails for lack of a model field; the adapter
+ * falls back to its default. Not a secret.
  */
 export interface DispatchWork {
   subagent: string | SubagentRef;
@@ -51,6 +58,8 @@ export interface DispatchWork {
   addCapabilities?: Array<string | CapabilityRef>;
   input?: Record<string, unknown>;
   target: string;
+  /** Authorized model level or provider-native id. See interface doc for grammar. */
+  model?: string;
   dispatchId?: string;
   callback?: { url: string; signatureAlgorithm?: 'sha256' };
   notifications?: NotificationConfig[];
