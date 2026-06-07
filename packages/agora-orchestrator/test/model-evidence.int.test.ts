@@ -211,6 +211,7 @@ describe('model evidence end-to-end (InprocWorkerExecutor)', () => {
     const manifest = await readJson(storage, manifestRef as string);
     const executorManifest = manifest.executorManifest as { model?: { id: string } };
     expect(executorManifest.model?.id).toBe('def-model');
+    expect(fakeAdapter.invocations).toHaveLength(1);
     expect(fakeAdapter.invocations[0]!.model).toBe('def-model');
   });
 

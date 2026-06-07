@@ -11,6 +11,18 @@ workspace. See [RELEASING.md](./RELEASING.md) for how a release is cut.
 
 ### Added
 
+- **Model + cost evidence in dispatch (spec: docs/superpowers/specs/2026-06-06-agora-model-cost-evidence-design.md).** 
+  Dogfood run 2's manifests sealed `model: { id: '' }` and discarded cost — evidence now answers "which model, at what cost."
+  Four surfaces landed: **(1) Core contract** adds `DispatchWork.model?: string` and a shared `RuntimeUsage` type; 
+  `RuntimeExit.usage` carries actual usage across the adapter boundary. **(2) Executor option** — 
+  `DispatchExecutor.defaultModel` and pre-fire requested-model resolution (`subagent.model > defaultModel > unset seals ''`); 
+  manifest `model.id ≡ dispatched work` by construction. **(3) Adapter capture** — claude-code adapter now passes `--model` 
+  (reserved levels `fast`/`standard`/`max` → haiku/sonnet/opus bare aliases; other strings pass through) and runs 
+  `claude --print --output-format json`, parsing the envelope best-effort for actual usage (modelUsage/cost/turns/duration), 
+  verbatim fallback on unparseable output. **(4) Sentinel block** — additive `usage` block sealed after `outputs` 
+  (models actually run, costUsd, turns, model-time durationMs); absent → byte-identical sentinel. Capture-only 
+  (not forwarded into ExecutionResult).
+
 - **Block-pipeline worker runtime + the `data` pack (#46, #47).** The worker's
   hardcoded step sequence is now a pipeline runner executing a `PipelineSpec` of
   typed blocks (`agent` / `script` / `capture`; script blocks carry a

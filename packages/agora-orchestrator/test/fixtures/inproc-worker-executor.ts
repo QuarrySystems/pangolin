@@ -12,7 +12,7 @@
 // Usage: provide a shared LocalStorageProvider and namespace; register bundles
 // via the real client APIs (registerSubagent / registerPipeline) before firing.
 
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Executor, ExecutionResult, FireContext, WorkItem } from '../../src/contracts/index.js';
@@ -184,7 +184,12 @@ export class InprocWorkerExecutor implements Executor {
     };
 
     // Run the worker in-process. exitCode is the terminal result.
-    const exitCode = await runWorker(workerEnv, deps);
+    let exitCode: number;
+    try {
+      exitCode = await runWorker(workerEnv, deps);
+    } finally {
+      await rm(workspaceDir, { recursive: true, force: true }).catch(() => {});
+    }
 
     // Record the dispatch result.
     const dispatchHash = `inproc-${dispatchId}`;
@@ -293,6 +298,7 @@ export class InprocWorkerExecutor implements Executor {
    * in item.inputs.subagent and return `def.model ?? defaultModel`, with an
    * empty-string def model treated as unset. NEVER throws — any failure
    * returns the defaultModel, which may be undefined.
+   * The fixture always receives a pinned URI from `setupRun`, so `resolveLatest` is not needed; production `DispatchExecutor` resolves the mutable name first.
    */
   private async resolveRequestedModel(pinnedSubagentUri: string): Promise<string | undefined> {
     try {
