@@ -1,8 +1,17 @@
 import { Command } from 'commander';
 import { readFile, writeFile } from 'node:fs/promises';
 import { userInfo } from 'node:os';
-import { OperationsApi, nextDueAfter, validateRun, normalizeRun } from '@quarry-systems/agora-orchestrator';
-import type { SubmissionTransport, ControlChannel, AuditAnchor, Signature, ScheduleStore, Schedule, Run } from '@quarry-systems/agora-orchestrator';
+import {
+  OperationsApi, nextDueAfter, validateRun, normalizeRun,
+  buildRunView, renderRunView, nextFrame, renderVerification,
+  pipeline, mapReduce, staticDag,
+} from '@quarry-systems/agora-orchestrator';
+import type {
+  SubmissionTransport, ControlChannel, AuditAnchor, Signature, ScheduleStore, Schedule, Run,
+  Pattern, StatusLike,
+} from '@quarry-systems/agora-orchestrator';
+import { parseAgoraUri, buildDispatchRecordUri } from '@quarry-systems/agora-core';
+import type { RuntimeUsage } from '@quarry-systems/agora-core';
 import type { CliContext } from './index.js';
 
 /** Config-owned operator wiring. Client verbs use transport(+anchor/storage); `serve` uses runService. */
@@ -16,6 +25,29 @@ export interface OrchContext {
 }
 
 const resolveActor = (flag?: string): string => flag ?? process.env.AGORA_ACTOR ?? `human:${userInfo().username}`;
+
+/** Named --pattern values → the real exported Pattern objects (spec §3 — `OrchContext`
+ *  carries no queue/pattern wiring, so the flag is the v1 layout-selection path). */
+const PATTERNS: Record<string, Pattern> = { pipeline, 'map-reduce': mapReduce, 'static-dag': staticDag };
+
+/** Post-terminal audit-summary retry bounds (the export publishes after the terminal
+ *  status record — same driver iteration or a tick later). Env vars override for tests. */
+const AUDIT_RETRIES = 15;
+const AUDIT_RETRY_MS = 1000;
+
+/** Resolve a --pattern flag value; reports a clean CLI error (validate-style) on unknown names. */
+function resolvePattern(name: string | undefined, verb: string): { ok: true; pattern?: Pattern } | { ok: false } {
+  if (name === undefined) return { ok: true };
+  const pattern = PATTERNS[name];
+  if (!pattern) {
+    console.error(`${verb}: unknown pattern '${name}' — expected one of: ${Object.keys(PATTERNS).join(', ')}`);
+    process.exitCode = 1;
+    return { ok: false };
+  }
+  return { ok: true, pattern };
+}
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 export function attachOrchCmd(program: Command, ctx: CliContext): void {
   const o = program.command('orch').aliases(['orchestrator']).description('Submit, follow, cancel, and audit offload runs');
@@ -51,12 +83,123 @@ export function attachOrchCmd(program: Command, ctx: CliContext): void {
     console.log(JSON.stringify(rec ?? null, null, 2));
   });
 
-  o.command('watch <run-id>').description('Follow a run until it reaches a terminal state (Ctrl-C to stop)').action(async (runId) => {
-    const api = new OperationsApi(await ctx.getOrchContext());
-    for await (const rec of api.watch(runId)) {
-      console.log(JSON.stringify(rec));   // render each status update until terminal
-    }
-  });
+  o.command('render <plan.json>')
+    .description('Render the pre-run view of a plan (ghost arcs dotted); needs no config file')
+    .option('--pattern <name>', `layout pattern: ${Object.keys(PATTERNS).join(' | ')}`)
+    .option('--no-color', 'disable ANSI color')
+    .option('--ascii', 'pure-ASCII glyphs')
+    .action(async (file, opts) => {
+      // MUST NOT call ctx.getOrchContext() — render works without a config file (spec §3).
+      let plan: Run;
+      try {
+        plan = JSON.parse(await readFile(file, 'utf8'));
+      } catch (err) {
+        console.error(`render: cannot read plan — ${(err as Error).message}`);
+        process.exitCode = 1;
+        return;
+      }
+      const resolved = resolvePattern(opts.pattern, 'render');
+      if (!resolved.ok) return;
+      let lines: string[];
+      try {
+        lines = renderRunView(
+          buildRunView({ plan, ...(resolved.pattern ? { pattern: resolved.pattern } : {}) }),
+          { color: process.stdout.isTTY === true && opts.color !== false, unicode: opts.ascii !== true },
+        );
+      } catch (err) {
+        // pattern.plan() may throw on malformed config — surface it validate-style.
+        console.error(`render: ${(err as Error).message}`);
+        process.exitCode = 1;
+        return;
+      }
+      console.log(lines.join('\n'));
+    });
+
+  o.command('watch <run-id>')
+    .description('Follow a run live until it reaches a terminal state (Ctrl-C to stop)')
+    .option('--json', 'raw record stream (one JSON line per poll — the pre-view format)')
+    .option('--interval <ms>', 'poll interval in milliseconds')
+    .option('--no-color', 'disable ANSI color')
+    .option('--no-clear', 'append frames instead of redrawing in place')
+    .option('--ascii', 'pure-ASCII glyphs')
+    .option('--pattern <name>', `layout pattern: ${Object.keys(PATTERNS).join(' | ')}`)
+    .action(async (runId, opts) => {
+      const oc = await ctx.getOrchContext();
+      const api = new OperationsApi(oc);
+
+      if (opts.json) {
+        for await (const rec of api.watch(runId)) {
+          console.log(JSON.stringify(rec));   // render each status update until terminal
+        }
+        return;
+      }
+
+      const resolved = resolvePattern(opts.pattern, 'watch');
+      if (!resolved.ok) return;
+      const color = process.stdout.isTTY === true && opts.color !== false;
+      const unicode = opts.ascii !== true;
+      const intervalMs = opts.interval !== undefined ? Number(opts.interval) : undefined;
+
+      const evidence = new Map<string, RuntimeUsage>();
+      const evidenceTried = new Set<string>();   // cached per item id — one fetch attempt each
+      let prev: string[] | undefined;
+
+      for await (const rec of api.watch(runId, intervalMs !== undefined ? { intervalMs } : undefined)) {
+        // api.watch can yield duplicates and, before the first status publishes,
+        // non-status kinds (the status() fallback) — only status arrays render.
+        if (rec.kind !== 'status' || !Array.isArray(rec.body)) continue;
+        const status = rec.body as StatusLike[];
+
+        // Evidence: best-effort per done item with a manifestRef. The namespace comes
+        // FROM the manifestRef itself; oc.storage may be absent; any throw → skip silently.
+        if (oc.storage) {
+          for (const s of status) {
+            if (s.status !== 'done' || s.manifestRef === undefined || evidenceTried.has(s.id)) continue;
+            evidenceTried.add(s.id);
+            try {
+              const p = parseAgoraUri(s.manifestRef);
+              const bytes = await oc.storage.get(buildDispatchRecordUri(p.namespace, p.name, 'output.json'));
+              const usage = (JSON.parse(new TextDecoder().decode(bytes)) as { usage?: RuntimeUsage }).usage;
+              if (usage !== undefined) evidence.set(s.id, usage);
+            } catch { /* best-effort — never fail the watch */ }
+          }
+        }
+
+        // No plan file in scope — synthesize a Run from the status items themselves
+        // (depends_on ships on StatusItem; the tree layout is always correct).
+        const plan: Run = {
+          id: runId,
+          queue: 'default',
+          items: status.map((s) => ({
+            id: s.id, executor: 'dispatch', inputs: {}, depends_on: s.depends_on ?? [], resourceLocks: [],
+          })),
+        };
+        const view = buildRunView({ plan, ...(resolved.pattern ? { pattern: resolved.pattern } : {}), status, evidence });
+        const frame = nextFrame(prev, renderRunView(view, { color, unicode }));
+        if (frame === null) continue;
+        if (opts.clear !== false && prev !== undefined) {
+          // Redraw in place: cursor up by the previous frame's height, clear to end.
+          process.stdout.write(`\x1b[${prev.length}A\x1b[0J`);
+        }
+        console.log(frame.join('\n'));
+        prev = frame;
+      }
+
+      // Terminal: bounded retry for the audit summary (the export publishes after
+      // the terminal status record). Exit code untouched — matches prior watch behavior.
+      const retries = Number(process.env.AGORA_WATCH_AUDIT_RETRIES ?? AUDIT_RETRIES);
+      const retryMs = Number(process.env.AGORA_WATCH_AUDIT_RETRY_MS ?? AUDIT_RETRY_MS);
+      for (let i = 0; i < retries; i++) {
+        try {
+          const bundle = await api.audit(runId);
+          console.log(renderVerification(bundle, { color }));
+          return;
+        } catch {
+          if (i < retries - 1) await sleep(retryMs);
+        }
+      }
+      console.log('(no audit export published — run may not be sealed)');
+    });
 
   o.command('cancel <target>').option('--actor <id>').action(async (target, opts) => {
     await new OperationsApi(await ctx.getOrchContext()).cancel(target, resolveActor(opts.actor));

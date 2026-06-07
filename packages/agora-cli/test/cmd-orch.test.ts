@@ -83,7 +83,7 @@ async function captureLog(fn: () => Promise<void>): Promise<string[]> {
 // ---------------------------------------------------------------------------
 
 describe('attachOrchCmd', () => {
-  it('registers serve|submit|status|watch|cancel|audit|schedule|validate subcommands + orchestrator alias', () => {
+  it('registers serve|submit|status|watch|cancel|audit|schedule|validate|render subcommands + orchestrator alias', () => {
     const program = new Command();
     const ctx = makeCtx(makeOrchContext());
     attachOrchCmd(program, ctx);
@@ -92,7 +92,7 @@ describe('attachOrchCmd', () => {
     expect(orchCmd).toBeDefined();
     expect(orchCmd.aliases()).toContain('orchestrator');
     const names = orchCmd.commands.map((c) => c.name()).sort();
-    expect(names).toEqual(['audit', 'cancel', 'schedule', 'serve', 'status', 'submit', 'validate', 'watch']);
+    expect(names).toEqual(['audit', 'cancel', 'render', 'schedule', 'serve', 'status', 'submit', 'validate', 'watch']);
   });
 
   describe('submit', () => {
@@ -280,8 +280,8 @@ describe('attachOrchCmd', () => {
     });
   });
 
-  describe('watch', () => {
-    it('prints each status record as JSON and terminates when all items are in a terminal state', async () => {
+  describe('watch --json (raw stream format pin)', () => {
+    it('prints each raw status record as one JSON line and terminates when all items are terminal', async () => {
       // Build a transport whose readOutbox returns a status record with all items done.
       // OperationsApi.watch yields each record and stops when isTerminalStatusBody returns true
       // (i.e. every item.status is in {done|failed|skipped|cancelled}).
@@ -303,20 +303,433 @@ describe('attachOrchCmd', () => {
       const program = new Command();
       attachOrchCmd(program, ctx);
 
-      // Pass intervalMs=0 so watch doesn't sleep between polls
-      // We can't pass it via CLI flags (no flag defined), so we rely on the
-      // transport already having a terminal record on the first poll — watch
+      // The transport already has a terminal record on the first poll — watch
       // yields once, sees terminal body, and returns without sleeping.
       const logs = await captureLog(() =>
-        program.parseAsync(['orch', 'watch', 'run-watch-1'], { from: 'user' }),
+        program.parseAsync(['orch', 'watch', 'run-watch-1', '--json'], { from: 'user' }),
       );
 
-      // Should print exactly one status record as JSON
+      // Format pin: exactly one JSON.parse-able line per poll, whole-record shape.
       expect(logs).toHaveLength(1);
       const parsed = JSON.parse(logs[0]);
       expect(parsed.runId).toBe('run-watch-1');
       expect(parsed.kind).toBe('status');
+      expect(parsed.body).toEqual(terminalStatusRec.body);
+      expect(parsed.at).toBe('2026-06-01T12:00:00Z');
       // The command must have returned (not hung); if it hung, captureLog would never resolve
+    });
+  });
+
+  describe('watch (live view default)', () => {
+    // Bound the post-terminal audit-summary retry so tests never sleep for real
+    // (the production defaults are 15 retries x 1000 ms).
+    let savedRetries: string | undefined;
+    let savedRetryMs: string | undefined;
+
+    beforeEach(() => {
+      savedRetries = process.env.AGORA_WATCH_AUDIT_RETRIES;
+      savedRetryMs = process.env.AGORA_WATCH_AUDIT_RETRY_MS;
+      process.env.AGORA_WATCH_AUDIT_RETRIES = '1';
+      process.env.AGORA_WATCH_AUDIT_RETRY_MS = '0';
+    });
+
+    afterEach(() => {
+      if (savedRetries === undefined) delete process.env.AGORA_WATCH_AUDIT_RETRIES;
+      else process.env.AGORA_WATCH_AUDIT_RETRIES = savedRetries;
+      if (savedRetryMs === undefined) delete process.env.AGORA_WATCH_AUDIT_RETRY_MS;
+      else process.env.AGORA_WATCH_AUDIT_RETRY_MS = savedRetryMs;
+    });
+
+    /** Fake transport whose readOutbox advances through scripted per-call results
+     *  (the stock fake returns the full accumulated list, so status() always sees
+     *  the latest record — useless for simulating poll-over-poll progression). */
+    function makeSequencedTransport(sequences: OutboxRecord[][]): ReturnType<typeof makeFakeTransport> {
+      const t = makeFakeTransport();
+      let call = 0;
+      t.readOutbox = async () => {
+        const idx = Math.min(call, sequences.length - 1);
+        call++;
+        return sequences[idx]!;
+      };
+      return t;
+    }
+
+    it('renders frames, dedups identical polls, and notes the missing audit export', async () => {
+      const runId = 'run-live-1';
+      const recA: OutboxRecord = {
+        runId, kind: 'status',
+        body: [{ id: 'item-1', runId, status: 'running', blockedBy: [], depends_on: [] }],
+        at: '2026-06-01T12:00:00Z',
+      };
+      const recB: OutboxRecord = {
+        runId, kind: 'status',
+        body: [{ id: 'item-1', runId, status: 'done', blockedBy: [], depends_on: [] }],
+        at: '2026-06-01T12:00:05Z',
+      };
+      // A, A (identical poll — must dedup), B (terminal)
+      const transport = makeSequencedTransport([[recA], [recA], [recB]]);
+      const oc = makeOrchContext({ transport });   // NO storage — evidence path must skip silently
+      const ctx = makeCtx(oc);
+
+      const program = new Command();
+      attachOrchCmd(program, ctx);
+
+      const logs = await captureLog(() =>
+        program.parseAsync(['orch', 'watch', runId, '--interval', '0', '--no-clear', '--no-color'], { from: 'user' }),
+      );
+
+      // Two distinct frames + the no-audit note. The duplicate poll produced no frame.
+      expect(logs).toHaveLength(3);
+      expect(logs[0]).toContain('item-1');
+      expect(logs[0]).toContain('state: running');
+      expect(logs[1]).toContain('state: terminal');
+      expect(logs[0]).not.toEqual(logs[1]);
+      expect(logs[2]).toContain('no audit export published');
+    });
+
+    it('skips non-status records seen before the first status publishes', async () => {
+      const runId = 'run-live-2';
+      const nonStatus: OutboxRecord = {
+        runId, kind: 'audit', body: { runId }, at: '2026-06-01T12:00:00Z',
+      };
+      const recDone: OutboxRecord = {
+        runId, kind: 'status',
+        body: [{ id: 'item-1', runId, status: 'done', blockedBy: [], depends_on: [] }],
+        at: '2026-06-01T12:00:05Z',
+      };
+      const transport = makeSequencedTransport([[nonStatus], [nonStatus, recDone]]);
+      const oc = makeOrchContext({ transport });
+      const ctx = makeCtx(oc);
+
+      const program = new Command();
+      attachOrchCmd(program, ctx);
+
+      const logs = await captureLog(() =>
+        program.parseAsync(['orch', 'watch', runId, '--interval', '0', '--no-clear', '--no-color'], { from: 'user' }),
+      );
+
+      // Exactly one frame (from the status record) + the no-audit note; the
+      // non-status record neither crashed the loop nor rendered a frame.
+      expect(logs).toHaveLength(2);
+      expect(logs[0]).toContain('item-1');
+      expect(logs[0]).toContain('state: terminal');
+      expect(logs[1]).toContain('no audit export published');
+    });
+
+    it('fills per-item evidence from storage best-effort (manifestRef → dispatch output.json)', async () => {
+      const runId = 'run-live-3';
+      const recDone: OutboxRecord = {
+        runId, kind: 'status',
+        body: [{
+          id: 'item-1', runId, status: 'done', blockedBy: [], depends_on: [],
+          manifestRef: 'agora://ns1/manifests/d-1',
+        }],
+        at: '2026-06-01T12:00:00Z',
+      };
+      const transport = makeSequencedTransport([[recDone]]);
+      const seenRefs: string[] = [];
+      const storage = {
+        async get(ref: string): Promise<Uint8Array> {
+          seenRefs.push(ref);
+          return new TextEncoder().encode(JSON.stringify({
+            usage: { models: ['m1'], costUsd: 0.25, turns: 3 },
+          }));
+        },
+      };
+      const oc = makeOrchContext({ transport, storage });
+      const ctx = makeCtx(oc);
+
+      const program = new Command();
+      attachOrchCmd(program, ctx);
+
+      const logs = await captureLog(() =>
+        program.parseAsync(['orch', 'watch', runId, '--interval', '0', '--no-clear', '--no-color'], { from: 'user' }),
+      );
+
+      expect(seenRefs).toEqual(['agora://ns1/dispatches/d-1/output.json']);
+      expect(logs[0]).toContain('m1');
+      expect(logs[0]).toContain('$0.25');
+      expect(logs[0]).toContain('3t');
+    });
+
+    it('still renders frames when a storage evidence read throws', async () => {
+      const runId = 'run-live-4';
+      const recDone: OutboxRecord = {
+        runId, kind: 'status',
+        body: [{
+          id: 'item-1', runId, status: 'done', blockedBy: [], depends_on: [],
+          manifestRef: 'agora://ns1/manifests/d-1',
+        }],
+        at: '2026-06-01T12:00:00Z',
+      };
+      const transport = makeSequencedTransport([[recDone]]);
+      const storage = {
+        async get(_ref: string): Promise<Uint8Array> { throw new Error('boom'); },
+      };
+      const oc = makeOrchContext({ transport, storage });
+      const ctx = makeCtx(oc);
+
+      const program = new Command();
+      attachOrchCmd(program, ctx);
+
+      const logs = await captureLog(() =>
+        program.parseAsync(['orch', 'watch', runId, '--interval', '0', '--no-clear', '--no-color'], { from: 'user' }),
+      );
+
+      expect(logs[0]).toContain('item-1');
+      expect(logs[0]).toContain('state: terminal');
+    });
+
+    it('repaints in place by default (cursor-up + clear by previous frame height)', async () => {
+      const runId = 'run-live-5';
+      const recA: OutboxRecord = {
+        runId, kind: 'status',
+        body: [{ id: 'item-1', runId, status: 'running', blockedBy: [], depends_on: [] }],
+        at: '2026-06-01T12:00:00Z',
+      };
+      const recB: OutboxRecord = {
+        runId, kind: 'status',
+        body: [{ id: 'item-1', runId, status: 'done', blockedBy: [], depends_on: [] }],
+        at: '2026-06-01T12:00:05Z',
+      };
+      const transport = makeSequencedTransport([[recA], [recB]]);
+      const oc = makeOrchContext({ transport });
+      const ctx = makeCtx(oc);
+
+      const program = new Command();
+      attachOrchCmd(program, ctx);
+
+      const writes: string[] = [];
+      const spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: any) => {
+        writes.push(String(chunk));
+        return true;
+      });
+      try {
+        await captureLog(() =>
+          program.parseAsync(['orch', 'watch', runId, '--interval', '0', '--no-color'], { from: 'user' }),
+        );
+      } finally {
+        spy.mockRestore();
+      }
+
+      // First frame is 3 lines (node, blank, footer) → cursor up 3 + clear-to-end
+      // before the second frame prints. No clear before the FIRST frame.
+      expect(writes).toContain('\x1b[3A\x1b[0J');
+    });
+
+    it('prints the verify summary when the audit export appears late (bounded retry)', async () => {
+      process.env.AGORA_WATCH_AUDIT_RETRIES = '2';
+      process.env.AGORA_WATCH_AUDIT_RETRY_MS = '0';
+
+      const { SqliteRunStateStore } = await import('@quarry-systems/agora-orchestrator');
+      const { AuditLog } = await import('@quarry-systems/agora-orchestrator/src/audit/audit-log.js');
+      const { LocalAnchor } = await import('@quarry-systems/agora-orchestrator/src/audit/anchor.js');
+
+      const store = new SqliteRunStateStore();
+      const anchor = new LocalAnchor(store);
+      const fakeSigner = { async sign() { return { alg: 'none', bytes: new Uint8Array(0) }; } };
+      const log = new AuditLog({ store, signer: fakeSigner, anchor });
+
+      const runId = 'run-live-audit-late';
+      log.append({ runId, kind: 'run.submitted', actor: 'human:test', at: '2026-06-01T00:00:00Z' });
+      log.append({ runId, kind: 'run.completed', at: '2026-06-01T00:01:00Z' });
+      await log.sealEpoch(runId);
+
+      const entries = store.getAuditEntries(runId);
+      const root = store.getAuditRoot(runId);
+      const exp = { runId, entries, root, items: [{ id: 'item-1', status: 'done' }] };
+
+      const recDone: OutboxRecord = {
+        runId, kind: 'status',
+        body: [{ id: 'item-1', runId, status: 'done', blockedBy: [], depends_on: [] }],
+        at: '2026-06-01T00:01:30Z',
+      };
+      const auditRec: OutboxRecord = { runId, kind: 'audit', body: exp, at: '2026-06-01T00:02:00Z' };
+
+      // Poll 1 (watch): terminal status, NO audit export yet.
+      // Audit attempt 1: still no export → retry. Attempt 2: export published → summary.
+      const transport = makeSequencedTransport([[recDone], [recDone], [recDone, auditRec]]);
+      const storage = {
+        async get(_ref: string): Promise<Uint8Array> { throw new Error('no manifests'); },
+      };
+      const oc = makeOrchContext({ transport, anchor, storage });
+      const ctx = makeCtx(oc);
+
+      const program = new Command();
+      attachOrchCmd(program, ctx);
+
+      const prevExitCode = process.exitCode;
+      process.exitCode = undefined;
+      try {
+        const logs = await captureLog(() =>
+          program.parseAsync(['orch', 'watch', runId, '--interval', '0', '--no-clear', '--no-color'], { from: 'user' }),
+        );
+
+        // Frame first, then the verification summary (no "missing export" note).
+        expect(logs[0]).toContain('state: terminal');
+        expect(logs.some((l) => l.includes('agora verify'))).toBe(true);
+        expect(logs.some((l) => l.includes('no audit export published'))).toBe(false);
+        expect(process.exitCode).not.toBe(1);
+      } finally {
+        process.exitCode = prevExitCode;
+      }
+    });
+  });
+
+  describe('render', () => {
+    let tmpDir: string;
+    let savedExitCode: typeof process.exitCode;
+    let stderrLines: string[];
+    let origError: typeof console.error;
+
+    beforeEach(async () => {
+      tmpDir = await mkdtemp(join(tmpdir(), 'agora-cli-render-'));
+      savedExitCode = process.exitCode;
+      process.exitCode = undefined;
+      stderrLines = [];
+      origError = console.error;
+      console.error = vi.fn((...args: unknown[]) => stderrLines.push(args.map(String).join(' ')));
+    });
+
+    afterEach(async () => {
+      await rm(tmpDir, { recursive: true, force: true });
+      process.exitCode = savedExitCode;
+      console.error = origError;
+    });
+
+    /** render must work with NO config file — getOrchContext THROWS. */
+    function throwingCtx(): CliContext {
+      return {
+        getClient: async () => ({} as any),
+        getOrchContext: async () => { throw new Error('getOrchContext must not be called by render'); },
+      };
+    }
+
+    const gatePlan = {
+      id: 'run-render-1',
+      queue: 'q',
+      items: [
+        { id: 'a', executor: 'x', inputs: {}, depends_on: [], resourceLocks: [] },
+        {
+          id: 'b', executor: 'x',
+          inputs: { gate: { onRed: 'spawn-fix', subject: 'a', fixTemplate: { executor: 'x', inputs: {} } } },
+          depends_on: ['a'], resourceLocks: [],
+        },
+        { id: 'c', executor: 'x', inputs: {}, depends_on: ['b'], resourceLocks: [] },
+      ],
+    };
+
+    it('--pattern pipeline shows the ghost arc for a spawn-fix gate plan (and never touches the orch context)', async () => {
+      const planPath = join(tmpDir, 'plan.json');
+      await writeFile(planPath, JSON.stringify(gatePlan));
+
+      const program = new Command();
+      attachOrchCmd(program, throwingCtx());
+
+      const logs = await captureLog(() =>
+        program.parseAsync(['orch', 'render', planPath, '--pattern', 'pipeline'], { from: 'user' }),
+      );
+
+      expect(logs).toHaveLength(1);
+      const out = logs[0];
+      // Ghost arc dotted under the gate
+      expect(out).toContain('┊ b-fix-1');
+      expect(out).toContain('┊ b~2');
+      expect(out).toContain('┊ c~2');
+      // Pre-run footer
+      expect(out).toContain('state: pre-run');
+      expect(process.exitCode).not.toBe(1);
+    });
+
+    it('--ascii substitutes ASCII glyphs', async () => {
+      const planPath = join(tmpDir, 'plan.json');
+      await writeFile(planPath, JSON.stringify(gatePlan));
+
+      const program = new Command();
+      attachOrchCmd(program, throwingCtx());
+
+      const logs = await captureLog(() =>
+        program.parseAsync(['orch', 'render', planPath, '--pattern', 'pipeline', '--ascii'], { from: 'user' }),
+      );
+
+      expect(logs[0]).toContain('[:] b-fix-1');
+      expect(logs[0]).not.toContain('┊');
+    });
+
+    it('renders a generic tree when --pattern is omitted', async () => {
+      const planPath = join(tmpDir, 'plan.json');
+      await writeFile(planPath, JSON.stringify({
+        id: 'run-render-tree',
+        queue: 'q',
+        items: [
+          { id: 'a', executor: 'x', inputs: {}, depends_on: [], resourceLocks: [] },
+          { id: 'b', executor: 'x', inputs: {}, depends_on: ['a'], resourceLocks: [] },
+        ],
+      }));
+
+      const program = new Command();
+      attachOrchCmd(program, throwingCtx());
+
+      const logs = await captureLog(() =>
+        program.parseAsync(['orch', 'render', planPath], { from: 'user' }),
+      );
+
+      expect(logs).toHaveLength(1);
+      expect(logs[0]).toContain('· a');
+      expect(logs[0]).toContain('· b');
+      expect(logs[0]).toContain('state: pre-run');
+    });
+
+    it('reports an unknown --pattern as a clean CLI error', async () => {
+      const planPath = join(tmpDir, 'plan.json');
+      await writeFile(planPath, JSON.stringify(gatePlan));
+
+      const program = new Command();
+      attachOrchCmd(program, throwingCtx());
+
+      await captureLog(() =>
+        program.parseAsync(['orch', 'render', planPath, '--pattern', 'bogus'], { from: 'user' }),
+      );
+
+      expect(process.exitCode).toBe(1);
+      expect(stderrLines.length).toBeGreaterThan(0);
+      expect(stderrLines[0]).toContain('unknown pattern');
+    });
+
+    it('reports an unreadable plan file as a clean CLI error', async () => {
+      const program = new Command();
+      attachOrchCmd(program, throwingCtx());
+
+      await captureLog(() =>
+        program.parseAsync(['orch', 'render', join(tmpDir, 'nope.json')], { from: 'user' }),
+      );
+
+      expect(process.exitCode).toBe(1);
+      expect(stderrLines.length).toBeGreaterThan(0);
+      expect(stderrLines[0]).toContain('render: cannot read plan');
+    });
+
+    it('surfaces pattern.plan() errors as clean CLI errors (mirrors validate)', async () => {
+      const planPath = join(tmpDir, 'plan.json');
+      await writeFile(planPath, JSON.stringify({
+        id: 'run-render-bad-mr',
+        queue: 'q',
+        items: [
+          { id: 'split', executor: 'x', inputs: { mapReduce: 'bogus' }, depends_on: [], resourceLocks: [] },
+        ],
+      }));
+
+      const program = new Command();
+      attachOrchCmd(program, throwingCtx());
+
+      await captureLog(() =>
+        program.parseAsync(['orch', 'render', planPath, '--pattern', 'map-reduce'], { from: 'user' }),
+      );
+
+      expect(process.exitCode).toBe(1);
+      expect(stderrLines.length).toBeGreaterThan(0);
+      expect(stderrLines[0]).toContain('render:');
+      expect(stderrLines[0]).toContain('map-reduce');
     });
   });
 
