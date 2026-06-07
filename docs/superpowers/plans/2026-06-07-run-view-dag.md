@@ -5,13 +5,13 @@ created: 2026-06-07
 
 ```mermaid
 flowchart TD
-    task-status-depends-on["task-status-depends-on: StatusItem gains depends_on<br/>files: packages/agora-orchestrator/src/orchestrator.ts +1 more"]
-    task-view-build["task-view-build: buildRunView view model + ghosts<br/>files: packages/agora-orchestrator/src/view/build.ts +1 more"]
-    task-view-render["task-view-render: renderRunView + frame dedup + barrel<br/>files: packages/agora-orchestrator/src/view/render.ts +3 more"]
-    task-cli-verbs["task-cli-verbs: orch render verb + watch default live view<br/>files: packages/agora-cli/src/cmd-orch.ts +1 more"]
-    task-driver-adopt["task-driver-adopt: dogfood-gated driver uses the view<br/>files: examples/dogfood-gated/src/index.ts"]
-    task-docs["task-docs: cli.md + execution-patterns cross-link<br/>files: docs-site/src/content/docs/reference/cli.md +1 more"]
-    task-changelog["task-changelog: CHANGELOG entry<br/>files: CHANGELOG.md"]
+    task-status-depends-on["task-status-depends-on: StatusItem gains depends_on<br/>files: packages/agora-orchestrator/src/orchestrator.ts +1 more"]:::done
+    task-view-build["task-view-build: buildRunView view model + ghosts<br/>files: packages/agora-orchestrator/src/view/build.ts +1 more"]:::done
+    task-view-render["task-view-render: renderRunView + frame dedup + barrel<br/>files: packages/agora-orchestrator/src/view/render.ts +3 more"]:::done
+    task-cli-verbs["task-cli-verbs: orch render verb + watch default live view<br/>files: packages/agora-cli/src/cmd-orch.ts +1 more"]:::done
+    task-driver-adopt["task-driver-adopt: dogfood-gated driver uses the view<br/>files: examples/dogfood-gated/src/index.ts"]:::done
+    task-docs["task-docs: cli.md + execution-patterns cross-link<br/>files: docs-site/src/content/docs/reference/cli.md +2 more"]:::done
+    task-changelog["task-changelog: CHANGELOG entry<br/>files: CHANGELOG.md"]:::done
 
     task-view-build --> task-view-render
     task-view-build --> task-cli-verbs
@@ -52,7 +52,7 @@ depends_on: []
 files:
   - packages/agora-orchestrator/src/orchestrator.ts
   - packages/agora-orchestrator/test/orchestrator.test.ts
-status: pending
+status: done
 model_hint: cheap
 ```
 
@@ -93,7 +93,7 @@ depends_on: []
 files:
   - packages/agora-orchestrator/src/view/build.ts
   - packages/agora-orchestrator/test/view/build.test.ts
-status: pending
+status: done
 model_hint: opus
 ```
 
@@ -168,7 +168,7 @@ files:
   - packages/agora-orchestrator/src/view/frame.ts
   - packages/agora-orchestrator/src/index.ts
   - packages/agora-orchestrator/test/view/render.test.ts
-status: pending
+status: done
 model_hint: standard
 ```
 
@@ -218,7 +218,7 @@ depends_on: [task-view-build, task-view-render, task-status-depends-on]
 files:
   - packages/agora-cli/src/cmd-orch.ts
   - packages/agora-cli/test/cmd-orch.test.ts
-status: pending
+status: done
 model_hint: opus
 ```
 
@@ -262,7 +262,7 @@ id: task-driver-adopt
 depends_on: [task-view-build, task-view-render]
 files:
   - examples/dogfood-gated/src/index.ts
-status: pending
+status: done
 model_hint: standard
 ```
 
@@ -306,7 +306,7 @@ files:
   - docs-site/src/content/docs/reference/cli.md
   - docs-site/src/content/docs/explanation/execution-patterns.md
   - docs-site/src/content/docs/tutorials/first-offload-run.md
-status: pending
+status: done
 model_hint: standard
 is_wiring_task: true
 ```
@@ -327,7 +327,7 @@ id: task-changelog
 depends_on: [task-cli-verbs, task-driver-adopt]
 files:
   - CHANGELOG.md
-status: pending
+status: done
 model_hint: cheap
 is_wiring_task: true
 ```
