@@ -233,4 +233,44 @@ describe('registerSubagent', () => {
       registerSubagent(client, { name: 'reviewer', systemPrompt: 'hi' }),
     ).rejects.toThrow(/resolveLatest returned null immediately after put/);
   });
+
+  it('persists model into the stored canonical def', async () => {
+    const storage = makeMemoryStorage();
+    const client = makeClient(storage);
+    const handle = await registerSubagent(client, {
+      name: 'analyst',
+      systemPrompt: 'analyze carefully',
+      model: 'claude-opus-4',
+    });
+    const pinnedUri = `agora://ns/subagent/analyst/${handle.contentHash}`;
+    const def = JSON.parse(new TextDecoder().decode(await storage.get(pinnedUri)));
+    expect(def.model).toBe('claude-opus-4');
+  });
+
+  it('stores null for model when not provided', async () => {
+    const storage = makeMemoryStorage();
+    const client = makeClient(storage);
+    const handle = await registerSubagent(client, {
+      name: 'analyst',
+      systemPrompt: 'analyze carefully',
+    });
+    const pinnedUri = `agora://ns/subagent/analyst/${handle.contentHash}`;
+    const def = JSON.parse(new TextDecoder().decode(await storage.get(pinnedUri)));
+    expect(def.model).toBe(null);
+  });
+
+  it('content hash differs between model and no-model registrations', async () => {
+    const storage = makeMemoryStorage();
+    const client = makeClient(storage);
+    const withModel = await registerSubagent(client, {
+      name: 'analyst',
+      systemPrompt: 'analyze',
+      model: 'claude-opus-4',
+    });
+    const withoutModel = await registerSubagent(client, {
+      name: 'analyst',
+      systemPrompt: 'analyze',
+    });
+    expect(withModel.contentHash).not.toBe(withoutModel.contentHash);
+  });
 });
