@@ -5,12 +5,12 @@ created: 2026-06-07
 
 ```mermaid
 flowchart TD
-    task-adapter-promotion["task-adapter-promotion: S3 mailbox/lock clients → agora-storage-s3<br/>files: packages/agora-storage-s3/src/aws-s3-mailbox-client.ts +4 more"]
-    task-example-rewire["task-example-rewire: offload-minio imports the promoted adapters<br/>files: examples/offload-minio/agora.config.mjs +3 more"]
-    task-deploy-package["task-deploy-package: deploy/serve-stack workspace member + image<br/>files: deploy/serve-stack/package.json +4 more"]
-    task-deploy-configs["task-deploy-configs: serve config + client kit + compose + smoke<br/>files: deploy/serve-stack/agora.config.mjs +5 more"]
-    task-runbook["task-runbook: RUNBOOK.md (WSL2 keep-alive → smoke → drill)<br/>files: deploy/serve-stack/RUNBOOK.md"]
-    task-changelog["task-changelog: CHANGELOG entry<br/>files: CHANGELOG.md"]
+    task-adapter-promotion["task-adapter-promotion: S3 mailbox/lock clients → agora-storage-s3<br/>files: packages/agora-storage-s3/src/aws-s3-mailbox-client.ts +5 more"]:::done
+    task-example-rewire["task-example-rewire: offload-minio imports the promoted adapters<br/>files: examples/offload-minio/agora.config.mjs +5 more"]:::done
+    task-deploy-package["task-deploy-package: deploy/serve-stack workspace member + image<br/>files: deploy/serve-stack/package.json +4 more"]:::done
+    task-deploy-configs["task-deploy-configs: serve config + client kit + compose + smoke<br/>files: deploy/serve-stack/agora.config.mjs +6 more"]:::done
+    task-runbook["task-runbook: RUNBOOK.md (WSL2 keep-alive → smoke → drill)<br/>files: deploy/serve-stack/RUNBOOK.md"]:::done
+    task-changelog["task-changelog: CHANGELOG entry<br/>files: CHANGELOG.md"]:::done
 
     task-adapter-promotion --> task-example-rewire
     task-adapter-promotion --> task-deploy-package
@@ -53,7 +53,7 @@ files:
   - packages/agora-storage-s3/package.json
   - packages/agora-storage-s3/test/aws-s3-mailbox-client.test.ts
   - packages/agora-storage-s3/test/aws-s3-lock-client.test.ts
-status: pending
+status: done
 model_hint: standard
 ```
 
@@ -97,7 +97,7 @@ files:
   - examples/offload-minio/test/aws-s3-mailbox-client.test.ts
   - examples/offload-minio/test/aws-s3-lock-client.test.ts
   - examples/offload-minio/README.md
-status: pending
+status: done
 model_hint: standard
 ```
 
@@ -134,7 +134,7 @@ files:
   - deploy/serve-stack/serve-entrypoint.mjs
   - pnpm-workspace.yaml
   - pnpm-lock.yaml
-status: pending
+status: done
 model_hint: standard
 is_wiring_task: true
 ```
@@ -162,7 +162,7 @@ files:
   - deploy/serve-stack/.env.example
   - deploy/serve-stack/docker-compose.yml
   - deploy/serve-stack/scripts/init-buckets.sh
-status: pending
+status: done
 model_hint: opus
 ```
 
@@ -213,7 +213,7 @@ id: task-runbook
 depends_on: [task-deploy-configs]
 files:
   - deploy/serve-stack/RUNBOOK.md
-status: pending
+status: done
 model_hint: standard
 is_wiring_task: true
 ```
@@ -235,7 +235,7 @@ id: task-changelog
 depends_on: [task-adapter-promotion, task-deploy-configs]
 files:
   - CHANGELOG.md
-status: pending
+status: done
 model_hint: cheap
 is_wiring_task: true
 ```
