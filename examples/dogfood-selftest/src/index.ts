@@ -146,8 +146,8 @@ async function main(): Promise<void> {
     const anchor = new LocalAnchor(store);
     const auditLog = new AuditLog({ store, signer, anchor });
 
-    // 5. Orchestrator. concurrency 2: the 4 items hold disjoint per-file locks, so
-    //    they never serialize on a lock — concurrency alone paces them (2 at a time).
+    // 5. Orchestrator. concurrency 2: the two-item dependent chain (A, then B via
+    //    needs) strictly enforces order; concurrency 2 is a no-op pacing bound for this run.
     const orchestrator = new AgoraOrchestrator({
       store,
       executors: {
