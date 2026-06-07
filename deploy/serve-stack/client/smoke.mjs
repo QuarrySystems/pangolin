@@ -56,7 +56,7 @@ const runId = await api.submit(plan, 'human:smoke');
 // 4. Hand the operator the follow-ups.
 console.log(`submitted smoke run '${runId}' (1 item)`);
 console.log('');
-console.log('Follow along / verify (from the repo root, tunnel still up):');
+console.log('Follow along / verify (from deploy/serve-stack/client — the CLI resolves agora.config.mjs from cwd; tunnel still up):');
 console.log(`  pnpm exec agora orch watch ${runId}`);
 console.log(`  pnpm exec agora orch audit ${runId} --out bundle.json`);
 console.log('  pnpm exec agora verify bundle.json');
