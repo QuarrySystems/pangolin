@@ -476,8 +476,10 @@ export async function runWorker(
   // Runtime-effect model override: the control plane's requested model
   // (AGORA_MODEL → cfg.model) wins over the subagent def's default. The
   // worker performs no level mapping — the string is opaque; levels resolve
-  // in the adapter.
-  const subagentForCtx = { ...subagent, model: cfg.model ?? subagent.model };
+  // in the adapter. The trailing ?? undefined normalizes the canonical
+  // `model: null` a registered def carries when unpinned — RuntimeInvocation.model
+  // is typed `string | undefined`, never null.
+  const subagentForCtx = { ...subagent, model: cfg.model ?? subagent.model ?? undefined };
 
   let result;
   try {
