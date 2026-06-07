@@ -5,20 +5,20 @@ created: 2026-06-06
 
 ```mermaid
 flowchart TD
-    task-core-contracts["task-core-contracts: DispatchWork.model + RuntimeUsage/RuntimeExit.usage<br/>files: packages/agora-core/src/dispatch.ts +3 more"]
-    task-adapter-model-map["task-adapter-model-map: level map pure fn<br/>files: packages/agora-runtime-claude-code/src/model-map.ts +1 more"]
-    task-adapter-envelope["task-adapter-envelope: claude JSON envelope parser<br/>files: packages/agora-runtime-claude-code/src/envelope.ts +1 more"]
-    task-adapter-wire["task-adapter-wire: adapter --model + envelope wiring<br/>files: packages/agora-runtime-claude-code/src/adapter.ts +3 more"]
-    task-client-model-passthrough["task-client-model-passthrough: AGORA_MODEL control-plane emit<br/>files: packages/agora-client/src/dispatch.ts +1 more"]
-    task-client-register-regression["task-client-register-regression: model-in-blob regression pin<br/>files: packages/agora-client/test/subagent-register-model.test.ts"]
-    task-worker-env-parse["task-worker-env-parse: parse AGORA_MODEL<br/>files: packages/agora-worker/src/env-parser.ts +1 more"]
-    task-worker-sentinel-usage["task-worker-sentinel-usage: sentinel usage block<br/>files: packages/agora-worker/src/output-sentinel.ts +1 more"]
-    task-worker-runner-thread["task-worker-runner-thread: model override + usage threading<br/>files: packages/agora-worker/src/pipeline-runner.ts +4 more"]
-    task-executor-model["task-executor-model: defaultModel + pre-fire resolve + manifest seal<br/>files: packages/agora-orchestrator/src/executors/dispatch.ts +1 more"]
-    task-int-evidence["task-int-evidence: requested-in-manifest + actual-in-sentinel int test<br/>files: packages/agora-orchestrator/test/model-evidence.int.test.ts +1 more"]
-    task-docs-site["task-docs-site: reference pages<br/>files: docs-site/src/content/docs/reference/agora-client-api.md +2 more"]
-    task-changelog["task-changelog: CHANGELOG entry<br/>files: CHANGELOG.md"]
-    task-example-comment["task-example-comment: fix stale run-1 comment<br/>files: examples/dogfood-selftest/src/index.ts"]
+    task-core-contracts["task-core-contracts: DispatchWork.model + RuntimeUsage/RuntimeExit.usage<br/>files: packages/agora-core/src/dispatch.ts +3 more"]:::done
+    task-adapter-model-map["task-adapter-model-map: level map pure fn<br/>files: packages/agora-runtime-claude-code/src/model-map.ts +1 more"]:::done
+    task-adapter-envelope["task-adapter-envelope: claude JSON envelope parser<br/>files: packages/agora-runtime-claude-code/src/envelope.ts +1 more"]:::done
+    task-adapter-wire["task-adapter-wire: adapter --model + envelope wiring<br/>files: packages/agora-runtime-claude-code/src/adapter.ts +3 more"]:::done
+    task-client-model-passthrough["task-client-model-passthrough: AGORA_MODEL control-plane emit<br/>files: packages/agora-client/src/dispatch.ts +1 more"]:::done
+    task-client-register-regression["task-client-register-regression: model-in-blob regression pin<br/>files: packages/agora-client/test/subagent-register.test.ts"]:::done
+    task-worker-env-parse["task-worker-env-parse: parse AGORA_MODEL<br/>files: packages/agora-worker/src/env-parser.ts +1 more"]:::done
+    task-worker-sentinel-usage["task-worker-sentinel-usage: sentinel usage block<br/>files: packages/agora-worker/src/output-sentinel.ts +1 more"]:::done
+    task-worker-runner-thread["task-worker-runner-thread: model override + usage threading<br/>files: packages/agora-worker/src/pipeline-runner.ts +4 more"]:::done
+    task-executor-model["task-executor-model: defaultModel + pre-fire resolve + manifest seal<br/>files: packages/agora-orchestrator/src/executors/dispatch.ts +1 more"]:::done
+    task-int-evidence["task-int-evidence: requested-in-manifest + actual-in-sentinel int test<br/>files: packages/agora-orchestrator/test/model-evidence.int.test.ts +1 more"]:::done
+    task-docs-site["task-docs-site: reference pages<br/>files: docs-site/src/content/docs/reference/agora-client-api.md +2 more"]:::done
+    task-changelog["task-changelog: CHANGELOG entry<br/>files: CHANGELOG.md"]:::done
+    task-example-comment["task-example-comment: fix stale run-1 comment<br/>files: examples/dogfood-selftest/src/index.ts"]:::done
 
     task-core-contracts --> task-adapter-envelope
     task-core-contracts --> task-adapter-wire
@@ -67,7 +67,7 @@ files:
   - packages/agora-core/src/runtime-adapter.ts
   - packages/agora-core/src/index.ts
   - packages/agora-core/test/model-contracts.test.ts
-status: pending
+status: done
 model_hint: standard
 ```
 
@@ -130,7 +130,7 @@ depends_on: []
 files:
   - packages/agora-runtime-claude-code/src/model-map.ts
   - packages/agora-runtime-claude-code/test/model-map.test.ts
-status: pending
+status: done
 model_hint: cheap
 ```
 
@@ -179,7 +179,7 @@ depends_on: [task-core-contracts]
 files:
   - packages/agora-runtime-claude-code/src/envelope.ts
   - packages/agora-runtime-claude-code/test/envelope.test.ts
-status: pending
+status: done
 model_hint: standard
 ```
 
@@ -251,7 +251,7 @@ files:
   - packages/agora-runtime-claude-code/src/claude-spawn.ts
   - packages/agora-runtime-claude-code/test/adapter.test.ts
   - packages/agora-runtime-claude-code/test/claude-spawn.test.ts
-status: pending
+status: done
 model_hint: standard
 ```
 
@@ -300,7 +300,7 @@ depends_on: [task-core-contracts]
 files:
   - packages/agora-client/src/dispatch.ts
   - packages/agora-client/test/dispatch-model.test.ts
-status: pending
+status: done
 model_hint: standard
 ```
 
@@ -343,7 +343,7 @@ id: task-client-register-regression
 depends_on: []
 files:
   - packages/agora-client/test/subagent-register.test.ts
-status: pending
+status: done
 model_hint: cheap
 ```
 
@@ -386,7 +386,7 @@ depends_on: []
 files:
   - packages/agora-worker/src/env-parser.ts
   - packages/agora-worker/test/env-parser.test.ts
-status: pending
+status: done
 model_hint: cheap
 ```
 
@@ -430,7 +430,7 @@ depends_on: [task-core-contracts]
 files:
   - packages/agora-worker/src/output-sentinel.ts
   - packages/agora-worker/test/output-sentinel.test.ts
-status: pending
+status: done
 model_hint: standard
 ```
 
@@ -485,7 +485,7 @@ files:
   - packages/agora-worker/test/pipeline-runner.test.ts
   - packages/agora-worker/test/entrypoint.test.ts
   - packages/agora-worker/test/pipeline-golden.test.ts
-status: pending
+status: done
 model_hint: opus
 ```
 
@@ -532,7 +532,7 @@ depends_on: [task-core-contracts]
 files:
   - packages/agora-orchestrator/src/executors/dispatch.ts
   - packages/agora-orchestrator/test/executors/dispatch.test.ts
-status: pending
+status: done
 model_hint: opus
 ```
 
@@ -586,7 +586,7 @@ depends_on: [task-executor-model, task-worker-runner-thread]
 files:
   - packages/agora-orchestrator/test/model-evidence.int.test.ts
   - packages/agora-orchestrator/test/fixtures/inproc-worker-executor.ts
-status: pending
+status: done
 model_hint: opus
 ```
 
@@ -641,7 +641,7 @@ files:
   - docs-site/src/content/docs/reference/agora-client-api.md
   - docs-site/src/content/docs/reference/dispatch-lifecycle.md
   - docs-site/src/content/docs/reference/cli.md
-status: pending
+status: done
 model_hint: standard
 is_wiring_task: true
 ```
@@ -663,7 +663,7 @@ id: task-changelog
 depends_on: [task-int-evidence, task-docs-site]
 files:
   - CHANGELOG.md
-status: pending
+status: done
 model_hint: cheap
 is_wiring_task: true
 ```
@@ -684,7 +684,7 @@ id: task-example-comment
 depends_on: []
 files:
   - examples/dogfood-selftest/src/index.ts
-status: pending
+status: done
 model_hint: cheap
 is_wiring_task: true
 ```
