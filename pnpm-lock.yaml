@@ -79,6 +79,34 @@ importers:
         specifier: ^5.7.2
         version: 5.9.3
 
+  examples/dogfood-gated:
+    dependencies:
+      '@quarry-systems/agora-client':
+        specifier: workspace:*
+        version: link:../../packages/agora-client
+      '@quarry-systems/agora-core':
+        specifier: workspace:*
+        version: link:../../packages/agora-core
+      '@quarry-systems/agora-orchestrator':
+        specifier: workspace:*
+        version: link:../../packages/agora-orchestrator
+      '@quarry-systems/agora-providers-local-docker':
+        specifier: workspace:*
+        version: link:../../packages/agora-providers-local-docker
+      '@quarry-systems/agora-secret-store':
+        specifier: workspace:*
+        version: link:../../packages/agora-secret-store
+      '@quarry-systems/agora-storage-local':
+        specifier: workspace:*
+        version: link:../../packages/agora-storage-local
+    devDependencies:
+      tsx:
+        specifier: ^4.19.0
+        version: 4.22.3
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+
   examples/dogfood-selftest:
     dependencies:
       '@quarry-systems/agora-client':

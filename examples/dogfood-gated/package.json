@@ -8,11 +8,12 @@
   "scripts": {
     "start": "tsx src/index.ts",
     "start:env": "tsx --env-file=../../.env src/index.ts",
-    "typecheck": "tsc --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --esModuleInterop --skipLibCheck --strict src/config.ts",
-    "build": "tsc --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --esModuleInterop --skipLibCheck --strict src/config.ts"
+    "typecheck": "tsc --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --esModuleInterop --skipLibCheck --strict src/index.ts",
+    "build": "tsc --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --esModuleInterop --skipLibCheck --strict src/index.ts"
   },
   "dependencies": {
     "@quarry-systems/agora-client": "workspace:*",
+    "@quarry-systems/agora-core": "workspace:*",
     "@quarry-systems/agora-orchestrator": "workspace:*",
     "@quarry-systems/agora-providers-local-docker": "workspace:*",
     "@quarry-systems/agora-secret-store": "workspace:*",
