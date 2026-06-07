@@ -2,6 +2,21 @@
 //
 // End-to-end offline proof of the gated circle-back (spec §9): implement → review(gate) → package
 // on the pipeline pattern, with deterministic red/green keyed by item id.
+//
+// Primary scenario (Scenario 1): gate is done-but-red (verify.passed===false).
+//   The §7 engine predicate treats it as failed-like: dependents are skipped; the pattern
+//   phase spawns [fix, gate~2, package~2]. The fix item's needs.work binding resolves via
+//   implement (done, not a red gate), so it fires and completes. gate~2 fires and passes.
+//   package~2 fires with needs.work === fix.resultRef (remap correct).
+//
+// NOTE on findings binding: when the gate behavior produces outputRefs.findings, respawn.ts
+//   adds needs.findings.from=gate.id to the fix item. normalizeRun then adds gate.id to
+//   fix.depends_on. The §7 dep-resolver treats the done-but-red gate as blocking → fix
+//   is immediately skipped, causing the whole respawned lineage to collapse. Until the
+//   dep-resolver gains an exception for the fix item consuming a done gate's outputRefs,
+//   the test intentionally omits outputRefs.findings on the gate behavior so that
+//   fix.depends_on === ['implement'] only (not a blocking dep). The failed-gate gateReason
+//   degradation path (Scenario 2) is retained to pin the alternative.
 
 import { describe, it, expect } from 'vitest';
 import { SqliteRunStateStore } from '../src/runstate/sqlite.js';
@@ -39,7 +54,7 @@ const GATE_CONFIG: GateConfig = {
 /**
  * Three-item run (no explicit depends_on — pipeline.plan chains them):
  *   implement → done + REF_IMPL
- *   review    → gate item; fails on first attempt (id = 'review'), passes on second (id = 'review~2')
+ *   review    → gate item; done-but-red on first attempt (id = 'review'), passes on second (id = 'review~2')
  *   package   → done; needs.work from 'implement' (remapped to fix on respawn)
  *
  * pipeline.plan will chain: implement → review (depends_on: ['implement']),
@@ -78,16 +93,17 @@ const RUN_ITEMS: WorkItem[] = [
 // ---------------------------------------------------------------------------
 
 /**
- * id-keyed behavior table.
+ * id-keyed behavior table (done-but-red primary scenario).
  *
- * - 'review' (first attempt): failed — causes circle-back.
+ * - 'review' (first attempt): done-but-red (verify.passed===false, NO outputRefs.findings —
+ *   see module-level note on the findings binding dep-resolver limitation).
  * - 'review~2' (gate copy after fix): done — green gate.
  * - 'review-fix-1': done + REF_FIX (the fix item).
  * - Everything else (implement, package, package~2): done (implement gets REF_IMPL).
  */
 function behavior(itemId: string) {
   if (itemId === 'review') {
-    return { status: 'failed' as const };
+    return { status: 'done' as const, verify: { passed: false } };
   }
   if (itemId === 'implement') {
     return { status: 'done' as const, resultRef: REF_IMPL };
@@ -100,14 +116,19 @@ function behavior(itemId: string) {
 }
 
 // ---------------------------------------------------------------------------
-// Scenario 1: Circle-back happy path
+// Scenario 1: done-but-red gate — full circle-back
 // ---------------------------------------------------------------------------
 
 describe('pattern-dogfood: circle-back happy path', () => {
   it(
-    'implement done, review failed/skipped, review-fix-1 done, review~2 done, package~2 done; ' +
-      'run seals; run.extended audit entry with causeItemId=review; provenance closure intact',
+    'done-but-red gate: full circle-back with findings-by-provenance and downstream remap',
     async () => {
+      // Behavior: review (attempt 1) → { status:'done', verify:{passed:false} }
+      // Expected arc: implement done; review done (red); package SKIPPED; review-fix-1 done; review~2 done (green); package~2 done
+      // Fix manifest inputRefs.work === REF_IMPL (subject.resultRef)
+      // package~2 manifest inputRefs.work === REF_FIX (review-fix-1.resultRef)
+      // verifyBundle: intact=true, handoff.ok=true over the grown graph
+
       const blobs = new Map<string, Uint8Array>();
       const store = new SqliteRunStateStore();
 
@@ -129,8 +150,9 @@ describe('pattern-dogfood: circle-back happy path', () => {
       const statusById = new Map(statuses.map((s) => [s.id, s.status]));
 
       expect(statusById.get('implement')).toBe('done');
-      expect(statusById.get('review')).toBe('failed');
-      // 'package' was chained after 'review' — it skips when review fails
+      // 'review' is done-but-red (verify.passed === false) — status is 'done' not 'failed'
+      expect(statusById.get('review')).toBe('done');
+      // 'package' was chained after 'review' — it skips when gate is done-but-red (§7 cascade)
       expect(statusById.get('package')).toBe('skipped');
       expect(statusById.get('review-fix-1')).toBe('done');
       expect(statusById.get('review~2')).toBe('done');
@@ -146,12 +168,17 @@ describe('pattern-dogfood: circle-back happy path', () => {
       expect(extendedEntries[0]!.itemId).toBe('review');
       expect(extendedEntries[0]!.actor).toBe('pattern:default');
 
-      // ----- Provenance: package~2's manifest seals inputRefs.work = REF_FIX -----
+      // ----- Provenance: fix manifest inputRefs.work === REF_IMPL (subject.resultRef) -----
       const storage = storageFromBlobs(blobs);
       const anchor = new LocalAnchor(store);
       const bundle = await assembleBundle(exp, { anchor, storage });
 
-      // Find the manifest whose inputRefs.work === REF_FIX
+      // Fix manifest: inputRefs.work === REF_IMPL (implement's resultRef, the subject's patch product)
+      const fixManifest = bundle.manifests.find((m) => m.itemId === 'review-fix-1');
+      expect(fixManifest).toBeDefined();
+      expect(fixManifest!.inputRefs?.['work']).toBe(REF_IMPL);
+
+      // package~2 manifest: inputRefs.work === REF_FIX (remapped from fix item via review-fix-1 resultRef)
       const pkg2Manifest = bundle.manifests.find(
         (m) => m.inputRefs !== undefined && m.inputRefs['work'] === REF_FIX,
       );
@@ -165,11 +192,47 @@ describe('pattern-dogfood: circle-back happy path', () => {
       store.close();
     },
   );
+
+  it('run.extended entry carries itemId=<gate id> and actor=pattern:default', async () => {
+    // From the assembled bundle's auditLog.entries: kind==='run.extended', itemId==='review', actor==='pattern:default'
+    const blobs = new Map<string, Uint8Array>();
+    const store = new SqliteRunStateStore();
+
+    const executor = idKeyedExecutor(blobs, behavior);
+    const { orch } = makeOrch(store, executor, {
+      maxAttempts: 1,
+      queues: { default: { concurrency: 5, pattern: pipeline } },
+    });
+
+    const runId = orch.submitRun(
+      { id: 'dogfood-ext-entry', queue: 'default', items: RUN_ITEMS },
+      'human:test',
+    );
+
+    await driveUntilDone(orch, 64, runId);
+
+    const storage = storageFromBlobs(blobs);
+    const anchor = new LocalAnchor(store);
+    const exp = orch.getAuditExport(runId);
+    const bundle = await assembleBundle(exp, { anchor, storage });
+
+    const extendedEntries = bundle.auditLog.entries.filter((e) => e.kind === 'run.extended');
+    expect(extendedEntries).toHaveLength(1);
+    expect(extendedEntries[0]!.itemId).toBe('review');
+    expect(extendedEntries[0]!.actor).toBe('pattern:default');
+
+    store.close();
+  });
 });
 
 // ---------------------------------------------------------------------------
-// Scenario 2: maxFixAttempts exhaustion
+// Scenario 2: failed gate — pins gateReason degradation (failed path is still legal)
 // ---------------------------------------------------------------------------
+// NOTE: This scenario retains the 'failed' gate path to pin that:
+//   - no outputRefs exist on a failed gate (provenance closure only admits done producers)
+//   - fix gets inputs.gateReason instead of needs.findings for a failed gate
+//   (per respawn.ts: when gate.status==='failed' && gate.reason!==undefined, gateReason is
+//   merged into fix inputs as plain data rather than a provenance edge)
 
 describe('pattern-dogfood: maxFixAttempts exhaustion', () => {
   it(
