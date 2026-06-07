@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { computeNewlyReady, computeSkipped, isSettled } from '../src/engine/dep-resolver.js';
 import type { ItemState } from '../src/contracts/index.js';
-import type { VerifyOutcome } from '@quarry-systems/agora-core';
 
 const mk = (id: string, deps: string[], status: ItemState['status']): ItemState =>
   ({ id, executor: 'fake', inputs: {}, depends_on: deps, resourceLocks: [], runId: 'r', queue: 'default', status });
