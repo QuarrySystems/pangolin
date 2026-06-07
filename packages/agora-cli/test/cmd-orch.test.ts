@@ -504,17 +504,31 @@ describe('attachOrchCmd', () => {
         writes.push(String(chunk));
         return true;
       });
+      let frameLogs: string[] = [];
       try {
-        await captureLog(() =>
+        frameLogs = await captureLog(() =>
           program.parseAsync(['orch', 'watch', runId, '--interval', '0', '--no-color'], { from: 'user' }),
         );
       } finally {
         spy.mockRestore();
       }
 
-      // First frame is 3 lines (node, blank, footer) → cursor up 3 + clear-to-end
-      // before the second frame prints. No clear before the FIRST frame.
-      expect(writes).toContain('\x1b[3A\x1b[0J');
+      // No clear before the FIRST frame. Before the second frame: cursor up by
+      // (first frame height + 1) then clear-to-end. The +1 accounts for the trailing
+      // newline that console.log appends — the frame occupies (lineCount+1) terminal rows.
+      //
+      // frameLogs[0] is what console.log printed for the first frame: frame.join('\n').
+      // Its line count  = frameLogs[0].split('\n').length
+      // Terminal rows consumed = line count + 1  (the implicit trailing newline from console.log)
+      // Expected rewind count  = line count + 1
+      const firstFrameLineCount = frameLogs[0].split('\n').length;
+      const expectedRewind = firstFrameLineCount + 1;
+
+      // Assert the escape sequence is present and the rewind count is correct.
+      const escSeq = writes.find((w) => /\x1b\[\d+A\x1b\[0J/.test(w));
+      expect(escSeq).toMatch(/\x1b\[\d+A\x1b\[0J/);
+      const rewindMatch = escSeq!.match(/\x1b\[(\d+)A\x1b\[0J/)!;
+      expect(Number(rewindMatch[1])).toBe(expectedRewind);
     });
 
     it('prints the verify summary when the audit export appears late (bounded retry)', async () => {

@@ -152,17 +152,23 @@ export function attachOrchCmd(program: Command, ctx: CliContext): void {
 
         // Evidence: best-effort per done item with a manifestRef. The namespace comes
         // FROM the manifestRef itself; oc.storage may be absent; any throw → skip silently.
+        // Fetches are issued concurrently so the stall is bounded by the slowest single
+        // fetch rather than the sum of all fetch latencies.
         if (oc.storage) {
-          for (const s of status) {
-            if (s.status !== 'done' || s.manifestRef === undefined || evidenceTried.has(s.id)) continue;
-            evidenceTried.add(s.id);
-            try {
-              const p = parseAgoraUri(s.manifestRef);
-              const bytes = await oc.storage.get(buildDispatchRecordUri(p.namespace, p.name, 'output.json'));
-              const usage = (JSON.parse(new TextDecoder().decode(bytes)) as { usage?: RuntimeUsage }).usage;
-              if (usage !== undefined) evidence.set(s.id, usage);
-            } catch { /* best-effort — never fail the watch */ }
-          }
+          const pending = status
+            .filter((s) => s.status === 'done' && s.manifestRef !== undefined && !evidenceTried.has(s.id))
+            .map((s) => {
+              evidenceTried.add(s.id);
+              return (async () => {
+                try {
+                  const p = parseAgoraUri(s.manifestRef!);
+                  const bytes = await oc.storage!.get(buildDispatchRecordUri(p.namespace, p.name, 'output.json'));
+                  const usage = (JSON.parse(new TextDecoder().decode(bytes)) as { usage?: RuntimeUsage }).usage;
+                  if (usage !== undefined) evidence.set(s.id, usage);
+                } catch { /* best-effort — never fail the watch */ }
+              })();
+            });
+          await Promise.all(pending);
         }
 
         // No plan file in scope — synthesize a Run from the status items themselves
@@ -178,8 +184,10 @@ export function attachOrchCmd(program: Command, ctx: CliContext): void {
         const frame = nextFrame(prev, renderRunView(view, { color, unicode }));
         if (frame === null) continue;
         if (opts.clear !== false && prev !== undefined) {
-          // Redraw in place: cursor up by the previous frame's height, clear to end.
-          process.stdout.write(`\x1b[${prev.length}A\x1b[0J`);
+          // Redraw in place: cursor up then clear to end. console.log(frame.join('\n'))
+          // emits frame.length lines plus one trailing newline, occupying prev.length+1
+          // terminal rows. Rewind by prev.length+1 to avoid the ghost-top-line bug.
+          process.stdout.write(`\x1b[${prev.length + 1}A\x1b[0J`);
         }
         console.log(frame.join('\n'));
         prev = frame;
