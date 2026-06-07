@@ -115,6 +115,8 @@ async function setupHarness(opts?: {
   capabilityFiles?: Record<string, Uint8Array>;
   capabilityHashCorrect?: boolean; // default true
   verify?: { command: string; timeout?: number };
+  /** Model baked into the subagent def (the def-level default). */
+  subagentModel?: string;
   /** Called inside the stub adapter's invoke(), after incrementing the counter. */
   onInvoke?: (spec: RuntimeInvocation) => Promise<void>;
   /**
@@ -147,6 +149,7 @@ async function setupHarness(opts?: {
 
   const subagentDef: Record<string, unknown> = { name: 'alpha', systemPrompt: 'do work' };
   if (opts?.verify) subagentDef.verify = opts.verify;
+  if (opts?.subagentModel) subagentDef.model = opts.subagentModel;
   const subagentUri = 'agora://ns/subagent/alpha/sha256:s';
   const subagentHash = computeContentHash(subagentDef);
 
@@ -761,6 +764,57 @@ describe('runWorker', () => {
     // The pre-existing input file (overlaid before baseline) must NOT appear
     // as a change — it was staged into the baseline tree, so the diff is clean.
     expect(patchText).not.toContain('inputs/patch.diff');
+  });
+
+  it('AGORA_MODEL overrides the subagent def model in the invocation and is stripped from the runtime env', async () => {
+    const h = await setupHarness({ subagentModel: 'def-model' });
+    cleanupDirs.push(h.workDir, h.adaptersRoot);
+    h.env.AGORA_MODEL = 'cfg-model';
+
+    let capturedSpec: RuntimeInvocation | undefined;
+    let capturedEnv: Record<string, string> | undefined;
+    const deps = makeDeps(h);
+    deps.adapter = {
+      name: 'claude-code',
+      reservedPaths: [],
+      invoke: async (spec, ctx) => {
+        capturedSpec = spec;
+        capturedEnv = ctx.env;
+        return { exitCode: 0, stdout: '', stderr: '' };
+      },
+    };
+
+    const code = await runWorker(h.env, deps);
+
+    expect(code).toBe(0);
+    // The runtime-effect override: cfg.model wins over the def's model.
+    expect(capturedSpec).toBeDefined();
+    expect(capturedSpec!.model).toBe('cfg-model');
+    // Firewall regression: AGORA_MODEL is control plane — stripped like all AGORA_*.
+    expect(capturedEnv).toBeDefined();
+    expect(capturedEnv).not.toHaveProperty('AGORA_MODEL');
+  });
+
+  it('without AGORA_MODEL the subagent def model flows to the invocation unchanged', async () => {
+    const h = await setupHarness({ subagentModel: 'def-model' });
+    cleanupDirs.push(h.workDir, h.adaptersRoot);
+
+    let capturedSpec: RuntimeInvocation | undefined;
+    const deps = makeDeps(h);
+    deps.adapter = {
+      name: 'claude-code',
+      reservedPaths: [],
+      invoke: async (spec) => {
+        capturedSpec = spec;
+        return { exitCode: 0, stdout: '', stderr: '' };
+      },
+    };
+
+    const code = await runWorker(h.env, deps);
+
+    expect(code).toBe(0);
+    expect(capturedSpec).toBeDefined();
+    expect(capturedSpec!.model).toBe('def-model');
   });
 
   it('declared valid script-only pipeline: runs without invoking the adapter, emits dispatch.finished, sentinel carries blocks[]', async () => {
