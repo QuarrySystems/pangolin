@@ -120,6 +120,36 @@ function gatePrefix(node: RunViewNode, unicode: boolean): string {
 }
 
 // ---------------------------------------------------------------------------
+// Shared helper: collect transitive arc ids from a seed set via depends_on edges
+// ---------------------------------------------------------------------------
+
+/**
+ * Given a seed set of known arc node ids, expand it transitively by following
+ * depends_on edges among `candidates`. Returns the expanded array (seed order
+ * first, then discovered in iteration order).
+ */
+function collectArcIds(
+  seedIds: string[],
+  candidates: RunViewNode[],
+): string[] {
+  const arcIdSet = new Set(seedIds);
+  const arcIds = [...seedIds];
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const g of candidates) {
+      if (arcIdSet.has(g.id)) continue;
+      if (g.depends_on.some((dep) => arcIdSet.has(dep))) {
+        arcIdSet.add(g.id);
+        arcIds.push(g.id);
+        changed = true;
+      }
+    }
+  }
+  return arcIds;
+}
+
+// ---------------------------------------------------------------------------
 // Chain layout renderer
 // ---------------------------------------------------------------------------
 
@@ -161,29 +191,16 @@ function buildGhostGroupsByGate(nodes: RunViewNode[]): Map<string, string[]> {
     const gateCopyId = `${gateBase}~${next}`;
 
     // Find ghost nodes that belong to this gate's arc
-    const arcIds: string[] = [];
+    const seedIds: string[] = [];
     // fix node
     const fixNode = ghostNodes.find((n) => n.id === fixId);
-    if (fixNode) arcIds.push(fixId);
+    if (fixNode) seedIds.push(fixId);
     // gate copy
     const gateCopyNode = ghostNodes.find((n) => n.id === gateCopyId);
-    if (gateCopyNode) arcIds.push(gateCopyId);
+    if (gateCopyNode) seedIds.push(gateCopyId);
     // marked copies: ghost nodes whose depends_on chains back through gateCopyId or fixId
-    // Simplified: find ghosts that aren't fix or gate-copy but share generation `next-1`=1
-    // Actually: find ghost nodes that depend_on any node in the arc (transitively)
-    const arcIdSet = new Set(arcIds);
-    let changed = true;
-    while (changed) {
-      changed = false;
-      for (const g of ghostNodes) {
-        if (arcIdSet.has(g.id)) continue;
-        if (g.depends_on.some((dep) => arcIdSet.has(dep))) {
-          arcIdSet.add(g.id);
-          arcIds.push(g.id);
-          changed = true;
-        }
-      }
-    }
+    // (transitively via collectArcIds)
+    const arcIds = collectArcIds(seedIds, ghostNodes);
 
     if (arcIds.length > 0) {
       result.set(gate.id, arcIds);
@@ -233,26 +250,17 @@ function renderChain(view: RunView, opts: RenderRunViewOpts): string[] {
     const next = gateAttempt + 1;
     const fixId = `${gateBase}-fix-${gateAttempt}`;
 
-    const arcNodeIds = new Set<string>();
     // fix node
+    const realSeedIds: string[] = [];
     const fixNode = realArcNodes.find((n) => n.id === fixId);
-    if (fixNode) arcNodeIds.add(fixId);
+    if (fixNode) realSeedIds.push(fixId);
     // gate copy
     const gateCopyId = `${gateBase}~${next}`;
     const gateCopyNode = realArcNodes.find((n) => n.id === gateCopyId);
-    if (gateCopyNode) arcNodeIds.add(gateCopyId);
-    // marked copies (transitively)
-    let changed = true;
-    while (changed) {
-      changed = false;
-      for (const n of realArcNodes) {
-        if (arcNodeIds.has(n.id)) continue;
-        if (n.depends_on.some((dep) => arcNodeIds.has(dep))) {
-          arcNodeIds.add(n.id);
-          changed = true;
-        }
-      }
-    }
+    if (gateCopyNode) realSeedIds.push(gateCopyId);
+    // marked copies (transitively via collectArcIds)
+    const realArcIdList = collectArcIds(realSeedIds, realArcNodes);
+    const arcNodeIds = new Set<string>(realArcIdList);
 
     if (arcNodeIds.size > 0) {
       realArcByGate.set(gateId, realArcNodes.filter((n) => arcNodeIds.has(n.id)));
@@ -371,6 +379,8 @@ function renderFan(view: RunView, opts: RenderRunViewOpts): string[] {
   // Reducer is the 'reduce' node
 
   // Find the splitter (plan node that's not a reducer)
+  // 'reduce' is the mapReduce pattern's fixed reducer id — coupling is intentional and
+  // matches the contract in src/patterns/map-reduce.ts (reducer WorkItem id = 'reduce').
   const planNodes = view.nodes.filter((n) => n.kind === 'real' && n.id !== 'reduce');
   const reducerNode = view.nodes.find((n) => n.id === 'reduce');
 
@@ -405,8 +415,10 @@ function renderFan(view: RunView, opts: RenderRunViewOpts): string[] {
       return `${indent}${glyph} ${n.id}${evSuffix}`;
     });
 
-    // Width budget: collapse if many items would exceed width (each ~10 chars indented)
-    const wouldExceedBudget = mapLines.length > 1 && (mapLines.length * 10) > width;
+    // Width budget: collapse if many items would exceed width.
+    // AVG_MAP_LINE_CHARS: estimated per-item rendered width (glyph + space + avg-id + indent).
+    const AVG_MAP_LINE_CHARS = 10;
+    const wouldExceedBudget = mapLines.length > 1 && (mapLines.length * AVG_MAP_LINE_CHARS) > width;
 
     if (wouldExceedBudget) {
       lines.push(`${indent}× ${mapNodes.length}`);
@@ -453,10 +465,18 @@ function renderTree(view: RunView, opts: RenderRunViewOpts): string[] {
   const roots = view.nodes.filter((n) => !hasParent.has(n.id));
 
   const rendered = new Set<string>();
+  // visiting tracks nodes currently on the DFS stack; re-entry means a true cycle
+  const visiting = new Set<string>();
 
   function renderNode(nodeId: string, indent: string): void {
     const node = nodeById.get(nodeId);
     if (!node) return;
+
+    if (visiting.has(nodeId)) {
+      // True cycle detected (A→B→A): emit a readable line instead of overflowing the stack
+      lines.push(`${indent}↩ cycle ${nodeId}`);
+      return;
+    }
 
     if (rendered.has(nodeId)) {
       // Diamond re-reference: show ↩ see <id>
@@ -464,6 +484,7 @@ function renderTree(view: RunView, opts: RenderRunViewOpts): string[] {
       return;
     }
 
+    visiting.add(nodeId);
     rendered.add(nodeId);
 
     const glyph = statusGlyph(node, opts);
@@ -475,10 +496,20 @@ function renderTree(view: RunView, opts: RenderRunViewOpts): string[] {
     for (const childId of kids) {
       renderNode(childId, indent + '  ');
     }
+    visiting.delete(nodeId);
   }
 
   for (const root of roots) {
     renderNode(root.id, '');
+  }
+
+  // Render any real nodes not yet reached (e.g. nodes in a pure cycle with no DAG root).
+  // renderNode's visiting guard will emit "↩ cycle <id>" on re-entry, producing a
+  // readable output instead of a RangeError stack overflow.
+  for (const node of view.nodes) {
+    if (node.kind === 'real' && !rendered.has(node.id)) {
+      renderNode(node.id, '');
+    }
   }
 
   // Include any ghost nodes that aren't in the tree

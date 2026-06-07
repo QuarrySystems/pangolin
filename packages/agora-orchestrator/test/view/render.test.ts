@@ -501,6 +501,30 @@ describe('footer line', () => {
 });
 
 // ---------------------------------------------------------------------------
+// renderTree cycle guard (defense for exported surface — buildRunView output is acyclic)
+// ---------------------------------------------------------------------------
+
+describe('renderTree cycle guard', () => {
+  it('renders a 2-node cycle as "↩ cycle <id>" instead of throwing RangeError', () => {
+    // Manually construct a malformed RunView with A→B→A cycle (bypasses buildRunView which is acyclic)
+    const cycleView: RunView = {
+      layout: 'tree',
+      nodes: [
+        { id: 'node-a', kind: 'real', depends_on: ['node-b'] },
+        { id: 'node-b', kind: 'real', depends_on: ['node-a'] },
+      ],
+      footer: { counts: {}, costUsd: 0, state: 'pre-run' },
+    };
+    let lines: string[];
+    expect(() => {
+      lines = renderRunView(cycleView, { color: false, unicode: true });
+    }).not.toThrow();
+    const joined = lines!.join('\n');
+    expect(joined).toContain('↩ cycle');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // returns string[] (not string)
 // ---------------------------------------------------------------------------
 
