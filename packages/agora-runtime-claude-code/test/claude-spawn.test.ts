@@ -6,12 +6,14 @@
 //
 // The "binary not found rejects" test uses a definitely-nonexistent path
 // and therefore runs on every platform.
+//
+// `buildClaudeArgs` tests run on ALL platforms (pure arg construction, no spawn).
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtemp, writeFile, chmod, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawnClaude } from "../src/claude-spawn.js";
+import { spawnClaude, buildClaudeArgs } from "../src/claude-spawn.js";
 
 const skipOnWindows = process.platform === "win32";
 
@@ -23,6 +25,76 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
+});
+
+describe("buildClaudeArgs (platform-independent)", () => {
+  it("includes --output-format json always and --model only when provided", () => {
+    expect(buildClaudeArgs({ prompt: "p", model: "opus" })).toEqual([
+      "--print",
+      "--output-format",
+      "json",
+      "--model",
+      "opus",
+      "p",
+    ]);
+    expect(buildClaudeArgs({ prompt: "p" })).toEqual([
+      "--print",
+      "--output-format",
+      "json",
+      "p",
+    ]);
+  });
+
+  it("places --dangerously-skip-permissions after --output-format json and before --model", () => {
+    expect(
+      buildClaudeArgs({
+        prompt: "p",
+        dangerouslySkipPermissions: true,
+        model: "haiku",
+      }),
+    ).toEqual([
+      "--print",
+      "--output-format",
+      "json",
+      "--dangerously-skip-permissions",
+      "--model",
+      "haiku",
+      "p",
+    ]);
+  });
+
+  it("appends extraArgs after the prompt", () => {
+    expect(
+      buildClaudeArgs({ prompt: "p", extraArgs: ["--foo", "bar"] }),
+    ).toEqual(["--print", "--output-format", "json", "p", "--foo", "bar"]);
+  });
+
+  it("includes all flags together in the correct order", () => {
+    expect(
+      buildClaudeArgs({
+        prompt: "my-prompt",
+        dangerouslySkipPermissions: true,
+        model: "sonnet",
+        extraArgs: ["--extra"],
+      }),
+    ).toEqual([
+      "--print",
+      "--output-format",
+      "json",
+      "--dangerously-skip-permissions",
+      "--model",
+      "sonnet",
+      "my-prompt",
+      "--extra",
+    ]);
+  });
+
+  it("omits --model when model is undefined", () => {
+    const args = buildClaudeArgs({ prompt: "p", model: undefined });
+    expect(args).not.toContain("--model");
+    expect(args).toContain("--output-format");
+    expect(args).toContain("json");
+  });
 });
 
 describe("spawnClaude", () => {
@@ -71,7 +143,7 @@ describe("spawnClaude", () => {
   );
 
   it.skipIf(skipOnWindows)(
-    "invokes the binary with `--print <prompt>` when dangerouslySkipPermissions is unset",
+    "invokes the binary with `--print --output-format json <prompt>` when no options are set",
     async () => {
       // Stub echoes its own argv (one arg per line) so the test can
       // assert ordering without depending on shell quoting.
@@ -90,9 +162,13 @@ describe("spawnClaude", () => {
 
       expect(result.exitCode).toBe(0);
       const lines = result.stdout.split("\n").filter((l) => l.length > 0);
-      // Spawn is policy-free: it only emits the flag when the caller
-      // asked for it. The adapter resolves the policy from env.
-      expect(lines).toEqual(["--print", "the-rendered-prompt"]);
+      // Always includes --output-format json; no --dangerously-skip-permissions when not set.
+      expect(lines).toEqual([
+        "--print",
+        "--output-format",
+        "json",
+        "the-rendered-prompt",
+      ]);
     },
   );
 
@@ -119,6 +195,8 @@ describe("spawnClaude", () => {
       // text appended to whatever the prompt arg consumed.
       expect(lines).toEqual([
         "--print",
+        "--output-format",
+        "json",
         "--dangerously-skip-permissions",
         "the-rendered-prompt",
       ]);
@@ -139,11 +217,47 @@ describe("spawnClaude", () => {
         workspaceDir: dir,
         env: {},
         claudeBin: stubBin,
-        extraArgs: ["--model", "sonnet"],
+        extraArgs: ["--foo", "bar"],
       });
 
       const lines = result.stdout.split("\n").filter((l) => l.length > 0);
-      expect(lines).toEqual(["--print", "p", "--model", "sonnet"]);
+      expect(lines).toEqual([
+        "--print",
+        "--output-format",
+        "json",
+        "p",
+        "--foo",
+        "bar",
+      ]);
+    },
+  );
+
+  it.skipIf(skipOnWindows)(
+    "passes --model when model option is provided",
+    async () => {
+      await writeFile(
+        stubBin,
+        '#!/bin/bash\nfor a in "$@"; do echo "$a"; done\n',
+      );
+      await chmod(stubBin, 0o755);
+
+      const result = await spawnClaude({
+        prompt: "p",
+        workspaceDir: dir,
+        env: {},
+        claudeBin: stubBin,
+        model: "sonnet",
+      });
+
+      const lines = result.stdout.split("\n").filter((l) => l.length > 0);
+      expect(lines).toEqual([
+        "--print",
+        "--output-format",
+        "json",
+        "--model",
+        "sonnet",
+        "p",
+      ]);
     },
   );
 
