@@ -40,7 +40,7 @@
 // Neither test imports InlineSecretStager.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import type { SecretStore, StageSecretArgs, StagedSecret } from '../../packages/agora-core/dist/index.js';
+import type { SecretStore, StageSecretArgs, StagedSecret } from '../../packages/pangolin-core/dist/index.js';
 
 import { makeClient } from './helpers/make-client.js';
 import { probeDocker, itIfDocker } from './helpers/docker-skip.js';
@@ -131,7 +131,7 @@ describe('E2E: inline secret lifecycle (§7.6)', () => {
 
       // Inject the mock store so dispatch stages secrets into our in-memory
       // map instead of real AWS. The worker container, when it boots, uses
-      // its OWN SecretStore backed by the AGORA_SECRET_STORE_KIND env var;
+      // its OWN SecretStore backed by the PANGOLIN_SECRET_STORE_KIND env var;
       // it cannot resolve `mock-ref:*` against our in-memory map. Verifying
       // "worker has the secret in process env" therefore requires live AWS
       // (or a LocalStack-style sidecar) and is out of scope for this hermetic
@@ -150,7 +150,7 @@ describe('E2E: inline secret lifecycle (§7.6)', () => {
       const cap = await client.capabilities.register({
         name: 'echo-token',
         files: {
-          'agora-setup.sh': '#!/bin/sh\necho "TOKEN=$DISPATCH_TOKEN"\n',
+          'pangolin-setup.sh': '#!/bin/sh\necho "TOKEN=$DISPATCH_TOKEN"\n',
         },
       });
       await client.subagent.register({
@@ -180,10 +180,10 @@ describe('E2E: inline secret lifecycle (§7.6)', () => {
       await dispatchPromise.catch(() => undefined);
 
       // Cleanup is fire-and-forget inside `dispatchWork`'s finally block
-      // (`store.cleanupByTag('agora:dispatchId', dispatchId).catch(() => {})`),
+      // (`store.cleanupByTag('pangolin:dispatchId', dispatchId).catch(() => {})`),
       // so by the time `await dispatch()` returns, the cleanup promise may
       // still be in the microtask queue. Flush the queue before asserting on
-      // the staged map — mirrors the `packages/agora-client/test/dispatch.test.ts`
+      // the staged map — mirrors the `packages/pangolin-client/test/dispatch.test.ts`
       // pattern for the same observation point.
       await new Promise((r) => setImmediate(r));
 
@@ -195,7 +195,7 @@ describe('E2E: inline secret lifecycle (§7.6)', () => {
       //    tag used by cleanup.
       const stageArgs = stageSpy.mock.calls[0]![0] as StageSecretArgs;
       expect(stageArgs.value).toBe(SECRET);
-      expect(stageArgs.tags?.['agora:dispatchId']).toBeDefined();
+      expect(stageArgs.tags?.['pangolin:dispatchId']).toBeDefined();
 
       // 3. After dispatch's cleanup (best-effort but always called), the
       //    mock's staged map contains no entries tagged with this dispatch's
@@ -276,21 +276,21 @@ describe('E2E: inline secret lifecycle (§7.6)', () => {
 
       // The mock store's `stage` was called exactly once — for the GH_TOKEN
       // inline secret. env-register derives the deterministic name:
-      // `agora/inline/env-<envName>/<key>`.
+      // `pangolin/inline/env-<envName>/<key>`.
       expect(stageSpy).toHaveBeenCalledTimes(1);
       const stageArgs = stageSpy.mock.calls[0]![0] as StageSecretArgs;
-      expect(stageArgs.name).toBe('agora/inline/env-with-inline/GH_TOKEN');
+      expect(stageArgs.name).toBe('pangolin/inline/env-with-inline/GH_TOKEN');
       expect(stageArgs.value).toBe(SECRET);
 
       // The mock store returns `mock-ref:<name>` as the opaque ref.
-      const stagedRef = `mock-ref:agora/inline/env-with-inline/GH_TOKEN`;
+      const stagedRef = `mock-ref:pangolin/inline/env-with-inline/GH_TOKEN`;
       expect(staged.has(stagedRef)).toBe(true);
 
       // The env-register flow called `storage.put` once with the env-bundle
       // blob bytes. Extract those bytes and assert on them directly.
       expect(putCalls.length).toBeGreaterThanOrEqual(1);
       const envPut = putCalls.find((c) =>
-        c.uri.startsWith('agora://inline-secret/env/with-inline/'),
+        c.uri.startsWith('pangolin://inline-secret/env/with-inline/'),
       );
       expect(envPut).toBeDefined();
       const blobText = new TextDecoder().decode(envPut!.bytes);

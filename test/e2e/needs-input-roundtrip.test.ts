@@ -3,15 +3,15 @@
 // Verifies the full §6.9 Shape A contract end-to-end:
 //
 //   1. A sub-agent dispatch is started. During setup, the sub-agent (via
-//      the capability's `agora-setup.sh`) writes the §6.9 sentinel file at
-//      `.agora/needs_input.json` declaring a `question` and a
+//      the capability's `pangolin-setup.sh`) writes the §6.9 sentinel file at
+//      `.pangolin/needs_input.json` declaring a `question` and a
 //      `partial_state` payload.
 //   2. The `claude-code` runtime adapter's `detectNeedsInputSentinel` step
-//      (`packages/agora-runtime-claude-code/src/sentinel-detector.ts`)
+//      (`packages/pangolin-runtime-claude-code/src/sentinel-detector.ts`)
 //      picks up the sentinel path after the model exits and surfaces it
 //      to the worker via `RuntimeExit.needsInputSentinelPath`.
 //   3. The worker resolves the sentinel
-//      (`packages/agora-worker/src/needs-input.ts`), validates it, and emits
+//      (`packages/pangolin-worker/src/needs-input.ts`), validates it, and emits
 //      `dispatch.needs_input` instead of `dispatch.finished` (entrypoint
 //      step 13). The container exits 0.
 //   4. The orchestrator (this test) sees `DispatchResult.needsInput`
@@ -21,7 +21,7 @@
 //   5. The orchestrator re-dispatches the same sub-agent with the answer
 //      and `partialState` carried back in as
 //      `input: { answer, partial_state }`. The second dispatch's setup
-//      script reads `AGORA_INPUT_JSON`, detects that `partial_state` is
+//      script reads `PANGOLIN_INPUT_JSON`, detects that `partial_state` is
 //      already provided, SKIPS writing the sentinel, and runs to
 //      `dispatch.finished` with `exitCode === 0`.
 //
@@ -89,13 +89,13 @@ afterEach(() => {
 
 // The sentinel-writing setup-script is the heart of the roundtrip. It is
 // deterministic — the convention any §6.9 sub-agent follows — and is
-// conditional on `AGORA_INPUT_JSON` so the SECOND dispatch (which carries
+// conditional on `PANGOLIN_INPUT_JSON` so the SECOND dispatch (which carries
 // `partial_state` back in via `input`) skips the write and runs to
 // completion.
 //
 // The dispatch contract serializes `work.input` (default `{}`) into
-// `AGORA_INPUT_JSON` (see agora-client/src/dispatch.ts §5). The merged env
-// the worker hands to `agora-setup.sh` therefore carries this var, which
+// `PANGOLIN_INPUT_JSON` (see pangolin-client/src/dispatch.ts §5). The merged env
+// the worker hands to `pangolin-setup.sh` therefore carries this var, which
 // the script greps with a fixed substring — no JSON parser available in
 // `/bin/sh`. Looking for the literal `"partial_state"` key in the JSON
 // string is robust enough for the deterministic shape this test emits.
@@ -103,16 +103,16 @@ const SENTINEL_SETUP_SCRIPT = `#!/bin/sh
 set -e
 # Skip the sentinel write on the second dispatch, where the orchestrator
 # has fed partial_state back in. Substring match on the literal JSON key
-# is sufficient — AGORA_INPUT_JSON is a JSON object, and on dispatch #1
+# is sufficient — PANGOLIN_INPUT_JSON is a JSON object, and on dispatch #1
 # work.input is {} (no partial_state); on dispatch #2 it carries the key.
-case "$AGORA_INPUT_JSON" in
+case "$PANGOLIN_INPUT_JSON" in
   *'"partial_state"'*)
     echo "second dispatch: skipping sentinel write"
     exit 0
     ;;
 esac
-mkdir -p /workspace/.agora
-cat > /workspace/.agora/needs_input.json <<'EOF'
+mkdir -p /workspace/.pangolin
+cat > /workspace/.pangolin/needs_input.json <<'EOF'
 {"question": "What is the answer?", "partial_state": {"step": 1, "data": "intermediate"}}
 EOF
 echo "first dispatch: wrote sentinel"
@@ -129,11 +129,11 @@ describe('E2E: needs-input Shape A roundtrip (§6.9)', () => {
 
       // Capability owns the sentinel-writing setup script. The script is
       // identical across both dispatches; conditional behavior comes from
-      // AGORA_INPUT_JSON, not from a flag the integrator toggles.
+      // PANGOLIN_INPUT_JSON, not from a flag the integrator toggles.
       const cap = await client.capabilities.register({
         name: 'needs-helper',
         files: {
-          'agora-setup.sh': SENTINEL_SETUP_SCRIPT,
+          'pangolin-setup.sh': SENTINEL_SETUP_SCRIPT,
         },
       });
       await client.subagent.register({
@@ -212,7 +212,7 @@ describe('E2E: needs-input Shape A roundtrip (§6.9)', () => {
       const cap = await client.capabilities.register({
         name: 'needs-helper-events',
         files: {
-          'agora-setup.sh': SENTINEL_SETUP_SCRIPT,
+          'pangolin-setup.sh': SENTINEL_SETUP_SCRIPT,
         },
       });
       await client.subagent.register({
@@ -234,7 +234,7 @@ describe('E2E: needs-input Shape A roundtrip (§6.9)', () => {
       } as never);
 
       // Filter to POSTs on the callback path. Each body is the JSON-
-      // serialized LifecycleEvent (see agora-worker/src/lifecycle.ts).
+      // serialized LifecycleEvent (see pangolin-worker/src/lifecycle.ts).
       const kinds = received
         .filter((p) => p.path === '/cb')
         .map((p) => {
@@ -242,7 +242,7 @@ describe('E2E: needs-input Shape A roundtrip (§6.9)', () => {
           return parsed.kind;
         });
 
-      // Per `packages/agora-worker/src/entrypoint.ts` step 13, a valid
+      // Per `packages/pangolin-worker/src/entrypoint.ts` step 13, a valid
       // needs_input sentinel produces a `dispatch.needs_input` terminal
       // event and EXCLUDES `dispatch.finished`. `dispatch.started` is
       // step 5 and fires regardless.

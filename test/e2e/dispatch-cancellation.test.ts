@@ -11,7 +11,7 @@
 //     no-op (the provider's `cancel()` swallows "container already
 //     stopped" errors so callers can re-fire without coordinating state).
 //
-// We spawn a worker whose `agora-setup.sh` does `sleep 600`, wait long
+// We spawn a worker whose `pangolin-setup.sh` does `sleep 600`, wait long
 // enough for the container to enter setup-script execution, then call
 // `client.dispatch.cancel(...)`. The provider's grace period is dialled
 // down to 5s so the test stays under its `60_000` ms vitest budget; the
@@ -53,7 +53,7 @@ describe('E2E: dispatch cancellation (§7.6)', () => {
         // runs this via the §6.3 setup-script step; the only way it ever
         // exits within the test window is via the provider's SIGTERM →
         // SIGKILL cancel path.
-        files: { 'agora-setup.sh': '#!/bin/sh\nsleep 600\n' },
+        files: { 'pangolin-setup.sh': '#!/bin/sh\nsleep 600\n' },
       });
       await client.subagent.register({
         name: 'long',
@@ -87,7 +87,7 @@ describe('E2E: dispatch cancellation (§7.6)', () => {
 
       // §7.6: failure.reason must be the canonical 'cancelled' token so
       // downstream consumers (sinks, lifecycle subscribers, the CLI's
-      // `agora describe`) can switch on it.
+      // `pangolin describe`) can switch on it.
       expect(result.failure?.reason).toBe('cancelled');
 
       // The provider must honour the grace window: SIGTERM first, then
@@ -145,7 +145,7 @@ describe('E2E: dispatch cancellation (§7.6)', () => {
 
         const cap = await client.capabilities.register({
           name: 'long-run-emit',
-          files: { 'agora-setup.sh': '#!/bin/sh\nsleep 600\n' },
+          files: { 'pangolin-setup.sh': '#!/bin/sh\nsleep 600\n' },
         });
         await client.subagent.register({
           name: 'long-emit',
@@ -225,7 +225,7 @@ describe('E2E: dispatch cancellation (§7.6)', () => {
 
       const cap = await client.capabilities.register({
         name: 'long-run-idem',
-        files: { 'agora-setup.sh': '#!/bin/sh\nsleep 600\n' },
+        files: { 'pangolin-setup.sh': '#!/bin/sh\nsleep 600\n' },
       });
       await client.subagent.register({
         name: 'long-idem',

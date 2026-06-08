@@ -1,7 +1,7 @@
 // E2E contract: §4.2 + §6.2 — multi-bundle `env` precedence.
 //
 // `client.dispatch({ env: [...] })` accepts an ordered list of env-bundle
-// names. The agora-worker merges them left-to-right, so the LAST bundle
+// names. The pangolin-worker merges them left-to-right, so the LAST bundle
 // wins on any key conflict. Keys that only appear in earlier bundles are
 // preserved (the merge is a union, not a swap).
 //
@@ -12,7 +12,7 @@
 // worker would test the wrong layer.
 //
 // Setup:
-//   - register a capability whose `agora-setup.sh` echoes `LOG_LEVEL=$LOG_LEVEL`
+//   - register a capability whose `pangolin-setup.sh` echoes `LOG_LEVEL=$LOG_LEVEL`
 //     and `BASE_ONLY=$BASE_ONLY` to stdout. Those are our observables for
 //     the merge result.
 //   - register two env bundles:
@@ -53,7 +53,7 @@ describe('E2E: multiple env bundles merge later-wins', () => {
       const cap = await client.capabilities.register({
         name: 'env-echo',
         files: {
-          'agora-setup.sh':
+          'pangolin-setup.sh':
             '#!/bin/sh\necho "LOG_LEVEL=$LOG_LEVEL"\necho "BASE_ONLY=$BASE_ONLY"\n',
         },
       });

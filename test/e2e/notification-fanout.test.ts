@@ -3,7 +3,7 @@
 // Verifies that BOTH notification sources defined by decision-0012 fire
 // correctly end-to-end through a real local-docker dispatch:
 //
-//   1. Capability-content notifications — an `agora-notifications.json` file
+//   1. Capability-content notifications — a `pangolin-notifications.json` file
 //      packaged inside the capability bundle. The worker's
 //      `loadCapabilityNotifications` reads it post-overlay (entrypoint
 //      step 11).
@@ -104,15 +104,15 @@ describe('E2E: notification fanout (decision-0012)', () => {
         storageRoot: storageRoot(),
       });
 
-      // Capability bundle ships an `agora-notifications.json` declaring a
+      // Capability bundle ships a `pangolin-notifications.json` declaring a
       // capability-content webhook subscribed to `dispatch.finished`. This is
       // the bytes-on-disk source that `loadCapabilityNotifications` parses
       // post-overlay.
       const cap = await client.capabilities.register({
         name: 'with-notif',
         files: {
-          'agora-setup.sh': '#!/bin/sh\necho "setup ran"\n',
-          'agora-notifications.json': JSON.stringify([
+          'pangolin-setup.sh': '#!/bin/sh\necho "setup ran"\n',
+          'pangolin-notifications.json': JSON.stringify([
             { when: ['dispatch.finished'], webhook: capSourceUrl },
           ]),
         },
@@ -124,7 +124,7 @@ describe('E2E: notification fanout (decision-0012)', () => {
       });
       await client.env.register({ name: 'e', values: {} });
 
-      // Deterministic dispatchId so we can correlate the X-Agora-Dispatch-Id
+      // Deterministic dispatchId so we can correlate the X-Pangolin-Dispatch-Id
       // header on captured POSTs back to the dispatch under test and so the
       // Secrets Manager lookup for the HMAC key is fully predictable.
       const dispatchId = `e2e-notify-${Date.now()}`;
@@ -160,7 +160,7 @@ describe('E2E: notification fanout (decision-0012)', () => {
       // Acceptance criterion 3: both POSTs carry HMAC headers that verify
       // against the per-dispatch key the worker fetched from Secrets
       // Manager. We resolve the same secret via the same ARN convention
-      // `mintCallbackHmac` uses (`agora/callback-hmac/<dispatchId>`) and
+      // `mintCallbackHmac` uses (`pangolin/callback-hmac/<dispatchId>`) and
       // re-compute the signature.
       const { SecretsManagerClient, GetSecretValueCommand } = await import(
         '@aws-sdk/client-secrets-manager'
@@ -168,7 +168,7 @@ describe('E2E: notification fanout (decision-0012)', () => {
       const secretsClient = new SecretsManagerClient({});
       const secretRes = await secretsClient.send(
         new GetSecretValueCommand({
-          SecretId: `agora/callback-hmac/${dispatchId}`,
+          SecretId: `pangolin/callback-hmac/${dispatchId}`,
         }),
       );
       const hmacKey = secretRes.SecretString;
@@ -179,9 +179,9 @@ describe('E2E: notification fanout (decision-0012)', () => {
       }
 
       const verifyPost = (post: CapturedPost): void => {
-        const sig = post.headers['x-agora-signature'];
-        const ts = post.headers['x-agora-timestamp'];
-        const seenId = post.headers['x-agora-dispatch-id'];
+        const sig = post.headers['x-pangolin-signature'];
+        const ts = post.headers['x-pangolin-timestamp'];
+        const seenId = post.headers['x-pangolin-dispatch-id'];
         expect(typeof sig).toBe('string');
         expect(typeof ts).toBe('string');
         expect(seenId).toBe(dispatchId);
@@ -230,8 +230,8 @@ describe('E2E: notification fanout (decision-0012)', () => {
       const cap = await client.capabilities.register({
         name: 'with-failed-notif',
         files: {
-          'agora-setup.sh': '#!/bin/sh\necho "setup ran"\n',
-          'agora-notifications.json': JSON.stringify([
+          'pangolin-setup.sh': '#!/bin/sh\necho "setup ran"\n',
+          'pangolin-notifications.json': JSON.stringify([
             { when: ['dispatch.failed'], webhook: capSourceUrl },
           ]),
         },

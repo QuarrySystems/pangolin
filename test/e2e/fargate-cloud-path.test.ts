@@ -10,7 +10,7 @@
 //
 // The dispatch boots a real worker container in Fargate, which fetches the
 // registered subagent + capability + env bundles from S3, runs the
-// `claude-code` adapter (or whatever the task definition's `agora-worker`
+// `claude-code` adapter (or whatever the task definition's `pangolin-worker`
 // container has installed), and writes back the terminal dispatch record.
 // On the client side we then assert:
 //
@@ -30,30 +30,30 @@
 // `main` push and on the `e2e-aws` workflow trigger, not on every PR (the
 // cost of spinning up Fargate tasks per PR is prohibitive).
 //
-//   AGORA_E2E_AWS_ENABLED                — explicit opt-in
-//   AGORA_E2E_AWS_BUCKET                 — S3 bucket the test reads/writes
-//   AGORA_E2E_AWS_CLUSTER                — ECS cluster the task runs in
-//   AGORA_E2E_AWS_TASK_DEFINITION_FAMILY — task definition family (the
-//                                          `agora-worker` container image
+//   PANGOLIN_E2E_AWS_ENABLED                — explicit opt-in
+//   PANGOLIN_E2E_AWS_BUCKET                 — S3 bucket the test reads/writes
+//   PANGOLIN_E2E_AWS_CLUSTER                — ECS cluster the task runs in
+//   PANGOLIN_E2E_AWS_TASK_DEFINITION_FAMILY — task definition family (the
+//                                          `pangolin-worker` container image
 //                                          is locked in here, not overridden
 //                                          per-dispatch — see FargateProvider)
 //
 // Optional tuning:
-//   AGORA_E2E_AWS_SUBNETS                — comma-separated subnet IDs
+//   PANGOLIN_E2E_AWS_SUBNETS                — comma-separated subnet IDs
 //                                          (defaults to empty — relies on
 //                                          the task def's awsvpc config)
-//   AGORA_E2E_AWS_SECURITY_GROUPS        — comma-separated security group IDs
-//   AGORA_E2E_AWS_REGION                 — AWS region (defaults to ambient
+//   PANGOLIN_E2E_AWS_SECURITY_GROUPS        — comma-separated security group IDs
+//   PANGOLIN_E2E_AWS_REGION                 — AWS region (defaults to ambient
 //                                          SDK chain — usually AWS_REGION)
-//   AGORA_E2E_AWS_S3_PREFIX              — bucket prefix (defaults to "")
-//   AGORA_E2E_WORKER_IMAGE               — worker image to dispatch
+//   PANGOLIN_E2E_AWS_S3_PREFIX              — bucket prefix (defaults to "")
+//   PANGOLIN_E2E_WORKER_IMAGE               — worker image to dispatch
 //                                          (must match what the task def
 //                                          actually runs; image overrides
 //                                          aren't permitted at RunTask, so
 //                                          this is informational + the
 //                                          §7.4 digest-pin gate)
 //
-// When `AGORA_E2E_AWS_ENABLED` is unset, the dispatch case is `it.skip`
+// When `PANGOLIN_E2E_AWS_ENABLED` is unset, the dispatch case is `it.skip`
 // and a sibling `it` asserts the skip path itself works (so the file
 // always exits with at least one passing assertion).
 
@@ -63,24 +63,24 @@
 // specifier (vitest transparently transpiles the resolved `.ts`). Same
 // convention as `runtime-adapter-seam.test.ts` and
 // `credentials-rejection.test.ts`.
-import { AgoraClient } from '../../packages/agora-client/src/client.js';
+import { PangolinClient } from '../../packages/pangolin-client/src/client.js';
 // Side-effect import: installs `client.capabilities`, `client.subagent`,
-// `client.env`, and `client.dispatch` getters on AgoraClient.prototype.
-import '../../packages/agora-client/src/index.js';
-import { StdoutResultSink } from '../../packages/agora-client/src/bundled-impls.js';
-import { S3StorageProvider } from '../../packages/agora-storage-s3/src/index.js';
-import { FargateProvider } from '../../packages/agora-providers-fargate/src/index.js';
-import { AwsCredentialProvider } from '../../packages/agora-providers-aws-creds/src/index.js';
+// `client.env`, and `client.dispatch` getters on PangolinClient.prototype.
+import '../../packages/pangolin-client/src/index.js';
+import { StdoutResultSink } from '../../packages/pangolin-client/src/bundled-impls.js';
+import { S3StorageProvider } from '../../packages/pangolin-storage-s3/src/index.js';
+import { FargateProvider } from '../../packages/pangolin-providers-fargate/src/index.js';
+import { AwsCredentialProvider } from '../../packages/pangolin-providers-aws-creds/src/index.js';
 import { WORKER_IMAGE } from './helpers/worker-image.js';
 import { describe, it, expect } from 'vitest';
 
 // ── Gating helpers ────────────────────────────────────────────────────────
 
 const ENABLED =
-  !!process.env.AGORA_E2E_AWS_ENABLED &&
-  !!process.env.AGORA_E2E_AWS_BUCKET &&
-  !!process.env.AGORA_E2E_AWS_CLUSTER &&
-  !!process.env.AGORA_E2E_AWS_TASK_DEFINITION_FAMILY;
+  !!process.env.PANGOLIN_E2E_AWS_ENABLED &&
+  !!process.env.PANGOLIN_E2E_AWS_BUCKET &&
+  !!process.env.PANGOLIN_E2E_AWS_CLUSTER &&
+  !!process.env.PANGOLIN_E2E_AWS_TASK_DEFINITION_FAMILY;
 
 const itIf = (cond: boolean): typeof it => (cond ? it : it.skip);
 
@@ -108,10 +108,10 @@ describe('E2E: register + dispatch via Fargate + S3 (live AWS)', () => {
     // a tautology); if `ENABLED` is false, the dispatch case is skipped
     // and this assertion documents WHY.
     const required = [
-      'AGORA_E2E_AWS_ENABLED',
-      'AGORA_E2E_AWS_BUCKET',
-      'AGORA_E2E_AWS_CLUSTER',
-      'AGORA_E2E_AWS_TASK_DEFINITION_FAMILY',
+      'PANGOLIN_E2E_AWS_ENABLED',
+      'PANGOLIN_E2E_AWS_BUCKET',
+      'PANGOLIN_E2E_AWS_CLUSTER',
+      'PANGOLIN_E2E_AWS_TASK_DEFINITION_FAMILY',
     ];
     const unset = required.filter((k) => !process.env[k]);
     if (unset.length === 0) {
@@ -131,12 +131,12 @@ describe('E2E: register + dispatch via Fargate + S3 (live AWS)', () => {
     async () => {
       // The bucket / cluster / task-def names are gated by `ENABLED` above
       // and are guaranteed non-empty here. Non-null assertions are safe.
-      const bucket = process.env.AGORA_E2E_AWS_BUCKET!;
-      const cluster = process.env.AGORA_E2E_AWS_CLUSTER!;
-      const taskDefinitionFamily = process.env.AGORA_E2E_AWS_TASK_DEFINITION_FAMILY!;
-      const subnets = csv('AGORA_E2E_AWS_SUBNETS');
-      const securityGroups = csv('AGORA_E2E_AWS_SECURITY_GROUPS');
-      const s3Prefix = process.env.AGORA_E2E_AWS_S3_PREFIX;
+      const bucket = process.env.PANGOLIN_E2E_AWS_BUCKET!;
+      const cluster = process.env.PANGOLIN_E2E_AWS_CLUSTER!;
+      const taskDefinitionFamily = process.env.PANGOLIN_E2E_AWS_TASK_DEFINITION_FAMILY!;
+      const subnets = csv('PANGOLIN_E2E_AWS_SUBNETS');
+      const securityGroups = csv('PANGOLIN_E2E_AWS_SECURITY_GROUPS');
+      const s3Prefix = process.env.PANGOLIN_E2E_AWS_S3_PREFIX;
 
       // Unique namespace per run so concurrent / repeated invocations
       // never collide on a `(namespace, type, name)` registry path. The
@@ -147,7 +147,7 @@ describe('E2E: register + dispatch via Fargate + S3 (live AWS)', () => {
       // `fargate-prod` target is the convention from the spec body; any
       // string would do but using `fargate-prod` lines up with the
       // §9 example in the spec for grep-ability.
-      const client = new AgoraClient({
+      const client = new PangolinClient({
         namespace,
         compute: {
           fargate: new FargateProvider({
@@ -171,7 +171,7 @@ describe('E2E: register + dispatch via Fargate + S3 (live AWS)', () => {
       });
 
       // Register a minimal capability + subagent + env triple. Same
-      // shape as the Docker round-trip in `agora-client`'s integration
+      // shape as the Docker round-trip in `pangolin-client`'s integration
       // suite, just pointed at S3 instead of LocalStorage.
       const capRef = await client.capabilities.register({
         name: 'cap-e2e',

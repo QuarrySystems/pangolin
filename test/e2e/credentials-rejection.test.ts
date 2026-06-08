@@ -28,12 +28,12 @@
 // the source-tree barrels. Vitest transparently transpiles the `.ts` files
 // resolved by the `.js`-suffixed NodeNext import specifiers used inside the
 // source tree. (Same convention as test/e2e/runtime-adapter-seam.test.ts.)
-import { AgoraClient } from '../../packages/agora-client/src/client.js';
+import { PangolinClient } from '../../packages/pangolin-client/src/client.js';
 // Bring the namespaced sub-API installer side-effect into scope so
 // `client.env.register` and `client.capabilities.register` exist.
-import '../../packages/agora-client/src/index.js';
-import { NoopCredentialProvider } from '../../packages/agora-client/src/bundled-impls.js';
-import { LocalStorageProvider } from '../../packages/agora-storage-local/src/index.js';
+import '../../packages/pangolin-client/src/index.js';
+import { NoopCredentialProvider } from '../../packages/pangolin-client/src/bundled-impls.js';
+import { LocalStorageProvider } from '../../packages/pangolin-storage-local/src/index.js';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -49,8 +49,8 @@ afterEach(async () => {
   await rm(storageRoot, { recursive: true, force: true });
 });
 
-function makeClient(): AgoraClient {
-  return new AgoraClient({
+function makeClient(): PangolinClient {
+  return new PangolinClient({
     namespace: 'creds-rejection',
     compute: {},
     credentials: { none: new NoopCredentialProvider() },
@@ -80,7 +80,7 @@ interface CredentialsInEnvErrorLike extends Error {
  * We rely on the name check (not `instanceof`) here because the e2e
  * harness reaches package internals through relative paths while the
  * thrower (`credential-pattern.ts`) imports the class via the
- * `@quarry-systems/agora-core` package specifier — two resolution paths
+ * `@quarry-systems/pangolin-core` package specifier — two resolution paths
  * to the same source file yield two distinct class identities under
  * vitest, which would break a naive `instanceof` check.
  */
@@ -106,7 +106,7 @@ async function captureRejection(p: Promise<unknown>): Promise<unknown> {
 
 // Representative credential-shaped strings for each named pattern. Names
 // here match the canonical pattern names in
-// packages/agora-client/src/credential-pattern.ts so `allowCredentialPatterns`
+// packages/pangolin-client/src/credential-pattern.ts so `allowCredentialPatterns`
 // opt-outs line up exactly.
 const AWS_ACCESS_KEY = 'AKIAIOSFODNN7EXAMPLE';
 const AWS_SESSION_KEY = 'ASIAIOSFODNN7EXAMPLE';

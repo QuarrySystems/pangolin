@@ -1,31 +1,31 @@
-// E2E §7.7: agora-mcp run-time tool surface, verified through a real MCP
-// client SDK over a real stdio transport against the real `agora-mcp` binary.
+// E2E §7.7: pangolin-mcp run-time tool surface, verified through a real MCP
+// client SDK over a real stdio transport against the real `pangolin-mcp` binary.
 //
-// This is the integration counterpart to `packages/agora-mcp/test/integration.test.ts`
-// — that suite exercises `registerAgoraTools` in-process against a stubbed
+// This is the integration counterpart to `packages/pangolin-mcp/test/integration.test.ts`
+// — that suite exercises `registerPangolinTools` in-process against a stubbed
 // `Server` map; this one spawns `node dist/bin.js` as a child process,
 // connects via `StdioClientTransport`, and drives the exact `tools/list` and
 // `tools/call` request flow an external orchestrator (Claude Code, another
 // MCP host) would. It is the only test that proves the bin entry, the
-// agora.config.mjs resolver, the stdio bootstrap, and the tool catalog all
+// pangolin.config.mjs resolver, the stdio bootstrap, and the tool catalog all
 // wire together end-to-end through real JSON-RPC frames.
 //
 // Module-resolution note. `@modelcontextprotocol/sdk` is declared as a
-// dependency of `@quarry-systems/agora-mcp`, not of the repo root. From a
+// dependency of `@quarry-systems/pangolin-mcp`, not of the repo root. From a
 // root-level test file vitest cannot resolve the bare specifier, so we
-// import the SDK via a relative path into the agora-mcp package's hoisted
+// import the SDK via a relative path into the pangolin-mcp package's hoisted
 // `node_modules/` — matching the convention every other root-level E2E
 // test uses for workspace packages (see `helpers/make-client.ts`).
 //
-// Pre-flight requirement: `pnpm -F @quarry-systems/agora-mcp build` must
-// have produced `packages/agora-mcp/dist/bin.js` before this suite runs.
+// Pre-flight requirement: `pnpm -F @quarry-systems/pangolin-mcp build` must
+// have produced `packages/pangolin-mcp/dist/bin.js` before this suite runs.
 // The task body deliberately hard-codes `dist/bin.js` rather than honoring
 // `package.json#bin` (which currently points at `dist/index.js`); a
 // follow-up consolidation task will reconcile the manifest, at which point
 // this hard-coded path will still work because `bin.js` is the real entry.
 
-import { Client } from '../../packages/agora-mcp/node_modules/@modelcontextprotocol/sdk/dist/esm/client/index.js';
-import { StdioClientTransport } from '../../packages/agora-mcp/node_modules/@modelcontextprotocol/sdk/dist/esm/client/stdio.js';
+import { Client } from '../../packages/pangolin-mcp/node_modules/@modelcontextprotocol/sdk/dist/esm/client/index.js';
+import { StdioClientTransport } from '../../packages/pangolin-mcp/node_modules/@modelcontextprotocol/sdk/dist/esm/client/stdio.js';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -36,11 +36,11 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const repoRoot = resolve(__dirname, '..', '..');
-const binPath = resolve(repoRoot, 'packages/agora-mcp/dist/bin.js');
+const binPath = resolve(repoRoot, 'packages/pangolin-mcp/dist/bin.js');
 
-// The fake AgoraClient body written into agora.config.mjs. Kept as a string
+// The fake PangolinClient body written into pangolin.config.mjs. Kept as a string
 // rather than a TS expression so the spawned child can require/import it
-// directly without a build step — agora.config.{ts,js,mjs} is resolved at
+// directly without a build step — pangolin.config.{ts,js,mjs} is resolved at
 // the child's cwd by `bin.ts#defaultGetClient`. The shape is structurally
 // duck-typed to the call sites in `tools.ts`: a callable `dispatch` with
 // `describe` and `cancel` attached, plus three catalog namespaces each
@@ -92,14 +92,14 @@ export default {
 `;
 
 // One scratch cwd per test. The bin's config resolver looks for
-// agora.config.{ts,js,mjs} relative to `process.cwd()`, so we pass this
+// pangolin.config.{ts,js,mjs} relative to `process.cwd()`, so we pass this
 // directory as the `cwd` of the spawned child. Cleaning up after each test
 // prevents one suite's fake client from accidentally serving another's.
 let configDir: string;
 
 beforeEach(async () => {
   configDir = await mkdtemp(join(tmpdir(), 'e2e-mcp-tool-surface-'));
-  await writeFile(join(configDir, 'agora.config.mjs'), FAKE_CLIENT_SOURCE);
+  await writeFile(join(configDir, 'pangolin.config.mjs'), FAKE_CLIENT_SOURCE);
 });
 
 afterEach(async () => {
@@ -110,7 +110,7 @@ afterEach(async () => {
 });
 
 /**
- * Spawn the agora-mcp binary, connect a real MCP client, and return both
+ * Spawn the pangolin-mcp binary, connect a real MCP client, and return both
  * handles. The caller is responsible for `client.close()` (which also tears
  * down the child process via the stdio transport).
  */
@@ -125,49 +125,49 @@ async function connectClient(): Promise<Client> {
     stderr: 'inherit',
   });
   const client = new Client(
-    { name: 'agora-mcp-e2e-test-client', version: '0.0.0' },
+    { name: 'pangolin-mcp-e2e-test-client', version: '0.0.0' },
     { capabilities: {} },
   );
   await client.connect(transport);
   return client;
 }
 
-describe('E2E: agora-mcp tool surface via real MCP client', () => {
+describe('E2E: pangolin-mcp tool surface via real MCP client', () => {
   it('listTools returns exactly the nine run-time tools (6 dispatch/catalog + 3 client orchestrator) and zero deploy-time or privileged tools', async () => {
     const client = await connectClient();
     try {
       const { tools } = await client.listTools();
       const names = tools.map((t) => t.name).sort();
       expect(names).toEqual([
-        'agora_capabilities_list',
-        'agora_dispatch',
-        'agora_dispatch_cancel',
-        'agora_dispatch_describe',
-        'agora_envs_list',
-        'agora_orchestrator_status',
-        'agora_orchestrator_submit',
-        'agora_orchestrator_watch',
-        'agora_subagents_list',
+        'pangolin_capabilities_list',
+        'pangolin_dispatch',
+        'pangolin_dispatch_cancel',
+        'pangolin_dispatch_describe',
+        'pangolin_envs_list',
+        'pangolin_orchestrator_status',
+        'pangolin_orchestrator_submit',
+        'pangolin_orchestrator_watch',
+        'pangolin_subagents_list',
       ]);
       // Defense in depth: even if the sorted-equality check above is
       // refactored, the explicit deploy-time + privileged exclusions must hold.
       // The orchestrator surface is client-only (§10.6): submit/status/watch are
       // exposed; cancel/audit/serve are CLI-only/privileged and never on MCP.
       for (const tool of tools) {
-        expect(tool.name).not.toMatch(/agora_.*_register$/);
-        expect(tool.name).not.toMatch(/agora_.*_assign$/);
-        expect(tool.name).not.toMatch(/agora_orchestrator_(cancel|audit|serve)$/);
+        expect(tool.name).not.toMatch(/pangolin_.*_register$/);
+        expect(tool.name).not.toMatch(/pangolin_.*_assign$/);
+        expect(tool.name).not.toMatch(/pangolin_orchestrator_(cancel|audit|serve)$/);
       }
     } finally {
       await client.close();
     }
   }, 30_000);
 
-  it('agora_dispatch returns a DispatchResult-shaped JSON payload in text content', async () => {
+  it('pangolin_dispatch returns a DispatchResult-shaped JSON payload in text content', async () => {
     const client = await connectClient();
     try {
       const res = await client.callTool({
-        name: 'agora_dispatch',
+        name: 'pangolin_dispatch',
         arguments: {
           target: 'local',
           subagent: 'sub-e2e',
@@ -194,10 +194,10 @@ describe('E2E: agora-mcp tool surface via real MCP client', () => {
     }
   }, 30_000);
 
-  it('agora_capabilities_list returns metadata only (no file-content fields)', async () => {
+  it('pangolin_capabilities_list returns metadata only (no file-content fields)', async () => {
     const client = await connectClient();
     try {
-      const res = await client.callTool({ name: 'agora_capabilities_list' });
+      const res = await client.callTool({ name: 'pangolin_capabilities_list' });
       expect(res.isError).toBeFalsy();
       const content = res.content as Array<{ type: string; text: string }>;
       const parsed = JSON.parse(content[0].text) as Array<Record<string, unknown>>;

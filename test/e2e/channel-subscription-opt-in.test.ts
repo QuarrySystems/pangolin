@@ -3,16 +3,16 @@
 // Verifies the §6.8 channel subscription flow end-to-end through the
 // `LocalDockerProvider` + `LocalStorageProvider` + a real worker image:
 //
-//   1. A capability bundle that includes `agora-channel.json` referencing a
+//   1. A capability bundle that includes `pangolin-channel.json` referencing a
 //      stub adapter (shipped as a test fixture in the worker image at
-//      `/opt/agora/adapters/stub/index.js`) causes the worker, after
+//      `/opt/pangolin/adapters/stub/index.js`) causes the worker, after
 //      capability overlay + env merge + setup-script execution (lifecycle
 //      step 8 per §6.2), to construct the named adapter and start its
 //      subscription as a background task.
 //   2. The worker writes each received `ChannelMessage` as one JSONL line to
-//      `/workspace/.agora/channel/inbox.jsonl` (the documented, stable path
+//      `/workspace/.pangolin/channel/inbox.jsonl` (the documented, stable path
 //      per §6.8 "How messages are made available to the sub-agent").
-//   3. The sub-agent (via its capability's `agora-setup.sh`) reads the inbox
+//   3. The sub-agent (via its capability's `pangolin-setup.sh`) reads the inbox
 //      file once and echoes its contents to stdout, so the test can assert
 //      against `result.stdout` rather than poking at the in-container
 //      workspace after teardown.
@@ -20,7 +20,7 @@
 //      signal close and awaits the adapter's cleanup with a 10s timeout
 //      (lifecycle step 12). A clean teardown is verified by the absence of
 //      channel-related error reasons on the dispatch result.
-//   5. A capability whose `agora-channel.json` names an adapter that does
+//   5. A capability whose `pangolin-channel.json` names an adapter that does
 //      not exist in the worker image must fail the dispatch with
 //      `reason: 'worker-failed'` per §6.8 paragraph 3 ("missing-adapter is
 //      a setup error, not a transient runtime concern"). The sub-agent must
@@ -30,14 +30,14 @@
 // `itIfDocker`). On a controller machine without Docker the suite is a
 // no-op — the assertions are only meaningful end-to-end when the configured
 // worker image is reachable AND the image bundles a `stub` adapter at
-// `/opt/agora/adapters/stub/index.js`.
+// `/opt/pangolin/adapters/stub/index.js`.
 //
 // DAG-3 scope note: the stub adapter itself (a deterministic ChannelAdapter
 // emitting a fixed sequence of three messages) is shipped by the worker
 // image build, not by this test file. This test assumes the image at
 // `WORKER_IMAGE` contains:
 //
-//   /opt/agora/adapters/stub/index.js
+//   /opt/pangolin/adapters/stub/index.js
 //
 // whose `default` export returns a `ChannelAdapter` named `"stub"` whose
 // `subscribe({ channel, opts })` yields a deterministic sequence — for the
@@ -58,7 +58,7 @@ const storageRoot = useTempStorageRoot('e2e-channel');
 
 describe('E2E: channel subscription opt-in (§6.8)', () => {
   itIfDocker(
-    'capability declaring agora-channel.json causes worker to subscribe + write inbox.jsonl',
+    'capability declaring pangolin-channel.json causes worker to subscribe + write inbox.jsonl',
     async () => {
       const client = makeClient({
         namespace: 'channel',
@@ -66,11 +66,11 @@ describe('E2E: channel subscription opt-in (§6.8)', () => {
       });
 
       // The capability ships two files:
-      //   - `agora-channel.json`  — declares the subscription. The worker
+      //   - `pangolin-channel.json`  — declares the subscription. The worker
       //     reads this after overlay (lifecycle step 10 per §6.2) and
       //     constructs the named `stub` adapter from
-      //     `/opt/agora/adapters/stub/` in the worker image.
-      //   - `agora-setup.sh`      — sleeps briefly to give the background
+      //     `/opt/pangolin/adapters/stub/` in the worker image.
+      //   - `pangolin-setup.sh`      — sleeps briefly to give the background
       //     channel loop time to drain the stub adapter's deterministic
       //     three-message sequence into `inbox.jsonl`, then cats the inbox
       //     file to stdout so the test can assert against `result.stdout`.
@@ -81,13 +81,13 @@ describe('E2E: channel subscription opt-in (§6.8)', () => {
       const cap = await client.capabilities.register({
         name: 'channel-sub',
         files: {
-          'agora-channel.json': JSON.stringify({
+          'pangolin-channel.json': JSON.stringify({
             adapter: 'stub',
             channel: 'test',
             opts: { count: 3 },
           }),
-          'agora-setup.sh':
-            '#!/bin/sh\nsleep 2\ncat /workspace/.agora/channel/inbox.jsonl || true\n',
+          'pangolin-setup.sh':
+            '#!/bin/sh\nsleep 2\ncat /workspace/.pangolin/channel/inbox.jsonl || true\n',
         },
       });
       await client.subagent.register({
@@ -132,7 +132,7 @@ describe('E2E: channel subscription opt-in (§6.8)', () => {
   );
 
   itIfDocker(
-    'dispatch fails with reason "worker-failed" when agora-channel.json names an unknown adapter',
+    'dispatch fails with reason "worker-failed" when pangolin-channel.json names an unknown adapter',
     async () => {
       const client = makeClient({
         namespace: 'channel',
@@ -151,11 +151,11 @@ describe('E2E: channel subscription opt-in (§6.8)', () => {
       const cap = await client.capabilities.register({
         name: 'channel-missing',
         files: {
-          'agora-channel.json': JSON.stringify({
+          'pangolin-channel.json': JSON.stringify({
             adapter: 'nonexistent-adapter',
             channel: 'test',
           }),
-          'agora-setup.sh': '#!/bin/sh\necho "agent-ran"\n',
+          'pangolin-setup.sh': '#!/bin/sh\necho "agent-ran"\n',
         },
       });
       await client.subagent.register({
