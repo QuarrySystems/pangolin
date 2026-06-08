@@ -5,15 +5,15 @@ created: 2026-06-04
 
 ```mermaid
 flowchart TD
-    task-rename-packages["task-rename-packages: codemod package namespace<br/>files: packages/"]
-    task-rename-code-refs["task-rename-code-refs: tests + scripts<br/>files: test/ +1 more"]
-    task-rename-examples["task-rename-examples: example projects<br/>files: examples/"]
-    task-rename-docs-site["task-rename-docs-site: docs-site rewrite<br/>files: docs-site/"]
-    task-rebrand-build-infra["task-rebrand-build-infra: docker + CI<br/>files: docker/ +1 more"]
-    task-rebrand-top-docs["task-rebrand-top-docs: top-level docs<br/>files: README.md +5 more"]
-    task-rename-deploy["task-rename-deploy: serve-stack deploy<br/>files: deploy/"]
-    task-root-workspace-config["task-root-workspace-config: root config + lockfile<br/>files: package.json +6 more"]
-    task-verify["task-verify: build green<br/>files: (verification only)"]
+    task-rename-packages["task-rename-packages: codemod package namespace<br/>files: packages/"]:::done
+    task-rename-code-refs["task-rename-code-refs: tests + scripts<br/>files: test/ +1 more"]:::done
+    task-rename-examples["task-rename-examples: example projects<br/>files: examples/"]:::done
+    task-rename-docs-site["task-rename-docs-site: docs-site rewrite<br/>files: docs-site/"]:::done
+    task-rebrand-build-infra["task-rebrand-build-infra: docker + CI<br/>files: docker/ +1 more"]:::done
+    task-rebrand-top-docs["task-rebrand-top-docs: top-level docs<br/>files: README.md +5 more"]:::done
+    task-rename-deploy["task-rename-deploy: serve-stack deploy<br/>files: deploy/"]:::done
+    task-root-workspace-config["task-root-workspace-config: root config + lockfile<br/>files: package.json +6 more"]:::done
+    task-verify["task-verify: build green<br/>files: (verification only)"]:::done
 
     task-rename-packages --> task-root-workspace-config
     task-rename-examples --> task-root-workspace-config
@@ -78,7 +78,7 @@ id: task-rename-packages
 depends_on: []
 files:
   - packages/
-status: pending
+status: done
 is_wiring_task: true
 ```
 
@@ -102,7 +102,7 @@ depends_on: []
 files:
   - test/
   - scripts/
-status: pending
+status: done
 is_wiring_task: true
 ```
 
@@ -123,7 +123,7 @@ id: task-rename-examples
 depends_on: []
 files:
   - examples/
-status: pending
+status: done
 is_wiring_task: true
 ```
 
@@ -144,7 +144,7 @@ id: task-rename-docs-site
 depends_on: []
 files:
   - docs-site/
-status: pending
+status: done
 is_wiring_task: true
 ```
 
@@ -166,7 +166,7 @@ depends_on: []
 files:
   - docker/
   - .github/
-status: pending
+status: done
 is_wiring_task: true
 ```
 
@@ -192,7 +192,7 @@ files:
   - RELEASING.md
   - LICENSING.md
   - LICENSE
-status: pending
+status: done
 is_wiring_task: true
 ```
 
@@ -213,7 +213,7 @@ id: task-rename-deploy
 depends_on: []
 files:
   - deploy/
-status: pending
+status: done
 is_wiring_task: true
 ```
 
@@ -240,7 +240,7 @@ files:
   - tsconfig.base.json
   - vitest.e2e.config.ts
   - pnpm-lock.yaml
-status: pending
+status: done
 is_wiring_task: true
 ```
 
@@ -259,7 +259,7 @@ Verification: `pnpm install --frozen-lockfile=false` succeeds and `grep -n "agor
 id: task-verify
 depends_on: [task-root-workspace-config, task-rename-code-refs, task-rename-deploy]
 files: []
-status: pending
+status: done
 single_threaded: true
 is_wiring_task: true
 ```
@@ -274,4 +274,6 @@ Whole-workspace correctness gate after all renames cohere. Run install + build +
 
 Verification: full `pnpm install && pnpm -w build && pnpm -w typecheck && pnpm -w test` green; `git grep -ni agora -- ':!CHANGELOG.md' ':!**/decisions/**' ':!docs/**'` reduced to the documented residue allowlist (empty).
 
-> **Residue allowlist (audited 2026-06-07):** `CHANGELOG.md` (dated past entries + the new rename note), `**/decisions/**` (historical ADR text), and `docs/superpowers/**` (historical DAG plans/specs whose filenames encode the `agora-` names of past work — renaming them would rewrite the build record). These are intentional and excluded from the zero-`agora` gate.
+> **Residue allowlist (audited 2026-06-07; verify run 2026-06-08 GREEN):** `CHANGELOG.md` (dated past entries + the new rename note), `**/decisions/**` (historical ADR text), and `docs/superpowers/**` (historical DAG plans/specs whose filenames encode the `agora-` names of past work — renaming them would rewrite the build record). After the gate run, two further *irreducible* intentional categories remain and are accepted: (a) `docs-site/astro.config.mjs` redirect **keys** that preserve the old `agora` URL slugs (required by the "preserve old slugs" spec — cannot be removed without breaking inbound links); (b) `README.md` link **targets** pointing at the `docs/superpowers/specs/…agora-*` residue files (the path must match the file that exists on disk). These are intentional and excluded from the zero-`agora` gate.
+>
+> **Final gate result (2026-06-08):** `pnpm install --frozen-lockfile` ✅ · `pnpm -w build` ✅ · `pnpm -w typecheck` ✅ · `pnpm -w test` ✅ · `pnpm -r lint` ✅ · CLI bin `pangolin` runs ("Pangolin Scale CLI") ✅ · MCP exposes `pangolin_*` tools ✅. `git grep -ni agora -- ':!CHANGELOG.md' ':!**/decisions/**' ':!docs/**'` → 6 matches, all in the (a)/(b) categories above.
