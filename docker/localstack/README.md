@@ -1,7 +1,7 @@
 # LocalStack sandbox
 
 A minimal, S3-only [LocalStack](https://docs.localstack.cloud/) instance used
-by `agora-storage-s3` integration tests. Same compose file runs locally and in
+by `pangolin-storage-s3` integration tests. Same compose file runs locally and in
 CI (via GitHub Actions' container service feature) so behaviour stays
 identical.
 
@@ -37,7 +37,7 @@ bash docker/localstack/test/health-check.sh
 
 ## Environment variables for tests
 
-Integration tests in `packages/agora-storage-s3` expect these variables to be
+Integration tests in `packages/pangolin-storage-s3` expect these variables to be
 set so the AWS SDK targets LocalStack instead of real AWS:
 
 | Variable                    | Value                       | Why                                                                 |
@@ -45,7 +45,7 @@ set so the AWS SDK targets LocalStack instead of real AWS:
 | `AWS_ACCESS_KEY_ID`         | `test`                      | LocalStack accepts any non-empty credentials; we standardise on `test`. |
 | `AWS_SECRET_ACCESS_KEY`     | `test`                      | Same — pairs with the access key above.                             |
 | `AWS_REGION`                | `us-east-1`                 | Matches `DEFAULT_REGION` in the compose file.                       |
-| `AGORA_TEST_S3_ENDPOINT`    | `http://localhost:4566`     | Tests read this to point the S3 client at LocalStack.               |
+| `PANGOLIN_TEST_S3_ENDPOINT`    | `http://localhost:4566`     | Tests read this to point the S3 client at LocalStack.               |
 
 Example, in a POSIX shell:
 
@@ -53,7 +53,7 @@ Example, in a POSIX shell:
 export AWS_ACCESS_KEY_ID=test
 export AWS_SECRET_ACCESS_KEY=test
 export AWS_REGION=us-east-1
-export AGORA_TEST_S3_ENDPOINT=http://localhost:4566
+export PANGOLIN_TEST_S3_ENDPOINT=http://localhost:4566
 ```
 
 ## CI usage

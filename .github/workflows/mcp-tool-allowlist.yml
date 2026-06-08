@@ -3,7 +3,7 @@ name: MCP tool allowlist
 on:
   pull_request:
     paths:
-      - 'packages/agora-mcp/**'
+      - 'packages/pangolin-mcp/**'
       - 'scripts/check-mcp-tool-allowlist.mjs'
       - '.github/workflows/mcp-tool-allowlist.yml'
   push:
@@ -44,7 +44,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # Build workspace deps first: agora-mcp imports @quarry-systems/agora-client,
+      # Build workspace deps first: pangolin-mcp imports @quarry-systems/pangolin-client,
       # resolved via its emitted dist/index.d.ts, so deps must be built before tsc.
       - name: Build
         run: pnpm -r build

@@ -1,4 +1,4 @@
-# LocalStack — S3-only sandbox used by `agora-storage-s3` integration tests.
+# LocalStack — S3-only sandbox used by `pangolin-storage-s3` integration tests.
 #
 # Bring up: docker compose -f docker/localstack/docker-compose.yml up -d
 # Tear down: docker compose -f docker/localstack/docker-compose.yml down
@@ -8,7 +8,7 @@
 services:
   localstack:
     image: localstack/localstack:3.8
-    container_name: agora-localstack
+    container_name: pangolin-localstack
     ports:
       - "4566:4566"
     environment:

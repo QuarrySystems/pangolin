@@ -1,6 +1,6 @@
-name: agora-worker-image
+name: pangolin-worker-image
 
-# Build + push the stock agora-worker OCI image to GHCR.
+# Build + push the stock pangolin-worker OCI image to GHCR.
 #
 # Triggers (per spec §9 acceptance + §7.4 image-pinning posture):
 #   - push to main           → publishes `:main` plus the immutable digest
@@ -18,15 +18,15 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: agora-worker-image-${{ github.ref }}
+  group: pangolin-worker-image-${{ github.ref }}
   cancel-in-progress: false
 
 env:
   REGISTRY: ghcr.io
   # GHCR namespace must match the lowercase GitHub org slug (`quarrysystems`,
   # no hyphen). The npm scope `@quarry-systems/*` keeps the hyphenated form —
-  # see /memory/agora-identity-split.md for the why.
-  IMAGE_NAME: quarrysystems/agora-worker
+  # see /memory/pangolin-identity-split.md for the why.
+  IMAGE_NAME: quarrysystems/pangolin-worker
 
 jobs:
   build-and-push:
@@ -69,7 +69,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: docker/agora-worker/Dockerfile
+          file: docker/pangolin-worker/Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -86,7 +86,7 @@ jobs:
       - name: Summary
         run: |
           {
-            echo "### agora-worker image published"
+            echo "### pangolin-worker image published"
             echo ""
             echo "**Digest-pinned ref (use this in production dispatches per §7.4):**"
             echo ""

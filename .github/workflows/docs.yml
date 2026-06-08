@@ -51,7 +51,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build docs site
-        run: pnpm --filter @agora/docs-site build
+        run: pnpm --filter @pangolin/docs-site build
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
