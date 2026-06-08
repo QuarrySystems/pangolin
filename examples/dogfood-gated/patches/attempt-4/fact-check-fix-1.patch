@@ -9,7 +9,7 @@ index 0000000..b1bd7b4
 +description: How queue-level execution patterns (static-dag, pipeline, map-reduce) layer above the tick engine — the Pattern contract, the extendRun seam, run.extended audit entries, the gate/respawn circle-back, and the forward-arc-never-rewind invariant.
 +---
 +
-+The core tick engine described in [How an offload run executes](/agora/explanation/how-offload-runs/)
++The core tick engine described in [How an offload run executes](/pangolin-scale/explanation/how-offload-runs/)
 +handles one responsibility: advancing a fixed DAG of **WorkItems** through their
 +status lattice. Execution patterns are a separate layer built *on top of* that
 +engine — they let a queue answer a richer question: "now that some items have
@@ -57,16 +57,16 @@ index 0000000..b1bd7b4
 +
 +## Queue-level pattern binding
 +
-+Patterns are bound to queues programmatically through `AgoraOrchestratorOptions`,
++Patterns are bound to queues programmatically through `PangolinOrchestratorOptions`,
 +not via a config file. A queue without a `pattern` has no pattern phase at all;
 +binding `staticDag` explicitly produces the same behaviour with one no-op call
 +per terminal item.
 +
 +```ts
-+import { AgoraOrchestrator } from '@quarry-systems/agora-orchestrator';
-+import { mapReduce, pipeline } from '@quarry-systems/agora-orchestrator/patterns';
++import { PangolinOrchestrator } from '@quarry-systems/pangolin-orchestrator';
++import { mapReduce, pipeline } from '@quarry-systems/pangolin-orchestrator/patterns';
 +
-+const orchestrator = new AgoraOrchestrator({
++const orchestrator = new PangolinOrchestrator({
 +  store,
 +  executors,
 +  triggers,
@@ -250,7 +250,7 @@ index 0000000..b1bd7b4
 +  the same outcome.
 +- **Audit closure is total.** Because no existing item ever points at a newly
 +  spawned item, every product consumed by a spawned item was already recorded
-+  before the extension. `agora verify`'s provenance-closure check can walk the
++  before the extension. `pangolin verify`'s provenance-closure check can walk the
 +  entire graph — including dynamically grown branches — using exactly the same
 +  algorithm it applies to static DAGs.
 +
@@ -290,13 +290,13 @@ index 0000000..b1bd7b4
 +
 +## See also
 +
-+- [How an offload run executes](/agora/explanation/how-offload-runs/) — the core
++- [How an offload run executes](/pangolin-scale/explanation/how-offload-runs/) — the core
 +  tick engine that execution patterns sit above.
-+- [plan.json schema](/agora/reference/plan-json/) — the WorkItem fields that
++- [plan.json schema](/pangolin-scale/reference/plan-json/) — the WorkItem fields that
 +  patterns populate when spawning (`depends_on`, `resourceLocks`, `executor`,
 +  `needs`).
-+- [Audit & guarantee tiers](/agora/explanation/audit-guarantee-tiers/) — how
-+  `run.extended` entries are covered by the audit bundle and what `agora verify`
++- [Audit & guarantee tiers](/pangolin-scale/explanation/audit-guarantee-tiers/) — how
++  `run.extended` entries are covered by the audit bundle and what `pangolin verify`
 +  checks.
-+- [Architecture overview](/agora/explanation/architecture-overview/) — where
++- [Architecture overview](/pangolin-scale/explanation/architecture-overview/) — where
 +  patterns fit in the whole system.

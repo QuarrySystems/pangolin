@@ -13,13 +13,13 @@ index 0000000..a5a68e0
 +polls running items via reconcile, and moves each item through a defined status
 +lattice. That model covers a large class of work, but some jobs are structurally
 +dynamic — the exact set of items is only knowable once earlier items run. Rather
-+than complicate the engine, agora layers **execution patterns** on top of it: a
++than complicate the engine, pangolin-scale layers **execution patterns** on top of it: a
 +per-queue strategy object that observes terminal items after each tick and may
 +answer with new work to add to the same run.
 +
 +For the tick loop that patterns plug into, see
-+[How an offload run executes](/agora/explanation/how-offload-runs/). For the
-+shape of a plan, see the [plan.json reference](/agora/reference/plan-json/). This
++[How an offload run executes](/pangolin-scale/explanation/how-offload-runs/). For the
++shape of a plan, see the [plan.json reference](/pangolin-scale/reference/plan-json/). This
 +page is about what happens *above* the engine between ticks.
 +
 +## What an execution pattern is
@@ -45,15 +45,15 @@ index 0000000..a5a68e0
 +
 +## Queue-level pattern config
 +
-+Patterns are registered per-queue via `AgoraOrchestratorOptions`. A queue without
++Patterns are registered per-queue via `PangolinOrchestratorOptions`. A queue without
 +a `pattern` entry uses the engine's default behavior — a static DAG submitted at
-+`agora orch submit` time and never extended; the pattern phase is bypassed
++`pangolin orch submit` time and never extended; the pattern phase is bypassed
 +entirely for that queue.
 +
 +```ts
-+import { mapReduce, pipeline } from '@agora/orchestrator';
++import { mapReduce, pipeline } from '@quarry-systems/pangolin-orchestrator';
 +
-+const orchestrator = new AgoraOrchestrator({
++const orchestrator = new PangolinOrchestrator({
 +  queues: {
 +    default: { concurrency: 4 },
 +    etl:    { concurrency: 8, pattern: mapReduce },
@@ -153,7 +153,7 @@ index 0000000..a5a68e0
 +append is best-effort: a failure during append is silently swallowed while the
 +items remain in the store.
 +
-+The `agora verify` provenance check treats the full merged graph as canonical and
++The `pangolin verify` provenance check treats the full merged graph as canonical and
 +traces lineage through the `run.extended` audit entries, which record the cause
 +item that triggered each extension. Every dynamically added item is traceable to
 +the cause item that drove its creation.
@@ -187,7 +187,7 @@ index 0000000..a5a68e0
 +described above does not re-run or mutate stage N's original item — it appends a
 +new fix item that `depends_on` the original subject, and a new gate copy that
 +depends on the fix. The failed arc is permanent sealed history;
-+`agora verify` will always report that `review-gate` failed. The new arc's
++`pangolin verify` will always report that `review-gate` failed. The new arc's
 +provenance is fully separate.
 +
 +**Settled state is monotone.** An item that reaches a terminal status
@@ -196,7 +196,7 @@ index 0000000..a5a68e0
 +therefore append-only: `run.extended` entries accumulate; they never revise.
 +
 +Together these properties mean the orchestrator's audit guarantees extend to
-+dynamically grown runs without special-casing: `agora verify` treats the full
++dynamically grown runs without special-casing: `pangolin verify` treats the full
 +merged graph as the canonical graph and checks provenance closure over it.
 +
 +## Replay safety and determinism
@@ -217,7 +217,7 @@ index 0000000..a5a68e0
 +
 +## See also
 +
-+- [How an offload run executes](/agora/explanation/how-offload-runs/) — the tick loop patterns plug into.
-+- [plan.json schema](/agora/reference/plan-json/) — WorkItem fields including `depends_on`, `outputs`, and `resourceLocks`.
-+- [Architecture overview](/agora/explanation/architecture-overview/) — where patterns sit in the full system.
-+- [Audit & guarantee tiers](/agora/explanation/audit-guarantee-tiers/) — what `run.extended` entries contribute to the audit bundle.
++- [How an offload run executes](/pangolin-scale/explanation/how-offload-runs/) — the tick loop patterns plug into.
++- [plan.json schema](/pangolin-scale/reference/plan-json/) — WorkItem fields including `depends_on`, `outputs`, and `resourceLocks`.
++- [Architecture overview](/pangolin-scale/explanation/architecture-overview/) — where patterns sit in the full system.
++- [Audit & guarantee tiers](/pangolin-scale/explanation/audit-guarantee-tiers/) — what `run.extended` entries contribute to the audit bundle.
