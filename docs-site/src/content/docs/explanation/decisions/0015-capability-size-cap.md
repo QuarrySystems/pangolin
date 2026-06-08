@@ -77,7 +77,7 @@ What becomes harder:
 
 - Use cases that genuinely need large embedded assets (a baked-in model
   weight file, a large reference corpus, a vendored binary) cannot ship
-  the asset inside the capability. Integrators write an `pangolin-setup.sh`
+  the asset inside the capability. Integrators write a `pangolin-setup.sh`
   that pulls the asset at runtime, accepting one additional network hop
   per cold dispatch in exchange for the smaller capability bundle.
 - There is no soft-warning tier. Integrators may bloat capabilities up to

@@ -19,7 +19,7 @@ Each provider is selected with `--provider <name>`.
 # a capability that places files at .claude/skills/<name>/ in the worker.
 pangolin capabilities sync --provider claude-code
 
-# Walk .claude/agents/*.md and register each as an pangolin subagent.
+# Walk .claude/agents/*.md and register each as a pangolin subagent.
 # systemPrompt = markdown body, model = frontmatter `model` if present.
 pangolin subagent sync --provider claude-code
 

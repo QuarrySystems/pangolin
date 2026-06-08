@@ -14,6 +14,7 @@ export default defineConfig({
   redirects: {
     '/pangolin-scale/reference/agora-client-api/': '/pangolin-scale/reference/pangolin-client-api/',
     '/agora/reference/agora-client-api/': '/pangolin-scale/reference/pangolin-client-api/',
+    '/pangolin-scale/explanation/decisions/0006-agora-mcp-auth-whoever-launched/': '/pangolin-scale/explanation/decisions/0006-pangolin-mcp-auth-whoever-launched/',
   },
   integrations: [
     mermaid({ theme: 'default' }),

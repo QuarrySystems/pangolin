@@ -314,7 +314,7 @@ includes the key (`pangolin env get <name>` shows the ref; the actual values
 require `pangolin env get` upgrades or a manual storage inspection).
 
 **"setup-script.ran shows only one of my N skills installed."** Multiple
-capabilities each shipped an `pangolin-setup.sh`. Only one wins
+capabilities each shipped a `pangolin-setup.sh`. Only one wins
 (last-write-wins on the filename). See
 [Worker file layout](/pangolin-scale/how-to/worker-file-layout/) — files at adapter-
 reserved paths (`.claude/skills/<name>/`) compose; setup scripts don't.

@@ -6,7 +6,7 @@ sidebar:
 ---
 
 `@quarry-systems/pangolin-mcp` is a stdio MCP server that exposes a deliberately
-narrow, **run-time-safe** tool surface over an `PangolinClient` (and, when
+narrow, **run-time-safe** tool surface over a `PangolinClient` (and, when
 configured, an `OperationsApi`). Privileged deploy-time operations
 (`register`, `assign`) and privileged/service orchestrator operations never
 appear here — see [The privilege boundary](/pangolin-scale/explanation/privilege-boundary/).

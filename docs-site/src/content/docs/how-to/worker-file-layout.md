@@ -96,7 +96,7 @@ union, the final settings.json has both.
 
 ## Recipe: install a tool in the worker
 
-Put an `pangolin-setup.sh` at your capability dir's root:
+Put a `pangolin-setup.sh` at your capability dir's root:
 
 ```sh
 #!/bin/sh

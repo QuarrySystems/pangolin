@@ -20,7 +20,7 @@ scope forever." Pangolin Scale now ships orchestration as a distinct, opt-in lay
 [ADR-0010](/pangolin-scale/explanation/decisions/0010-no-workflow-primitive/) (MVP, 2026-05-21)
 made two claims that have since diverged:
 
-1. **Narrow:** Pangolin Scale should not ship an `pangolin.workflow()` / `pangolin.procedure()`
+1. **Narrow:** Pangolin Scale should not ship a `pangolin.workflow()` / `pangolin.procedure()`
    primitive — a named, pre-composed dispatch template as sugar on the client SDK.
    Integrators wrap `dispatch()` themselves.
 2. **Broad:** the architectural posture is that *"orchestration sits above Pangolin Scale,

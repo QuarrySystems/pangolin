@@ -5,7 +5,7 @@ sidebar:
   order: 4
 ---
 
-The `pangolin` CLI and the MCP server resolve an `pangolin.config` file in the
+The `pangolin` CLI and the MCP server resolve a `pangolin.config` file in the
 current working directory to obtain the `PangolinClient` they operate on (and, for
 the `orch` family, an `OrchContext`). Integrators typically keep one
 `pangolin.config.mjs` in their deploy repo.

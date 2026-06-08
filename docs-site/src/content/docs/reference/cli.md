@@ -6,7 +6,7 @@ sidebar:
 ---
 
 The `pangolin` binary is a thin CLI over `PangolinClient` (and, for the `orch`
-family, an `OperationsApi`). It resolves an `pangolin.config.{ts,js,mjs}` in the
+family, an `OperationsApi`). It resolves a `pangolin.config.{ts,js,mjs}` in the
 current working directory and dispatches to the subcommand. See
 [pangolin.config reference](/pangolin-scale/reference/config/) for how the config is
 resolved and what it must export.

@@ -19,7 +19,7 @@ it drive itself first.
 ## Before you start
 
 You need everything from the first dispatch tutorial — Docker running, the
-worker image built, and `ANTHROPIC_API_KEY` set — plus an `pangolin.config.mjs`
+worker image built, and `ANTHROPIC_API_KEY` set — plus a `pangolin.config.mjs`
 that exports an `orch` context alongside the `PangolinClient`. The orchestrator
 verbs resolve a named `orch` export from your config (the same way `dispatch`
 resolves the default `PangolinClient`). The
