@@ -11,7 +11,7 @@ patch, with every byte provenance-sealed and verifiable.
   submit-normalization, so B fires only after A reaches `done`.
 - **Content-addressed handoff**: A's `result_ref` (a content-addressed patch artifact) is
   resolved at fire time and passed to B as `inputs.inputRefs.patch`. B's
-  `agora-setup.sh` initialises the repo (`git init -q`) and then runs
+  `pangolin-setup.sh` initialises the repo (`git init -q`) and then runs
   `git apply inputs/patch` so the downstream worker literally builds on the upstream
   edit.
 - **Provenance closure**: after both items complete, `verifyBundle` proves the chain —
@@ -38,12 +38,12 @@ pnpm --filter handoff-dag-example start
 
 The demo:
 1. Registers a `code-edit` subagent that renames `GREETING → SALUTATION` in `src/main.ts`
-   and an `apply-patch` subagent whose `agora-setup.sh` first initialises the repo
+   and an `apply-patch` subagent whose `pangolin-setup.sh` first initialises the repo
    (`git init -q`) then applies the patch (`git apply inputs/patch`).  Setup runs
    after the inputs/ overlay (so `inputs/patch` is already present) but before the
    adapter, which is why the repo must be initialised inside the script.
 2. Submits `plan.json` (2 items, `apply-patch` wired via `needs` only).
-3. The `serve` driver ticks the AgoraOrchestrator until both items are terminal.
+3. The `serve` driver ticks the PangolinOrchestrator until both items are terminal.
 4. Prints each item's `resultRef`.
 5. Assembles the audit bundle and calls `verifyBundle` for the provenance-closure proof.
 6. Exits non-zero if any item failed, `report.intact === false`, or
@@ -52,7 +52,7 @@ The demo:
 ### Prerequisites
 
 - Docker reachable (local Docker Desktop, or `DOCKER_HOST` pointing at a remote daemon).
-- Worker image pullable: `ghcr.io/quarrysystems/agora-worker:latest`.
+- Worker image pullable: `ghcr.io/quarrysystems/pangolin-worker:latest`.
 - `ANTHROPIC_API_KEY` set (Claude runs inside the worker container).
 
 ## CI smoke test (no Docker / no API key)
@@ -65,7 +65,7 @@ Runs `test/handoff.test.ts` with vitest. Uses a fake executor (no containers, no
 Verifies:
 - `plan.json` has exactly 2 items; `apply-patch` declares `needs.patch` binding `edit-a`
   with `select: { kind: 'patch' }` and has no hand-written `depends_on`.
-- A real `AgoraOrchestrator` with the fake executor drives the plan to completion — both
+- A real `PangolinOrchestrator` with the fake executor drives the plan to completion — both
   items reach `done`.
 - The fake executor builds REAL `buildManifest`-produced manifests (with `inputRefs`
   populated from `item.inputs.inputRefs`), stores them in an in-memory blob map, and

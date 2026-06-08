@@ -11,7 +11,7 @@
     "build": "tsc --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --esModuleInterop --skipLibCheck --strict src/index.ts"
   },
   "dependencies": {
-    "@quarry-systems/agora-orchestrator": "workspace:*"
+    "@quarry-systems/pangolin-orchestrator": "workspace:*"
   },
   "devDependencies": {
     "tsx": "^4.19.0",

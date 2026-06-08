@@ -1,9 +1,9 @@
 # hello-world example
 
-The §4.4 worked Hello World. End-to-end runnable demonstration of agora's
+The §4.4 worked Hello World. End-to-end runnable demonstration of pangolin's
 caller-side SDK against the local-only provider stack:
 
-- `AgoraClient` (the SDK entry point)
+- `Pangolin ScaleClient` (the SDK entry point)
 - `LocalDockerProvider` (compute)
 - `LocalStorageProvider` (artifact storage)
 - `NoopCredentialProvider` (no AWS dependency)
@@ -18,14 +18,14 @@ where you stalled.
 
 ## What it does
 
-1. Constructs an `AgoraClient` against the local provider stack.
+1. Constructs an `Pangolin ScaleClient` against the local provider stack.
 2. Registers:
-   - a capability (`echo-cap`) with a single `agora-setup.sh` that
+   - a capability (`echo-cap`) with a single `pangolin-setup.sh` that
      prints a greeting,
    - a subagent (`echo`) bound to that capability,
    - an env bundle (`minimal`) with a `LOG_LEVEL` value.
 3. Dispatches the subagent against the `local` target.
-4. Prints the **resolved bundle refs** (the `agora://` URIs and content
+4. Prints the **resolved bundle refs** (the `pangolin://` URIs and content
    hashes the worker resolved) and the **captured stdout** from the
    container.
 5. Cleans up the mkdtemp'd storage root so re-runs don't leak temp
@@ -35,13 +35,13 @@ where you stalled.
 
 - Node.js 20+ and pnpm 9
 - Docker Desktop (or equivalent) running locally
-- A locally-built `ghcr.io/quarrysystems/agora-worker:latest` image
+- A locally-built `ghcr.io/quarrysystems/pangolin-worker:latest` image
   available to your Docker daemon
 - **An `ANTHROPIC_API_KEY`** available to the dispatch. The stock worker
   image runs the `claude-code` runtime adapter, which spawns the `claude`
   binary. Without a key the adapter exits non-zero and the dispatch is
   reported as **`provider-failed`** (see "What you'll see" below). This is
-  expected v0.1 behavior — the adapter, not agora's machinery, is what
+  expected v0.1 behavior — the adapter, not pangolin's machinery, is what
   needs the credential. A credential-free `noop` runtime adapter for a
   zero-setup on-ramp is tracked as a follow-up.
 
@@ -52,19 +52,19 @@ below.
 
 ## Build the worker image
 
-Until the `agora-worker-image.yml` GitHub workflow has published a
+Until the `pangolin-worker-image.yml` GitHub workflow has published a
 versioned image you can pin against, build it locally from the repo
 root:
 
 ```sh
 docker build \
-  -t ghcr.io/quarrysystems/agora-worker:latest \
-  -f docker/agora-worker/Dockerfile \
+  -t ghcr.io/quarrysystems/pangolin-worker:latest \
+  -f docker/pangolin-worker/Dockerfile \
   .
 ```
 
 Multi-stage build details and the runtime contract live in
-[`docker/agora-worker/Dockerfile`](../../docker/agora-worker/Dockerfile).
+[`docker/pangolin-worker/Dockerfile`](../../docker/pangolin-worker/Dockerfile).
 
 ## Run it
 
@@ -90,13 +90,13 @@ proving exactly which bytes ran:
 ```
 
 Then `stdout`. Note: this is the worker's **structured-log stream** (one
-JSON object per line), *not* a bare line of text. The `agora-setup.sh`
+JSON object per line), *not* a bare line of text. The `pangolin-setup.sh`
 greeting is carried inside the `setup-script.ran` event's `stdout` field:
 
 ```text
 === stdout ===
 {"kind":"worker.boot","dispatchId":"..."}
-{"kind":"setup-script.ran","exitCode":0,"stdout":"hello from agora-worker\n","stderr":""}
+{"kind":"setup-script.ran","exitCode":0,"stdout":"hello from pangolin-worker\n","stderr":""}
 {"kind":"dispatch.finished","dispatchId":"...","exitCode":0}
 ```
 
@@ -127,17 +127,17 @@ The substitution is **constructor-only**. Every other line of
 deployment. Swap the three highlighted providers:
 
 ```typescript
-import { AgoraClient, StdoutResultSink } from '@quarry-systems/agora-client';
-import { S3StorageProvider } from '@quarry-systems/agora-storage-s3';
-import { FargateProvider } from '@quarry-systems/agora-providers-fargate';
-import { AwsCredsProvider } from '@quarry-systems/agora-providers-aws-creds';
+import { Pangolin ScaleClient, StdoutResultSink } from '@quarry-systems/pangolin-client';
+import { S3StorageProvider } from '@quarry-systems/pangolin-storage-s3';
+import { FargateProvider } from '@quarry-systems/pangolin-providers-fargate';
+import { AwsCredsProvider } from '@quarry-systems/pangolin-providers-aws-creds';
 
-const client = new AgoraClient({
+const client = new Pangolin ScaleClient({
   namespace: 'hello-world',
   compute: {
     fargate: new FargateProvider({
-      cluster: 'arn:aws:ecs:us-east-1:123456789012:cluster/agora',
-      taskDefinition: 'agora-worker:42',
+      cluster: 'arn:aws:ecs:us-east-1:123456789012:cluster/pangolin',
+      taskDefinition: 'pangolin-worker:42',
       subnets: ['subnet-abc', 'subnet-def'],
       securityGroups: ['sg-xyz'],
     }),
@@ -146,7 +146,7 @@ const client = new AgoraClient({
     aws: new AwsCredsProvider({ region: 'us-east-1' }),
   },
   storage: new S3StorageProvider({
-    bucket: 'my-org-agora-artifacts',
+    bucket: 'my-org-pangolin-artifacts',
     region: 'us-east-1',
   }),
   targets: { prod: { compute: 'fargate', credentials: 'aws' } },
@@ -159,7 +159,7 @@ const result = await client.dispatch({
   target: 'prod',
   // PINNED digest — Fargate provider rejects unpinned images per §7.4.
   workerImage:
-    'public.ecr.aws/quarry-systems/agora-worker@sha256:0123456789abcdef...',
+    'public.ecr.aws/quarry-systems/pangolin-worker@sha256:0123456789abcdef...',
 });
 ```
 

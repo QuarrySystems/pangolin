@@ -2,7 +2,7 @@
   "name": "hello-world-example",
   "version": "0.0.0",
   "private": true,
-  "description": "The §4.4 Hello World worked example: AgoraClient + LocalDockerProvider + LocalStorageProvider, dispatched end-to-end.",
+  "description": "The §4.4 Hello World worked example: PangolinClient + LocalDockerProvider + LocalStorageProvider, dispatched end-to-end.",
   "type": "module",
   "scripts": {
     "start": "tsx src/index.ts",
@@ -12,9 +12,9 @@
     "build": "tsc --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --esModuleInterop --skipLibCheck --strict src/index.ts"
   },
   "dependencies": {
-    "@quarry-systems/agora-client": "workspace:*",
-    "@quarry-systems/agora-providers-local-docker": "workspace:*",
-    "@quarry-systems/agora-storage-local": "workspace:*"
+    "@quarry-systems/pangolin-client": "workspace:*",
+    "@quarry-systems/pangolin-providers-local-docker": "workspace:*",
+    "@quarry-systems/pangolin-storage-local": "workspace:*"
   },
   "devDependencies": {
     "tsx": "^4.19.0",

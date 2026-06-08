@@ -4,9 +4,9 @@
 //
 // Pins three facets:
 //
-//   1. The manifest at `examples/manifest/agora-manifest.yaml` parses
+//   1. The manifest at `examples/manifest/pangolin-manifest.yaml` parses
 //      cleanly through `parseManifest` — i.e. the example actually
-//      satisfies the same validation gate `agora deploy --from <path>`
+//      satisfies the same validation gate `pangolin deploy --from <path>`
 //      runs at deploy time.
 //   2. The capability and subagent declarations carry the expected shape
 //      (`name`, `from`, `capabilities` cross-reference).
@@ -16,35 +16,35 @@
 // REFINEMENT (DAG 2 import-shape note):
 //   The natural import target for `parseManifest` is the published barrel:
 //
-//     import { parseManifest } from '@quarry-systems/agora-cli';
+//     import { parseManifest } from '@quarry-systems/pangolin-cli';
 //
-//   `parseManifest` is, however, NOT re-exported from the `agora-cli`
+//   `parseManifest` is, however, NOT re-exported from the `pangolin-cli`
 //   barrel as of DAG 2 — only `buildProgram` + `defaultGetClient` ship from
 //   `src/index.ts`. The next-most-natural shape is a deep-import into the
 //   compiled `dist/`:
 //
-//     import { parseManifest } from '@quarry-systems/agora-cli/dist/manifest-parser.js';
+//     import { parseManifest } from '@quarry-systems/pangolin-cli/dist/manifest-parser.js';
 //
 //   That path resolves correctly when the workspace package is symlinked
-//   into a consumer's `node_modules`, but at the repo root the agora
+//   into a consumer's `node_modules`, but at the repo root the pangolin
 //   workspace packages are NOT symlinked (the root `package.json` lists no
 //   workspace deps), so the deep import fails to resolve from this file.
 //
 //   The pragmatic in-tree alternative — and the one used by the sibling
 //   e2e suites under `test/e2e/` — is a relative source-tree import:
 //
-//     import { parseManifest } from '../../../packages/agora-cli/src/manifest-parser.js';
+//     import { parseManifest } from '../../../packages/pangolin-cli/src/manifest-parser.js';
 //
 //   Vitest transpiles the `.ts` file resolved by the `.js`-suffixed
 //   NodeNext specifier, so we don't need a build step. We use that here.
 //
-//   TODO: when `agora-cli` re-exports `parseManifest` (and `attachDeployCmd`)
+//   TODO: when `pangolin-cli` re-exports `parseManifest` (and `attachDeployCmd`)
 //   from its barrel, switch this import to:
-//       `import { parseManifest } from '@quarry-systems/agora-cli';`
+//       `import { parseManifest } from '@quarry-systems/pangolin-cli';`
 //   and drop the relative deep-reach.
-import { parseManifest } from '../../../packages/agora-cli/src/manifest-parser.js';
-import { buildProgram } from '../../../packages/agora-cli/src/index.js';
-import { attachDeployCmd } from '../../../packages/agora-cli/src/cmd-deploy.js';
+import { parseManifest } from '../../../packages/pangolin-cli/src/manifest-parser.js';
+import { buildProgram } from '../../../packages/pangolin-cli/src/index.js';
+import { attachDeployCmd } from '../../../packages/pangolin-cli/src/cmd-deploy.js';
 
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -53,7 +53,7 @@ import { describe, it, expect, vi } from 'vitest';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const exampleRoot = resolve(__dirname, '..');
-const manifestPath = resolve(exampleRoot, 'agora-manifest.yaml');
+const manifestPath = resolve(exampleRoot, 'pangolin-manifest.yaml');
 
 describe('§4.5 manifest example', () => {
   it('parses cleanly via parseManifest', async () => {
@@ -136,7 +136,7 @@ describe('§4.5 manifest example', () => {
 
     // Run from the example directory so the relative `from:` paths in the
     // manifest resolve correctly (mirrors how a user would invoke
-    // `agora deploy --from examples/manifest/agora-manifest.yaml` from a
+    // `pangolin deploy --from examples/manifest/pangolin-manifest.yaml` from a
     // project root containing the example).
     const originalCwd = process.cwd();
     process.chdir(exampleRoot);
@@ -144,7 +144,7 @@ describe('§4.5 manifest example', () => {
     try {
       const program = buildProgram({ getClient: async () => mockClient as never });
       attachDeployCmd(program, { getClient: async () => mockClient as never });
-      await program.parseAsync(['node', 'agora', 'deploy', '--from', manifestPath]);
+      await program.parseAsync(['node', 'pangolin', 'deploy', '--from', manifestPath]);
     } finally {
       logSpy.mockRestore();
       process.chdir(originalCwd);

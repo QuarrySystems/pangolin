@@ -1,11 +1,11 @@
-// dogfood-selftest RUN 2 — agora offloads DEPENDENT work on its OWN source tree,
+// dogfood-selftest RUN 2 — Pangolin Scale offloads DEPENDENT work on its OWN source tree,
 // exercising the typed-product handoff live (run 1, the 4-task independent fan-out,
 // landed as PR #36; its plan is preserved as plan-run1.json).
 //
 // Two-task dependent chain via `needs` (no hand-written depends_on on task B):
 //   A `readme-handoff-section` — adds a Typed-product handoff section to README.md.
 //   B `docs-handoff-page`     — declares needs.patch = A's patch; the worker
-//      materializes it at inputs/patch, a capability-shipped agora-setup.sh
+//      materializes it at inputs/patch, a capability-shipped pangolin-setup.sh
 //      git-applies it BEFORE the agent runs, and the agent writes the docs-site
 //      page consistent with A's actual wording. B literally builds on A's edit.
 // After the run: patches escape per task, the audit bundle is assembled, and
@@ -15,7 +15,7 @@
 //
 // Prerequisites (LIVE run):
 //   - Docker reachable (local Desktop, or DOCKER_HOST → a remote daemon).
-//   - The worker image pullable: ghcr.io/quarrysystems/agora-worker:main
+//   - The worker image pullable: ghcr.io/quarrysystems/pangolin-worker:main
 //     (`:main` carries the Wave A–C handoff worker code; `:latest` only rolls on
 //     v* tags and is still pre-handoff — do NOT use it for this run).
 //   - ANTHROPIC_API_KEY set. Run: `pnpm start:env` (reads ../../.env) or export it.
@@ -25,15 +25,15 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import {
-  AgoraClient,
+  PangolinClient,
   NoopCredentialProvider,
   StdoutResultSink,
-} from '@quarry-systems/agora-client';
-import { LocalStorageProvider } from '@quarry-systems/agora-storage-local';
-import { LocalDockerProvider } from '@quarry-systems/agora-providers-local-docker';
-import { LocalSecretStore } from '@quarry-systems/agora-secret-store';
+} from '@quarry-systems/pangolin-client';
+import { LocalStorageProvider } from '@quarry-systems/pangolin-storage-local';
+import { LocalDockerProvider } from '@quarry-systems/pangolin-providers-local-docker';
+import { LocalSecretStore } from '@quarry-systems/pangolin-secret-store';
 import {
-  AgoraOrchestrator,
+  PangolinOrchestrator,
   SqliteRunStateStore,
   ManualTrigger,
   DispatchExecutor,
@@ -46,18 +46,18 @@ import {
   OperationsApi,
   serve,
   verifyBundle,
-} from '@quarry-systems/agora-orchestrator';
-import type { Run } from '@quarry-systems/agora-orchestrator';
+} from '@quarry-systems/pangolin-orchestrator';
+import type { Run } from '@quarry-systems/pangolin-orchestrator';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, '../../..');
 const PLAN_PATH = join(__dirname, '../plan.json');
 const PATCHES_DIR = join(__dirname, '../patches');
 // :main carries Waves A–C (handoff worker code); :latest is pre-handoff until a v* tag.
-const WORKER_IMAGE = 'ghcr.io/quarrysystems/agora-worker:main';
+const WORKER_IMAGE = 'ghcr.io/quarrysystems/pangolin-worker:main';
 const RUN_TIMEOUT_MS = 600_000; // 10 min: 2 real edit tasks, B strictly after A
 
-// The agora source files each task needs in its workspace, keyed by the REAL
+// The pangolin-scale source files each task needs in its workspace, keyed by the REAL
 // repo-relative path so the escaped patch applies straight back onto the repo.
 // Both tasks share one seed capability: A edits README.md; B's workspace gets the
 // SAME README.md base so A's patch (materialized at inputs/patch) applies cleanly.
@@ -84,7 +84,7 @@ const apiKey: string = apiKeyRaw;
 async function main(): Promise<void> {
   // Fresh per-run dirs (a fixed storage/mailbox path would let a later run read a
   // prior run's stale records for a reused runId — see offload-fanout note).
-  const runDir = await mkdtemp(join(tmpdir(), 'agora-dogfood-'));
+  const runDir = await mkdtemp(join(tmpdir(), 'pangolin-dogfood-'));
   const mailboxDir = join(runDir, 'mailbox');
   const storageRoot = join(runDir, 'storage');
   const secretDir = join(runDir, 'secrets');
@@ -95,7 +95,7 @@ async function main(): Promise<void> {
 
   try {
     // 1. Wire the local-stack client.
-    const client = new AgoraClient({
+    const client = new PangolinClient({
       namespace: 'dogfood-selftest',
       compute: { 'local-docker': new LocalDockerProvider({ allowUnpinnedImage: true }) },
       storage: new LocalStorageProvider({ rootDir: storageRoot }),
@@ -105,7 +105,7 @@ async function main(): Promise<void> {
       resultSink: new StdoutResultSink(),
     });
 
-    // 2. Seed the agora source files into ONE capability overlaid into every
+    // 2. Seed the pangolin-scale source files into ONE capability overlaid into every
     //    worker's workspace (nested paths supported — overlay-engine mkdir -p's).
     //    captureBaseline snapshots them before the agent runs; the agent's
     //    edits/creations become the escaped patch (result_ref).
@@ -114,10 +114,10 @@ async function main(): Promise<void> {
         SEED_FILES.map(async (rel) => [rel, await readFile(join(REPO_ROOT, rel), 'utf8')] as const),
       ),
     );
-    await client.capabilities.register({ name: 'agora-src', files: seeded });
+    await client.capabilities.register({ name: 'pangolin-src', files: seeded });
     await client.capabilities.register({
       name: 'apply-upstream-patch',
-      files: { 'agora-setup.sh': APPLY_PATCH_SETUP_SH },
+      files: { 'pangolin-setup.sh': APPLY_PATCH_SETUP_SH },
     });
 
     // 3. Two templated subagents sharing one prompt. {{{instructions}}} is unescaped
@@ -126,19 +126,19 @@ async function main(): Promise<void> {
     //    capability (per-item capability overrides aren't threaded through the
     //    orchestrator dispatch path, so the binding lives on the subagent).
     const PROMPT =
-      'You are a coding agent working inside a workspace that holds a subset of the agora ' +
+      'You are a coding agent working inside a workspace that holds a subset of the pangolin-scale ' +
       'monorepo at real repository paths (e.g. `README.md`, `docs-site/src/content/...`). Complete EXACTLY ' +
       'the task below. Create or edit only the file(s) the task names; change nothing else. Use ' +
       'the Edit/Write tools, then stop.\n\nTASK:\n{{{instructions}}}';
     await client.subagent.register({
       name: 'code-edit',
       promptTemplate: PROMPT,
-      capabilities: ['agora-src'],
+      capabilities: ['pangolin-src'],
     });
     await client.subagent.register({
       name: 'apply-edit',
       promptTemplate: PROMPT,
-      capabilities: ['agora-src', 'apply-upstream-patch'],
+      capabilities: ['pangolin-src', 'apply-upstream-patch'],
     });
 
     // 4. Audit primitives (tamper-detecting tier — LocalAnchor).
@@ -148,7 +148,7 @@ async function main(): Promise<void> {
 
     // 5. Orchestrator. concurrency 2: the two-item dependent chain (A, then B via
     //    needs) strictly enforces order; concurrency 2 is a no-op pacing bound for this run.
-    const orchestrator = new AgoraOrchestrator({
+    const orchestrator = new PangolinOrchestrator({
       store,
       executors: {
         dispatch: new DispatchExecutor({

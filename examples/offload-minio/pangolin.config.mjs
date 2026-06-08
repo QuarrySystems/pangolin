@@ -1,10 +1,10 @@
-// agora.config.mjs — operator config for the Tier-1 MinIO proof.
+// pangolin.config.mjs — operator config for the Tier-1 MinIO proof.
 //
 // Exports:
-//   default / client  — wired AgoraClient (namespace 'offload-minio')
+//   default / client  — wired PangolinClient (namespace 'offload-minio')
 //   orch              — OrchContext: { transport, storage, anchor, verifySignature, createOrchestrator }
 //
-// IMPORT-SAFE: no throw at load when ANTHROPIC_API_KEY / AGORA_S3_ENDPOINT are absent.
+// IMPORT-SAFE: no throw at load when ANTHROPIC_API_KEY / PANGOLIN_S3_ENDPOINT are absent.
 // No SQLite opened at module level — only inside createOrchestrator() (D3 single-writer).
 
 import { tmpdir } from 'node:os';
@@ -12,12 +12,12 @@ import { join } from 'node:path';
 import { createPrivateKey, createPublicKey, sign as edSign } from 'node:crypto';
 
 import { S3Client } from '@aws-sdk/client-s3';
-import { AgoraClient, NoopCredentialProvider, StdoutResultSink } from '@quarry-systems/agora-client';
-import { LocalDockerProvider } from '@quarry-systems/agora-providers-local-docker';
-import { AwsSecretStore } from '@quarry-systems/agora-secret-store';
-import { S3StorageProvider } from '@quarry-systems/agora-storage-s3';
+import { PangolinClient, NoopCredentialProvider, StdoutResultSink } from '@quarry-systems/pangolin-client';
+import { LocalDockerProvider } from '@quarry-systems/pangolin-providers-local-docker';
+import { AwsSecretStore } from '@quarry-systems/pangolin-secret-store';
+import { S3StorageProvider } from '@quarry-systems/pangolin-storage-s3';
 import {
-  AgoraOrchestrator,
+  PangolinOrchestrator,
   SqliteRunStateStore,
   ManualTrigger,
   DispatchExecutor,
@@ -27,40 +27,40 @@ import {
   MailboxSubmissionTransport,
   createLocalSigner,
   verifyEd25519,
-} from '@quarry-systems/agora-orchestrator';
+} from '@quarry-systems/pangolin-orchestrator';
 
-import { AwsS3MailboxClient, AwsS3LockClient } from '@quarry-systems/agora-storage-s3';
+import { AwsS3MailboxClient, AwsS3LockClient } from '@quarry-systems/pangolin-storage-s3';
 
 // ---------------------------------------------------------------------------
 // Shared S3 client — built once, reused for storage + mailbox + anchor.
 // Safe at module level: no I/O is performed by the SDK constructor.
 // ---------------------------------------------------------------------------
 const s3 = new S3Client({
-  endpoint: process.env.AGORA_S3_ENDPOINT,
+  endpoint: process.env.PANGOLIN_S3_ENDPOINT,
   forcePathStyle: true,
   region: 'us-east-1',
   credentials: {
-    accessKeyId: process.env.AGORA_S3_ACCESS_KEY ?? 'minioadmin',
-    secretAccessKey: process.env.AGORA_S3_SECRET_KEY ?? 'minioadmin',
+    accessKeyId: process.env.PANGOLIN_S3_ACCESS_KEY ?? 'minioadmin',
+    secretAccessKey: process.env.PANGOLIN_S3_SECRET_KEY ?? 'minioadmin',
   },
 });
 
-const workerImage = 'ghcr.io/quarrysystems/agora-worker:latest';
+const workerImage = 'ghcr.io/quarrysystems/pangolin-worker:latest';
 
 // ---------------------------------------------------------------------------
 // Storage, transport, and anchor — safe at module level (constructors only).
 // ---------------------------------------------------------------------------
-const storage = new S3StorageProvider({ bucket: 'agora-data', client: s3 });
+const storage = new S3StorageProvider({ bucket: 'pangolin-data', client: s3 });
 
 const transport = new MailboxSubmissionTransport(
   new S3Mailbox(
-    new AwsS3MailboxClient({ client: s3, bucket: 'agora-data', prefix: 'mailbox/' }),
+    new AwsS3MailboxClient({ client: s3, bucket: 'pangolin-data', prefix: 'mailbox/' }),
   ),
 );
 
 const anchor = new S3ObjectLockAnchor(
-  new AwsS3LockClient({ client: s3, bucket: 'agora-audit' }),
-  'agora-audit',
+  new AwsS3LockClient({ client: s3, bucket: 'pangolin-audit' }),
+  'pangolin-audit',
 );
 
 // ---------------------------------------------------------------------------
@@ -70,11 +70,11 @@ const anchor = new S3ObjectLockAnchor(
 // (verifies it) are SEPARATE processes — a random per-process keypair
 // (createLocalSigner) would never verify cross-process. Derive ONE ed25519
 // keypair from a fixed seed shared via this config, so both sides match.
-// Override with AGORA_SIGNER_SEED_HEX (64 hex chars). DEV ONLY — for production
+// Override with PANGOLIN_SIGNER_SEED_HEX (64 hex chars). DEV ONLY — for production
 // the verifier obtains the signer's public key out-of-band (e.g. KMS / a
 // published key), not a shared secret seed.
 const _seedHex =
-  process.env.AGORA_SIGNER_SEED_HEX ??
+  process.env.PANGOLIN_SIGNER_SEED_HEX ??
   '00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff';
 const _pkcs8 = Buffer.concat([
   Buffer.from('302e020100300506032b657004220420', 'hex'), // PKCS8 ed25519 prefix
@@ -100,9 +100,9 @@ const triggers = { manual: new ManualTrigger() };
 const queues = { default: { concurrency: 2 } };
 
 // ---------------------------------------------------------------------------
-// AgoraClient — lazy: no Docker / network until dispatch fires.
+// PangolinClient — lazy: no Docker / network until dispatch fires.
 // ---------------------------------------------------------------------------
-export const client = new AgoraClient({
+export const client = new PangolinClient({
   namespace: 'offload-minio',
   compute: {
     'local-docker': new LocalDockerProvider({
@@ -114,9 +114,9 @@ export const client = new AgoraClient({
       extraHosts: ['host.docker.internal:host-gateway'],
       extraEnv: {
         // S3 (MinIO) storage bootstrap — needed at worker boot, before bundles.
-        AGORA_S3_ENDPOINT: process.env.AGORA_S3_ENDPOINT ?? '',
-        AWS_ACCESS_KEY_ID: process.env.AWS_ACCESS_KEY_ID ?? process.env.AGORA_S3_ACCESS_KEY ?? 'minioadmin',
-        AWS_SECRET_ACCESS_KEY: process.env.AWS_SECRET_ACCESS_KEY ?? process.env.AGORA_S3_SECRET_KEY ?? 'minioadmin',
+        PANGOLIN_S3_ENDPOINT: process.env.PANGOLIN_S3_ENDPOINT ?? '',
+        AWS_ACCESS_KEY_ID: process.env.AWS_ACCESS_KEY_ID ?? process.env.PANGOLIN_S3_ACCESS_KEY ?? 'minioadmin',
+        AWS_SECRET_ACCESS_KEY: process.env.AWS_SECRET_ACCESS_KEY ?? process.env.PANGOLIN_S3_SECRET_KEY ?? 'minioadmin',
         AWS_REGION: process.env.AWS_REGION ?? 'us-east-1',
         // Secrets Manager (LocalStack) endpoint so the worker's AwsSecretStore
         // resolves per-dispatch secret refs cross-container. The AWS SDK honors
@@ -172,10 +172,10 @@ function makeExecutors() {
 // ---------------------------------------------------------------------------
 function createOrchestrator() {
   const store = new SqliteRunStateStore(
-    process.env.AGORA_DB_PATH ?? join(tmpdir(), 'agora-minio.db'),
+    process.env.PANGOLIN_DB_PATH ?? join(tmpdir(), 'pangolin-minio.db'),
   );
   const auditLog = new AuditLog({ store, signer, anchor });
-  return new AgoraOrchestrator({
+  return new PangolinOrchestrator({
     store,
     executors: makeExecutors(),
     triggers,

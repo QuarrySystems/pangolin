@@ -1,7 +1,7 @@
-// agora.config.mjs — operator config for the offload-fanout example.
+// pangolin.config.mjs — operator config for the offload-fanout example.
 //
 // Exports:
-//   default / client  — wired AgoraClient (namespace 'offload-fanout')
+//   default / client  — wired PangolinClient (namespace 'offload-fanout')
 //   orch              — OrchContext: { transport, storage, anchor, verifySignature, runService }
 //
 // IMPORT-SAFE: no throw at load when ANTHROPIC_API_KEY is absent.
@@ -11,12 +11,12 @@ import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { AgoraClient, NoopCredentialProvider, StdoutResultSink } from '@quarry-systems/agora-client';
-import { LocalStorageProvider } from '@quarry-systems/agora-storage-local';
-import { LocalDockerProvider } from '@quarry-systems/agora-providers-local-docker';
-import { LocalSecretStore } from '@quarry-systems/agora-secret-store';
+import { PangolinClient, NoopCredentialProvider, StdoutResultSink } from '@quarry-systems/pangolin-client';
+import { LocalStorageProvider } from '@quarry-systems/pangolin-storage-local';
+import { LocalDockerProvider } from '@quarry-systems/pangolin-providers-local-docker';
+import { LocalSecretStore } from '@quarry-systems/pangolin-secret-store';
 import {
-  AgoraOrchestrator,
+  PangolinOrchestrator,
   SqliteRunStateStore,
   ManualTrigger,
   DispatchExecutor,
@@ -27,24 +27,24 @@ import {
   MailboxSubmissionTransport,
   LocalDirMailbox,
   serve,
-} from '@quarry-systems/agora-orchestrator';
+} from '@quarry-systems/pangolin-orchestrator';
 
 // ---------------------------------------------------------------------------
 // Path setup — use stable per-host dirs so containers can bind-mount them.
 // The db path is process-unique to avoid SQLITE_BUSY on concurrent/repeat
 // imports from parallel CLI invocations.
 // ---------------------------------------------------------------------------
-const rootDir = join(tmpdir(), 'agora-fanout-storage');
-const secretDir = join(tmpdir(), 'agora-fanout-secrets');
-const mailboxDir = join(tmpdir(), 'agora-fanout-mailbox');
-const dbPath = join(tmpdir(), `agora-fanout-${process.pid}.db`);
+const rootDir = join(tmpdir(), 'pangolin-fanout-storage');
+const secretDir = join(tmpdir(), 'pangolin-fanout-secrets');
+const mailboxDir = join(tmpdir(), 'pangolin-fanout-mailbox');
+const dbPath = join(tmpdir(), `pangolin-fanout-${process.pid}.db`);
 
-const workerImage = 'ghcr.io/quarrysystems/agora-worker:latest';
+const workerImage = 'ghcr.io/quarrysystems/pangolin-worker:latest';
 
 // ---------------------------------------------------------------------------
-// AgoraClient — lazy: no Docker/network until dispatch fires.
+// PangolinClient — lazy: no Docker/network until dispatch fires.
 // ---------------------------------------------------------------------------
-export const client = new AgoraClient({
+export const client = new PangolinClient({
   namespace: 'offload-fanout',
   compute: { 'local-docker': new LocalDockerProvider({ allowUnpinnedImage: true }) },
   storage: new LocalStorageProvider({ rootDir }),
@@ -67,7 +67,7 @@ const signer = createLocalSigner();
 const anchor = new LocalAnchor(store);
 const auditLog = new AuditLog({ store, signer, anchor });
 
-const orchestrator = new AgoraOrchestrator({
+const orchestrator = new PangolinOrchestrator({
   store,
   executors: {
     dispatch: new DispatchExecutor({

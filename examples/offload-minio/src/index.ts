@@ -10,36 +10,36 @@
 // Prerequisites (LIVE RUN — not a unit test):
 //   - MinIO running at http://localhost:9000 (host port, §2.1)
 //   - The serve container + worker image available (see docker-compose.yml)
-//   - AGORA_S3_ENDPOINT=http://localhost:9000  AGORA_S3_ACCESS_KEY=minioadmin  AGORA_S3_SECRET_KEY=minioadmin
+//   - PANGOLIN_S3_ENDPOINT=http://localhost:9000  PANGOLIN_S3_ACCESS_KEY=minioadmin  PANGOLIN_S3_SECRET_KEY=minioadmin
 //   - NO ANTHROPIC_API_KEY required in the driver process (the serve container stages it)
 //
 // Run via:
-//   AGORA_S3_ENDPOINT=http://localhost:9000 AGORA_S3_ACCESS_KEY=minioadmin \
-//   AGORA_S3_SECRET_KEY=minioadmin pnpm start
+//   PANGOLIN_S3_ENDPOINT=http://localhost:9000 PANGOLIN_S3_ACCESS_KEY=minioadmin \
+//   PANGOLIN_S3_SECRET_KEY=minioadmin pnpm start
 
 import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { OperationsApi } from '@quarry-systems/agora-orchestrator';
+import { OperationsApi } from '@quarry-systems/pangolin-orchestrator';
 import type {
   Run,
   SubmissionTransport,
   ControlChannel,
   AuditAnchor,
-} from '@quarry-systems/agora-orchestrator';
-import type { AgoraClient } from '@quarry-systems/agora-client';
+} from '@quarry-systems/pangolin-orchestrator';
+import type { PangolinClient } from '@quarry-systems/pangolin-client';
 
 // Import the shared config's wired client + orch context.
-// The host driver does NOT build a fresh AgoraClient — it reuses the config's,
+// The host driver does NOT build a fresh PangolinClient — it reuses the config's,
 // which is already backed by S3/MinIO.  The client's storage is already pointed
-// at the MinIO endpoint via the AGORA_S3_* env vars read at module load time.
+// at the MinIO endpoint via the PANGOLIN_S3_* env vars read at module load time.
 //
-// agora.config.mjs is a plain-JS module with no .d.ts declarations.
+// pangolin.config.mjs is a plain-JS module with no .d.ts declarations.
 // We import it as `any` and cast below so that strict TS stays clean without
 // requiring a declaration file in the examples/ tree.
 // @ts-ignore — .mjs has no declaration file; typed below via explicit casts.
-import * as _config from '../agora.config.mjs';
+import * as _config from '../pangolin.config.mjs';
 
 interface StorageLike { get(ref: string): Promise<Uint8Array>; }
 
@@ -51,7 +51,7 @@ interface OrchContext {
   createOrchestrator: () => unknown;
 }
 
-const config = _config as { client: AgoraClient; orch: OrchContext };
+const config = _config as { client: PangolinClient; orch: OrchContext };
 const client = config.client;
 const orch = config.orch;
 

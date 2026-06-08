@@ -6,20 +6,20 @@
 # at http://localhost:9000.
 # The `serve` container and any sibling Docker workers it launches reach MinIO
 # at http://host.docker.internal:9000 (resolved via `extra_hosts` below).
-# AGORA_S3_ENDPOINT in the `serve` service is set to the latter form.
+# PANGOLIN_S3_ENDPOINT in the `serve` service is set to the latter form.
 #
 # Operator prerequisites
 # ----------------------
-# 1. Build the stock agora-worker image locally before `docker compose up`:
-#      docker build -t ghcr.io/quarrysystems/agora-worker:latest \
-#                   -f docker/agora-worker/Dockerfile .
-#    (The worker image must include the AGORA_S3_ENDPOINT + AWS_* env handling
+# 1. Build the stock pangolin-worker image locally before `docker compose up`:
+#      docker build -t ghcr.io/quarrysystems/pangolin-worker:latest \
+#                   -f docker/pangolin-worker/Dockerfile .
+#    (The worker image must include the PANGOLIN_S3_ENDPOINT + AWS_* env handling
 #    introduced for this proof.)
 # 2. Optionally set DOCKER_GID to the host docker socket's GID if it differs
 #    from the default 999 (run: `stat -c '%g' /var/run/docker.sock` on the host).
 # 3. Set ANTHROPIC_API_KEY in ../../.env (the repo-root .env file).
 
-name: agora-minio-proof
+name: pangolin-minio-proof
 
 services:
 
@@ -28,7 +28,7 @@ services:
   # ---------------------------------------------------------------------------
   minio:
     image: minio/minio:RELEASE.2025-09-07T16-13-09Z
-    container_name: agora-minio
+    container_name: pangolin-minio
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: minioadmin
@@ -52,7 +52,7 @@ services:
   # ---------------------------------------------------------------------------
   localstack:
     image: localstack/localstack:3.8
-    container_name: agora-localstack
+    container_name: pangolin-localstack
     ports:
       - "4566:4566"
     environment:
@@ -71,7 +71,7 @@ services:
   # ---------------------------------------------------------------------------
   minio-init:
     image: minio/mc:RELEASE.2025-08-13T08-35-41Z
-    container_name: agora-minio-init
+    container_name: pangolin-minio-init
     restart: "no"
     depends_on:
       minio:
@@ -86,19 +86,19 @@ services:
 
   # ---------------------------------------------------------------------------
   # serve-data-init — one-shot: chown the serve-data volume so the non-root
-  # agora user (uid 1000) can write the SQLite DB on a fresh `docker compose up`.
+  # pangolin user (uid 1000) can write the SQLite DB on a fresh `docker compose up`.
   # Docker creates named volumes root-owned; this fixes that before serve starts.
   # ---------------------------------------------------------------------------
   serve-data-init:
     image: busybox
-    container_name: agora-serve-data-init
+    container_name: pangolin-serve-data-init
     volumes:
       - serve-data:/data
     command: ["sh", "-c", "chown -R 1000:1000 /data"]
     restart: "no"
 
   # ---------------------------------------------------------------------------
-  # serve — agora-orchestrator serve container (Tier-1 proof)
+  # serve — pangolin-orchestrator serve container (Tier-1 proof)
   # ---------------------------------------------------------------------------
   serve:
     build:
@@ -106,7 +106,7 @@ services:
       # (packages/*, pnpm-workspace.yaml, pnpm-lock.yaml, etc.)
       context: ../..
       dockerfile: examples/offload-minio/Dockerfile.serve
-    container_name: agora-serve
+    container_name: pangolin-serve
     depends_on:
       minio:
         condition: service_healthy
@@ -119,28 +119,28 @@ services:
     environment:
       # S3 / MinIO — host.docker.internal so the serve container reaches
       # the MinIO port exposed on the Docker host network (§2.1 duality).
-      AGORA_S3_ENDPOINT: "http://host.docker.internal:9000"
+      PANGOLIN_S3_ENDPOINT: "http://host.docker.internal:9000"
       # Secrets Manager (LocalStack) — serve stages the per-dispatch secret here;
       # same host.docker.internal endpoint the worker uses (set via extraEnv).
       AWS_ENDPOINT_URL_SECRETS_MANAGER: "http://host.docker.internal:4566"
       AWS_ACCESS_KEY_ID: minioadmin
       AWS_SECRET_ACCESS_KEY: minioadmin
       AWS_REGION: us-east-1
-      # Config reads AGORA_S3_ACCESS_KEY / AGORA_S3_SECRET_KEY for its S3Client.
-      AGORA_S3_ACCESS_KEY: minioadmin
-      AGORA_S3_SECRET_KEY: minioadmin
+      # Config reads PANGOLIN_S3_ACCESS_KEY / PANGOLIN_S3_SECRET_KEY for its S3Client.
+      PANGOLIN_S3_ACCESS_KEY: minioadmin
+      PANGOLIN_S3_SECRET_KEY: minioadmin
       # Anthropic key is supplied by `env_file: ../../.env` below — do NOT also
       # list it here: a compose `environment:` entry overrides `env_file`, and the
       # `${ANTHROPIC_API_KEY}` interpolation resolves against the project-dir .env
       # (which doesn't exist here), blanking the key.
       # SQLite run-state DB — persisted on the named volume below.
-      AGORA_DB_PATH: /data/agora.db
+      PANGOLIN_DB_PATH: /data/pangolin.db
     volumes:
       # Docker socket — lets the serve container launch sibling worker containers.
       - /var/run/docker.sock:/var/run/docker.sock
-      # Named volume for the SQLite DB — must be writable by uid 1000 (agora).
+      # Named volume for the SQLite DB — must be writable by uid 1000 (pangolin).
       - serve-data:/data
-    # group_add: add the docker socket's GID so the non-root agora user (uid 1000)
+    # group_add: add the docker socket's GID so the non-root pangolin user (uid 1000)
     # can write to /var/run/docker.sock.  Default 999 matches most Linux hosts;
     # set DOCKER_GID in the environment if your host socket has a different GID.
     group_add:

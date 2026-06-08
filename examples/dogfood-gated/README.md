@@ -1,4 +1,4 @@
-# dogfood-gated — agora exercises the pattern layer's gated circle-back
+# dogfood-gated — pangolin exercises the pattern layer's gated circle-back
 
 ## Run lineage
 
@@ -10,7 +10,7 @@ genuinely builds on A's edit, wired by `needs`, with provenance closure live.
 
 **Run 3 proves the gated circle-back (this example).** Gate red → audited
 respawn → fix consumes findings by provenance → downstream remapped to the
-fix's patch. All of this live, with real Claude workers on agora's own source
+fix's patch. All of this live, with real Claude workers on pangolin's own source
 tree, and every dispatch sealing model + cost evidence (PR #52).
 
 ---
@@ -61,7 +61,7 @@ the supported path.
 From the **repo root**:
 
 ```sh
-docker build -f docker/agora-worker/Dockerfile -t ghcr.io/quarrysystems/agora-worker:main .
+docker build -f docker/pangolin-worker/Dockerfile -t ghcr.io/quarrysystems/pangolin-worker:main .
 ```
 
 ---
@@ -145,14 +145,14 @@ A successful run persists two text artifacts beside this README:
 - `bundle.json` — the exported `AuditBundle` (the artifact you hand an auditor)
 - `verify-context.json` — the signer **public** key + the anchored root(s)
 
-`agora.config.mjs` here is a **verify-only** config: a read-only anchor serving
+`pangolin.config.mjs` here is a **verify-only** config: a read-only anchor serving
 the persisted roots and a `verifySignature` bound to the persisted public key.
 Any process holding the two files can re-verify the full proof — no store, no
 Docker, no API key, no access to the run that produced it:
 
 ```sh
 # from this directory
-pnpm exec agora verify bundle.json --full
+pnpm exec pangolin verify bundle.json --full
 ```
 
 Expected: `✓ TAMPER-DETECTING` with all five rows green (chain / root /

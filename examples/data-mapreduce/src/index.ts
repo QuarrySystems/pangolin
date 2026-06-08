@@ -9,7 +9,7 @@
 // It runs worker pipelines IN-PROCESS (no sandbox, no network firewall,
 // no filesystem isolation). This executor is a test/demo bridge ONLY —
 // it MUST NEVER be used in production. See:
-//   packages/agora-orchestrator/test/fixtures/inproc-worker-executor.ts
+//   packages/pangolin-orchestrator/test/fixtures/inproc-worker-executor.ts
 // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 //
 // Flow:
@@ -32,7 +32,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
-  AgoraOrchestrator,
+  PangolinOrchestrator,
   ManualTrigger,
   SqliteRunStateStore,
   AuditLog,
@@ -41,39 +41,39 @@ import {
   mapReduce,
   assembleBundle,
   verifyBundle,
-} from '@quarry-systems/agora-orchestrator';
-import type { Run, ItemState } from '@quarry-systems/agora-orchestrator';
-import { AgoraClient, registerSubagent, registerPipeline } from '@quarry-systems/agora-client';
-import type { PipelineRef } from '@quarry-systems/agora-client';
-import { LocalStorageProvider } from '@quarry-systems/agora-storage-local';
+} from '@quarry-systems/pangolin-orchestrator';
+import type { Run, ItemState } from '@quarry-systems/pangolin-orchestrator';
+import { PangolinClient, registerSubagent, registerPipeline } from '@quarry-systems/pangolin-client';
+import type { PipelineRef } from '@quarry-systems/pangolin-client';
+import { LocalStorageProvider } from '@quarry-systems/pangolin-storage-local';
 
 // Import the InprocWorkerExecutor from the orchestrator test fixture.
 // tsx compiles workspace TS directly, resolving workspace:* packages in-source.
 // WARNING: bypasses container isolation — demo/test bridge only, never production.
-import { InprocWorkerExecutor } from '../../../packages/agora-orchestrator/test/fixtures/inproc-worker-executor.js';
+import { InprocWorkerExecutor } from '../../../packages/pangolin-orchestrator/test/fixtures/inproc-worker-executor.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PLAN_PATH = join(__dirname, '../plan.json');
 const NAMESPACE = 'data-mapreduce-demo';
 
 // ---------------------------------------------------------------------------
-// Local URI helpers — avoids importing @quarry-systems/agora-core directly
+// Local URI helpers — avoids importing @quarry-systems/pangolin-core directly
 // (it's not in this example's dependencies; only its peer-packages are).
 // ---------------------------------------------------------------------------
 
-/** Builds a pinned agora:// URI: agora://<ns>/<type>/<name>/<contentHash> */
+/** Builds a pinned pangolin:// URI: pangolin://<ns>/<type>/<name>/<contentHash> */
 function buildPinnedUri(namespace: string, type: string, name: string, contentHash: string): string {
-  return `agora://${namespace}/${type}/${name}/${contentHash}`;
+  return `pangolin://${namespace}/${type}/${name}/${contentHash}`;
 }
 
-/** Builds a dispatch-record URI: agora://<ns>/dispatches/<dispatchId>/<suffix> */
+/** Builds a dispatch-record URI: pangolin://<ns>/dispatches/<dispatchId>/<suffix> */
 function buildDispatchUri(namespace: string, dispatchId: string, suffix: string): string {
-  return `agora://${namespace}/dispatches/${dispatchId}/${suffix}`;
+  return `pangolin://${namespace}/dispatches/${dispatchId}/${suffix}`;
 }
 
 // ---------------------------------------------------------------------------
-// Minimal local PipelineSpec type (structurally compatible with agora-core's).
-// Avoids importing @quarry-systems/agora-core directly.
+// Minimal local PipelineSpec type (structurally compatible with pangolin-core's).
+// Avoids importing @quarry-systems/pangolin-core directly.
 // ---------------------------------------------------------------------------
 
 interface LocalBlockSpec {
@@ -188,7 +188,7 @@ const aggregatePipelineSpec: LocalPipelineSpec = {
 // ---------------------------------------------------------------------------
 
 async function registerAll(
-  client: AgoraClient,
+  client: PangolinClient,
 ): Promise<{
   subagentUri: string;
   seedPipelineUri: string;
@@ -252,7 +252,7 @@ function fillPlaceholders(
 // Drive loop
 // ---------------------------------------------------------------------------
 
-async function driveUntilDone(orch: AgoraOrchestrator, runId: string, maxTicks = 100): Promise<void> {
+async function driveUntilDone(orch: PangolinOrchestrator, runId: string, maxTicks = 100): Promise<void> {
   for (let i = 0; i < maxTicks; i++) {
     await orch.tick('default');
     const statuses = orch.getStatus(runId).map((s) => s.status);
@@ -279,8 +279,8 @@ async function main(): Promise<void> {
     // and the InprocWorkerExecutor (bundle fetch + output writes).
     const storage = new LocalStorageProvider({ rootDir: storageDir });
 
-    // Build the AgoraClient for registration (no network, no compute).
-    const client = new AgoraClient({
+    // Build the PangolinClient for registration (no network, no compute).
+    const client = new PangolinClient({
       namespace: NAMESPACE,
       compute: {},
       credentials: {},
@@ -304,7 +304,7 @@ async function main(): Promise<void> {
     const anchor = new LocalAnchor(store);
     const auditLog = new AuditLog({ store, signer: NoneSigner, anchor });
 
-    const orch = new AgoraOrchestrator({
+    const orch = new PangolinOrchestrator({
       store,
       executors: { dispatch: executor },
       triggers: { manual: new ManualTrigger() },
@@ -399,7 +399,7 @@ async function main(): Promise<void> {
     // (3) blocks[] evidence sample — sentinel of one map item (map-a.csv)
     //
     // The InprocWorkerExecutor stores the output sentinel (output.json) at:
-    //   agora://<namespace>/dispatches/<dispatchId>/output.json
+    //   pangolin://<namespace>/dispatches/<dispatchId>/output.json
     // The dispatchId is embedded in dispatchHash as 'inproc-<dispatchId>'.
     // ---------------------------------------------------------------------------
     console.log('\n=== blocks[] evidence sample (sentinel of map-a.csv) ===');

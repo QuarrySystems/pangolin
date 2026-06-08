@@ -2,10 +2,10 @@
 #
 # Drive this file with:
 #
-#   agora deploy --from examples/manifest/agora-manifest.yaml
+#   pangolin deploy --from examples/manifest/pangolin-manifest.yaml
 #
 # The deploy reconciler walks the manifest in three phases against the
-# AgoraClient your `agora.config.ts` exports:
+# Pangolin ScaleClient your `pangolin.config.ts` exports:
 #
 #   1. capabilities  — bundle the `from:` directory; register via
 #                      client.capabilities.register({ name, files })

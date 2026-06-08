@@ -24,7 +24,7 @@ import { readFile } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  AgoraOrchestrator,
+  PangolinOrchestrator,
   ManualTrigger,
   SqliteRunStateStore,
   AuditLog,
@@ -34,8 +34,8 @@ import {
   verifyBundle,
   buildManifest,
   pipeline,
-} from '@quarry-systems/agora-orchestrator';
-import type { Run, Executor } from '@quarry-systems/agora-orchestrator';
+} from '@quarry-systems/pangolin-orchestrator';
+import type { Run, Executor } from '@quarry-systems/pangolin-orchestrator';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PLAN_PATH = join(__dirname, '../plan.json');
@@ -46,23 +46,23 @@ const PLAN_PATH = join(__dirname, '../plan.json');
 
 /** Artifact produced by 'implement'. */
 const REF_IMPL =
-  'agora://ns/artifact/impl/sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+  'pangolin://ns/artifact/impl/sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 
 /** Artifact produced by 'review-fix-1'. */
 const REF_FIX =
-  'agora://ns/artifact/fix/sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+  'pangolin://ns/artifact/fix/sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 
 /** Findings artifact produced by the done-but-red 'review' gate.
  *  Returned as review's outputRefs.findings — a true gate output.
  *  The engine auto-binds needs.findings on the fix item and resolves it via needs-resolver
  *  (selectProductRef → upstream.outputRefs['findings']). */
 const REF_FINDINGS =
-  'agora://ns/artifact/findings/sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
+  'pangolin://ns/artifact/findings/sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
 
 // ---------------------------------------------------------------------------
 // Id-keyed fake executor (re-created inline — examples cannot import test fixtures)
 //
-// Mirrors packages/agora-orchestrator/test/fixtures/pattern-harness.ts idKeyedExecutor:
+// Mirrors packages/pangolin-orchestrator/test/fixtures/pattern-harness.ts idKeyedExecutor:
 //   fire() seals engine-resolved inputs.inputRefs into a buildManifest blob.
 //   reconcile() returns the deterministic behavior keyed by de-namespaced item id.
 // ---------------------------------------------------------------------------
@@ -112,7 +112,7 @@ function makeIdKeyedExecutor(blobs: Map<string, Uint8Array>): Executor {
         ...(inputRefs ? { inputRefs } : {}),
       });
 
-      const manifestRef = `agora://ns/manifest/m/${manifest.manifestHash}`;
+      const manifestRef = `pangolin://ns/manifest/m/${manifest.manifestHash}`;
       blobs.set(manifestRef, bytes);
 
       const dispatchHash = `d-${ctx?.runId ?? ''}-${item.id}`;
@@ -139,7 +139,7 @@ function makeIdKeyedExecutor(blobs: Map<string, Uint8Array>): Executor {
 // Drive loop — tick until all items terminal (or tick limit)
 // ---------------------------------------------------------------------------
 
-async function driveUntilDone(orch: AgoraOrchestrator, runId: string, maxTicks = 64): Promise<void> {
+async function driveUntilDone(orch: PangolinOrchestrator, runId: string, maxTicks = 64): Promise<void> {
   for (let i = 0; i < maxTicks; i++) {
     await orch.tick('default');
     const statuses = orch.getStatus(runId).map((s) => s.status);
@@ -165,7 +165,7 @@ async function main(): Promise<void> {
     const anchor = new LocalAnchor(store);
     const auditLog = new AuditLog({ store, signer: NoneSigner, anchor });
 
-    const orch = new AgoraOrchestrator({
+    const orch = new PangolinOrchestrator({
       store,
       executors: { dispatch: executor },
       triggers: { manual: new ManualTrigger() },

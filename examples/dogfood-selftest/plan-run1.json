@@ -8,11 +8,11 @@
       "inputs": {
         "subagent": "code-edit",
         "workerInput": {
-          "instructions": "Create a NEW test file at `packages/agora-cli/test/sync.test.ts` that unit-tests the `runSync` function exported from `packages/agora-cli/src/sync.ts`. Read that source file (it is present in your workspace) to learn its exact signature and behaviour. Use vitest: `import { describe, it, expect, vi } from 'vitest'`. Match the import/style conventions of the existing test at `packages/agora-cli/test/frontmatter.test.ts` (also in your workspace). Cover both the dry-run path (no side effects) and the normal register/iterate path. Create ONLY that one new file; modify nothing else; then stop."
+          "instructions": "Create a NEW test file at `packages/pangolin-cli/test/sync.test.ts` that unit-tests the `runSync` function exported from `packages/pangolin-cli/src/sync.ts`. Read that source file (it is present in your workspace) to learn its exact signature and behaviour. Use vitest: `import { describe, it, expect, vi } from 'vitest'`. Match the import/style conventions of the existing test at `packages/pangolin-cli/test/frontmatter.test.ts` (also in your workspace). Cover both the dry-run path (no side effects) and the normal register/iterate path. Create ONLY that one new file; modify nothing else; then stop."
         }
       },
       "depends_on": [],
-      "resourceLocks": ["packages/agora-cli/test/sync.test.ts"]
+      "resourceLocks": ["packages/pangolin-cli/test/sync.test.ts"]
     },
     {
       "id": "test-client-errors",
@@ -20,11 +20,11 @@
       "inputs": {
         "subagent": "code-edit",
         "workerInput": {
-          "instructions": "Create a NEW test file at `packages/agora-client/test/errors.test.ts` that unit-tests the error class exported from `packages/agora-client/src/errors.ts`. Read that source file (present in your workspace) to learn the exact class name and constructor shape. Use vitest: `import { describe, it, expect } from 'vitest'`. Match the style of the existing test at `packages/agora-client/test/secret-ttl.test.ts` (also in your workspace). Assert: the formatted error message, the `.name` property, and that the instance is `instanceof Error`. Create ONLY that one new file; modify nothing else; then stop."
+          "instructions": "Create a NEW test file at `packages/pangolin-client/test/errors.test.ts` that unit-tests the error class exported from `packages/pangolin-client/src/errors.ts`. Read that source file (present in your workspace) to learn the exact class name and constructor shape. Use vitest: `import { describe, it, expect } from 'vitest'`. Match the style of the existing test at `packages/pangolin-client/test/secret-ttl.test.ts` (also in your workspace). Assert: the formatted error message, the `.name` property, and that the instance is `instanceof Error`. Create ONLY that one new file; modify nothing else; then stop."
         }
       },
       "depends_on": [],
-      "resourceLocks": ["packages/agora-client/test/errors.test.ts"]
+      "resourceLocks": ["packages/pangolin-client/test/errors.test.ts"]
     },
     {
       "id": "tighten-dispatch-rooturi",
@@ -32,11 +32,11 @@
       "inputs": {
         "subagent": "code-edit",
         "workerInput": {
-          "instructions": "In `packages/agora-client/src/dispatch.ts` (present in your workspace) there is a cast of the form `(client.storage as unknown as { rootUri?: string }).rootUri` (near line 216). Replace this `as unknown as ...` cast with a small, well-named local type guard (e.g. a `hasRootUri(x): x is { rootUri: string }` helper) or a narrow interface, so the access is type-safe WITHOUT `as unknown`. Preserve the exact runtime behaviour, including the `?? ''` fallback. Edit ONLY `packages/agora-client/src/dispatch.ts`; modify nothing else; then stop."
+          "instructions": "In `packages/pangolin-client/src/dispatch.ts` (present in your workspace) there is a cast of the form `(client.storage as unknown as { rootUri?: string }).rootUri` (near line 216). Replace this `as unknown as ...` cast with a small, well-named local type guard (e.g. a `hasRootUri(x): x is { rootUri: string }` helper) or a narrow interface, so the access is type-safe WITHOUT `as unknown`. Preserve the exact runtime behaviour, including the `?? ''` fallback. Edit ONLY `packages/pangolin-client/src/dispatch.ts`; modify nothing else; then stop."
         }
       },
       "depends_on": [],
-      "resourceLocks": ["packages/agora-client/src/dispatch.ts"]
+      "resourceLocks": ["packages/pangolin-client/src/dispatch.ts"]
     },
     {
       "id": "tighten-manifest-parser-casts",
@@ -44,11 +44,11 @@
       "inputs": {
         "subagent": "code-edit",
         "workerInput": {
-          "instructions": "In `packages/agora-cli/src/manifest-parser.ts` (present in your workspace) there are three `as unknown[]` casts in the YAML iteration loops (near lines 44, 58, 76 — over `capabilities`, `subagents`, and `envs`). Replace each with a typed iteration backed by a small type guard (e.g. an `asArray(x): unknown[]` or per-field narrowing helper) so the loops are type-safe WITHOUT `as unknown[]`. Preserve the exact runtime behaviour, including the `?? []` fallbacks. Edit ONLY `packages/agora-cli/src/manifest-parser.ts`; modify nothing else; then stop."
+          "instructions": "In `packages/pangolin-cli/src/manifest-parser.ts` (present in your workspace) there are three `as unknown[]` casts in the YAML iteration loops (near lines 44, 58, 76 — over `capabilities`, `subagents`, and `envs`). Replace each with a typed iteration backed by a small type guard (e.g. an `asArray(x): unknown[]` or per-field narrowing helper) so the loops are type-safe WITHOUT `as unknown[]`. Preserve the exact runtime behaviour, including the `?? []` fallbacks. Edit ONLY `packages/pangolin-cli/src/manifest-parser.ts`; modify nothing else; then stop."
         }
       },
       "depends_on": [],
-      "resourceLocks": ["packages/agora-cli/src/manifest-parser.ts"]
+      "resourceLocks": ["packages/pangolin-cli/src/manifest-parser.ts"]
     }
   ]
 }

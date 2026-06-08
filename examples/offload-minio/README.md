@@ -8,7 +8,7 @@ tamper-evident (`external-immutable`) audit bundle. Every edit runs the **real**
 infra is free.
 
 Design spec:
-[`../../docs/superpowers/specs/2026-06-02-agora-offload-tier1-minio-proof-design.md`](../../docs/superpowers/specs/2026-06-02-agora-offload-tier1-minio-proof-design.md)
+[`../../docs/superpowers/specs/2026-06-02-pangolin-offload-tier1-minio-proof-design.md`](../../docs/superpowers/specs/2026-06-02-pangolin-offload-tier1-minio-proof-design.md)
 
 ---
 
@@ -27,7 +27,7 @@ Design spec:
   uploaded to content-addressed S3 storage; the `result_ref` URI is surfaced
   through the `OperationsApi` without the patch ever living in the run-state DB.
 - **`external-immutable` audit bundle**: `S3ObjectLockAnchor` anchors the Merkle
-  root into a MinIO object-lock bucket (`agora-audit`, `COMPLIANCE` mode). The
+  root into a MinIO object-lock bucket (`pangolin-audit`, `COMPLIANCE` mode). The
   audit report reads `intact: true`, `guarantee: 'external-immutable'`, and
   `claim: 'tamper-evident'`.
 - **Tamper detection demonstrated**: mutating a persisted audit entry in the
@@ -35,8 +35,8 @@ Design spec:
   be rewritten before retention expires) — causes `verify()` to return
   `intact: false`. The compliance edge is proven, not just claimed.
 
-The two-bucket split is load-bearing: `agora-audit` holds **only** WORM anchor
-roots (object-lock `COMPLIANCE`). `agora-data` is the unlocked bucket for the
+The two-bucket split is load-bearing: `pangolin-audit` holds **only** WORM anchor
+roots (object-lock `COMPLIANCE`). `pangolin-data` is the unlocked bucket for the
 mailbox and content-addressed storage, both of which require deletes/overwrites.
 Pointing the mailbox at the locked bucket would break inbox consumption.
 
@@ -68,7 +68,7 @@ green checkmark does and does not cover.
 **NOT covered by Tier-1:**
 
 - Fargate mechanics: ECS task launch, IAM task roles, EFS volume mount,
-  `agora-providers-fargate` compute path.
+  `pangolin-providers-fargate` compute path.
 - Real AWS S3 + real object-lock `COMPLIANCE` enforcement (not MinIO's
   implementation).
 - `KmsSigner`.
@@ -94,13 +94,13 @@ the swap, and Tier-2 validates the AWS implementations behind the seams. See
 ### Step 1 — Build the worker image locally
 
 The stock worker image is GHCR-private. Build it once from the repo root before
-starting the compose stack; the build must include the `AGORA_S3_ENDPOINT` +
+starting the compose stack; the build must include the `PANGOLIN_S3_ENDPOINT` +
 `AWS_*` env handling introduced for this proof:
 
 ```sh
 # From repo root
-docker build -t ghcr.io/quarrysystems/agora-worker:latest \
-             -f docker/agora-worker/Dockerfile .
+docker build -t ghcr.io/quarrysystems/pangolin-worker:latest \
+             -f docker/pangolin-worker/Dockerfile .
 ```
 
 ### Step 2 — Put the Anthropic key in the repo-root `.env`
@@ -134,7 +134,7 @@ published key.
 
 ### Step 3 — Set `DOCKER_GID` to the Docker socket's group
 
-The non-root `agora` user (`uid 1000`) in the `serve` container needs the socket's
+The non-root `pangolin` user (`uid 1000`) in the `serve` container needs the socket's
 group to launch sibling workers. The default `999` is wrong on Docker Desktop,
 where the socket is group `0`:
 
@@ -158,13 +158,13 @@ This starts:
 
 - **`minio`** — MinIO S3-compatible store, published on host ports 9000 (API)
   and 9001 (console).
-- **`minio-init`** — one-shot bucket creation: `agora-audit` (with object lock)
-  and `agora-data` (unlocked). Runs after MinIO is healthy, then exits.
+- **`minio-init`** — one-shot bucket creation: `pangolin-audit` (with object lock)
+  and `pangolin-data` (unlocked). Runs after MinIO is healthy, then exits.
 - **`localstack`** — AWS Secrets Manager emulator on host port 4566. serve stages
   the per-dispatch API key here; workers resolve it over the network.
 - **`serve-data-init`** — one-shot chown of the SQLite volume so uid 1000 can
   write. Runs before `serve`.
-- **`serve`** — the `agora-orchestrator` serve container. Mounts the host Docker
+- **`serve`** — the `pangolin-orchestrator` serve container. Mounts the host Docker
   socket to launch sibling worker containers. **No published port** — reachable
   only through the MinIO mailbox.
 
@@ -177,9 +177,9 @@ From the `examples/offload-minio` directory (the driver needs **no** API key —
 serve container stages it):
 
 ```sh
-AGORA_S3_ENDPOINT=http://localhost:9000 \
-AGORA_S3_ACCESS_KEY=minioadmin \
-AGORA_S3_SECRET_KEY=minioadmin \
+PANGOLIN_S3_ENDPOINT=http://localhost:9000 \
+PANGOLIN_S3_ACCESS_KEY=minioadmin \
+PANGOLIN_S3_SECRET_KEY=minioadmin \
 pnpm start
 ```
 
@@ -214,10 +214,10 @@ host, so both `serve` and its sibling workers must use
 resolved via the `extra_hosts: host.docker.internal:host-gateway` entry in
 `docker-compose.yml`.
 
-The compose stack wires `AGORA_S3_ENDPOINT=http://host.docker.internal:9000`
+The compose stack wires `PANGOLIN_S3_ENDPOINT=http://host.docker.internal:9000`
 into the `serve` service. The host driver passes
-`AGORA_S3_ENDPOINT=http://localhost:9000` on its command line. The config
-(`agora.config.mjs`) reads the endpoint from `$AGORA_S3_ENDPOINT` at module
+`PANGOLIN_S3_ENDPOINT=http://localhost:9000` on its command line. The config
+(`pangolin.config.mjs`) reads the endpoint from `$PANGOLIN_S3_ENDPOINT` at module
 load time — the same file serves both roles.
 
 ---
@@ -258,18 +258,18 @@ Runs `test/smoke.test.ts` with vitest. Verifies:
   `dispatch-a` / `dispatch-b`, two contending on `shared.ts`, `verify` gate
   `depends_on` all four.
 
-The MinIO integration tests (`packages/agora-storage-s3/test/aws-s3-mailbox-client.test.ts`,
-`packages/agora-storage-s3/test/aws-s3-lock-client.test.ts`) and the e2e suite
-(`test/e2e.test.ts`) are **skipped** unless `AGORA_S3_ENDPOINT` (integration)
-or `AGORA_RUN_E2E` (e2e) are set.
+The MinIO integration tests (`packages/pangolin-storage-s3/test/aws-s3-mailbox-client.test.ts`,
+`packages/pangolin-storage-s3/test/aws-s3-lock-client.test.ts`) and the e2e suite
+(`test/e2e.test.ts`) are **skipped** unless `PANGOLIN_S3_ENDPOINT` (integration)
+or `PANGOLIN_RUN_E2E` (e2e) are set.
 
 ### Live e2e (requires full compose stack)
 
 ```sh
-AGORA_RUN_E2E=1 \
-AGORA_S3_ENDPOINT=http://localhost:9000 \
-AGORA_S3_ACCESS_KEY=minioadmin \
-AGORA_S3_SECRET_KEY=minioadmin \
+PANGOLIN_RUN_E2E=1 \
+PANGOLIN_S3_ENDPOINT=http://localhost:9000 \
+PANGOLIN_S3_ACCESS_KEY=minioadmin \
+PANGOLIN_S3_SECRET_KEY=minioadmin \
 pnpm --filter offload-minio-example test
 ```
 
@@ -292,10 +292,10 @@ spend is Anthropic token usage: each of the four edits invokes the real
 
 Once a paying reason justifies the real run, Tier-2 is a seam swap — no new code:
 
-1. ~~Promote `AwsS3MailboxClient` / `AwsS3LockClient` to `agora-storage-s3`~~ —
-   **DONE**: the adapters now live in `agora-storage-s3`; the `deploy/serve-stack`
+1. ~~Promote `AwsS3MailboxClient` / `AwsS3LockClient` to `pangolin-storage-s3`~~ —
+   **DONE**: the adapters now live in `pangolin-storage-s3`; the `deploy/serve-stack`
    deployment is the second consumer that triggered this promotion.
-2. Drop the `AGORA_S3_ENDPOINT` override so the AWS SDK targets real S3. Swap
+2. Drop the `PANGOLIN_S3_ENDPOINT` override so the AWS SDK targets real S3. Swap
    `createLocalSigner()` → `KmsSigner`.
 3. Move the already-containerized `serve` from compose onto **Fargate** with an
    EFS/EBS volume for SQLite. Change the executor `target` from `'local'` to

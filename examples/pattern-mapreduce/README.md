@@ -1,6 +1,6 @@
 # pattern-mapreduce — offline mapReduce fan-out demo
 
-Demonstrates that the Agora orchestrator can grow a run's item graph at
+Demonstrates that the Pangolin Scale orchestrator can grow a run's item graph at
 runtime through the audited `extendRun` seam, and that provenance closure
 over the dynamically-spawned graph is fully verifiable.
 
@@ -18,7 +18,7 @@ over the dynamically-spawned graph is fully verifiable.
   `checks.handoff.ok === true` — every spawned item's consumed input refs are
   provenance-sealed to a completed item in the same run.
 
-Design spec: `docs/superpowers/specs/2026-06-05-agora-pattern-layer-design.md`
+Design spec: `docs/superpowers/specs/2026-06-05-pangolin-pattern-layer-design.md`
 
 ## Why no API credits or workers are needed
 

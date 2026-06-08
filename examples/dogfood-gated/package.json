@@ -12,15 +12,15 @@
     "build": "tsc --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --esModuleInterop --skipLibCheck --strict src/index.ts"
   },
   "dependencies": {
-    "@quarry-systems/agora-client": "workspace:*",
-    "@quarry-systems/agora-core": "workspace:*",
-    "@quarry-systems/agora-orchestrator": "workspace:*",
-    "@quarry-systems/agora-providers-local-docker": "workspace:*",
-    "@quarry-systems/agora-secret-store": "workspace:*",
-    "@quarry-systems/agora-storage-local": "workspace:*"
+    "@quarry-systems/pangolin-client": "workspace:*",
+    "@quarry-systems/pangolin-core": "workspace:*",
+    "@quarry-systems/pangolin-orchestrator": "workspace:*",
+    "@quarry-systems/pangolin-providers-local-docker": "workspace:*",
+    "@quarry-systems/pangolin-secret-store": "workspace:*",
+    "@quarry-systems/pangolin-storage-local": "workspace:*"
   },
   "devDependencies": {
-    "@quarry-systems/agora-cli": "workspace:*",
+    "@quarry-systems/pangolin-cli": "workspace:*",
     "tsx": "^4.19.0",
     "typescript": "^5.7.2"
   }

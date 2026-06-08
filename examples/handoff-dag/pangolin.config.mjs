@@ -1,7 +1,7 @@
-// agora.config.mjs — operator config for the handoff-dag example.
+// pangolin.config.mjs — operator config for the handoff-dag example.
 //
 // Exports:
-//   default / client  — wired AgoraClient (namespace 'handoff-dag')
+//   default / client  — wired PangolinClient (namespace 'handoff-dag')
 //   orch              — OrchContext: { transport, storage, anchor, verifySignature, runService }
 //
 // IMPORT-SAFE: no throw at load when ANTHROPIC_API_KEY is absent.
@@ -11,12 +11,12 @@ import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { AgoraClient, NoopCredentialProvider, StdoutResultSink } from '@quarry-systems/agora-client';
-import { LocalStorageProvider } from '@quarry-systems/agora-storage-local';
-import { LocalDockerProvider } from '@quarry-systems/agora-providers-local-docker';
-import { LocalSecretStore } from '@quarry-systems/agora-secret-store';
+import { PangolinClient, NoopCredentialProvider, StdoutResultSink } from '@quarry-systems/pangolin-client';
+import { LocalStorageProvider } from '@quarry-systems/pangolin-storage-local';
+import { LocalDockerProvider } from '@quarry-systems/pangolin-providers-local-docker';
+import { LocalSecretStore } from '@quarry-systems/pangolin-secret-store';
 import {
-  AgoraOrchestrator,
+  PangolinOrchestrator,
   SqliteRunStateStore,
   ManualTrigger,
   DispatchExecutor,
@@ -27,7 +27,7 @@ import {
   MailboxSubmissionTransport,
   LocalDirMailbox,
   serve,
-} from '@quarry-systems/agora-orchestrator';
+} from '@quarry-systems/pangolin-orchestrator';
 
 // ---------------------------------------------------------------------------
 // Path setup — rootDir/secretDir/mailboxDir use stable per-host paths so
@@ -35,17 +35,17 @@ import {
 // offload-fanout template).  dbPath is PID-qualified to avoid SQLITE_BUSY
 // when multiple CLI invocations run concurrently (each gets its own DB file).
 // ---------------------------------------------------------------------------
-const rootDir = join(tmpdir(), 'agora-handoff-storage');
-const secretDir = join(tmpdir(), 'agora-handoff-secrets');
-const mailboxDir = join(tmpdir(), 'agora-handoff-mailbox');
-const dbPath = join(tmpdir(), `agora-handoff-${process.pid}.db`);
+const rootDir = join(tmpdir(), 'pangolin-handoff-storage');
+const secretDir = join(tmpdir(), 'pangolin-handoff-secrets');
+const mailboxDir = join(tmpdir(), 'pangolin-handoff-mailbox');
+const dbPath = join(tmpdir(), `pangolin-handoff-${process.pid}.db`);
 
-const workerImage = 'ghcr.io/quarrysystems/agora-worker:latest';
+const workerImage = 'ghcr.io/quarrysystems/pangolin-worker:latest';
 
 // ---------------------------------------------------------------------------
-// AgoraClient — lazy: no Docker/network until dispatch fires.
+// PangolinClient — lazy: no Docker/network until dispatch fires.
 // ---------------------------------------------------------------------------
-export const client = new AgoraClient({
+export const client = new PangolinClient({
   namespace: 'handoff-dag',
   compute: { 'local-docker': new LocalDockerProvider({ allowUnpinnedImage: true }) },
   storage: new LocalStorageProvider({ rootDir }),
@@ -68,7 +68,7 @@ const signer = createLocalSigner();
 const anchor = new LocalAnchor(store);
 const auditLog = new AuditLog({ store, signer, anchor });
 
-const orchestrator = new AgoraOrchestrator({
+const orchestrator = new PangolinOrchestrator({
   store,
   executors: {
     dispatch: new DispatchExecutor({
