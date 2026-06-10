@@ -20,7 +20,6 @@ import { fileURLToPath } from 'node:url';
 import {
   PangolinClient,
   NoopCredentialProvider,
-  StdoutResultSink,
 } from '@quarry-systems/pangolin-client';
 import { LocalStorageProvider } from '@quarry-systems/pangolin-storage-local';
 import { LocalDockerProvider } from '@quarry-systems/pangolin-providers-local-docker';
@@ -76,19 +75,6 @@ if (!apiKeyRaw) {
 const apiKey: string = apiKeyRaw;
 
 async function main(): Promise<void> {
-  // Quiet the per-dispatch lifecycle JSON the StdoutResultSink writes
-  // ({"kind":"dispatch.finished",…}) so the live demo output stays clean. We
-  // drop ONLY those lines (installed once — never swapped, so no concurrency
-  // race); the sink's RETURN value is untouched, so item status/patch
-  // extraction are unaffected. The same info shows as readable status lines.
-  const realStdoutWrite = process.stdout.write.bind(process.stdout);
-  process.stdout.write = ((chunk: string | Uint8Array, ...rest: unknown[]): boolean => {
-    if (typeof chunk === 'string' && /^\{"kind":"dispatch\.(finished|failed|needs_input)"/.test(chunk)) {
-      return true; // swallow the machine line; status is shown by the watch loop
-    }
-    return (realStdoutWrite as (...a: unknown[]) => boolean)(chunk, ...rest);
-  }) as typeof process.stdout.write;
-
   // Per-run unique dirs (see offload-fanout for why a fixed path causes stale
   // outbox reads → spurious anchor-missing).
   const runDir = await mkdtemp(join(tmpdir(), 'pangolin-claims-'));
@@ -109,7 +95,10 @@ async function main(): Promise<void> {
       secretStores: { local: new LocalSecretStore({ dir: secretDir }) },
       credentials: { none: new NoopCredentialProvider() },
       targets: { local: { compute: 'local-docker', credentials: 'none', secretStore: 'local' } },
-      resultSink: new StdoutResultSink(),
+      // No resultSink: the client falls back to a minimal DispatchResult (carries
+      // exitCode + stdout for status/patch extraction) and emits NO machine
+      // `{"kind":"dispatch.finished"}` lines — keeps the live demo output clean
+      // without a stdout monkey-patch. Status is shown by the watch loop below.
     });
 
     // 2. Capability: seed the synthetic denial files into EACH worker's workspace

@@ -90,7 +90,20 @@ examples/demo-claims-appeals-minio/
 
 **Reuse:** the `claim-appeal`/`verify` subagent definitions (prompt +
 self-verify command) and the 3 claim fixtures already exist in
-`examples/demo-claims-appeals` — lift them verbatim.
+`examples/demo-claims-appeals` — lift them verbatim. **This duplication is
+intentional and matches repo convention:** `offload-fanout` and `offload-minio`
+deliberately duplicate their fixtures/subagents rather than share a module —
+examples are self-contained so each runs standalone. Do NOT refactor the two
+demo examples into a shared module (that would break the convention). The same
+applies to the ~2-line "forge one byte" snippet appearing in both examples.
+
+**Why `register.mjs` (vs `offload-*`'s inline registration):** `offload-fanout`/
+`offload-minio` register subagents inline because their `src/index.ts` is a
+single-process driver that registers AND submits AND audits in one process. Our
+demo is the multi-process host-serve CLI flow — registration must persist to
+shared storage in a process that runs *before* `pangolin orch serve`. Hence a
+separate `register.mjs` step. This is a consequence of the chosen topology, not
+an inconsistency; the README states it.
 
 **Credential for Beat 2:** stage a synthetic `PAYER_PORTAL_TOKEN` through
 `AwsSecretStore` alongside `ANTHROPIC_API_KEY`, so the redaction beat has a
