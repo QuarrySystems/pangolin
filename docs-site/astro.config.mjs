@@ -55,6 +55,8 @@ export default defineConfig({
             { slug: 'how-to/worker-file-layout' },
             { slug: 'how-to/sync-capabilities-subagents' },
             { slug: 'how-to/handle-needs-input' },
+            { slug: 'how-to/author-a-declared-pipeline' },
+            { slug: 'how-to/assemble-a-pattern-plan' },
             { slug: 'how-to/remote-docker-dispatch' },
             { slug: 'how-to/deploy-fargate-s3' },
             { slug: 'how-to/verify-audit-bundle' },

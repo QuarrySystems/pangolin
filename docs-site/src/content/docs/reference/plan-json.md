@@ -99,6 +99,43 @@ it, and runs *that* pipeline instead of the default execution steps — see
 [Dispatch lifecycle → The block-pipeline runner](/pangolin/reference/dispatch-lifecycle/#the-block-pipeline-runner)
 and [`pangolin pipeline`](/pangolin/reference/cli/#pangolin-pipeline).
 
+### Pattern payloads: `inputs.gate` and `inputs.mapReduce`
+
+Two further reserved keys are read by the queue's **execution pattern**, not
+by the executor — they are meaningful only when the run's queue is bound to
+the matching pattern (a queue without that pattern treats them as inert
+inputs). The shapes, from `pangolin-orchestrator`'s pattern contract:
+
+```typescript
+/** On a gate item's reserved `inputs.gate` key — pipeline pattern only. */
+interface GateConfig {
+  onRed: 'advance' | 'spawn-fix';
+  subject: string;              // itemId whose product is being gated
+  fixTemplate?: SpawnTemplate;  // required for spawn-fix to actually spawn
+  maxFixAttempts?: number;      // default 1
+}
+
+/** On the splitter's reserved `inputs.mapReduce` key — map-reduce pattern only. */
+interface MapReduceConfig {
+  map:    SpawnTemplate & { needsKey?: string; outputPath?: string }; // defaults: 'input', 'result'
+  reduce: SpawnTemplate & { keyPrefix?: string };                     // default: 'part'
+}
+
+/** A user-declared template for items the pattern will spawn (subset of WorkItem). */
+interface SpawnTemplate {
+  executor: string;
+  inputs: Record<string, unknown>;
+  subagentShape?: string;
+  resourceLocks?: string[];
+}
+```
+
+For what the patterns *do* with these payloads — spawn timing, deterministic
+ids, the red-gate lineage — see
+[Execution patterns](/pangolin-scale/explanation/execution-patterns/); for
+authoring a working plan around them, see
+[Assemble a pattern-driven plan](/pangolin-scale/how-to/assemble-a-pattern-plan/).
+
 :::note
 The lock field is `resourceLocks`, **not** `locks`. Some prose (including the
 README's Offload section) abbreviates it to "resource locks" / "locks", but the
