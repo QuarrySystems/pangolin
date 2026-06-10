@@ -115,24 +115,36 @@ ONLY; production uses an out-of-band public key (KMS).
 | 0 Frame | — | spoken intro |
 | 1 Fan-out | `pangolin orch submit plan.json` → `pangolin orch watch <id>` | 3 appeals fan out under per-claim locks → `done` + `resultRef` |
 | 2 Sealed creds | `pangolin orch audit <id>` | `PAYER_PORTAL_TOKEN` ref-only / redacted; never in transcript |
-| 3 Ran-to-byte ⚠️ | `pangolin orch audit <id>` | per item: self-verify PASS + model + costUsd — **spike-gated** |
+| 3 Ran-to-byte | `pangolin orch audit <id>` | per item: self-verify PASS + model + costUsd — **committed** |
 | 4 Headline | `pangolin orch audit <id> --out bundle.json` → `pangolin verify bundle.json --full` (green) → forge byte → `verify` again | all `✓` / `intact:true` / `external-immutable`; one row RED / `intact:false` / exit 1 |
 | 5 Honesty | — | spoken close (external-immutable ⇐ S3 Object Lock) |
 
 The outreach-**gating** 60–90s cut is Beats **0 → 1 → 4 → 5** (skips 2 & 3) —
-record that first.
+record that first. Beat 3 is the GTM-critical "govern-and-run" beat (self-verify
+quality gate + per-action cost accountability) and is **committed**, not optional
+— it answers the economic buyer's "can I trust the output and control the spend?"
 
-### Beat 3 spike (FIRST task in the plan, gates the beat)
-Determine whether `pangolin orch audit` can surface, per item, the self-verify
-result, model id, and `costUsd`. Check the audit bundle's item shape, the
-`audit`-command render path, and `docs/superpowers/specs/2026-06-06-agora-model-cost-evidence-design.md`.
-Outcome gates:
-- (a) already present → render it.
-- (b) in run-state but not in bundle/render → small wiring task.
-- (c) absent → **cut Beat 3** from this demo, log it; recording uses Beats
-  0/1/2/4/5.
+### Beat 3 — committed (the data already exists; this is surfacing, not a build)
+Spike findings (2026-06-10, code-grounded):
+- **Model + cost: landed.** `model-cost-evidence` DAG complete (14/14). The
+  claude-code adapter extracts `total_cost_usd` (`pangolin-runtime-claude-code/src/envelope.ts:19`),
+  the worker sums per-block usage (`pangolin-worker/src/pipeline-runner.ts:181`),
+  and the orchestrator already renders per-node model + a `costUsd` footer in the
+  run **view** (`pangolin-orchestrator/src/view/render.ts:107,541`). `pangolin
+  orch watch` shows model/cost today.
+- **Self-verify: captured per item** (Gap A — the item's `verify` field, sealed
+  with the patch; `dispatch.ts:110` returns it on the dispatch result).
 
-No open-ended feature build — the spike's job is to pick (a)/(b)/(c).
+So all three fields exist in run-state now. The work is **bounded wiring**, two
+tasks:
+1. **Surface per-item self-verify + model + costUsd in `pangolin orch audit`
+   output** (the script places Beat 3 under `audit`). Data is in run-state; this
+   is an orchestrator render/assembly task, not new evidence capture. (If during
+   planning this proves larger than render-wiring, the fallback is to show Beat 3
+   via `pangolin orch watch` — which already renders model/cost — plus the
+   item's self-verify; the demo still lands, just under a different command.)
+2. **Pin a model on the `claim-appeal` subagent** so the model id renders
+   non-empty (unpinned today → blank).
 
 ## 5. Honesty enforcement (non-negotiable)
 - S3 Object Lock → `external-immutable` → **"tamper-evident"** is truthful, and
@@ -182,7 +194,10 @@ also documents the manual live forge for anyone who wants it.
 5. README carries the 5-beat script and the honesty wording.
 
 ## 10. Open risks
-- **Beat 3 rendering** (handled by the spike — may be cut).
+- **Beat 3 placement** — committed; the only open question is whether per-item
+  self-verify+model+cost goes into `audit` output (render-wiring, preferred) or
+  is shown via `watch` (already renders model/cost) + the item's self-verify.
+  Either way Beat 3 ships; planning picks the cleaner surface. NOT a feature gap.
 - **MinIO/LocalStack on Windows + Docker Desktop**: `host.docker.internal` is
   injected by Docker Desktop, so worker→MinIO should resolve; verify during
   implementation. If LocalStack Secrets Manager proves flaky on this host, Beat 2
