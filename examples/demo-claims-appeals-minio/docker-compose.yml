@@ -28,9 +28,13 @@ services:
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
+    # Host ports default to 9000/9001; override (e.g. PANGOLIN_MINIO_PORT=9100) when
+    # another MinIO already owns 9000. Set PANGOLIN_S3_ENDPOINT=http://localhost:<port>
+    # to match — the config derives the worker endpoint (host.docker.internal:<port>)
+    # from it automatically. Container-internal ports stay 9000/9001.
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "${PANGOLIN_MINIO_PORT:-9000}:9000"
+      - "${PANGOLIN_MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
       - minio-data:/data
     healthcheck:

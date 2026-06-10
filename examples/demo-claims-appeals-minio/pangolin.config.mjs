@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import { createPrivateKey, createPublicKey, sign as edSign } from 'node:crypto';
 
 import { S3Client } from '@aws-sdk/client-s3';
+import { SecretsManagerClient } from '@aws-sdk/client-secrets-manager';
 import { PangolinClient, NoopCredentialProvider, StdoutResultSink } from '@quarry-systems/pangolin-client';
 import { LocalDockerProvider } from '@quarry-systems/pangolin-providers-local-docker';
 import { AwsSecretStore } from '@quarry-systems/pangolin-secret-store';
@@ -26,6 +27,7 @@ import {
   S3ObjectLockAnchor,
   MailboxSubmissionTransport,
   verifyEd25519,
+  serve,
 } from '@quarry-systems/pangolin-orchestrator';
 
 import { AwsS3MailboxClient, AwsS3LockClient } from '@quarry-systems/pangolin-storage-s3';
@@ -43,6 +45,19 @@ const s3 = new S3Client({
   credentials: {
     accessKeyId: process.env.PANGOLIN_S3_ACCESS_KEY ?? 'minioadmin',
     secretAccessKey: process.env.PANGOLIN_S3_SECRET_KEY ?? 'minioadmin',
+  },
+});
+
+// Secrets Manager client for the HOST serve process — points at LocalStack so
+// staging secrets never hits real AWS. (Workers get their own SM endpoint via
+// LocalDockerProvider.extraEnv → host.docker.internal:4566.) Constructor does no
+// I/O, so this stays import-safe.
+const sm = new SecretsManagerClient({
+  endpoint: process.env.AWS_ENDPOINT_URL_SECRETS_MANAGER ?? 'http://localhost:4566',
+  region: 'us-east-1',
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID ?? 'minioadmin',
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY ?? 'minioadmin',
   },
 });
 
@@ -130,7 +145,10 @@ export const client = new PangolinClient({
   storage,
   // AwsSecretStore against LocalStack Secrets Manager. ANTHROPIC_API_KEY and
   // PAYER_PORTAL_TOKEN are staged per-dispatch (ref-only in audit, log-redacted).
-  secretStores: { aws: new AwsSecretStore() },
+  // Host serve stages into LocalStack — point the SM client there explicitly
+  // (mirrors the S3 client) so host serve never hits real AWS. LocalStack is on
+  // 4566 (not remapped with MinIO); accepts any creds.
+  secretStores: { aws: new AwsSecretStore({ client: sm }) },
   credentials: { none: new NoopCredentialProvider() },
   targets: { local: { compute: 'local-docker', credentials: 'none', secretStore: 'aws' } },
   resultSink: new StdoutResultSink(),
@@ -183,10 +201,17 @@ function createOrchestrator() {
   });
 }
 
+// `pangolin orch serve` (host-side) calls orch.runService(signal). It opens the
+// single-writer orchestrator (createOrchestrator → the sole SQLite owner) and
+// drives the S3 mailbox. The audit/verify CLIs read the anchor from S3 (Object
+// Lock), not this local DB, so they work cross-process without sharing it.
+const runService = (signal) => serve({ orchestrator: createOrchestrator(), transport, signal });
+
 export const orch = {
   transport,
   anchor,
   storage,
   verifySignature,
   createOrchestrator,
+  runService,
 };
