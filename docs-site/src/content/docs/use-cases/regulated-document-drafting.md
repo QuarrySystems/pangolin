@@ -96,6 +96,6 @@ pnpm --filter demo-claims-appeals-example test
 
 ## Next steps
 
-- [Your first offload run](/pangolin-scale/tutorials/first-offload-run/) — the tutorial behind this demo.
+- [Your first offload run](/pangolin-scale/tutorials/first-offload-run/) — the orchestrator tutorial (different example, same mechanics).
 - [Export & verify an audit bundle](/pangolin-scale/how-to/verify-audit-bundle/) — produce and re-verify the evidence.
 - [Commercial & pilots](/pangolin-scale/commercial/) — white-glove pilot for your regulated deal.
