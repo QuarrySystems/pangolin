@@ -24,8 +24,8 @@ Pangolin Scale seals every run into an exportable bundle whose verification
   pangolin verify  ·  run_a3f9c2                  ✓ TAMPER-EVIDENT
   ──────────────────────────────────────────────────────────
   ✓ chain        10 entries, hash-linked, no gaps
-  ✓ root         merkle c4f1a9…  =  anchored root
-  ✓ signature    ed25519 / pangolin-prod  valid
+  ✓ root         merkle = anchored root
+  ✓ signature    true
   ✓ anchor       s3:my-audit-bucket  (external-immutable)
   ✓ handoff      3 input refs accounted for
 ```

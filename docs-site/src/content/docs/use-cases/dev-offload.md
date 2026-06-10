@@ -36,6 +36,22 @@ checks the result.
   guarantee: detect
 ```
 
+## How it works
+
+1. `plan.json` declares three `code-edit` items plus a `verify` gate that
+   depends on all three; each item names the file it owns as a
+   `resourceLock`. The orchestrator resolves dependencies, locks, and
+   concurrency — see
+   [How an offload run executes](/pangolin-scale/explanation/how-offload-runs/).
+2. Each item dispatches into an isolated Docker container, where the agent
+   edits its file in a private workspace — see
+   [Sandboxing AI agents](/pangolin-scale/explanation/sandboxing-ai-agents/).
+3. The workspace diff escapes as a content-addressed artifact and surfaces as
+   the item's `resultRef`; the run-state database only ever holds references.
+4. After all items are terminal the run seals its epoch and the audit bundle
+   is assembled and verified — see
+   [Audit & guarantee tiers](/pangolin-scale/explanation/audit-guarantee-tiers/).
+
 ## Gated circle-back: when review fails, the run fixes itself — on the record
 
 [`examples/pattern-dogfood`](https://github.com/quarrysystems/pangolin-scale/tree/main/examples/pattern-dogfood)
@@ -69,13 +85,19 @@ The gated circle-back demo runs offline — no Docker, no API key:
 pnpm --filter pattern-dogfood-example start
 ```
 
-:::note[What each demo proves]
-`offload-fanout`'s live path dispatches real agents in real containers.
-`pattern-dogfood` runs a **deterministic in-memory fake executor** — no
-containers, no LLM — so it proves the engine's circle-back, audit, and
-provenance semantics, not live agent behavior. The default audit tier in both
-is **tamper-detecting** (`LocalAnchor`); see
-[Audit & guarantee tiers](/pangolin-scale/explanation/audit-guarantee-tiers/).
+:::caution[Shipped today vs. on the roadmap]
+- `offload-fanout`'s live path dispatches real agents in real containers.
+  `pattern-dogfood` runs a **deterministic in-memory fake executor** — no
+  containers, no LLM — so it proves the engine's circle-back, audit, and
+  provenance semantics, not live agent behavior.
+- The default audit tier in both is **tamper-detecting** (`LocalAnchor`). The
+  stronger **tamper-evident** claim requires the `external-immutable` tier
+  (`S3ObjectLockAnchor`); see
+  [Audit & guarantee tiers](/pangolin-scale/explanation/audit-guarantee-tiers/).
+- The vocabulary is **"compliance-ready," never "compliant" or "certified"** —
+  the audit trail proves what ran, not that the output is correct. For the
+  evidence/auditor story, see
+  [Compliance evidence](/pangolin-scale/use-cases/compliance-evidence/).
 :::
 
 ## Next steps
