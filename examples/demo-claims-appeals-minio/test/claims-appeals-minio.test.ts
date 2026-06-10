@@ -20,29 +20,11 @@ import plan from '../plan.json' assert { type: 'json' };
 // Mirrors the inline loop in demo-claims-appeals/test/claims-appeals.test.ts.
 // ---------------------------------------------------------------------------
 async function driveToTerminal(rawPlan: Run): Promise<ItemStatus[]> {
-  const enc = (o: unknown) => new TextEncoder().encode(JSON.stringify(o));
-  const blobs = new Map<string, Uint8Array>();
-
   const fakeExecutor: Executor = {
     id: 'dispatch',
-    async fire(item, ctx?: FireContext) {
+    async fire(item, _ctx?: FireContext) {
       const dispatchHash = 'dh-' + item.id;
       const manifestRef = 'pangolin://manifests/' + dispatchHash;
-      blobs.set(
-        manifestRef,
-        enc({
-          schemaVersion: 1,
-          runId: ctx?.runId ?? '',
-          itemId: item.id,
-          parent: 'run:' + (ctx?.runId ?? ''),
-          executor: 'dispatch',
-          executorManifest: {},
-          secretRefs: [],
-          actor: ctx?.actor ?? '',
-          firedAt: '2026-06-01T00:00:00Z',
-          manifestHash: 'sha256:x',
-        }),
-      );
       return { dispatchHash, manifestRef };
     },
     async reconcile(h: string) {
@@ -93,8 +75,10 @@ describe('demo-claims-appeals-minio example', () => {
 
   it('a real orchestrator drives the plan to done via a fake executor', async () => {
     const items = await driveToTerminal(plan as unknown as Run);
+    expect(items).toHaveLength(plan.items.length);
     expect(
       items.filter((i) => i.id.startsWith('appeal-')).every((i) => i.status === 'done' && i.resultRef),
     ).toBe(true);
+    expect(items.find((i) => i.id === 'verify')?.status).toBe('done');
   });
 });
