@@ -39,13 +39,40 @@ The demo: submits `plan.json` (3 parallel appeals + 1 verify gate) → the `serv
 driver ticks to completion → prints each appeal's `resultRef` → assembles and
 prints the audit bundle (`intact`, `claim`, `anchorId`, `guarantee`).
 
-### CLI flow (when the `pangolin` CLI is available)
+**`start:env` is the canonical, end-to-end-verified run.** It is self-contained:
+`src/index.ts` registers the `claim-appeal`/`verify` subagents and the `appeal-kit`
+capability inline, then submits → watches → audits in one process.
+
+### CLI flow (`pangolin orch …`) — NOT yet runnable end-to-end
+
+The multi-process CLI sequence below is **aspirational**: it does not work as-is,
+because nothing registers the subagents/capability into the shared `client.storage`
+before `submit`. `submit plan.json` enqueues a plan that references the
+`claim-appeal` subagent, and `serve` then fails every item with
+`dispatchWork: subagent not found: claim-appeal` (no container is ever launched).
+
+To make this flow work you must first register `claim-appeal`, `verify`, and the
+`appeal-kit` capability against the same storage `serve` reads — e.g. via a
+`pangolin deploy <manifest>` step (a manifest for this example is **not yet
+authored**; the registration currently lives only inside `src/index.ts`). Until
+that exists, use `start:env` above.
+
+Two cross-process prerequisites are already wired in `pangolin.config.mjs` (so
+once registration is added, the audit/verify chain works across separate CLI
+processes): a **stable shared SQLite DB path** (not per-PID — else the separate
+`audit`/`verify` process reads an empty anchor store → false `TAMPERED`) and a
+**persisted ed25519 signer key** (not a fresh per-process keypair — else
+`serve` signs the root with one key and `verify` checks it with another →
+`signature false`). Clear `${TMPDIR}/pangolin-claims*` between runs (the run id
+`claims-demo-1` is fixed, so stale state collides).
 
 ```sh
+# PREREQUISITE (not yet implemented): register subagents + appeal-kit into storage,
+#   e.g.  pangolin deploy manifest.yaml
 pangolin orch serve &
-pangolin orch submit plan.json
-pangolin orch watch <run-id>
-pangolin orch audit <run-id> --out bundle.json
+pangolin orch submit plan.json              # prints the run id: claims-demo-1
+pangolin orch watch claims-demo-1
+pangolin orch audit claims-demo-1 --out bundle.json
 pangolin verify bundle.json --full          # all rows ✓, intact: true
 #  --- the headline: edit one byte of bundle.json, then ---
 pangolin verify bundle.json --full          # a row goes RED, intact: false, exit 1

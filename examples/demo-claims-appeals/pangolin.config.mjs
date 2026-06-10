@@ -13,6 +13,9 @@
 
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { generateKeyPairSync, createPrivateKey, createPublicKey, sign as edSign } from 'node:crypto';
 
 import { PangolinClient, NoopCredentialProvider, StdoutResultSink } from '@quarry-systems/pangolin-client';
 import { LocalStorageProvider } from '@quarry-systems/pangolin-storage-local';
@@ -25,7 +28,6 @@ import {
   DispatchExecutor,
   AuditLog,
   LocalAnchor,
-  createLocalSigner,
   verifyEd25519,
   MailboxSubmissionTransport,
   LocalDirMailbox,
@@ -35,9 +37,54 @@ import {
 const rootDir = join(tmpdir(), 'pangolin-claims-storage');
 const secretDir = join(tmpdir(), 'pangolin-claims-secrets');
 const mailboxDir = join(tmpdir(), 'pangolin-claims-mailbox');
-const dbPath = join(tmpdir(), `pangolin-claims-${process.pid}.db`);
+// Stable (NOT per-pid) so the multi-process CLI flow shares one store:
+// `pangolin orch serve` seals the audit root via LocalAnchor → store.putAuditRoot,
+// and a SEPARATE `pangolin orch audit|verify|watch` process must read it back via
+// store.getAuditRoot. A ${process.pid} path would give each process its own empty
+// DB → anchor.fetch misses → false "TAMPERED". Clear this file between runs.
+const dbPath = join(tmpdir(), 'pangolin-claims.db');
+const signerKeyFile = join(tmpdir(), 'pangolin-claims-signer.pem');
 
 const workerImage = 'ghcr.io/quarrysystems/pangolin-worker:latest';
+
+// PERSISTED signer keypair — same cross-process reason as the stable dbPath.
+// `createLocalSigner()` mints a FRESH random ed25519 keypair per call, so the
+// `serve` process would sign the audit root with one key and a separate
+// `verify`/`audit` process would check it with a different key → "signature
+// false / TAMPERED". Persist the private key so every process loads the same
+// one. (Demo-only convenience; a real deployment uses a managed KMS key.)
+function loadOrCreateSigner(keyRef = 'local') {
+  let privateKey;
+  if (existsSync(signerKeyFile)) {
+    privateKey = createPrivateKey({ key: readFileSync(signerKeyFile), format: 'pem', type: 'pkcs8' });
+  } else {
+    privateKey = generateKeyPairSync('ed25519').privateKey;
+    writeFileSync(signerKeyFile, privateKey.export({ type: 'pkcs8', format: 'pem' }));
+  }
+  const publicKey = createPublicKey(privateKey);
+  return {
+    keyRef,
+    publicKey: publicKey.export({ type: 'spki', format: 'der' }),
+    async sign(root) {
+      return { alg: 'ed25519', bytes: new Uint8Array(edSign(null, Buffer.from(root), privateKey)), keyRef };
+    },
+  };
+}
+
+// Resolve the Anthropic key for the CLI flow. `pangolin orch serve` is a plain
+// CLI process — it does NOT auto-load ../../.env the way the `start:env` npm
+// script (`tsx --env-file`) does. So fall back to reading ../../.env here, and
+// strip a trailing CR (Windows .env files are often CRLF). Without this, the
+// inline secret is empty → dispatches fail BEFORE a container even launches.
+function resolveApiKey() {
+  if (process.env.ANTHROPIC_API_KEY) return process.env.ANTHROPIC_API_KEY.trim();
+  try {
+    const envPath = join(fileURLToPath(new URL('.', import.meta.url)), '../../.env');
+    const m = readFileSync(envPath, 'utf8').match(/^ANTHROPIC_API_KEY=(.*)$/m);
+    if (m) return m[1].trim();
+  } catch { /* no .env — leave empty; the worker reports provider-failed */ }
+  return '';
+}
 
 export const client = new PangolinClient({
   namespace: 'demo-claims-appeals',
@@ -53,7 +100,7 @@ export default client;
 
 const store = new SqliteRunStateStore(dbPath);
 process.on('exit', () => { try { store.close(); } catch {} });
-const signer = createLocalSigner();
+const signer = loadOrCreateSigner();
 const anchor = new LocalAnchor(store);
 const auditLog = new AuditLog({ store, signer, anchor });
 
@@ -65,7 +112,7 @@ const orchestrator = new PangolinOrchestrator({
       target: 'local',
       workerImage,
       secrets: {
-        ANTHROPIC_API_KEY: { inline: process.env.ANTHROPIC_API_KEY ?? '' },
+        ANTHROPIC_API_KEY: { inline: resolveApiKey() },
       },
     }),
   },
