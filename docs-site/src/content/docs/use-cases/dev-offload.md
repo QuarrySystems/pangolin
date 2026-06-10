@@ -21,9 +21,10 @@ checks the result.
 - **Reviewable patches** — each worker's output is its workspace diff, escaped
   as a content-addressed `resultRef`. You review the patch before anything
   touches your repo; nothing auto-merges.
-- **Retry / backoff** — failed items retry with exponential backoff up to
-  `maxAttempts`; exhausted items go `failed` and their dependents are skipped,
-  all of it recorded in the audit log.
+- **Retry / backoff** — an engine-wide behavior (not specific to this demo):
+  failed items retry with exponential backoff up to `maxAttempts`; exhausted
+  items go `failed` and their dependents are skipped, all of it recorded in
+  the audit log.
 - **The sealed record** — the run ends with the same verifiable audit bundle as
   every other domain:
 
@@ -43,9 +44,9 @@ shows the `pipeline` pattern's spawn-fix gate. When a `review` gate completes
 re-review, and a re-run of the downstream task via the audited `extendRun`
 seam. The original red review and the skipped downstream item are preserved as
 sealed history — the run is never rewound, only extended with a forward arc.
-Every spawn writes a `run.extended` audit entry naming which gate fired and
-that the actor was the pattern layer, and provenance closure is checked across
-the grown graph. See
+Every spawn writes a `run.extended` audit entry naming which gate fired, with
+the pattern layer as the recorded actor (`actor=pattern:default`), and
+provenance closure is checked across the grown graph. See
 [Execution patterns](/pangolin-scale/explanation/execution-patterns/) and
 [Typed-product handoff](/pangolin-scale/explanation/typed-product-handoff/).
 
