@@ -21,13 +21,15 @@ the retention window expires.
   are staged per-dispatch into LocalStack Secrets Manager. The credential
   (`PAYER_PORTAL_TOKEN`) is staged into each dispatch and is provably absent from
   the sealed record — `pangolin orch audit` shows refs-only, no raw values.
-- **Per-item model (Beat 3, partial)**: each `claim-appeal` runs on a pinned model;
-  `pangolin orch audit` prints the per-item model (`claude-haiku-4-5-20251001`), read
-  from the sealed bundle manifest. **Self-verify PASS/FAIL and `costUsd` are not yet
-  sealed into the audit bundle** — surfacing them in `audit` is a tracked follow-up
-  (the worker computes both; they need to be added to the sealed manifest). For the
-  GTM cut, Beat 3's self-verify/cost can be narrated from the live `watch` + worker
-  logs, or deferred to the longer sales-call version.
+- **Self-verify + model + cost (Beat 3)**: `pangolin orch watch` shows, per item,
+  the pinned model (`claude-haiku-4-5-20251001`), the **cost** (`$0.02` per appeal),
+  and turn count, plus a **batch total** in the footer (`$0.12`). The green `✓` is
+  the self-verify passing — a `claim-appeal` whose self-verify shell check fails is
+  marked `failed`, not `done`. So Beats 1 and 3 land on the same `watch` screen:
+  the fan-out AND the per-action model/cost accountability. (`pangolin orch audit`
+  additionally prints the per-item model from the sealed bundle manifest; sealing an
+  explicit self-verify PASS/FAIL label + `costUsd` *into the bundle* — so they survive
+  in `audit` independent of `watch` — is a tracked follow-up.)
 - **Tamper-evident audit bundle**: `S3ObjectLockAnchor` anchors the Merkle root
   into `pangolin-audit` (MinIO Object Lock, COMPLIANCE mode). `pangolin orch audit`
   / `pangolin verify` assemble a verifiable bundle with
@@ -49,7 +51,7 @@ the retention window expires.
 | **0 Frame** | Orient the audience: a batch of three denied insurance claims is about to fan out to parallel AI agents that each draft an appeal. The audit chain is sealed in MinIO Object Lock. |
 | **1 Fan-out** | `pangolin orch watch claims-demo-1` — watch three appeals fan out under per-claim resource locks (concurrency 2), then the `verify` gate. |
 | **2 Sealed creds** | `pangolin orch audit claims-demo-1` — the credential (`PAYER_PORTAL_TOKEN`) is staged into each dispatch and is provably absent from the sealed record. Audit shows refs, not values. |
-| **3 Per-item model** (partial) | Same audit output — per-item pinned model (`claude-haiku-4-5-20251001`) from the sealed manifest. Self-verify PASS/FAIL + `costUsd` are not yet sealed into the bundle (tracked follow-up); narrate from live `watch`/worker logs or defer. Every dispatch is byte-for-byte reproducible from the sealed record. |
+| **3 Self-verify + model + cost** | `pangolin orch watch` (same screen as Beat 1) shows per item: pinned model (`claude-haiku-4-5-20251001`), cost (`$0.02`/appeal), turns, + a batch-total footer (`$0.12`). Green `✓` = self-verify passed (a failed self-verify → `failed`, not `done`). `audit` also prints the per-item model from the sealed manifest. Every dispatch is byte-for-byte reproducible from the sealed record. |
 | **4 Headline forge → fail** | `pangolin verify recording/bundle.forged.json --full` — a row goes RED, `intact: false`, exit 1. `pangolin verify recording/bundle.json --full` — all rows ✓, `intact: true`, `external-immutable`. |
 | **5 Honesty** | State the nuance plainly (see §Honesty wording below). |
 
@@ -160,7 +162,7 @@ containers via the local Docker daemon.
 
 ```sh
 pangolin orch submit plan.json          # → prints run id: claims-demo-1
-pangolin orch watch claims-demo-1       # Beat 1: 3 appeals fan out, then verify
+pangolin orch watch claims-demo-1       # Beats 1 + 3: appeals fan out, then verify; per-item model + cost + batch total
 ```
 
 `plan.json` contains three `claim-appeal` items (per-output resource locks) and
@@ -175,11 +177,11 @@ pangolin orch audit claims-demo-1
 Beat 2: `PAYER_PORTAL_TOKEN` is sealed as a ref — the credential is staged into
 each dispatch and is provably absent from the sealed record.
 
-Beat 3 (partial): a per-item evidence block prints the pinned model
-(`claude-haiku-4-5-20251001`) from the sealed manifest. Self-verify PASS/FAIL and
-costUsd are computed by the worker but are not yet sealed into the audit bundle —
-surfacing them here is a tracked follow-up; for now narrate them from the live
-`watch` / worker logs or defer to the longer sales-call cut. Every dispatch is
+Beat 3 proper is on the `watch` screen (Step 6): per-item model + cost + the
+batch-total footer. Here, `audit` additionally prints a per-item model line from
+the sealed bundle manifest (model survives in the sealed record). Sealing an
+explicit self-verify label + `costUsd` into the bundle — so cost survives in
+`audit` independent of `watch` — is a tracked follow-up. Every dispatch is
 byte-for-byte reproducible from the sealed record.
 
 ```sh
@@ -220,7 +222,7 @@ cd examples/demo-claims-appeals-minio
 node register.mjs                          # one-time: registers claim-appeal/verify/appeal-kit/minimal into S3 storage
 pangolin orch serve &                      # host-side serve (sole DB owner; launches worker containers)
 pangolin orch submit plan.json             # → prints run id: claims-demo-1
-pangolin orch watch claims-demo-1          # Beat 1: 3 appeals fan out under per-claim locks, then verify
+pangolin orch watch claims-demo-1          # Beats 1 + 3: appeals fan out under per-claim locks, then verify; per-item model + cost + batch total
 pangolin orch audit claims-demo-1          # Beat 2 + 3: redacted PAYER_PORTAL_TOKEN; per-item self-verify PASS + model + costUsd
 pangolin orch audit claims-demo-1 --out bundle.json
 pangolin verify bundle.json --full         # Beat 4: all rows ✓, intact:true, external-immutable

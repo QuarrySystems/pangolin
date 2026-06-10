@@ -104,7 +104,7 @@ function evidenceSuffix(usage: RuntimeUsage | undefined): string {
   if (!usage) return '';
   const parts: string[] = [];
   if (usage.models && usage.models.length > 0) parts.push(usage.models.join(','));
-  if (usage.costUsd !== undefined) parts.push(`$${usage.costUsd}`);
+  if (usage.costUsd !== undefined) parts.push(`$${usage.costUsd.toFixed(4)}`);
   if (usage.turns !== undefined) parts.push(`${usage.turns}t`);
   if (parts.length === 0) return '';
   return ` — ${parts.join(' · ')}`;
@@ -538,7 +538,7 @@ function renderFooter(view: RunView): string {
     .join(', ');
   if (statusParts) parts.push(statusParts);
 
-  if (costUsd > 0) parts.push(`$${costUsd}`);
+  if (costUsd > 0) parts.push(`$${costUsd.toFixed(4)}`);
 
   return parts.join(' · ');
 }
