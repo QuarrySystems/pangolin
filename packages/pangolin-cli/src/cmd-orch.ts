@@ -26,6 +26,27 @@ export interface OrchContext {
 
 const resolveActor = (flag?: string): string => flag ?? process.env.PANGOLIN_ACTOR ?? `human:${userInfo().username}`;
 
+/**
+ * Pure helper: render a single per-item evidence line for `pangolin orch audit`.
+ * Exported for unit testing.
+ *
+ * @param itemId   - the work item id (e.g. "appeal-001")
+ * @param verify   - the item's self-verify result ({ passed: boolean }) or undefined if absent
+ * @param models   - array of model ids from RuntimeUsage.models, or undefined
+ * @param costUsd  - cost in USD from RuntimeUsage.costUsd, or undefined
+ */
+export function renderEvidenceLine(
+  itemId: string,
+  verify: { passed: boolean } | undefined,
+  models: string[] | undefined,
+  costUsd: number | undefined,
+): string {
+  const verifyStr = verify === undefined ? 'self-verify: -' : `self-verify: ${verify.passed ? 'PASS' : 'FAIL'}`;
+  const modelStr = models && models.length > 0 ? `model: ${models.join(',')}` : 'model: -';
+  const costStr = costUsd !== undefined ? `$${costUsd}` : '$-';
+  return `  ${itemId}  ${verifyStr}   ${modelStr}   ${costStr}`;
+}
+
 /** Named --pattern values → the real exported Pattern objects (spec §3 — `OrchContext`
  *  carries no queue/pattern wiring, so the flag is the v1 layout-selection path). */
 const PATTERNS: Record<string, Pattern> = { pipeline, 'map-reduce': mapReduce, 'static-dag': staticDag };
@@ -215,7 +236,37 @@ export function attachOrchCmd(program: Command, ctx: CliContext): void {
   });
 
   o.command('audit <run-id>').option('--out <path>').action(async (runId, opts) => {
-    const bundle = await new OperationsApi(await ctx.getOrchContext()).audit(runId);
+    const oc = await ctx.getOrchContext();
+    const api = new OperationsApi(oc);
+    const bundle = await api.audit(runId);
+
+    // Per-item evidence block (additive — printed before/after the JSON bundle).
+    // Fetch status to get per-item verify + depends_on; build view for per-node usage.
+    try {
+      const statusRec = await api.status(runId);
+      if (statusRec !== null && statusRec !== undefined) {
+        // statusRec may be an OutboxRecord or similar — the status items live in body.
+        // OperationsApi.status returns the raw body array or null.
+        const items = Array.isArray(statusRec) ? statusRec as StatusLike[] : null;
+        if (items && items.length > 0) {
+          const plan: Run = {
+            id: runId,
+            queue: 'default',
+            items: items.map((s) => ({
+              id: s.id, executor: 'dispatch', inputs: {}, depends_on: s.depends_on ?? [], resourceLocks: [],
+            })),
+          };
+          const view = buildRunView({ plan, status: items });
+          console.error('--- per-item evidence ---');
+          for (const item of items) {
+            const node = view.nodes.find((n) => n.id === item.id);
+            console.error(renderEvidenceLine(item.id, item.verify, node?.usage?.models, node?.usage?.costUsd));
+          }
+          console.error('---');
+        }
+      }
+    } catch { /* best-effort — never fail the audit command itself */ }
+
     const json = JSON.stringify(bundle, null, 2);
     if (opts.out) await writeFile(opts.out, json); else console.log(json);
     if (!bundle.report.intact) process.exitCode = 1;   // audit failure → nonzero exit
