@@ -16,6 +16,39 @@ for where the run sits in the whole system see the
 [architecture overview](/pangolin/explanation/architecture-overview/). This page is
 about the algorithm in the middle.
 
+## One run, end to end — who talks to whom, in what order
+
+The pieces below are easiest to follow with the cross-process timeline in view:
+the client never talks to the daemon directly (everything flows through the
+mailbox), and the daemon never blocks on a running item (fire now, reconcile on
+a later tick):
+
+```mermaid
+sequenceDiagram
+  participant CL as client CLI<br/>(orch submit / watch / audit)
+  participant MBX as MailboxStore<br/>(inbox · outbox)
+  participant SRV as serve daemon<br/>(tick loop)
+  participant EX as DispatchExecutor
+  participant WK as worker container
+  participant CAS as StorageProvider<br/>(content-addressed)
+
+  CL->>MBX: submit — write Run spec (non-blocking)
+  SRV->>MBX: poll inbox → ingest run (idempotent)
+  loop every tick, until the run settles
+    SRV->>SRV: ready → reconcile → fire → cascade
+    SRV->>EX: fire(item) — signed dispatch manifest, refs only
+    EX->>WK: launch container
+    WK->>CAS: put patch artifact (content-addressed)
+    SRV->>EX: reconcile(dispatchHash) — poll, never block
+    EX-->>SRV: terminal outcome → record resultRef, release locks
+    SRV->>MBX: publish status
+    CL->>MBX: watch — read status
+  end
+  SRV->>SRV: every item terminal → seal epoch<br/>(Merkle root → signer → anchor)
+  SRV->>MBX: publish audit export
+  CL->>MBX: orch audit — assemble bundle + verify
+```
+
 ## The model: Queue, Run, WorkItem
 
 Three nouns carry the whole model.

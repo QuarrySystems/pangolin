@@ -199,6 +199,35 @@ exactly why the local tier claims `tamper-detecting`, not `tamper-evident`: the
 trust domain of the anchor is the same as the trust domain of the log.
 </Aside>
 
+The trust boundaries, drawn out — the entire difference between the two tiers
+is *which trust domain holds the anchored root* the verifier compares against:
+
+```mermaid
+flowchart LR
+  subgraph OP["Operator's trust domain — operator can write here"]
+    SRV["serve — seals the epoch"]
+    DB[("run-state SQLite<br/>audit log entries")]
+    LROOT[("LocalAnchor root<br/>guarantee: detect")]
+    SRV --> DB
+    SRV --> LROOT
+  end
+
+  subgraph EXT["External trust domain — operator cannot rewrite"]
+    S3ROOT[("S3 Object Lock root<br/>COMPLIANCE mode WORM<br/>guarantee: external-immutable")]
+  end
+  SRV -->|"anchor the signed root"| S3ROOT
+
+  BUNDLE["bundle.json — entries + embedded root copy<br/>(data UNTRUSTED until verified)"]
+  DB -->|"pangolin orch audit --out"| BUNDLE
+
+  subgraph AUD["Auditor's trust domain"]
+    VER["pangolin verify<br/>replays the chain · recomputes the root"]
+  end
+  BUNDLE -->|"handed over"| VER
+  VER -->|"fetches the LIVE anchored root —<br/>never the bundle's embedded copy"| S3ROOT
+  VER -.->|"local tier: the root sits in the operator's<br/>own store → claim stays tamper-detecting"| LROOT
+```
+
 For programmatic use, the same check is the `verifyBundle(bundle, { anchor })`
 library entry point, exported from `@quarry-systems/pangolin-orchestrator` so an
 auditor can re-verify a handed-over bundle inside their own tooling.

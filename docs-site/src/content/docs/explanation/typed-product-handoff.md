@@ -37,6 +37,33 @@ provider-agnostic: a `LocalStorageProvider` hands over a file on disk and an
 S3-backed storage provider hands over an object — the worker sees the same
 materialized bytes either way.
 
+The whole seam, producer to verifier:
+
+```mermaid
+flowchart LR
+  subgraph PROD["edit-a — producer"]
+    AG1["agent edits workspace"] --> P1["patch escape<br/>resultRef = sha256:…"]
+    AG1 --> O1["outputs/ files<br/>outputRefs per name = sha256:…"]
+  end
+
+  CAS[("StorageProvider<br/>content-addressed")]
+  P1 --> CAS
+  O1 --> CAS
+
+  subgraph CONS["apply-patch — consumer"]
+    N["needs.patch —<br/>from: edit-a · select.kind: patch"]
+    IN["inputs/patch<br/>hash-verified before the agent runs"]
+    N --> IN --> AG2["agent runs"]
+  end
+
+  N -. "auto-derives<br/>depends_on: [edit-a]" .-> PROD
+  CAS -->|"fire time: orchestrator resolves the ref,<br/>worker materializes the bytes"| IN
+
+  MAN["dispatch manifest<br/>inputRefs sealed"]
+  IN --> MAN
+  MAN --> VER["pangolin verify — handoff row:<br/>every inputRef is a sealed product of<br/>a done item in the same run"]
+```
+
 ## The `needs` declaration and whole-DAG validation
 
 A consumer item declares its inputs in `needs`, a map keyed by the **input

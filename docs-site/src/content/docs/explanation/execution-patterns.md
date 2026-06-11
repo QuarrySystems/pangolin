@@ -49,6 +49,18 @@ All three implement the same `Pattern` interface and reuse the identical engine.
 The pattern layer is purely an *item producer* — scheduling, locking, and
 concurrency remain the engine's job.
 
+The map-reduce shape, drawn out — solid arrows are `depends_on`/`needs` edges,
+dotted arrows are the pattern's spawns:
+
+```mermaid
+flowchart LR
+  SPLIT["split — submitted<br/>carries inputs.mapReduce"]
+  SPLIT -. "done → one spawn per<br/>outputRefs key" .-> MA["map-a.csv — spawned"]
+  SPLIT -. " " .-> MB["map-b.csv — spawned"]
+  MA --> RED["reduce — spawned when every<br/>map is done; needs bind each map's output"]
+  MB --> RED
+```
+
 ## Queue-level pattern binding
 
 Patterns are bound to queues programmatically through `PangolinOrchestratorOptions`,
@@ -270,6 +282,15 @@ The full per-tick order on a pattern-bound queue is:
    / `cancelled`), append a `run.completed` audit entry and call
    `sealEpoch(runId)`. Both calls are best-effort: an audit failure must not
    throw out of `tick()`.
+
+```mermaid
+flowchart TD
+  T1["1 · engine tick<br/>ready → reconcile → fire → cascade"] --> T2["2 · pattern phase<br/>onTaskDone per terminal item"]
+  T2 -->|"SpawnDirective(s)"| T3["3 · extendRun per directive<br/>id-skip · runaway fuse · validate merged DAG ·<br/>append pending items · run.extended entry"]
+  T2 -->|"null — nothing to spawn"| T4["4 · seal check<br/>every item terminal →<br/>run.completed + sealEpoch"]
+  T3 --> T4
+  T3 -. "fresh items land pending,<br/>so sealing defers to a later tick" .-> T1
+```
 
 Steps 2–3 are a no-op for queues without a pattern (the orchestrator returns
 immediately when `patterns[queue]` is `undefined`). For queues bound to

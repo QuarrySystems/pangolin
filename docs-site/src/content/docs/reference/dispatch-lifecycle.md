@@ -65,6 +65,18 @@ pipeline**, built per-dispatch:
 [ agent → capture(patch) → script(verify lens, if subagent.verify) → capture(outputs) ] + seal
 ```
 
+```mermaid
+flowchart LR
+  subgraph DEF["default pipeline — built per-dispatch"]
+    A["agent<br/>runtime adapter"] --> C1["capture<br/>what: patch"]
+    C1 --> V["script · verify lens<br/>only if subagent.verify —<br/>report-only, never fails the dispatch"]
+    V --> C2["capture<br/>what: outputs"]
+  end
+  C2 --> SEAL["seal — structural terminal step,<br/>always appended by the runner itself;<br/>never authored in a spec"]
+  DECL["declared pipeline<br/>pangolin pipeline register → pinned on inputs.pipeline<br/>re-validated by the worker · per-block blocks[] evidence"]
+  DECL -.->|"replaces the default"| DEF
+```
+
 This default is **byte-identical** to the pre-runner worker — golden tests pin
 the output sentinel's bytes against the legacy path, so dev-pack consumers see
 no hash changes. Three block kinds exist:
