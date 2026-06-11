@@ -1,6 +1,6 @@
 {
   "name": "@quarry-systems/pangolin-mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "license": "BUSL-1.1",
   "description": "Stdio MCP server exposing exactly nine run-time, orchestration-safe tools; privileged register/assign ops never reach the AI loop.",
   "main": "dist/index.js",

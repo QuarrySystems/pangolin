@@ -1,6 +1,6 @@
 {
   "name": "@quarry-systems/pangolin-providers-local-docker",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "license": "BUSL-1.1",
   "description": "ComputeProvider backed by the local Docker daemon via dockerode — developer iteration and the local smoke suite.",
   "main": "dist/index.js",

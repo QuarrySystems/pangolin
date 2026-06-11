@@ -1,6 +1,6 @@
 {
   "name": "@quarry-systems/pangolin-core",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "license": "BUSL-1.1",
   "description": "Types-only contract package; every other Pangolin Scale package depends on this and nothing depends on anything else by default.",
   "main": "dist/index.js",

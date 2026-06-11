@@ -1,6 +1,6 @@
 {
   "name": "@quarry-systems/pangolin-secret-store",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "license": "BUSL-1.1",
   "description": "SecretStore seam plus implementations — InlineSecretStager (AWS Secrets Manager) and LocalSecretStore (on-disk staging) for per-dispatch inline secrets.",
   "main": "dist/index.js",

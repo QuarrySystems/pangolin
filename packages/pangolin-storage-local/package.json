@@ -1,6 +1,6 @@
 {
   "name": "@quarry-systems/pangolin-storage-local",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "license": "BUSL-1.1",
   "description": "StorageProvider backed by the local filesystem — pairs with pangolin-providers-local-docker for the local stack.",
   "main": "dist/index.js",

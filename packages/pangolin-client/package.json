@@ -1,6 +1,6 @@
 {
   "name": "@quarry-systems/pangolin-client",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "license": "BUSL-1.1",
   "description": "Caller-side SDK — PangolinClient is the single entry point for registration and dispatch with wired-in providers.",
   "main": "dist/index.js",

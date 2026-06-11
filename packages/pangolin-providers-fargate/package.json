@@ -1,6 +1,6 @@
 {
   "name": "@quarry-systems/pangolin-providers-fargate",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "license": "BUSL-1.1",
   "description": "ComputeProvider backed by AWS ECS Fargate (RunTask / DescribeTasks / StopTask) — the production compute target.",
   "main": "dist/index.js",

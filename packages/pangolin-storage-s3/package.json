@@ -1,6 +1,6 @@
 {
   "name": "@quarry-systems/pangolin-storage-s3",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "license": "BUSL-1.1",
   "description": "StorageProvider backed by S3 with a content-addressed, integrity-verified object layout — the production storage target.",
   "main": "dist/index.js",

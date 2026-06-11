@@ -1,6 +1,6 @@
 {
   "name": "@quarry-systems/pangolin-worker",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "license": "BUSL-1.1",
   "description": "Container-side runtime — one process per dispatch; fetches bundles, verifies integrity, overlays the workspace, resolves secrets, and hands off to a RuntimeAdapter.",
   "main": "dist/index.js",

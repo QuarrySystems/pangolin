@@ -1,6 +1,6 @@
 {
   "name": "@quarry-systems/pangolin-orchestrator",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "license": "BUSL-1.1",
   "description": "Orchestrator-engine (codename pangolin-offload) — named queues, depends_on resolution, resource locks, a fire-and-reconcile tick loop, and SQLite run-state behind pluggable Executor/Trigger seams.",
   "main": "dist/index.js",

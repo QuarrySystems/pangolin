@@ -1,6 +1,6 @@
 {
   "name": "@quarry-systems/pangolin-runtime-claude-code",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "license": "BUSL-1.1",
   "description": "RuntimeAdapter implementation — prompt rendering, claude --print invocation, Claude-specific merge rules, and needs_input sentinel detection.",
   "main": "dist/index.js",
