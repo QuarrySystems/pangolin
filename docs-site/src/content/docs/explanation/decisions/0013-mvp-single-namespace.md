@@ -3,16 +3,16 @@ title: "ADR-0013: MVP is strictly single-namespace"
 description: "MVP is strictly single-namespace; no public cross-namespace addressing."
 status: accepted
 date: 2026-05-21
-deciders: agora-mvp-design
+deciders: pangolin-scale-mvp-design
 ---
 
 ## Context
 
-Agora's registry is organized by namespace: every capability, subagent, env bundle, and dispatch lives under a namespace identifier. Internally, the storage URI scheme `agora://<namespace>/...` encodes the namespace explicitly in every path, which means the underlying storage layer is already structured to support cross-namespace addressing.
+Pangolin Scale's registry is organized by namespace: every capability, subagent, env bundle, and dispatch lives under a namespace identifier. Internally, the storage URI scheme `pangolin://<namespace>/...` encodes the namespace explicitly in every path, which means the underlying storage layer is already structured to support cross-namespace addressing.
 
 The question for MVP is whether to expose that addressing on the public API surface. Three shapes were considered:
 
-1. **Full cross-namespace addressing.** `DispatchWork` accepts capability and subagent references in another namespace (e.g., `agora://platform/capabilities/lint@v3` from a dispatch inside `agora://team-a/`). The orchestrator can reach across namespace boundaries arbitrarily.
+1. **Full cross-namespace addressing.** `DispatchWork` accepts capability and subagent references in another namespace (e.g., `pangolin://platform/capabilities/lint@v3` from a dispatch inside `pangolin://team-a/`). The orchestrator can reach across namespace boundaries arbitrarily.
 2. **Read-only cross-namespace primitive.** A constrained variant: dispatches can *read* artifacts from other namespaces (catalog lookups, listing) but cannot *register* into them or be *dispatched* across them. Less power than full cross-namespace, but still introduces the addressing concept publicly.
 3. **No public cross-namespace surface at all.** The single-namespace boundary is total at the public API level. Integrators who want shared catalogs across namespaces handle that themselves (CI pipelines that register the same artifacts into N namespaces, manual republication, etc.).
 
@@ -24,7 +24,7 @@ Pressures toward shipping cross-namespace in MVP:
 Counter-pressures:
 
 - Cross-namespace introduces a whole class of design questions: ACLs ("who can dispatch from namespace A using a capability from namespace B?"), versioning semantics across namespace boundaries, audit trails that span namespaces, deprecation rules, accidental coupling of namespace lifecycles. None of these has a small answer.
-- §10.1's `agora-mcp` authentication decision — "whoever launched the server has full access to all run-time tools" — is workable precisely because the trust boundary is the host. Cross-namespace adds a second trust dimension that the MVP auth model is not equipped to express.
+- §10.1's `pangolin-mcp` authentication decision — "whoever launched the server has full access to all run-time tools" — is workable precisely because the trust boundary is the host. Cross-namespace adds a second trust dimension that the MVP auth model is not equipped to express.
 - §11 lists "Cross-namespace registration and addressing" as deferred out of scope. Including a read-only variant would create a confusing partial story (some cross-namespace surfaces exist, others don't) that's harder to reason about than either extreme.
 - The integrator's workaround — running a CI job that registers the same artifacts into N namespaces in parallel — is well-shaped, content-hashed, and aligned with how artifacts already flow through the system.
 
@@ -32,28 +32,28 @@ The decision turns on whether MVP draws the namespace boundary at "internal sche
 
 ## Decision
 
-From §10.1 of `docs/superpowers/specs/2026-05-21-agora-mvp-design.md`:
+From §10.1 of `docs/superpowers/specs/2026-05-21-pangolin-scale-mvp-design.md`:
 
-> **MVP is strictly single-namespace.** No public cross-namespace addressing, no read-only cross-namespace primitive. Integrators who want to share capability libraries across namespaces use a shared deploy pipeline (CI job that registers the same artifacts into N namespaces in parallel) or republish manually. The internal storage URI scheme (`agora://<namespace>/...`) is structured to support cross-namespace later, but the public API surfaces none of it in MVP.
+> **MVP is strictly single-namespace.** No public cross-namespace addressing, no read-only cross-namespace primitive. Integrators who want to share capability libraries across namespaces use a shared deploy pipeline (CI job that registers the same artifacts into N namespaces in parallel) or republish manually. The internal storage URI scheme (`pangolin://<namespace>/...`) is structured to support cross-namespace later, but the public API surfaces none of it in MVP.
 
 In MVP:
 
 - Every `DispatchWork` operates entirely within one namespace. The capability, subagent, and env references it carries all resolve in the same namespace as the dispatch.
-- Catalog-lookup tools (`agora_capabilities_list`, `agora_subagents_list`, `agora_envs_list`) return only the current namespace's artifacts.
-- The internal storage URI scheme remains `agora://<namespace>/...` — structurally ready for cross-namespace to be added in v0.2+ — but no public API accepts or returns a cross-namespace URI.
+- Catalog-lookup tools (`pangolin_capabilities_list`, `pangolin_subagents_list`, `pangolin_envs_list`) return only the current namespace's artifacts.
+- The internal storage URI scheme remains `pangolin://<namespace>/...` — structurally ready for cross-namespace to be added in v0.2+ — but no public API accepts or returns a cross-namespace URI.
 
 Integrators who legitimately need shared catalogs:
 
 - Set up a shared deploy pipeline (CI job that registers identical artifacts — same content hash, same name, same version — into N namespaces in parallel).
 - Or republish manually when artifacts change.
 
-Both approaches keep each namespace self-contained from agora's perspective; coordination happens upstream in the integrator's CI / release flow.
+Both approaches keep each namespace self-contained from Pangolin Scale's perspective; coordination happens upstream in the integrator's CI / release flow.
 
 ## Consequences
 
 What stays bounded:
 
-- The MVP authorization model — "host launching the agora-mcp server has full access to all artifacts in that namespace" — is internally consistent. No cross-namespace ACL is needed because no cross-namespace access exists.
+- The MVP authorization model — "host launching the pangolin-mcp server has full access to all artifacts in that namespace" — is internally consistent. No cross-namespace ACL is needed because no cross-namespace access exists.
 - Catalog listings, dispatch records, and audit logs scope cleanly to one namespace. Operators reasoning about "what artifacts are reachable from here" get a single, finite answer.
 - Each namespace's lifecycle (capability versions, subagent registrations, env rotations) is independent. A change in one namespace cannot accidentally invalidate dispatches in another.
 - The MCP tool surface stays small and uniform. No tools need a "cross-namespace" mode flag, no responses need namespace-prefixed entries.

@@ -38,25 +38,25 @@ importers:
       '@aws-sdk/client-s3':
         specifier: ^3.700.0
         version: 3.1052.0
-      '@quarry-systems/agora-client':
+      '@quarry-systems/pangolin-client':
         specifier: workspace:*
-        version: link:../../packages/agora-client
-      '@quarry-systems/agora-orchestrator':
+        version: link:../../packages/pangolin-client
+      '@quarry-systems/pangolin-orchestrator':
         specifier: workspace:*
-        version: link:../../packages/agora-orchestrator
-      '@quarry-systems/agora-providers-local-docker':
+        version: link:../../packages/pangolin-orchestrator
+      '@quarry-systems/pangolin-providers-local-docker':
         specifier: workspace:*
-        version: link:../../packages/agora-providers-local-docker
-      '@quarry-systems/agora-secret-store':
+        version: link:../../packages/pangolin-providers-local-docker
+      '@quarry-systems/pangolin-secret-store':
         specifier: workspace:*
-        version: link:../../packages/agora-secret-store
-      '@quarry-systems/agora-storage-s3':
+        version: link:../../packages/pangolin-secret-store
+      '@quarry-systems/pangolin-storage-s3':
         specifier: workspace:*
-        version: link:../../packages/agora-storage-s3
+        version: link:../../packages/pangolin-storage-s3
     devDependencies:
-      '@quarry-systems/agora-cli':
+      '@quarry-systems/pangolin-cli':
         specifier: workspace:*
-        version: link:../../packages/agora-cli
+        version: link:../../packages/pangolin-cli
 
   docs-site:
     dependencies:
@@ -81,21 +81,21 @@ importers:
 
   examples/data-mapreduce:
     dependencies:
-      '@quarry-systems/agora-client':
+      '@quarry-systems/pangolin-client':
         specifier: workspace:*
-        version: link:../../packages/agora-client
-      '@quarry-systems/agora-orchestrator':
+        version: link:../../packages/pangolin-client
+      '@quarry-systems/pangolin-orchestrator':
         specifier: workspace:*
-        version: link:../../packages/agora-orchestrator
-      '@quarry-systems/agora-secret-store':
+        version: link:../../packages/pangolin-orchestrator
+      '@quarry-systems/pangolin-secret-store':
         specifier: workspace:*
-        version: link:../../packages/agora-secret-store
-      '@quarry-systems/agora-storage-local':
+        version: link:../../packages/pangolin-secret-store
+      '@quarry-systems/pangolin-storage-local':
         specifier: workspace:*
-        version: link:../../packages/agora-storage-local
-      '@quarry-systems/agora-worker':
+        version: link:../../packages/pangolin-storage-local
+      '@quarry-systems/pangolin-worker':
         specifier: workspace:*
-        version: link:../../packages/agora-worker
+        version: link:../../packages/pangolin-worker
     devDependencies:
       tsx:
         specifier: ^4.19.0
@@ -106,28 +106,28 @@ importers:
 
   examples/dogfood-gated:
     dependencies:
-      '@quarry-systems/agora-client':
+      '@quarry-systems/pangolin-client':
         specifier: workspace:*
-        version: link:../../packages/agora-client
-      '@quarry-systems/agora-core':
+        version: link:../../packages/pangolin-client
+      '@quarry-systems/pangolin-core':
         specifier: workspace:*
-        version: link:../../packages/agora-core
-      '@quarry-systems/agora-orchestrator':
+        version: link:../../packages/pangolin-core
+      '@quarry-systems/pangolin-orchestrator':
         specifier: workspace:*
-        version: link:../../packages/agora-orchestrator
-      '@quarry-systems/agora-providers-local-docker':
+        version: link:../../packages/pangolin-orchestrator
+      '@quarry-systems/pangolin-providers-local-docker':
         specifier: workspace:*
-        version: link:../../packages/agora-providers-local-docker
-      '@quarry-systems/agora-secret-store':
+        version: link:../../packages/pangolin-providers-local-docker
+      '@quarry-systems/pangolin-secret-store':
         specifier: workspace:*
-        version: link:../../packages/agora-secret-store
-      '@quarry-systems/agora-storage-local':
+        version: link:../../packages/pangolin-secret-store
+      '@quarry-systems/pangolin-storage-local':
         specifier: workspace:*
-        version: link:../../packages/agora-storage-local
+        version: link:../../packages/pangolin-storage-local
     devDependencies:
-      '@quarry-systems/agora-cli':
+      '@quarry-systems/pangolin-cli':
         specifier: workspace:*
-        version: link:../../packages/agora-cli
+        version: link:../../packages/pangolin-cli
       tsx:
         specifier: ^4.19.0
         version: 4.22.3
@@ -137,21 +137,21 @@ importers:
 
   examples/dogfood-selftest:
     dependencies:
-      '@quarry-systems/agora-client':
+      '@quarry-systems/pangolin-client':
         specifier: workspace:*
-        version: link:../../packages/agora-client
-      '@quarry-systems/agora-orchestrator':
+        version: link:../../packages/pangolin-client
+      '@quarry-systems/pangolin-orchestrator':
         specifier: workspace:*
-        version: link:../../packages/agora-orchestrator
-      '@quarry-systems/agora-providers-local-docker':
+        version: link:../../packages/pangolin-orchestrator
+      '@quarry-systems/pangolin-providers-local-docker':
         specifier: workspace:*
-        version: link:../../packages/agora-providers-local-docker
-      '@quarry-systems/agora-secret-store':
+        version: link:../../packages/pangolin-providers-local-docker
+      '@quarry-systems/pangolin-secret-store':
         specifier: workspace:*
-        version: link:../../packages/agora-secret-store
-      '@quarry-systems/agora-storage-local':
+        version: link:../../packages/pangolin-secret-store
+      '@quarry-systems/pangolin-storage-local':
         specifier: workspace:*
-        version: link:../../packages/agora-storage-local
+        version: link:../../packages/pangolin-storage-local
     devDependencies:
       tsx:
         specifier: ^4.19.0
@@ -162,21 +162,21 @@ importers:
 
   examples/handoff-dag:
     dependencies:
-      '@quarry-systems/agora-client':
+      '@quarry-systems/pangolin-client':
         specifier: workspace:*
-        version: link:../../packages/agora-client
-      '@quarry-systems/agora-orchestrator':
+        version: link:../../packages/pangolin-client
+      '@quarry-systems/pangolin-orchestrator':
         specifier: workspace:*
-        version: link:../../packages/agora-orchestrator
-      '@quarry-systems/agora-providers-local-docker':
+        version: link:../../packages/pangolin-orchestrator
+      '@quarry-systems/pangolin-providers-local-docker':
         specifier: workspace:*
-        version: link:../../packages/agora-providers-local-docker
-      '@quarry-systems/agora-secret-store':
+        version: link:../../packages/pangolin-providers-local-docker
+      '@quarry-systems/pangolin-secret-store':
         specifier: workspace:*
-        version: link:../../packages/agora-secret-store
-      '@quarry-systems/agora-storage-local':
+        version: link:../../packages/pangolin-secret-store
+      '@quarry-systems/pangolin-storage-local':
         specifier: workspace:*
-        version: link:../../packages/agora-storage-local
+        version: link:../../packages/pangolin-storage-local
     devDependencies:
       tsx:
         specifier: ^4.19.0
@@ -190,15 +190,15 @@ importers:
 
   examples/hello-world:
     dependencies:
-      '@quarry-systems/agora-client':
+      '@quarry-systems/pangolin-client':
         specifier: workspace:*
-        version: link:../../packages/agora-client
-      '@quarry-systems/agora-providers-local-docker':
+        version: link:../../packages/pangolin-client
+      '@quarry-systems/pangolin-providers-local-docker':
         specifier: workspace:*
-        version: link:../../packages/agora-providers-local-docker
-      '@quarry-systems/agora-storage-local':
+        version: link:../../packages/pangolin-providers-local-docker
+      '@quarry-systems/pangolin-storage-local':
         specifier: workspace:*
-        version: link:../../packages/agora-storage-local
+        version: link:../../packages/pangolin-storage-local
     devDependencies:
       tsx:
         specifier: ^4.19.0
@@ -212,21 +212,21 @@ importers:
 
   examples/offload-fanout:
     dependencies:
-      '@quarry-systems/agora-client':
+      '@quarry-systems/pangolin-client':
         specifier: workspace:*
-        version: link:../../packages/agora-client
-      '@quarry-systems/agora-orchestrator':
+        version: link:../../packages/pangolin-client
+      '@quarry-systems/pangolin-orchestrator':
         specifier: workspace:*
-        version: link:../../packages/agora-orchestrator
-      '@quarry-systems/agora-providers-local-docker':
+        version: link:../../packages/pangolin-orchestrator
+      '@quarry-systems/pangolin-providers-local-docker':
         specifier: workspace:*
-        version: link:../../packages/agora-providers-local-docker
-      '@quarry-systems/agora-secret-store':
+        version: link:../../packages/pangolin-providers-local-docker
+      '@quarry-systems/pangolin-secret-store':
         specifier: workspace:*
-        version: link:../../packages/agora-secret-store
-      '@quarry-systems/agora-storage-local':
+        version: link:../../packages/pangolin-secret-store
+      '@quarry-systems/pangolin-storage-local':
         specifier: workspace:*
-        version: link:../../packages/agora-storage-local
+        version: link:../../packages/pangolin-storage-local
     devDependencies:
       tsx:
         specifier: ^4.19.0
@@ -243,21 +243,21 @@ importers:
       '@aws-sdk/client-s3':
         specifier: ^3.700.0
         version: 3.1052.0
-      '@quarry-systems/agora-client':
+      '@quarry-systems/pangolin-client':
         specifier: workspace:*
-        version: link:../../packages/agora-client
-      '@quarry-systems/agora-orchestrator':
+        version: link:../../packages/pangolin-client
+      '@quarry-systems/pangolin-orchestrator':
         specifier: workspace:*
-        version: link:../../packages/agora-orchestrator
-      '@quarry-systems/agora-providers-local-docker':
+        version: link:../../packages/pangolin-orchestrator
+      '@quarry-systems/pangolin-providers-local-docker':
         specifier: workspace:*
-        version: link:../../packages/agora-providers-local-docker
-      '@quarry-systems/agora-secret-store':
+        version: link:../../packages/pangolin-providers-local-docker
+      '@quarry-systems/pangolin-secret-store':
         specifier: workspace:*
-        version: link:../../packages/agora-secret-store
-      '@quarry-systems/agora-storage-s3':
+        version: link:../../packages/pangolin-secret-store
+      '@quarry-systems/pangolin-storage-s3':
         specifier: workspace:*
-        version: link:../../packages/agora-storage-s3
+        version: link:../../packages/pangolin-storage-s3
     devDependencies:
       tsx:
         specifier: ^4.19.0
@@ -271,21 +271,21 @@ importers:
 
   examples/orchestrator-offload:
     dependencies:
-      '@quarry-systems/agora-client':
+      '@quarry-systems/pangolin-client':
         specifier: workspace:*
-        version: link:../../packages/agora-client
-      '@quarry-systems/agora-orchestrator':
+        version: link:../../packages/pangolin-client
+      '@quarry-systems/pangolin-orchestrator':
         specifier: workspace:*
-        version: link:../../packages/agora-orchestrator
-      '@quarry-systems/agora-providers-local-docker':
+        version: link:../../packages/pangolin-orchestrator
+      '@quarry-systems/pangolin-providers-local-docker':
         specifier: workspace:*
-        version: link:../../packages/agora-providers-local-docker
-      '@quarry-systems/agora-secret-store':
+        version: link:../../packages/pangolin-providers-local-docker
+      '@quarry-systems/pangolin-secret-store':
         specifier: workspace:*
-        version: link:../../packages/agora-secret-store
-      '@quarry-systems/agora-storage-local':
+        version: link:../../packages/pangolin-secret-store
+      '@quarry-systems/pangolin-storage-local':
         specifier: workspace:*
-        version: link:../../packages/agora-storage-local
+        version: link:../../packages/pangolin-storage-local
     devDependencies:
       tsx:
         specifier: ^4.19.0
@@ -296,9 +296,9 @@ importers:
 
   examples/pattern-dogfood:
     dependencies:
-      '@quarry-systems/agora-orchestrator':
+      '@quarry-systems/pangolin-orchestrator':
         specifier: workspace:*
-        version: link:../../packages/agora-orchestrator
+        version: link:../../packages/pangolin-orchestrator
     devDependencies:
       tsx:
         specifier: ^4.19.0
@@ -309,9 +309,9 @@ importers:
 
   examples/pattern-mapreduce:
     dependencies:
-      '@quarry-systems/agora-orchestrator':
+      '@quarry-systems/pangolin-orchestrator':
         specifier: workspace:*
-        version: link:../../packages/agora-orchestrator
+        version: link:../../packages/pangolin-orchestrator
     devDependencies:
       tsx:
         specifier: ^4.19.0
@@ -320,17 +320,17 @@ importers:
         specifier: ^5.7.2
         version: 5.9.3
 
-  packages/agora-cli:
+  packages/pangolin-cli:
     dependencies:
-      '@quarry-systems/agora-client':
+      '@quarry-systems/pangolin-client':
         specifier: workspace:*
-        version: link:../agora-client
-      '@quarry-systems/agora-core':
+        version: link:../pangolin-client
+      '@quarry-systems/pangolin-core':
         specifier: workspace:*
-        version: link:../agora-core
-      '@quarry-systems/agora-orchestrator':
+        version: link:../pangolin-core
+      '@quarry-systems/pangolin-orchestrator':
         specifier: workspace:*
-        version: link:../agora-orchestrator
+        version: link:../pangolin-orchestrator
       commander:
         specifier: ^12.0.0
         version: 12.1.0
@@ -338,24 +338,24 @@ importers:
         specifier: ^2.0.0
         version: 2.9.0
 
-  packages/agora-client:
+  packages/pangolin-client:
     dependencies:
       '@aws-sdk/client-secrets-manager':
         specifier: ^3.700.0
         version: 3.1052.0
-      '@quarry-systems/agora-core':
+      '@quarry-systems/pangolin-core':
         specifier: workspace:*
-        version: link:../agora-core
-      '@quarry-systems/agora-secret-store':
+        version: link:../pangolin-core
+      '@quarry-systems/pangolin-secret-store':
         specifier: workspace:*
-        version: link:../agora-secret-store
+        version: link:../pangolin-secret-store
     devDependencies:
-      '@quarry-systems/agora-providers-local-docker':
+      '@quarry-systems/pangolin-providers-local-docker':
         specifier: workspace:*
-        version: link:../agora-providers-local-docker
-      '@quarry-systems/agora-storage-local':
+        version: link:../pangolin-providers-local-docker
+      '@quarry-systems/pangolin-storage-local':
         specifier: workspace:*
-        version: link:../agora-storage-local
+        version: link:../pangolin-storage-local
       '@types/dockerode':
         specifier: ^3.3.30
         version: 3.3.47
@@ -363,31 +363,31 @@ importers:
         specifier: ^4.0.0
         version: 4.0.12
 
-  packages/agora-core: {}
+  packages/pangolin-core: {}
 
-  packages/agora-mcp:
+  packages/pangolin-mcp:
     dependencies:
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
         version: 1.29.0(zod@4.4.3)
-      '@quarry-systems/agora-client':
+      '@quarry-systems/pangolin-client':
         specifier: workspace:*
-        version: link:../agora-client
-      '@quarry-systems/agora-core':
+        version: link:../pangolin-client
+      '@quarry-systems/pangolin-core':
         specifier: workspace:*
-        version: link:../agora-core
-      '@quarry-systems/agora-orchestrator':
+        version: link:../pangolin-core
+      '@quarry-systems/pangolin-orchestrator':
         specifier: workspace:^
-        version: link:../agora-orchestrator
+        version: link:../pangolin-orchestrator
 
-  packages/agora-orchestrator:
+  packages/pangolin-orchestrator:
     dependencies:
-      '@quarry-systems/agora-client':
+      '@quarry-systems/pangolin-client':
         specifier: workspace:*
-        version: link:../agora-client
-      '@quarry-systems/agora-core':
+        version: link:../pangolin-client
+      '@quarry-systems/pangolin-core':
         specifier: workspace:*
-        version: link:../agora-core
+        version: link:../pangolin-core
       better-sqlite3:
         specifier: ^11.0.0
         version: 11.10.0
@@ -398,42 +398,42 @@ importers:
         specifier: ^3
         version: 3.25.76
     devDependencies:
-      '@quarry-systems/agora-secret-store':
+      '@quarry-systems/pangolin-secret-store':
         specifier: workspace:*
-        version: link:../agora-secret-store
-      '@quarry-systems/agora-storage-local':
+        version: link:../pangolin-secret-store
+      '@quarry-systems/pangolin-storage-local':
         specifier: workspace:*
-        version: link:../agora-storage-local
-      '@quarry-systems/agora-worker':
+        version: link:../pangolin-storage-local
+      '@quarry-systems/pangolin-worker':
         specifier: workspace:*
-        version: link:../agora-worker
+        version: link:../pangolin-worker
       '@types/better-sqlite3':
         specifier: ^7.6.0
         version: 7.6.13
 
-  packages/agora-providers-aws-creds:
+  packages/pangolin-providers-aws-creds:
     dependencies:
       '@aws-sdk/credential-providers':
         specifier: ^3.600.0
         version: 3.1052.0
-      '@quarry-systems/agora-core':
+      '@quarry-systems/pangolin-core':
         specifier: workspace:*
-        version: link:../agora-core
+        version: link:../pangolin-core
 
-  packages/agora-providers-fargate:
+  packages/pangolin-providers-fargate:
     dependencies:
       '@aws-sdk/client-ecs':
         specifier: ^3.700.0
         version: 3.1052.0
-      '@quarry-systems/agora-core':
+      '@quarry-systems/pangolin-core':
         specifier: workspace:*
-        version: link:../agora-core
+        version: link:../pangolin-core
 
-  packages/agora-providers-local-docker:
+  packages/pangolin-providers-local-docker:
     dependencies:
-      '@quarry-systems/agora-core':
+      '@quarry-systems/pangolin-core':
         specifier: workspace:*
-        version: link:../agora-core
+        version: link:../pangolin-core
       dockerode:
         specifier: ^4.0.0
         version: 4.0.12
@@ -442,11 +442,11 @@ importers:
         specifier: ^3.3.30
         version: 3.3.47
 
-  packages/agora-runtime-claude-code:
+  packages/pangolin-runtime-claude-code:
     dependencies:
-      '@quarry-systems/agora-core':
+      '@quarry-systems/pangolin-core':
         specifier: workspace:*
-        version: link:../agora-core
+        version: link:../pangolin-core
       mustache:
         specifier: ^4.2.0
         version: 4.2.0
@@ -455,47 +455,47 @@ importers:
         specifier: ^4.2.0
         version: 4.2.6
 
-  packages/agora-secret-store:
+  packages/pangolin-secret-store:
     dependencies:
       '@aws-sdk/client-secrets-manager':
         specifier: ^3.700.0
         version: 3.1052.0
-      '@quarry-systems/agora-core':
+      '@quarry-systems/pangolin-core':
         specifier: workspace:*
-        version: link:../agora-core
+        version: link:../pangolin-core
 
-  packages/agora-storage-local:
+  packages/pangolin-storage-local:
     dependencies:
-      '@quarry-systems/agora-core':
+      '@quarry-systems/pangolin-core':
         specifier: workspace:*
-        version: link:../agora-core
+        version: link:../pangolin-core
 
-  packages/agora-storage-s3:
+  packages/pangolin-storage-s3:
     dependencies:
       '@aws-sdk/client-s3':
         specifier: ^3.700.0
         version: 3.1052.0
-      '@quarry-systems/agora-core':
+      '@quarry-systems/pangolin-core':
         specifier: workspace:*
-        version: link:../agora-core
+        version: link:../pangolin-core
 
-  packages/agora-worker:
+  packages/pangolin-worker:
     dependencies:
       '@aws-sdk/client-secrets-manager':
         specifier: ^3.700.0
         version: 3.1052.0
-      '@quarry-systems/agora-core':
+      '@quarry-systems/pangolin-core':
         specifier: workspace:*
-        version: link:../agora-core
-      '@quarry-systems/agora-secret-store':
+        version: link:../pangolin-core
+      '@quarry-systems/pangolin-secret-store':
         specifier: workspace:*
-        version: link:../agora-secret-store
-      '@quarry-systems/agora-storage-local':
+        version: link:../pangolin-secret-store
+      '@quarry-systems/pangolin-storage-local':
         specifier: workspace:*
-        version: link:../agora-storage-local
-      '@quarry-systems/agora-storage-s3':
+        version: link:../pangolin-storage-local
+      '@quarry-systems/pangolin-storage-s3':
         specifier: workspace:*
-        version: link:../agora-storage-s3
+        version: link:../pangolin-storage-s3
 
 packages:
 

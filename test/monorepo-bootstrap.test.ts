@@ -23,9 +23,9 @@ describe('monorepo bootstrap', () => {
       expect(pkg).toBeTypeOf('object');
     });
 
-    it('declares name "agora"', () => {
+    it('declares name "pangolin-scale"', () => {
       pkg = readJson('package.json') as Record<string, unknown>;
-      expect(pkg.name).toBe('agora');
+      expect(pkg.name).toBe('pangolin-scale');
     });
 
     it('is marked private', () => {
@@ -153,7 +153,7 @@ describe('monorepo bootstrap', () => {
       expect(existsSync(full)).toBe(true);
       const raw = readFileSync(full, 'utf8');
       expect(raw.length).toBeGreaterThan(0);
-      expect(raw.toLowerCase()).toContain('agora');
+      expect(raw.toLowerCase()).toContain('pangolin');
     });
   });
 });

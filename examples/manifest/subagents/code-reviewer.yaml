@@ -1,8 +1,8 @@
 # Canonical body of the `code-reviewer` subagent referenced from
-# `../agora-manifest.yaml` via `from: ./subagents/code-reviewer.yaml`.
+# `../pangolin-manifest.yaml` via `from: ./subagents/code-reviewer.yaml`.
 #
 # DAG 2 status: the manifest parser does NOT yet splice this file into the
-# subagent declaration — the inline `systemPrompt` in `agora-manifest.yaml`
+# subagent declaration — the inline `systemPrompt` in `pangolin-manifest.yaml`
 # wins. When the parser learns to dereference `from:`, drop the inline
 # fallback and let this file be the source of truth.
 name: code-reviewer

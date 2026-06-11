@@ -8,14 +8,14 @@
 // via the mounted socket (wired in docker-compose, not here).
 //
 // Cross-task interface contract (fulfilled by the sibling task-deploy-config):
-//   agora.config.mjs (sibling file, NOT created here) MUST export:
+//   pangolin.config.mjs (sibling file, NOT created here) MUST export:
 //     - `orch.createOrchestrator()` — factory returning an Orchestrator instance
 //     - `orch.transport`            — the mailbox transport (e.g. S3-backed)
-//   This entrypoint also imports `serve` from @quarry-systems/agora-orchestrator.
+//   This entrypoint also imports `serve` from @quarry-systems/pangolin-orchestrator.
 //   All three must align for the serve loop to start.
 
-import { serve } from '@quarry-systems/agora-orchestrator';
-import { orch } from './agora.config.mjs';
+import { serve } from '@quarry-systems/pangolin-orchestrator';
+import { orch } from './pangolin.config.mjs';
 
 const ac = new AbortController();
 process.on('SIGTERM', () => ac.abort());

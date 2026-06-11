@@ -9,7 +9,7 @@ index 0000000..a9b0a98
 +description: How queue-level execution patterns (static-dag, pipeline, map-reduce) layer above the tick engine — the extendRun seam, run.extended audit entries, the gate/respawn circle-back, and the forward-arc-never-rewind invariant.
 +---
 +
-+The core tick engine described in [How an offload run executes](/agora/explanation/how-offload-runs/)
++The core tick engine described in [How an offload run executes](/pangolin/explanation/how-offload-runs/)
 +handles one responsibility: advancing a fixed DAG of **WorkItems** through their
 +status lattice. Execution patterns are a separate layer built *on top of* that
 +engine — they let a queue answer a richer question: "now that some items have
@@ -39,12 +39,12 @@ index 0000000..a9b0a98
 +
 +## Queue-level pattern config
 +
-+Patterns are configured in `agora.config.ts` on the queue definition, not on
++Patterns are configured in `pangolin.config.ts` on the queue definition, not on
 +individual runs. A queue without a `pattern` key defaults to `static-dag`
 +transparently.
 +
 +```ts
-+// agora.config.ts
++// pangolin.config.ts
 +export default defineConfig({
 +  queues: [
 +    {
@@ -103,7 +103,7 @@ index 0000000..a9b0a98
 +   - the directive's content-addressed ref.
 +
 +The `run.extended` entries are first-class members of the audit bundle, so
-+`agora verify` can reconstruct exactly *why* each dynamically added item exists
++`pangolin verify` can reconstruct exactly *why* each dynamically added item exists
 +— which cause item produced it, through which pattern, at which tick.
 +
 +Because `extendRun` runs **before** the seal check in the same tick, a run that
@@ -122,7 +122,7 @@ index 0000000..a9b0a98
 +  "queueName": "nightly",
 +  "actor": "pattern:nightly",
 +  "causeItemId": "split",
-+  "causeResultRef": "agora://ns/artifact/split-abc/sha256:deadbeef",
++  "causeResultRef": "pangolin://ns/artifact/split-abc/sha256:deadbeef",
 +  "spawnedItems": [
 +    { "id": "map-chunk-0", "executor": "chunk-processor", "depends_on": ["split"] },
 +    { "id": "map-chunk-1", "executor": "chunk-processor", "depends_on": ["split"] },
@@ -199,7 +199,7 @@ index 0000000..a9b0a98
 +  silently.
 +- **Audit closure is total.** Because no existing item can point at a newly
 +  spawned item, every product consumed by a spawned item was already recorded
-+  before the extension. `agora verify`'s provenance-closure check can walk the
++  before the extension. `pangolin verify`'s provenance-closure check can walk the
 +  entire graph — including dynamically grown branches — using exactly the same
 +  algorithm it applies to static DAGs.
 +
@@ -229,12 +229,12 @@ index 0000000..a9b0a98
 +
 +## See also
 +
-+- [How an offload run executes](/agora/explanation/how-offload-runs/) — the core
++- [How an offload run executes](/pangolin/explanation/how-offload-runs/) — the core
 +  tick engine that execution patterns sit above.
-+- [plan.json schema](/agora/reference/plan-json/) — the WorkItem fields that
++- [plan.json schema](/pangolin/reference/plan-json/) — the WorkItem fields that
 +  patterns populate when spawning (`depends_on`, `resourceLocks`, `executor`).
-+- [Audit & guarantee tiers](/agora/explanation/audit-guarantee-tiers/) — how
-+  `run.extended` entries are covered by the audit bundle and what `agora verify`
++- [Audit & guarantee tiers](/pangolin/explanation/audit-guarantee-tiers/) — how
++  `run.extended` entries are covered by the audit bundle and what `pangolin verify`
 +  checks.
-+- [Architecture overview](/agora/explanation/architecture-overview/) — where
++- [Architecture overview](/pangolin/explanation/architecture-overview/) — where
 +  patterns fit in the whole system.

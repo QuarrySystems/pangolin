@@ -8,7 +8,7 @@
 // contract is observable on for the local target.
 //
 // Concretely: an env bundle is registered with an inline secret value; a
-// capability's `agora-setup.sh` references the secret env var directly via
+// capability's `pangolin-setup.sh` references the secret env var directly via
 // `echo`, exercising the worst-case path where the sub-agent emits the
 // literal value verbatim (no transform). The worker resolves the secret,
 // registers it with the structured logger, and runs the setup-script under
@@ -56,7 +56,7 @@ describe('E2E: runtime secret redaction', () => {
       const cap = await client.capabilities.register({
         name: 'echo-secret',
         files: {
-          'agora-setup.sh': '#!/bin/sh\necho "secret is $MY_SECRET"\n',
+          'pangolin-setup.sh': '#!/bin/sh\necho "secret is $MY_SECRET"\n',
         },
       });
       await client.subagent.register({

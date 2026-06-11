@@ -44,13 +44,13 @@ describe('E2E: register + dispatch via local-docker + local storage', () => {
 
       const cap = await client.capabilities.register({
         name: 'noop-cap',
-        files: { 'agora-setup.sh': '#!/bin/sh\necho "setup ran"\n' },
+        files: { 'pangolin-setup.sh': '#!/bin/sh\necho "setup ran"\n' },
       });
 
       const sub = await client.subagent.register({
         name: 'echo-agent',
         systemPrompt:
-          'You are an echo agent. Print exactly "hello from agora" and exit.',
+          'You are an echo agent. Print exactly "hello from pangolin" and exit.',
         capabilities: [cap],
       });
 
@@ -71,7 +71,7 @@ describe('E2E: register + dispatch via local-docker + local storage', () => {
       expect(result.resolved.subagent.contentHash).toBe(sub.contentHash);
       expect(result.resolved.capabilities[0].contentHash).toBe(cap.contentHash);
       expect(result.resolved.env![0].contentHash).toBe(env.contentHash);
-      expect(result.stdout).toContain('hello from agora');
+      expect(result.stdout).toContain('hello from pangolin');
     },
     120_000,
   );

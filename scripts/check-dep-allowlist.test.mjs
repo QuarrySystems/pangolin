@@ -148,7 +148,7 @@ test('rejects a package declaring a forbidden @quarry-systems/drift-* dependency
   }
 });
 
-test('allows non-forbidden @quarry-systems packages (e.g., agora-core workspace ref)', async () => {
+test('allows non-forbidden @quarry-systems packages (e.g., pangolin-core workspace ref)', async () => {
   const tmp = await mkdtemp(join(tmpdir(), 'dep-allowlist-allowed-'));
   try {
     await mkdir(join(tmp, 'packages', 'foo'), { recursive: true });
@@ -157,7 +157,7 @@ test('allows non-forbidden @quarry-systems packages (e.g., agora-core workspace 
       JSON.stringify({
         name: '@quarry-systems/foo',
         dependencies: {
-          '@quarry-systems/agora-core': 'workspace:*',
+          '@quarry-systems/pangolin-core': 'workspace:*',
           '@aws-sdk/client-s3': '^3.700.0',
         },
       }),

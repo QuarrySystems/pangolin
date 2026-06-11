@@ -1,5 +1,5 @@
 // DRY: deep mechanics are owned elsewhere and are NOT re-tested here:
-//   lock fan-out/serialize -> packages/agora-orchestrator/test/pressure-runner.test.ts SCENARIO 1
+//   lock fan-out/serialize -> packages/pangolin-orchestrator/test/pressure-runner.test.ts SCENARIO 1
 //   audit verify / DB-tamper-fails / no-secret-in-export / guarantee tier -> .../test/audit/acceptance.int.test.ts 1-4 + .../test/audit/bundle.test.ts
 //   OperationsApi.audit read + errors -> .../test/operations-api.test.ts
 // This file proves only that the SHIPPED EXAMPLE ARTIFACTS compose and run.
@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  AgoraOrchestrator,
+  PangolinOrchestrator,
   SqliteRunStateStore,
   ManualTrigger,
   AuditLog,
@@ -19,8 +19,8 @@ import {
   MailboxSubmissionTransport,
   LocalDirMailbox,
   OperationsApi,
-} from '@quarry-systems/agora-orchestrator';
-import type { Run, Executor, FireContext } from '@quarry-systems/agora-orchestrator';
+} from '@quarry-systems/pangolin-orchestrator';
+import type { Run, Executor, FireContext } from '@quarry-systems/pangolin-orchestrator';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PLAN_PATH = resolve(__dirname, '../plan.json');
@@ -78,7 +78,7 @@ describe('offload-fanout example', () => {
       id: 'dispatch',
       async fire(item, ctx?: FireContext) {
         const dispatchHash = 'dh-' + item.id;
-        const manifestRef = 'agora://manifests/' + dispatchHash;
+        const manifestRef = 'pangolin://manifests/' + dispatchHash;
         blobs.set(
           manifestRef,
           enc({
@@ -97,7 +97,7 @@ describe('offload-fanout example', () => {
         return { dispatchHash, manifestRef };
       },
       async reconcile(h: string) {
-        return { status: 'done' as const, output: { exitCode: 0 }, resultRef: 'agora://artifacts/' + h };
+        return { status: 'done' as const, output: { exitCode: 0 }, resultRef: 'pangolin://artifacts/' + h };
       },
     };
 
@@ -107,7 +107,7 @@ describe('offload-fanout example', () => {
     try {
       const anchor = new LocalAnchor(store);
       const auditLog = new AuditLog({ store, signer: NoneSigner, anchor });
-      const orchestrator = new AgoraOrchestrator({
+      const orchestrator = new PangolinOrchestrator({
         store,
         executors: { dispatch: fakeExecutor },
         triggers: { manual: new ManualTrigger() },
@@ -162,7 +162,7 @@ describe('offload-fanout example', () => {
       }
 
       // Publish audit export via MailboxSubmissionTransport
-      const tmpDir = await mkdtemp(join(tmpdir(), 'agora-fanout-test-'));
+      const tmpDir = await mkdtemp(join(tmpdir(), 'pangolin-fanout-test-'));
       try {
         const mbox = new LocalDirMailbox(tmpDir);
         const transport = new MailboxSubmissionTransport(mbox);

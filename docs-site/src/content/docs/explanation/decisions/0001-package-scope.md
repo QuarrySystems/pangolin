@@ -1,27 +1,27 @@
 ---
-title: "ADR-0001: Package scope is @quarry-systems/agora-*"
-description: "Agora packages publish under the @quarry-systems/agora-* npm scope."
+title: "ADR-0001: Package scope is @quarry-systems/pangolin-*"
+description: "Pangolin Scale packages publish under the @quarry-systems/pangolin-* npm scope."
 status: accepted
 date: 2026-05-21
-deciders: agora-mvp-design
+deciders: pangolin-scale-mvp-design
 ---
 
 ## Context
 
-Agora ships as a family of npm packages (`agora-core`, `agora-client`, `agora-worker`, `agora-mcp`, etc.). The package scope chosen at publication time becomes load-bearing: it appears in every `package.json`, every import statement, every published README, and every downstream integrator's lockfile. Renaming a scope after the fact is expensive (downstream churn, deprecation notices, ecosystem confusion).
+Pangolin Scale ships as a family of npm packages (`pangolin-core`, `pangolin-client`, `pangolin-worker`, `pangolin-mcp`, etc.). The package scope chosen at publication time becomes load-bearing: it appears in every `package.json`, every import statement, every published README, and every downstream integrator's lockfile. Renaming a scope after the fact is expensive (downstream churn, deprecation notices, ecosystem confusion).
 
 Two candidates were weighed:
 
-- `@quarry-systems/agora-*` — consistent with sibling Quarry Systems libraries (`@quarry-systems/bedrock-*`, `@quarry-systems/stoa-*`, etc.). Single platform story, single release pipeline, single set of contributor docs.
-- `@agora-mcp/*` — a neutral scope, on the theory that it would make a future open-source spinout (extracting agora from the Quarry Systems platform) cheaper. The argument: an independent project would want an independent scope; starting there avoids the rename later.
+- `@quarry-systems/pangolin-*` — consistent with sibling Quarry Systems libraries (`@quarry-systems/bedrock-*`, `@quarry-systems/stoa-*`, etc.). Single platform story, single release pipeline, single set of contributor docs.
+- `@pangolin-mcp/*` — a neutral scope, on the theory that it would make a future open-source spinout (extracting Pangolin Scale from the Quarry Systems platform) cheaper. The argument: an independent project would want an independent scope; starting there avoids the rename later.
 
-The trade-off framing turned on whether the orthogonality principle — agora as a self-contained, independently-usable library — is enforced by package-scope separation or by something stronger.
+The trade-off framing turned on whether the orthogonality principle — Pangolin Scale as a self-contained, independently-usable library — is enforced by package-scope separation or by something stronger.
 
 ## Decision
 
-Agora packages publish under `@quarry-systems/agora-*`. Per §10.1 of `docs/superpowers/specs/2026-05-21-agora-mvp-design.md`:
+Pangolin Scale packages publish under `@quarry-systems/pangolin-*`. Per §10.1 of `docs/superpowers/specs/2026-05-21-pangolin-scale-mvp-design.md`:
 
-> **Package scope is `@quarry-systems/agora-*`.** Originally weighed against `@agora-mcp/*` for "easier OSS spinout later." Spinouts happen when they happen regardless of npm scope; the orthogonality principle is enforced architecturally (CI allowlist on dependencies), not via separate scopes. Consistent platform story + easier release coordination + room to add `@quarry-systems/bedrock-*` and `@quarry-systems/stoa-*` alongside without scope thrash.
+> **Package scope is `@quarry-systems/pangolin-*`.** Originally weighed against `@pangolin-mcp/*` for "easier OSS spinout later." Spinouts happen when they happen regardless of npm scope; the orthogonality principle is enforced architecturally (CI allowlist on dependencies), not via separate scopes. Consistent platform story + easier release coordination + room to add `@quarry-systems/bedrock-*` and `@quarry-systems/stoa-*` alongside without scope thrash.
 
 Orthogonality is enforced by the CI allowlist check (§8 of the spec) on the dependency graph, not by namespace separation.
 
@@ -36,8 +36,8 @@ What becomes easier:
 
 What becomes harder:
 
-- A future OSS spinout under a neutral scope (`@agora-mcp/*` or similar) would require a one-time rename across all packages, downstream lockfiles, and integrator imports. Mitigations: maintain the old scope as a redirect/deprecation for one major version; communicate the rename in release notes well ahead of cutover.
-- Casual observers may assume agora is Quarry-Systems-coupled and skip evaluating it for standalone use. Counter: the README and package metadata make the orthogonality explicit, and the CI allowlist is the durable proof.
+- A future OSS spinout under a neutral scope (`@pangolin-mcp/*` or similar) would require a one-time rename across all packages, downstream lockfiles, and integrator imports. Mitigations: maintain the old scope as a redirect/deprecation for one major version; communicate the rename in release notes well ahead of cutover.
+- Casual observers may assume Pangolin Scale is Quarry-Systems-coupled and skip evaluating it for standalone use. Counter: the README and package metadata make the orthogonality explicit, and the CI allowlist is the durable proof.
 
 Trade-offs:
 

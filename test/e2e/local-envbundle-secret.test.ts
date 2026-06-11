@@ -9,11 +9,11 @@
 //      `LocalSecretStore` stages the value to a host tmpdir as a file.
 //   3. The bundle is dispatched to the `local` Docker target, which
 //      bind-mounts the secret store dir into the container via
-//      `AGORA_SECRET_STORE_DIR` / `AGORA_SECRET_STORE_KIND`.
+//      `PANGOLIN_SECRET_STORE_DIR` / `PANGOLIN_SECRET_STORE_KIND`.
 //   4. The worker resolves `local-secret://<id>` refs from the bind-mounted
 //      dir, merges the secret into its env, and registers the resolved value
 //      with the structured logger for redaction.
-//   5. The capability's `agora-setup.sh` echoes `DEPLOY_TOKEN=$DEPLOY_TOKEN`
+//   5. The capability's `pangolin-setup.sh` echoes `DEPLOY_TOKEN=$DEPLOY_TOKEN`
 //      so the subagent can observe the resolved value in its environment.
 //
 // Assertions:
@@ -36,13 +36,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import {
-  AgoraClient,
+  PangolinClient,
   NoopCredentialProvider,
   StdoutResultSink,
-} from '../../packages/agora-client/dist/index.js';
-import { LocalStorageProvider } from '../../packages/agora-storage-local/dist/index.js';
-import { LocalDockerProvider } from '../../packages/agora-providers-local-docker/dist/index.js';
-import { LocalSecretStore } from '../../packages/agora-secret-store/dist/index.js';
+} from '../../packages/pangolin-client/dist/index.js';
+import { LocalStorageProvider } from '../../packages/pangolin-storage-local/dist/index.js';
+import { LocalDockerProvider } from '../../packages/pangolin-providers-local-docker/dist/index.js';
+import { LocalSecretStore } from '../../packages/pangolin-secret-store/dist/index.js';
 
 import { probeDocker, itIfDocker } from './helpers/docker-skip.js';
 import { useTempStorageRoot } from './helpers/temp-storage.js';
@@ -65,7 +65,7 @@ describe('E2E: local env-bundle inline secret resolved end-to-end with no AWS', 
     async () => {
       // Use a dedicated tmpdir for the LocalSecretStore — separate from the
       // storage root so secrets and bundles don't land in the same tree.
-      const secretDir = await mkdtemp(join(tmpdir(), 'agora-e2e-envbundle-secrets-'));
+      const secretDir = await mkdtemp(join(tmpdir(), 'pangolin-e2e-envbundle-secrets-'));
       const localStore = new LocalSecretStore({ dir: secretDir });
 
       // Spy on stage so we can assert it was called and its arguments.
@@ -75,7 +75,7 @@ describe('E2E: local env-bundle inline secret resolved end-to-end with no AWS', 
       // Construct the client with LocalSecretStore as the ONLY registered
       // store (key 'local'). No AwsSecretStore → by construction no AWS
       // Secrets Manager calls happen on the host side.
-      const client = new AgoraClient({
+      const client = new PangolinClient({
         namespace: 'local-envbundle',
         compute: { 'local-docker': new LocalDockerProvider() },
         credentials: { none: new NoopCredentialProvider() },
@@ -96,7 +96,7 @@ describe('E2E: local env-bundle inline secret resolved end-to-end with no AWS', 
       const cap = await client.capabilities.register({
         name: 'echo-deploy-token',
         files: {
-          'agora-setup.sh': '#!/bin/sh\necho "DEPLOY_TOKEN=$DEPLOY_TOKEN"\n',
+          'pangolin-setup.sh': '#!/bin/sh\necho "DEPLOY_TOKEN=$DEPLOY_TOKEN"\n',
         },
       });
       await client.subagent.register({
@@ -122,8 +122,8 @@ describe('E2E: local env-bundle inline secret resolved end-to-end with no AWS', 
       const stageCall = stageSpy.mock.calls[0]![0];
       expect(stageCall.value).toBe(SECRET);
       // The staged name follows the deterministic placeholder convention:
-      // `agora/inline/env-<bundleName>/<secretKey>` (see env-register.ts).
-      expect(stageCall.name).toBe('agora/inline/env-deploy/DEPLOY_TOKEN');
+      // `pangolin/inline/env-<bundleName>/<secretKey>` (see env-register.ts).
+      expect(stageCall.name).toBe('pangolin/inline/env-deploy/DEPLOY_TOKEN');
 
       // Reset spy count before dispatch so we can verify dispatch itself
       // does NOT stage any additional secrets for this env-bundle-only run.
@@ -131,8 +131,8 @@ describe('E2E: local env-bundle inline secret resolved end-to-end with no AWS', 
 
       // Dispatch: the env bundle is referenced by name. The worker will:
       //   1. Fetch the bundle blob → see secretRefs: { DEPLOY_TOKEN: 'local-secret://<id>' }
-      //   2. Read AGORA_SECRET_STORE_KIND=local-file / AGORA_SECRET_STORE_DIR=<in-container path>
-      //   3. Instantiate LocalSecretStore({ dir: '/agora/secrets' })
+      //   2. Read PANGOLIN_SECRET_STORE_KIND=local-file / PANGOLIN_SECRET_STORE_DIR=<in-container path>
+      //   3. Instantiate LocalSecretStore({ dir: '/pangolin/secrets' })
       //   4. Resolve 'local-secret://<id>' → literal SECRET
       //   5. Register SECRET with StructuredLogger.registerSecret()
       //   6. Run the capability setup script which echoes DEPLOY_TOKEN=$SECRET

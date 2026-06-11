@@ -5,11 +5,11 @@
 // every assertion fires AFTER the worker has read the sentinel from a
 // containerized workspace):
 //
-//   1. The sentinel file at `/workspace/.agora/needs_input.json` is parsed
+//   1. The sentinel file at `/workspace/.pangolin/needs_input.json` is parsed
 //      as JSON. Unparseable contents (truncated braces, raw text, …) MUST
 //      surface as `result.failure.reason === 'worker-failed'` and the
 //      `detail` must mention either a parse error or the missing required
-//      `question` field. See `packages/agora-worker/src/needs-input.ts` —
+//      `question` field. See `packages/pangolin-worker/src/needs-input.ts` —
 //      both unparseable JSON and missing-question route to the same
 //      `kind: 'malformed'` outcome with a structured `detail` string that
 //      is propagated verbatim into the lifecycle `dispatch.failed` event's
@@ -24,22 +24,22 @@
 //      this assertion is a paired contract test between the worker's
 //      enforcement and the SKILL's documentation.
 //
-//   3. The `agora-needs-input-helper` overlay (a SKILL.md authored under
-//      `.claude/skills/agora-needs-input/SKILL.md`) MUST be merged into
+//   3. The `pangolin-needs-input-helper` overlay (a SKILL.md authored under
+//      `.claude/skills/pangolin-needs-input/SKILL.md`) MUST be merged into
 //      every workspace by default. The SKILL teaches the sub-agent how to
 //      shape a valid sentinel — without it, every "I need input" path
 //      degenerates into one of the failure modes above. The helper module
-//      lives at `packages/agora-runtime-claude-code/src/needs-input-helper.ts`
+//      lives at `packages/pangolin-runtime-claude-code/src/needs-input-helper.ts`
 //      (`getNeedsInputHelperOverlay()`); the adapter is responsible for
 //      prepending its returned overlay to integrator capabilities before
 //      the runtime spawn. We probe this by having the capability's
-//      `agora-setup.sh` `cat` the on-disk SKILL.md path: a successful read
+//      `pangolin-setup.sh` `cat` the on-disk SKILL.md path: a successful read
 //      proves the overlay landed.
 //
-//   4. `AGORA_DISABLE_NEEDS_INPUT_HELPER=true` (also defined in the same
+//   4. `PANGOLIN_DISABLE_NEEDS_INPUT_HELPER=true` (also defined in the same
 //      helper module, exposed via `isHelperDisabled`) MUST suppress the
 //      default overlay. We exercise this by registering an env bundle with
-//      `values: { AGORA_DISABLE_NEEDS_INPUT_HELPER: 'true' }` and asserting
+//      `values: { PANGOLIN_DISABLE_NEEDS_INPUT_HELPER: 'true' }` and asserting
 //      the same on-disk probe reports the SKILL is absent.
 //
 // All four assertions run inside a real worker container reached via
@@ -59,8 +59,8 @@ probeDocker();
 const storageRoot = useTempStorageRoot('e2e-needs-resilience');
 
 // Conventional on-disk path of the helper overlay (matches
-// `packages/agora-runtime-claude-code/src/needs-input-helper.ts`).
-const HELPER_SKILL_PATH = '.claude/skills/agora-needs-input/SKILL.md';
+// `packages/pangolin-runtime-claude-code/src/needs-input-helper.ts`).
+const HELPER_SKILL_PATH = '.claude/skills/pangolin-needs-input/SKILL.md';
 
 describe('E2E: needs-input resilience (§6.9)', () => {
   itIfDocker(
@@ -82,11 +82,11 @@ describe('E2E: needs-input resilience (§6.9)', () => {
       const cap = await client.capabilities.register({
         name: 'malformed-sentinel-writer',
         files: {
-          'agora-setup.sh':
+          'pangolin-setup.sh':
             '#!/bin/sh\n' +
-            'mkdir -p /workspace/.agora\n' +
+            'mkdir -p /workspace/.pangolin\n' +
             // Deliberately not JSON — bare text the parser will reject.
-            'printf "this is not json at all" > /workspace/.agora/needs_input.json\n',
+            'printf "this is not json at all" > /workspace/.pangolin/needs_input.json\n',
         },
       });
       await client.subagent.register({
@@ -135,12 +135,12 @@ describe('E2E: needs-input resilience (§6.9)', () => {
           // We use `printf` + `head -c` to generate the bulk to keep the
           // capability bundle itself small (the bulk is generated at run
           // time, not shipped in the bundle).
-          'agora-setup.sh':
+          'pangolin-setup.sh':
             '#!/bin/sh\n' +
             'set -e\n' +
-            'mkdir -p /workspace/.agora\n' +
+            'mkdir -p /workspace/.pangolin\n' +
             'BIG=$(head -c 2097152 /dev/zero | tr "\\0" "A")\n' +
-            'printf \'{"question":"q?","partial_state":"%s"}\' "$BIG" > /workspace/.agora/needs_input.json\n',
+            'printf \'{"question":"q?","partial_state":"%s"}\' "$BIG" > /workspace/.pangolin/needs_input.json\n',
         },
       });
       await client.subagent.register({
@@ -168,7 +168,7 @@ describe('E2E: needs-input resilience (§6.9)', () => {
   );
 
   itIfDocker(
-    'agora-needs-input-helper overlay is applied by default',
+    'pangolin-needs-input-helper overlay is applied by default',
     async () => {
       // The capability's setup script probes for the helper SKILL.md and
       // prints a deterministic marker if present. The overlay MUST land
@@ -188,13 +188,13 @@ describe('E2E: needs-input resilience (§6.9)', () => {
       const cap = await client.capabilities.register({
         name: 'helper-probe',
         files: {
-          'agora-setup.sh':
+          'pangolin-setup.sh':
             '#!/bin/sh\n' +
             'if [ -s /workspace/' + HELPER_SKILL_PATH + ' ]; then\n' +
             '  echo "HELPER_PRESENT=yes"\n' +
             // Surface a known-from-the-SKILL.md token to catch a
             // hypothetical overlay-of-empty-file regression.
-            '  grep -q "/workspace/.agora/needs_input.json" /workspace/' +
+            '  grep -q "/workspace/.pangolin/needs_input.json" /workspace/' +
             HELPER_SKILL_PATH +
             ' && echo "HELPER_BODY=ok"\n' +
             'else\n' +
@@ -225,7 +225,7 @@ describe('E2E: needs-input resilience (§6.9)', () => {
   );
 
   itIfDocker(
-    'AGORA_DISABLE_NEEDS_INPUT_HELPER=true suppresses the overlay',
+    'PANGOLIN_DISABLE_NEEDS_INPUT_HELPER=true suppresses the overlay',
     async () => {
       // Same probe as above, but with the suppression env var set on the
       // env bundle. The worker's `parseWorkerEnv` flips
@@ -240,7 +240,7 @@ describe('E2E: needs-input resilience (§6.9)', () => {
       const cap = await client.capabilities.register({
         name: 'helper-probe-disabled',
         files: {
-          'agora-setup.sh':
+          'pangolin-setup.sh':
             '#!/bin/sh\n' +
             'if [ -e /workspace/' + HELPER_SKILL_PATH + ' ]; then\n' +
             '  echo "HELPER_PRESENT=yes"\n' +
@@ -256,7 +256,7 @@ describe('E2E: needs-input resilience (§6.9)', () => {
       });
       await client.env.register({
         name: 'disable-helper',
-        values: { AGORA_DISABLE_NEEDS_INPUT_HELPER: 'true' },
+        values: { PANGOLIN_DISABLE_NEEDS_INPUT_HELPER: 'true' },
       });
 
       const result = await client.dispatch({

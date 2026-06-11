@@ -19,11 +19,11 @@
 // package's vitest scope.) Both packages are built by their own `pnpm
 // build` — see the repo-level build script.
 import {
-  AgoraClient,
+  PangolinClient,
   NoopCredentialProvider,
   StdoutResultSink,
-} from '../../packages/agora-client/dist/index.js';
-import { LocalStorageProvider } from '../../packages/agora-storage-local/dist/index.js';
+} from '../../packages/pangolin-client/dist/index.js';
+import { LocalStorageProvider } from '../../packages/pangolin-storage-local/dist/index.js';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -39,8 +39,8 @@ afterEach(async () => {
   await rm(storageRoot, { recursive: true, force: true });
 });
 
-function makeClient(): AgoraClient {
-  return new AgoraClient({
+function makeClient(): PangolinClient {
+  return new PangolinClient({
     namespace: 'versioning-tests',
     compute: {},
     credentials: { none: new NoopCredentialProvider() },
@@ -79,7 +79,7 @@ describe('E2E: content-hash drives identity', () => {
     expect(b.contentHash).not.toBe(a.contentHash);
 
     // Both versions remain in storage (immutability).
-    const baseUri = `agora://versioning-tests/capability/cap`;
+    const baseUri = `pangolin://versioning-tests/capability/cap`;
     const versions = await client.storage.list(baseUri);
     const hashes = versions.map((v) => v.contentHash);
     expect(hashes).toContain(a.contentHash);
@@ -129,7 +129,7 @@ describe('E2E: content-hash drives identity', () => {
     expect(reassigned.contentHash).not.toBe(sub.contentHash);
 
     // Both versions coexist in storage (§4.3 immutability).
-    const baseUri = `agora://versioning-tests/subagent/sub`;
+    const baseUri = `pangolin://versioning-tests/subagent/sub`;
     const versions = await client.storage.list(baseUri);
     const hashes = versions.map((v) => v.contentHash);
     expect(hashes).toContain(sub.contentHash);

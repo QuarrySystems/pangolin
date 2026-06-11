@@ -1,9 +1,9 @@
 // examples/hello-world/src/index.ts
 //
 // The §4.4 Hello World worked example. End-to-end runnable demonstration
-// of the AgoraClient against the local-docker + local-storage providers:
+// of the PangolinClient against the local-docker + local-storage providers:
 //
-//   1. Construct AgoraClient with the local stack (no AWS deps).
+//   1. Construct PangolinClient with the local stack (no AWS deps).
 //   2. Register a capability, a subagent, and an env bundle.
 //   3. Dispatch the subagent.
 //   4. Print the resolved bundle refs and the captured stdout.
@@ -19,19 +19,19 @@
 // invoked directly (e.g. `tsx src/index.ts`).
 
 import {
-  AgoraClient,
+  PangolinClient,
   NoopCredentialProvider,
   StdoutResultSink,
-} from '@quarry-systems/agora-client';
-import { LocalStorageProvider } from '@quarry-systems/agora-storage-local';
-import { LocalDockerProvider } from '@quarry-systems/agora-providers-local-docker';
+} from '@quarry-systems/pangolin-client';
+import { LocalStorageProvider } from '@quarry-systems/pangolin-storage-local';
+import { LocalDockerProvider } from '@quarry-systems/pangolin-providers-local-docker';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 /**
- * Build the example's AgoraClient against a fresh tmp storage root.
+ * Build the example's PangolinClient against a fresh tmp storage root.
  *
  * Returned `cleanup` MUST be invoked (in a try/finally) to avoid leaking
  * the mkdtemp'd directory across runs — see the REFINEMENT note in the
@@ -42,11 +42,11 @@ import { pathToFileURL } from 'node:url';
  */
 export async function buildClient(): Promise<{
   storageRoot: string;
-  client: AgoraClient;
+  client: PangolinClient;
   cleanup: () => Promise<void>;
 }> {
-  const storageRoot = await mkdtemp(join(tmpdir(), 'agora-hello-'));
-  const client = new AgoraClient({
+  const storageRoot = await mkdtemp(join(tmpdir(), 'pangolin-hello-'));
+  const client = new PangolinClient({
     namespace: 'hello-world',
     // `allowUnpinnedImage: true` so the example can be re-run locally
     // against a freshly-built worker image without the user first
@@ -80,7 +80,7 @@ export async function main(): Promise<void> {
     await client.capabilities.register({
       name: 'echo-cap',
       files: {
-        'agora-setup.sh': '#!/bin/sh\necho "hello from agora-worker"\n',
+        'pangolin-setup.sh': '#!/bin/sh\necho "hello from pangolin-worker"\n',
       },
     });
     await client.subagent.register({
@@ -114,14 +114,14 @@ export async function main(): Promise<void> {
       subagent: 'echo',
       env: 'minimal',
       target: 'local',
-      workerImage: 'ghcr.io/quarrysystems/agora-worker:latest',
+      workerImage: 'ghcr.io/quarrysystems/pangolin-worker:latest',
     });
 
     console.log('\n=== resolved ===\n' + JSON.stringify(result.resolved, null, 2));
     console.log('\n=== stdout ===\n' + result.stdout);
 
     // Surface the dispatch OUTCOME honestly. `result.stdout` above is the
-    // worker's structured-log stream, and the bundled `agora-setup.sh` runs
+    // worker's structured-log stream, and the bundled `pangolin-setup.sh` runs
     // (and prints its greeting) regardless of whether the *runtime adapter*
     // step then succeeds. So printing stdout alone is NOT evidence of success.
     // A non-zero `exitCode` — or an infrastructural `failure` block — means the

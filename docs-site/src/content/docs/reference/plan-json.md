@@ -6,21 +6,21 @@ sidebar:
 ---
 
 A `plan.json` describes a DAG of agent tasks submitted to the orchestrator via
-`agora orch submit`. It deserializes into a `Run` — a set of `WorkItem`s plus
+`pangolin orch submit`. It deserializes into a `Run` — a set of `WorkItem`s plus
 their edges, placed on a named queue. The schema below is the `Run` /
-`WorkItem` shape from `agora-orchestrator`.
+`WorkItem` shape from `pangolin-orchestrator`.
 
 ## The `Run` envelope
 
 ```typescript
 interface Run {
-  id: string;        // run id (also overridable via `agora orch submit --queue` for queue)
+  id: string;        // run id (also overridable via `pangolin orch submit --queue` for queue)
   queue: string;     // named queue this run is placed on
   items: WorkItem[]; // the DAG nodes
 }
 ```
 
-`agora orch submit --queue <name>` overrides the plan's `queue` at submit time.
+`pangolin orch submit --queue <name>` overrides the plan's `queue` at submit time.
 
 ## `WorkItem`
 
@@ -71,7 +71,7 @@ How a binding flows through a run:
 
 - **At submit**, every `needs[*].from` is auto-unioned into `depends_on` —
   you cannot wire a need without its dependency, and the engine's readiness
-  logic is unchanged. `agora orch validate` (and the submit path itself) checks
+  logic is unchanged. `pangolin orch validate` (and the submit path itself) checks
   the wiring statically: references exist, the selected product is declared,
   edge-type tags match, no cycles.
 - **At fire time**, the engine resolves each binding against the now-`done`
@@ -83,7 +83,7 @@ How a binding flows through a run:
   block) reads them from there. What to *do* with the bytes (e.g. `git apply
   inputs/patch.diff`) is a pack/setup concern, not the seam's.
 - **In the audit trail**, the consumed refs are sealed into the item's
-  dispatch manifest at fire, and [`agora verify`](/agora/reference/cli/#agora-verify)'s
+  dispatch manifest at fire, and [`pangolin verify`](/pangolin/reference/cli/#pangolin-verify)'s
   provenance-closure check proves every consumed ref equals a sealed output
   product of a verified item in the same run — byte-level provenance with no
   blob re-fetch.
@@ -96,8 +96,8 @@ rather than free-form worker input: `subagent`, `env`, `workerInput`,
 `inputs.pipeline` to a registered pipeline ref pins a **declared
 block-pipeline**: the worker fetches the spec by its content hash, re-validates
 it, and runs *that* pipeline instead of the default execution steps — see
-[Dispatch lifecycle → The block-pipeline runner](/agora/reference/dispatch-lifecycle/#the-block-pipeline-runner)
-and [`agora pipeline`](/agora/reference/cli/#agora-pipeline).
+[Dispatch lifecycle → The block-pipeline runner](/pangolin/reference/dispatch-lifecycle/#the-block-pipeline-runner)
+and [`pangolin pipeline`](/pangolin/reference/cli/#pangolin-pipeline).
 
 :::note
 The lock field is `resourceLocks`, **not** `locks`. Some prose (including the
@@ -108,7 +108,7 @@ actual JSON key and the `WorkItem` interface field are `resourceLocks`.
 ## Worked example
 
 This is
-[`examples/offload-fanout/plan.json`](https://github.com/quarrysystems/agora/tree/main/examples/offload-fanout/plan.json)
+[`examples/offload-fanout/plan.json`](https://github.com/quarrysystems/pangolin/tree/main/examples/offload-fanout/plan.json)
 — a four-item fan-out: three independent edits (disjoint locks, run in parallel)
 followed by a `verify` that depends on all three.
 
@@ -152,7 +152,7 @@ followed by a `verify` that depends on all three.
 ## Worked example: typed-product handoff
 
 This is
-[`examples/handoff-dag/plan.json`](https://github.com/quarrysystems/agora/tree/main/examples/handoff-dag/plan.json)
+[`examples/handoff-dag/plan.json`](https://github.com/quarrysystems/pangolin/tree/main/examples/handoff-dag/plan.json)
 — a two-item dependent edit: `apply-patch` consumes `edit-a`'s patch artifact
 via `needs`, so the second worker materializes the first worker's diff at
 `inputs/patch` before its agent runs. Note `apply-patch` declares no
@@ -196,9 +196,9 @@ internal run-state fields (`ItemState`), not part of the submitted plan.
 ## Subagent / env / target bindings
 
 A `WorkItem` itself does not pin a target, env bundle, or worker image —
-those bindings live on the **executor** configured in `agora.config`, not in
+those bindings live on the **executor** configured in `pangolin.config`, not in
 the plan. For the `dispatch` executor (`DispatchExecutor`), the
-[`agora.config.mjs`](/agora/reference/config/) wires `target`, `workerImage`,
+[`pangolin.config.mjs`](/pangolin/reference/config/) wires `target`, `workerImage`,
 and `secrets`; the plan item supplies only `inputs.subagent` and the
 per-item `workerInput`. This keeps the plan portable across environments —
 the same `plan.json` runs locally or against Fargate depending solely on the

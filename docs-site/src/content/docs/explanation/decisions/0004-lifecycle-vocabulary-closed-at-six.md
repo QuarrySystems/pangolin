@@ -3,12 +3,12 @@ title: "ADR-0004: Lifecycle event vocabulary is closed at six, extensible at min
 description: "Lifecycle event vocabulary is closed at six kinds for MVP and extensible at minor versions."
 status: accepted
 date: 2026-05-21
-deciders: agora-mvp-design
+deciders: pangolin-scale-mvp-design
 ---
 
 ## Context
 
-Agora emits lifecycle events for each dispatch (`dispatch.started`, `dispatch.finished`, etc.). These events flow to integrator-supplied telemetry hooks and downstream channels (ChannelAdapter implementations, notification routers, audit logs). The shape of the event vocabulary affects two distinct populations:
+Pangolin Scale emits lifecycle events for each dispatch (`dispatch.started`, `dispatch.finished`, etc.). These events flow to integrator-supplied telemetry hooks and downstream channels (ChannelAdapter implementations, notification routers, audit logs). The shape of the event vocabulary affects two distinct populations:
 
 - **Event producers** (the worker, the SDK, the MCP layer): need a stable, documented set of event kinds they are permitted to emit so that downstream consumers can rely on the contract.
 - **Event consumers** (integrator telemetry hooks, channel adapters, notification routers): need to handle every event kind they receive, and must not break when new kinds are introduced over time.
@@ -19,7 +19,7 @@ That experience also surfaced a more general point: the lifecycle vocabulary can
 
 ## Decision
 
-The lifecycle event vocabulary is closed at six kinds for MVP and extensible at minor-version boundaries. Per §10.1 of `docs/superpowers/specs/2026-05-21-agora-mvp-design.md`:
+The lifecycle event vocabulary is closed at six kinds for MVP and extensible at minor-version boundaries. Per §10.1 of `docs/superpowers/specs/2026-05-21-pangolin-scale-mvp-design.md`:
 
 > **Lifecycle event vocabulary is closed at six for MVP, extensible at minor versions.** Five-event closed-vocabulary commitment retired. Sixth event (`dispatch.needs_input`) added because squeezing it into `dispatch.finished` muddied downstream semantics. Future kinds (potentially `dispatch.heartbeat`, `dispatch.warning`) reserved. Integrators implementing telemetry hooks MUST handle unknown event kinds gracefully (log + skip).
 
@@ -39,7 +39,7 @@ What becomes easier:
 What becomes harder:
 
 - Integrators must explicitly handle the unknown-event-kind case in their telemetry hooks. Failing to do so makes them fragile against any future minor-version event addition. Mitigation: the contract is documented in the spec and called out in integrator-facing guides; a reference telemetry-hook implementation includes the log-and-skip pattern.
-- The producer side must enforce the closed vocabulary in MVP: emitting a seventh kind in v0.1 would silently corrupt the contract. Mitigation: event-kind constants live in a single exported enum in `agora-core`; producers reference the enum rather than open-coding strings.
+- The producer side must enforce the closed vocabulary in MVP: emitting a seventh kind in v0.1 would silently corrupt the contract. Mitigation: event-kind constants live in a single exported enum in `pangolin-core`; producers reference the enum rather than open-coding strings.
 - Forward-compatibility means the vocabulary will grow over time, which makes the integrator-facing contract slightly less stable than a permanently-frozen vocabulary would be. This is the cost of admitting up front that we do not know every future event need.
 
 Trade-offs:

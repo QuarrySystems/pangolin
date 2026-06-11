@@ -1,15 +1,15 @@
 ---
-title: agora
+title: Pangolin Scale
 description: Secure, deterministic, auditable execution of AI agents.
 template: splash
 hero:
   tagline: Submit a plan of agent tasks — they run in dependency order and fan out safely under resource locks. Get back reviewable patches and a verifiable audit trail — tamper-detecting by default, tamper-evident at the S3 Object Lock tier.
   actions:
     - text: Orchestrate a task plan
-      link: /agora/tutorials/first-offload-run/
+      link: /pangolin/tutorials/first-offload-run/
       icon: right-arrow
     - text: View on GitHub
-      link: https://github.com/quarrysystems/agora
+      link: https://github.com/quarrysystems/pangolin
       variant: minimal
       icon: external
 ---
@@ -20,23 +20,23 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
 
 <CardGrid>
   <Card title="Dispatch one agent" icon="rocket">
-    Wire `AgoraClient` into your app: register a capability, a subagent, and an env, then dispatch and read the result.
-    [Start the dispatch tutorial →](/agora/tutorials/first-dispatch/)
+    Wire `PangolinClient` into your app: register a capability, a subagent, and an env, then dispatch and read the result.
+    [Start the dispatch tutorial →](/pangolin/tutorials/first-dispatch/)
   </Card>
   <Card title="Orchestrate a task plan" icon="puzzle">
-    Run many agent tasks unattended with `agora orch`: tasks execute in dependency order, fan out in parallel under resource locks, and each drops a reviewable patch — with a verifiable audit bundle for the whole run.
-    [Run your first offload →](/agora/tutorials/first-offload-run/)
+    Run many agent tasks unattended with `pangolin orch`: tasks execute in dependency order, fan out in parallel under resource locks, and each drops a reviewable patch — with a verifiable audit bundle for the whole run.
+    [Run your first offload →](/pangolin/tutorials/first-offload-run/)
   </Card>
   <Card title="Extend a provider" icon="setting">
-    Plug in a new compute, storage, credential, or result-sink backend behind agora's seams.
-    [Write a provider →](/agora/how-to/write-a-provider/)
+    Plug in a new compute, storage, credential, or result-sink backend behind Pangolin Scale's seams.
+    [Write a provider →](/pangolin/how-to/write-a-provider/)
   </Card>
   <Card title="Evaluate / is it safe?" icon="approve-check">
-    What agora is, how agents are sandboxed, the privilege boundary, and what the BSL license means for you.
-    [Read the architecture →](/agora/explanation/architecture-overview/)
+    What Pangolin Scale is, how agents are sandboxed, the privilege boundary, and what the BSL license means for you.
+    [Read the architecture →](/pangolin/explanation/architecture-overview/)
   </Card>
-  <Card title="Ship agora in a product" icon="seti:license">
-    Embedding agora in a product for your customers, or need enterprise compliance modules and support? Start a white-glove pilot.
-    [Commercial & pilots →](/agora/commercial/)
+  <Card title="Ship Pangolin Scale in a product" icon="seti:license">
+    Embedding Pangolin Scale in a product for your customers, or need enterprise compliance modules and support? Start a white-glove pilot.
+    [Commercial & pilots →](/pangolin/commercial/)
   </Card>
 </CardGrid>

@@ -1,5 +1,5 @@
 // DRY: deep mechanics are owned elsewhere and are NOT re-tested here:
-//   needs wiring / auto-union / resolve-at-fire -> packages/agora-orchestrator/test/needs*.test.ts
+//   needs wiring / auto-union / resolve-at-fire -> packages/pangolin-orchestrator/test/needs*.test.ts
 //   audit verify / DB-tamper-fails / guarantee tier -> .../test/audit/acceptance.int.test.ts
 //   verifyBundle handoff closure -> .../test/audit/verify-bundle.test.ts
 //   OperationsApi.audit read + errors -> .../test/operations-api.test.ts
@@ -14,7 +14,7 @@ import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { APPLY_PATCH_SETUP_SH } from '../src/capabilities.js';
 import {
-  AgoraOrchestrator,
+  PangolinOrchestrator,
   SqliteRunStateStore,
   ManualTrigger,
   AuditLog,
@@ -25,8 +25,8 @@ import {
   OperationsApi,
   buildManifest,
   verifyBundle,
-} from '@quarry-systems/agora-orchestrator';
-import type { Run, Executor, FireContext } from '@quarry-systems/agora-orchestrator';
+} from '@quarry-systems/pangolin-orchestrator';
+import type { Run, Executor, FireContext } from '@quarry-systems/pangolin-orchestrator';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PLAN_PATH = resolve(__dirname, '../plan.json');
@@ -38,7 +38,7 @@ const PLAN_PATH = resolve(__dirname, '../plan.json');
 describe('handoff-dag example', () => {
   it('apply-patch setup script initializes git repo before applying the patch', () => {
     // The worker workspace is a fresh mkdtemp'd directory — not a git repo.
-    // agora-setup.sh must run `git init` before `git apply`, otherwise `git apply`
+    // pangolin-setup.sh must run `git init` before `git apply`, otherwise `git apply`
     // exits non-zero and the worker fails.
     expect(APPLY_PATCH_SETUP_SH).toContain('git init');
     const initIdx = APPLY_PATCH_SETUP_SH.indexOf('git init');
@@ -112,13 +112,13 @@ describe('handoff-dag example', () => {
           inputRefs,
         });
 
-        const manifestRef = 'agora://manifests/' + dispatchHash;
+        const manifestRef = 'pangolin://manifests/' + dispatchHash;
         blobs.set(manifestRef, bytes);
 
         // For edit-a: produce a content-addressed patch artifact
         if (item.id === 'edit-a') {
           const patchBytes = enc({ type: 'patch', content: '--- a/file\n+++ b/file\n@@\n-old\n+new' });
-          const resultRef = 'agora://artifacts/patch-' + dispatchHash;
+          const resultRef = 'pangolin://artifacts/patch-' + dispatchHash;
           blobs.set(resultRef, patchBytes);
           resultRefByDispatchHash.set(dispatchHash, resultRef);
         }
@@ -139,7 +139,7 @@ describe('handoff-dag example', () => {
     try {
       const anchor = new LocalAnchor(store);
       const auditLog = new AuditLog({ store, signer: NoneSigner, anchor });
-      const orchestrator = new AgoraOrchestrator({
+      const orchestrator = new PangolinOrchestrator({
         store,
         executors: { dispatch: fakeExecutor },
         triggers: { manual: new ManualTrigger() },
@@ -185,7 +185,7 @@ describe('handoff-dag example', () => {
       expect(applyStatus?.manifestRef).toBeDefined();
 
       // Publish audit export via MailboxSubmissionTransport
-      const tmpDir = await mkdtemp(join(tmpdir(), 'agora-handoff-test-'));
+      const tmpDir = await mkdtemp(join(tmpdir(), 'pangolin-handoff-test-'));
       try {
         const mbox = new LocalDirMailbox(tmpDir);
         const transport = new MailboxSubmissionTransport(mbox);

@@ -23,7 +23,7 @@ index c637095..8eed278 100644
 +to the worker, which materializes it under `inputs/` before the agent
 +runs (e.g. `inputs/patch.diff`). Both consumed `inputRefs` and produced
 +`outputRefs` are sealed into the dispatch manifest and the audit
-+evidence, and `agora verify` proves **provenance closure** — every
++evidence, and `pangolin verify` proves **provenance closure** — every
 +consumed input ref must be a sealed product of a completed task in the
 +same run — surfaced as a fifth `handoff` check row alongside the
 +existing chain / root / signature / anchor checks. See

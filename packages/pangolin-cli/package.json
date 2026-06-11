@@ -1,0 +1,43 @@
+{
+  "name": "@quarry-systems/pangolin-cli",
+  "version": "0.1.0",
+  "license": "BUSL-1.1",
+  "description": "The pangolin binary — a thin CLI over PangolinClient that resolves pangolin.config.{ts,js,mjs} and dispatches to subcommands.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/QuarrySystems/pangolin.git",
+    "directory": "packages/pangolin-cli"
+  },
+  "homepage": "https://quarrysystems.github.io/pangolin",
+  "bugs": {
+    "url": "https://github.com/QuarrySystems/pangolin/issues"
+  },
+  "bin": {
+    "pangolin": "dist/index.js"
+  },
+  "scripts": {
+    "lint": "eslint src --ext .ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@quarry-systems/pangolin-client": "workspace:*",
+    "@quarry-systems/pangolin-core": "workspace:*",
+    "@quarry-systems/pangolin-orchestrator": "workspace:*",
+    "commander": "^12.0.0",
+    "yaml": "^2.0.0"
+  },
+  "devDependencies": {}
+}

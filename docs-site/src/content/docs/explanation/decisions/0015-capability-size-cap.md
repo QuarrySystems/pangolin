@@ -3,7 +3,7 @@ title: "ADR-0015: Capability size cap is 50 MiB, rejected at register() time"
 description: "Capability size cap is 50 MiB, rejected synchronously at register() time."
 status: accepted
 date: 2026-05-21
-deciders: agora-mvp-design
+deciders: pangolin-scale-mvp-design
 ---
 
 ## Context
@@ -38,12 +38,12 @@ moment they can do something about it without losing work.
 
 ## Decision
 
-From §10.1 of `docs/superpowers/specs/2026-05-21-agora-mvp-design.md`:
+From §10.1 of `docs/superpowers/specs/2026-05-21-pangolin-scale-mvp-design.md`:
 
 > **Capability size cap is 50 MiB, rejected at `register()` time.** Above
 > this, integrators are probably packaging the wrong thing (model files,
 > vendor binaries, fat library bundles); those should be fetched at runtime
-> via `agora-setup.sh`, not baked into the capability. No soft-warning tier
+> via `pangolin-setup.sh`, not baked into the capability. No soft-warning tier
 > in MVP (e.g., warn above 10 MiB); add one in v0.2 if integrators
 > consistently hit unintentional bloat.
 
@@ -52,7 +52,7 @@ The cap is the sum of all `files` values in a single
 any content and throws `CapabilityTooLargeError` if the total exceeds
 50 MiB. No partial upload, no async failure, no worker-time surprise.
 
-The escape hatch is the existing `agora-setup.sh` mechanism (§6.3): a
+The escape hatch is the existing `pangolin-setup.sh` mechanism (§6.3): a
 capability ships a small setup script that fetches the large payload from
 the integrator's chosen storage at dispatch time. The capability bundle
 stays small (the script, configuration, and any small static assets);
@@ -77,7 +77,7 @@ What becomes harder:
 
 - Use cases that genuinely need large embedded assets (a baked-in model
   weight file, a large reference corpus, a vendored binary) cannot ship
-  the asset inside the capability. Integrators write an `agora-setup.sh`
+  the asset inside the capability. Integrators write a `pangolin-setup.sh`
   that pulls the asset at runtime, accepting one additional network hop
   per cold dispatch in exchange for the smaller capability bundle.
 - There is no soft-warning tier. Integrators may bloat capabilities up to
@@ -87,7 +87,7 @@ What becomes harder:
 
 Trade-offs:
 
-- We pay one additional indirection (`agora-setup.sh` pulling large
+- We pay one additional indirection (`pangolin-setup.sh` pulling large
   assets) on dispatches that need bulk content, in exchange for keeping
   the capability registration surface fast and the storage backend cheap.
 - The 50 MiB number is a deliberate over-shoot of typical capability

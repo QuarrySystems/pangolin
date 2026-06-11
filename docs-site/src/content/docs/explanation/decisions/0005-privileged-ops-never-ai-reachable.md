@@ -1,19 +1,19 @@
 ---
 title: "ADR-0005: Privileged operations are never reachable through an AI tool surface"
-description: "Privileged deploy-time operations (register, assign) are never reachable through agora-mcp."
+description: "Privileged deploy-time operations (register, assign) are never reachable through pangolin-mcp."
 status: accepted
 date: 2026-05-21
-deciders: agora-mvp-design
+deciders: pangolin-scale-mvp-design
 ---
 
 ## Context
 
-The agora SDK splits its operations into two classes: deploy-time operations that
+The Pangolin Scale SDK splits its operations into two classes: deploy-time operations that
 create or modify executable artifacts (capabilities, subagents, env bundles), and
 run-time operations that compose existing artifacts into dispatches. The question
 is whether the deploy-time operations — `capabilities.register()`,
 `subagent.register()` / `assign()`, and `env.register()` — should be exposed
-through the `agora-mcp` server alongside the run-time operations.
+through the `pangolin-mcp` server alongside the run-time operations.
 
 Exposing them would be ergonomic: an orchestrator LLM could provision its own
 capabilities and subagents on demand. But three distinct prompt-injection risks
@@ -48,7 +48,7 @@ illustrations of the same principle, not three independent rules.
 
 From §10.1:
 
-> **Privileged operations are never reachable through `agora-mcp`.**
+> **Privileged operations are never reachable through `pangolin-mcp`.**
 > `capabilities.register()`, `subagent.register()` / `assign()`, and
 > `env.register()` are CLI- and TypeScript-only. The MCP surface exposes only
 > run-time, orchestration-safe operations (dispatch + read-only catalog
@@ -65,32 +65,32 @@ pipelines (deploy manifest from §4.5).
 
 This pattern mirrors the AWS IAM model: lambdas don't create their own
 execution roles; an admin provisions roles and lambdas reference them. The
-agora pattern is the same — artifacts are provisioned, dispatches reference
+Pangolin Scale pattern is the same — artifacts are provisioned, dispatches reference
 them.
 
 The enforcement is **architectural, not policy**. A CI step (§9, end-to-end
-test 14) runs the agora-mcp server in test mode, dumps its exposed tool
+test 14) runs the pangolin-mcp server in test mode, dumps its exposed tool
 names, and asserts the set equals exactly the six run-time tool names from
-§4.6: `{agora_dispatch, agora_dispatch_describe, agora_dispatch_cancel,
-agora_capabilities_list, agora_subagents_list, agora_envs_list}`. Any
-addition is a CI failure. Any tool name matching `agora_*_register` or
-`agora_*_assign` is a CI failure regardless of intent. Without this check
+§4.6: `{pangolin_dispatch, pangolin_dispatch_describe, pangolin_dispatch_cancel,
+pangolin_capabilities_list, pangolin_subagents_list, pangolin_envs_list}`. Any
+addition is a CI failure. Any tool name matching `pangolin_*_register` or
+`pangolin_*_assign` is a CI failure regardless of intent. Without this check
 the security boundary would be policy, not architecture, and policy decays
 as code evolves.
 
 ## Consequences
 
 - Orchestrator agents cannot bootstrap new capabilities or subagents on
-  demand. A human (or human-reviewed CI pipeline via the `agora-manifest.yaml`
+  demand. A human (or human-reviewed CI pipeline via the `pangolin-manifest.yaml`
   reconciler) must provision the catalog before any dispatch can use it.
-- The `agora-mcp` tool surface is small and stable: six run-time tools, period.
+- The `pangolin-mcp` tool surface is small and stable: six run-time tools, period.
   Future additions go through human review of this decision.
 - Integrators who want self-modifying orchestration workflows are blocked at
   the MCP boundary by design. The escape hatch is to write a TypeScript
-  orchestrator that uses `agora-client` directly — which means a human wrote
+  orchestrator that uses `pangolin-client` directly — which means a human wrote
   the orchestration code, which is the trust model we want.
 - The CI allowlist check is load-bearing. If it ever regresses, the security
   boundary collapses silently. Treat that test as a tier-1 invariant.
-- Auditors reading the agora codebase can verify the boundary by inspecting
-  one file (the agora-mcp tool registration) plus the CI check. The proof is
+- Auditors reading the Pangolin Scale codebase can verify the boundary by inspecting
+  one file (the pangolin-mcp tool registration) plus the CI check. The proof is
   local and shallow, not "read the whole codebase and convince yourself."

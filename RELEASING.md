@@ -9,7 +9,7 @@ not yet in place (see "Future" below).
 1. **Land everything on `main`** and pull it locally.
 2. **Bump the version** in every publishable `packages/*/package.json` to the new
    version (they must match so the `workspace:*` deps rewrite consistently on
-   publish). Keep `agora-core` and its dependents in sync.
+   publish). Keep `pangolin-core` and its dependents in sync.
 3. **Update [`CHANGELOG.md`](./CHANGELOG.md):** move the relevant notes from
    `[Unreleased]` into a new `## [x.y.z] - YYYY-MM-DD` section, and add the link
    references at the bottom.
@@ -26,12 +26,12 @@ not yet in place (see "Future" below).
    mid-batch, re-run it and already-published versions are skipped.
 7. **Tag and push** the annotated tag at the released commit:
    ```sh
-   git tag -a vX.Y.Z -m "agora vX.Y.Z"
+   git tag -a vX.Y.Z -m "pangolin-scale vX.Y.Z"
    git push origin vX.Y.Z
    ```
 8. **Create the GitHub release** from the tag (notes sourced from the changelog):
    ```sh
-   gh release create vX.Y.Z --title "agora vX.Y.Z" --notes-file <notes> --latest
+   gh release create vX.Y.Z --title "pangolin-scale vX.Y.Z" --notes-file <notes> --latest
    ```
 
 ## Notes

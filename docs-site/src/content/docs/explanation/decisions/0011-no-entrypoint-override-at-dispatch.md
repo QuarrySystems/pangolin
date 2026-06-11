@@ -1,14 +1,14 @@
 ---
 title: "ADR-0011: No entrypoint override at dispatch time"
-description: "No entrypoint override at dispatch time; customization goes through worker images or agora-setup.sh."
+description: "No entrypoint override at dispatch time; customization goes through worker images or pangolin-setup.sh."
 status: accepted
 date: 2026-05-21
-deciders: agora-mvp-design
+deciders: pangolin-scale-mvp-design
 ---
 
 ## Context
 
-Container platforms commonly let callers override the container's entrypoint per-invocation. Translated to agora, that would mean `DispatchWork` carrying an optional `entrypoint?: string[]` field that, when set, replaces the worker image's default ENTRYPOINT for that one dispatch.
+Container platforms commonly let callers override the container's entrypoint per-invocation. Translated to Pangolin Scale, that would mean `DispatchWork` carrying an optional `entrypoint?: string[]` field that, when set, replaces the worker image's default ENTRYPOINT for that one dispatch.
 
 Two patterns push integrators toward asking for this:
 
@@ -17,26 +17,26 @@ Two patterns push integrators toward asking for this:
 
 Counter-pressures:
 
-- The worker image is the agora trust root for everything below `RuntimeAdapter` (fetch, integrity verification, overlay engine, secrets, env, setup, channel, notifications, lifecycle). Overriding its entrypoint at dispatch time means a caller can replace the entire boot sequence with arbitrary commands — bypassing integrity checks, lifecycle emissions, sentinel-file conventions (§6.9), and notification setup.
+- The worker image is the Pangolin Scale trust root for everything below `RuntimeAdapter` (fetch, integrity verification, overlay engine, secrets, env, setup, channel, notifications, lifecycle). Overriding its entrypoint at dispatch time means a caller can replace the entire boot sequence with arbitrary commands — bypassing integrity checks, lifecycle emissions, sentinel-file conventions (§6.9), and notification setup.
 - Per-dispatch entrypoint overrides are not content-addressable: there is no hash to pin, no audit trail of which override ran where, no way to reproduce a past run by replaying its artifacts. The override lives only in the dispatch call's parameters, which decay quickly.
 - The two real needs the override would address are each handled by an existing, better-shaped mechanism:
-  - **Container-level customization** is handled by extending the worker image. Integrators who need a custom binary, sidecar, or base image build their own worker image FROM the agora worker, register it once, and dispatches reference it by name. The customization is versioned with the image and audited with the image.
-  - **Per-dispatch setup** is handled by `agora-setup.sh` inside capability content. The setup script is part of the capability bundle, content-hashed alongside the rest, fetched and verified by the worker, and executed in a documented stage of the boot sequence.
+  - **Container-level customization** is handled by extending the worker image. Integrators who need a custom binary, sidecar, or base image build their own worker image FROM the Pangolin Scale worker, register it once, and dispatches reference it by name. The customization is versioned with the image and audited with the image.
+  - **Per-dispatch setup** is handled by `pangolin-setup.sh` inside capability content. The setup script is part of the capability bundle, content-hashed alongside the rest, fetched and verified by the worker, and executed in a documented stage of the boot sequence.
 
-The decision turns on whether agora preserves "the worker image and capability bundle are the only sources of execution behavior" as an invariant, or admits a per-dispatch escape hatch that quietly erodes it.
+The decision turns on whether Pangolin Scale preserves "the worker image and capability bundle are the only sources of execution behavior" as an invariant, or admits a per-dispatch escape hatch that quietly erodes it.
 
 ## Decision
 
-From §10.1 of `docs/superpowers/specs/2026-05-21-agora-mvp-design.md`:
+From §10.1 of `docs/superpowers/specs/2026-05-21-pangolin-scale-mvp-design.md`:
 
-> **No `entrypoint` override at dispatch time.** Container-level customization is handled by extending the worker image. Per-dispatch setup is handled by `agora-setup.sh` content in capability bundles — versioned, content-addressable, audit-friendly. Dispatch-time entrypoint override would lose those properties.
+> **No `entrypoint` override at dispatch time.** Container-level customization is handled by extending the worker image. Per-dispatch setup is handled by `pangolin-setup.sh` content in capability bundles — versioned, content-addressable, audit-friendly. Dispatch-time entrypoint override would lose those properties.
 
-`DispatchWork` carries no `entrypoint` field in MVP. The worker image's ENTRYPOINT is the only entry path; capability `agora-setup.sh` is the only per-dispatch customization seam.
+`DispatchWork` carries no `entrypoint` field in MVP. The worker image's ENTRYPOINT is the only entry path; capability `pangolin-setup.sh` is the only per-dispatch customization seam.
 
 Concretely:
 
-- Integrators who want a custom container build a custom worker image (FROM the official agora worker, layer their additions, push to their registry, register the image once) and reference it by name in dispatches.
-- Integrators who want per-dispatch setup ship that logic as part of the capability bundle's `agora-setup.sh`. The script is content-hashed with the rest of the capability, runs in the documented setup stage of the worker's boot sequence, and is auditable by inspecting the capability artifact.
+- Integrators who want a custom container build a custom worker image (FROM the official Pangolin Scale worker, layer their additions, push to their registry, register the image once) and reference it by name in dispatches.
+- Integrators who want per-dispatch setup ship that logic as part of the capability bundle's `pangolin-setup.sh`. The script is content-hashed with the rest of the capability, runs in the documented setup stage of the worker's boot sequence, and is auditable by inspecting the capability artifact.
 
 ## Consequences
 
@@ -50,7 +50,7 @@ What stays true:
 What integrators carry instead:
 
 - Custom container needs become "register a custom worker image once." Heavier first-time effort than passing a one-off entrypoint, but the customization is then versioned, named, and reusable.
-- Per-dispatch setup needs become "extend the capability's `agora-setup.sh`." Setup edits move at the cadence of capability versioning, which is the right cadence for behavior that affects every dispatch using that capability.
+- Per-dispatch setup needs become "extend the capability's `pangolin-setup.sh`." Setup edits move at the cadence of capability versioning, which is the right cadence for behavior that affects every dispatch using that capability.
 - One-off "just this dispatch is different" cases require either a new capability version or a new worker image. There is no shortcut. This is intended — one-off boot-behavior changes that don't justify a versioned artifact also don't justify the trust they would receive.
 
 Trade-offs:

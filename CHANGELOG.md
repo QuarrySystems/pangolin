@@ -7,7 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 All packages are versioned in lockstep; this file is the changelog for the whole
 workspace. See [RELEASING.md](./RELEASING.md) for how a release is cut.
 
-## [Unreleased]
+## [Unreleased] — Renamed Agora → Pangolin Scale
+
+### Changed
+
+- **Project renamed from Agora to Pangolin Scale.** All package names change from
+  `@quarry-systems/agora-*` to `@quarry-systems/pangolin-*` (13 packages). The CLI
+  binary changes from `agora` to `pangolin`; config files change from
+  `agora.config.*` to `pangolin.config.*`; the worker image changes from
+  `agora-worker` to `pangolin-worker`; the repo URL changes from
+  `github.com/QuarrySystems/agora` to `.../pangolin-scale`; the docs URL changes
+  from `quarrysystems.github.io/agora` to `.../pangolin-scale`. Historical
+  changelog entries below this line retain their original "agora" text as
+  intentional residue.
+
+## [Unreleased] — Pre-rename
 
 ### Added
 
@@ -158,5 +172,5 @@ published to npm under `@quarry-systems/agora-*`.
 - **Effect-tier policy** is computed but not yet enforced.
 - **Pre-1.0 (`0.x`):** interfaces may change between minor versions.
 
-[Unreleased]: https://github.com/QuarrySystems/agora/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/QuarrySystems/agora/releases/tag/v0.1.0
+[Unreleased]: https://github.com/QuarrySystems/pangolin/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/QuarrySystems/pangolin/releases/tag/v0.1.0

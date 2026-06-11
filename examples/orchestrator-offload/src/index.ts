@@ -1,7 +1,7 @@
 // Orchestrator-offload battle-test / on-ramp.
 //
 // Drives the FULL orchestrator path end-to-end against a real container:
-//   AgoraOrchestrator.tick → DispatchExecutor.fire → client.dispatch.fire
+//   PangolinOrchestrator.tick → DispatchExecutor.fire → client.dispatch.fire
 //   → local-docker worker runs the subagent → reconcile → WorkItemResult.
 //
 // Where examples/hello-world exercises a single `client.dispatch(...)`, this
@@ -10,7 +10,7 @@
 //
 // Prerequisites (a real cold-run, not a unit test):
 //   - Docker reachable (local Desktop, or DOCKER_HOST → a remote daemon).
-//   - The worker image pullable/pinned: ghcr.io/quarrysystems/agora-worker:latest.
+//   - The worker image pullable/pinned: ghcr.io/quarrysystems/pangolin-worker:latest.
 //   - ANTHROPIC_API_KEY in the environment (the worker invokes `claude --print`).
 //     Run via:  pnpm start:env   (reads ../../.env)   or export the var and `pnpm start`.
 
@@ -18,21 +18,21 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  AgoraClient,
+  PangolinClient,
   NoopCredentialProvider,
   StdoutResultSink,
-} from '@quarry-systems/agora-client';
-import { LocalStorageProvider } from '@quarry-systems/agora-storage-local';
-import { LocalDockerProvider } from '@quarry-systems/agora-providers-local-docker';
-import { LocalSecretStore } from '@quarry-systems/agora-secret-store';
+} from '@quarry-systems/pangolin-client';
+import { LocalStorageProvider } from '@quarry-systems/pangolin-storage-local';
+import { LocalDockerProvider } from '@quarry-systems/pangolin-providers-local-docker';
+import { LocalSecretStore } from '@quarry-systems/pangolin-secret-store';
 import {
-  AgoraOrchestrator,
+  PangolinOrchestrator,
   SqliteRunStateStore,
   ManualTrigger,
   DispatchExecutor,
-} from '@quarry-systems/agora-orchestrator';
+} from '@quarry-systems/pangolin-orchestrator';
 
-const WORKER_IMAGE = 'ghcr.io/quarrysystems/agora-worker:latest';
+const WORKER_IMAGE = 'ghcr.io/quarrysystems/pangolin-worker:latest';
 const RUN_TIMEOUT_MS = 180_000; // a real claude run can take a while; poll up to 3 min
 const TICK_INTERVAL_MS = 2_000;
 
@@ -45,17 +45,17 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const storageRoot = await mkdtemp(join(tmpdir(), 'agora-offload-'));
+  const storageRoot = await mkdtemp(join(tmpdir(), 'pangolin-offload-'));
   // Stable per-host secret store dir: fixed path so the LocalDockerProvider can
   // reliably bind-mount it into the container across ticks. Not a mkdtemp so
   // the dir survives between the fire() call and the worker reading from it.
-  const secretStoreDir = join(tmpdir(), 'agora-offload-secrets');
+  const secretStoreDir = join(tmpdir(), 'pangolin-offload-secrets');
   const secretStore = new LocalSecretStore({ dir: secretStoreDir });
   const store = new SqliteRunStateStore(); // :memory: — single-process orchestrator
 
   try {
     // 1. Wire a local-stack client (same shape as examples/hello-world).
-    const client = new AgoraClient({
+    const client = new PangolinClient({
       namespace: 'orchestrator-offload',
       compute: { 'local-docker': new LocalDockerProvider({ allowUnpinnedImage: true }) },
       credentials: { none: new NoopCredentialProvider() },
@@ -70,7 +70,7 @@ async function main(): Promise<void> {
     //    It travels as a deploy-time executor secret instead (step 3).
     await client.capabilities.register({
       name: 'echo-cap',
-      files: { 'agora-setup.sh': '#!/bin/sh\necho "hello from agora-offload worker"\n' },
+      files: { 'pangolin-setup.sh': '#!/bin/sh\necho "hello from pangolin-offload worker"\n' },
     });
     await client.subagent.register({
       name: 'echo',
@@ -82,7 +82,7 @@ async function main(): Promise<void> {
     //    AND secrets are the executor's deploy-time config (NOT the WorkItem's) — §10.6.
     //    The inline API-key secret stages via LocalSecretStore for file:// storage
     //    (no AWS) and is log-redacted by the worker; it never touches the WorkItem.
-    const orch = new AgoraOrchestrator({
+    const orch = new PangolinOrchestrator({
       store,
       executors: {
         dispatch: new DispatchExecutor({

@@ -3,10 +3,10 @@ title: Write a provider
 description: Implement a compute, storage, credential, or result-sink seam.
 ---
 
-Agora is provider-shaped: every backend concern — compute, credentials,
+Pangolin Scale is provider-shaped: every backend concern — compute, credentials,
 storage, results, channels, notifications — is behind an interface in
-`@quarry-systems/agora-core`. You plug in by implementing one of those
-interfaces and passing your instance to `new AgoraClient({...})`.
+`@quarry-systems/pangolin-core`. You plug in by implementing one of those
+interfaces and passing your instance to `new PangolinClient({...})`.
 
 This guide covers the contracts, a working example for each, and the
 places people most often get tripped up.
@@ -22,9 +22,9 @@ places people most often get tripped up.
 | `ChannelProvider` | Inbound message stream the worker subscribes to during dispatch | (none in MVP — interface only) |
 | `NotificationProvider` | Outbound webhook fire when a dispatch reaches a terminal state | (none in MVP — interface only) |
 
-All live in `packages/agora-core/src/`. Importing from `@quarry-systems/
-agora-core` is the only allowed dependency for a third-party provider
-package — keeping the dep graph linear (every package's only agora dep is
+All live in `packages/pangolin-core/src/`. Importing from `@quarry-systems/
+pangolin-core` is the only allowed dependency for a third-party provider
+package — keeping the dep graph linear (every package's only Pangolin Scale dep is
 core).
 
 ## ComputeProvider — the most common one to write
@@ -51,7 +51,7 @@ Walking skeleton for a new compute backend:
 ```typescript
 import type {
   ComputeProvider, TaskSpec, ProviderContext, TaskHandle, TaskExit,
-} from '@quarry-systems/agora-core';
+} from '@quarry-systems/pangolin-core';
 
 export class MyComputeProvider implements ComputeProvider {
   readonly name = 'my-backend';
@@ -92,10 +92,10 @@ export class MyComputeProvider implements ComputeProvider {
 }
 ```
 
-Wire it into `AgoraClient`:
+Wire it into `PangolinClient`:
 
 ```typescript
-const client = new AgoraClient({
+const client = new PangolinClient({
   namespace: 'my-deploy',
   compute: { 'my-backend': new MyComputeProvider({ /* ... */ }) },
   credentials: { /* ... */ },
@@ -141,8 +141,8 @@ interface StorageProvider {
 }
 ```
 
-URIs are agora-shaped strings — `agora://<namespace>/<type>/<name>/
-<contentHash>` for blob slots, `agora://<namespace>/<type>/<name>` for the
+URIs are Pangolin Scale-shaped strings — `pangolin://<namespace>/<type>/<name>/
+<contentHash>` for blob slots, `pangolin://<namespace>/<type>/<name>` for the
 resolve/list queries. The storage layer interprets them as a path.
 
 The provider picks the hash algorithm. `LocalStorageProvider` and
@@ -194,16 +194,16 @@ write to a database, or PR-comment.
 
 Conventions used by the shipped providers:
 
-- One npm package per provider, under `@quarry-systems/agora-<role>-<name>`
-  (e.g. `agora-providers-fargate`, `agora-storage-s3`).
+- One npm package per provider, under `@quarry-systems/pangolin-<role>-<name>`
+  (e.g. `pangolin-providers-fargate`, `pangolin-storage-s3`).
 - Single class export named after the provider (`FargateProvider`,
   `S3StorageProvider`).
 - README.md cross-linking the MVP spec section that owns the contract.
-- The only `agora-*` dep is `@quarry-systems/agora-core` (types only).
-  No depending on other agora packages.
+- The only `pangolin-*` dep is `@quarry-systems/pangolin-core` (types only).
+  No depending on other Pangolin Scale packages.
 
-This keeps the dep graph linear — `agora-client` and `agora-worker`
-depend on `agora-core` and on whichever providers the integrator chooses,
+This keeps the dep graph linear — `pangolin-client` and `pangolin-worker`
+depend on `pangolin-core` and on whichever providers the integrator chooses,
 not on a fixed set.
 
 ## Testing your provider
@@ -211,14 +211,14 @@ not on a fixed set.
 The shipped providers each have a unit test suite and an integration
 suite. For ComputeProviders the integration test is the canonical
 "register → dispatch → assert exit 0" flow.
-[`examples/hello-world/`](https://github.com/quarrysystems/agora/tree/main/examples/hello-world) is the
+[`examples/hello-world/`](https://github.com/quarrysystems/pangolin/tree/main/examples/hello-world) is the
 template — copy it, swap your provider in, and the rest of the
 integration code is identical (that's the whole point of the seam).
 
 ## See also
 
 - MVP spec §5 (provider contracts), §5.1-§5.7 for per-interface details.
-- [ADR-0014](/agora/explanation/decisions/0014-stdout-cap/) (stdout cap), [ADR-0015](/agora/explanation/decisions/0015-capability-size-cap/) (capability size cap) — sizing limits
+- [ADR-0014](/pangolin/explanation/decisions/0014-stdout-cap/) (stdout cap), [ADR-0015](/pangolin/explanation/decisions/0015-capability-size-cap/) (capability size cap) — sizing limits
   your provider must respect.
-- [ADR-0011](/agora/explanation/decisions/0011-no-entrypoint-override-at-dispatch/) — no entrypoint override at dispatch (the runtime spawns the
+- [ADR-0011](/pangolin/explanation/decisions/0011-no-entrypoint-override-at-dispatch/) — no entrypoint override at dispatch (the runtime spawns the
   adapter, not user-supplied commands).

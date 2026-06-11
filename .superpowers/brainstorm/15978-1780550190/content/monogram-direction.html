@@ -1,0 +1,107 @@
+<h2>The "p"-monogram direction — original take</h2>
+<p class="subtitle">Inspired by reference #1, rebuilt in your bronze/ink palette: the bowl of the <em>p</em> is the curled, scaled pangolin, negative-space centre. Shown big, on light, and as the name finalists. Click what works.</p>
+
+<style>
+  .grid{display:flex;flex-wrap:wrap;gap:16px;margin:8px 0}
+  .plate{border-radius:16px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;padding:34px 26px;min-width:230px;flex:1}
+  .pdark{background:#141009}.plight{background:#F4F1EC;border:1px solid #E7E1D6}
+  .wmk{font-family:'Inter',system-ui,sans-serif;font-weight:700;letter-spacing:-.03em;font-size:38px;line-height:1}
+  .gold{color:#D69A4E}.ink{color:#1a1109}
+  .lockrow{display:flex;align-items:center;gap:12px}
+  .sx{font-family:'Inter',system-ui,sans-serif;font-weight:800;letter-spacing:-.03em;font-size:21px}
+  .sx span{font-weight:500;opacity:.6}
+  .cap{font-size:12px;opacity:.6;font-family:'Inter',system-ui,sans-serif;letter-spacing:.04em}
+</style>
+
+<!-- reusable monogram: bowl-of-p is a scaled pangolin curl, with descender stem -->
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <g id="pmono">
+      <rect x="17" y="33" width="15" height="62" rx="7.5"/>
+      <path fill-rule="evenodd" d="M54 16 a30 30 0 1 0 0.01 0 Z M54 35 a11 11 0 1 1 -0.01 0 Z"/>
+    </g>
+    <clipPath id="bowlClip"><path fill-rule="evenodd" d="M54 16 a30 30 0 1 0 0.01 0 Z M54 35 a11 11 0 1 1 -0.01 0 Z"/></clipPath>
+  </defs>
+</svg>
+
+<div class="grid">
+
+  <div class="card" data-choice="mono-dark" onclick="toggleSelect(this)" style="flex:1;min-width:240px">
+    <div class="card-image" style="padding:0">
+      <div class="plate pdark">
+        <svg viewBox="0 0 112 110" width="120" height="118" aria-label="pangolin p monogram">
+          <use href="#pmono" fill="#D69A4E"/>
+          <g clip-path="url(#bowlClip)" stroke="#141009" stroke-width="2.1" fill="none" stroke-linecap="round">
+            <circle cx="54" cy="46" r="16"/><circle cx="54" cy="46" r="22.5"/>
+            <path d="M54 46 L86 46 M54 46 L80 26 M54 46 L80 66 M54 46 L70 20 M54 46 L70 72 M54 46 L40 70"/>
+          </g>
+        </svg>
+        <div class="wmk gold">pangolin</div>
+      </div>
+    </div>
+    <div class="card-body"><h3>A · Primary, dark</h3><p>Gold-on-ink. The letterform + scaled curl + negative-space eye in one mark.</p></div>
+  </div>
+
+  <div class="card" data-choice="mono-light" onclick="toggleSelect(this)" style="flex:1;min-width:240px">
+    <div class="card-image" style="padding:0">
+      <div class="plate plight">
+        <svg viewBox="0 0 112 110" width="120" height="118" aria-label="pangolin p monogram light">
+          <use href="#pmono" fill="#C2772E"/>
+          <g clip-path="url(#bowlClip)" stroke="#F4F1EC" stroke-width="2.1" fill="none" stroke-linecap="round">
+            <circle cx="54" cy="46" r="16"/><circle cx="54" cy="46" r="22.5"/>
+            <path d="M54 46 L86 46 M54 46 L80 26 M54 46 L80 66 M54 46 L70 20 M54 46 L70 72 M54 46 L40 70"/>
+          </g>
+        </svg>
+        <div class="wmk ink">pangolin</div>
+      </div>
+    </div>
+    <div class="card-body"><h3>B · Primary, light</h3><p>Same mark on warm paper — proves it holds in one colour, both polarities.</p></div>
+  </div>
+
+</div>
+
+<div class="label" style="margin-top:8px">…with the name finalists (same monogram, bronze, on ink)</div>
+<div class="cards" data-multiselect>
+
+  <div class="card" data-choice="lk-scale" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:0">
+      <div class="plate pdark" style="min-height:120px">
+        <div class="lockrow">
+          <svg viewBox="0 0 112 110" width="52" height="51" aria-label="mark"><use href="#pmono" fill="#D69A4E"/>
+            <g clip-path="url(#bowlClip)" stroke="#141009" stroke-width="2.4" fill="none"><circle cx="54" cy="46" r="16"/><circle cx="54" cy="46" r="22.5"/><path d="M54 46 L86 46 M54 46 L80 26 M54 46 L80 66"/></g></svg>
+          <div class="sx gold">pangolin<span> scale</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body"><h3>Pangolin Scale</h3></div>
+  </div>
+
+  <div class="card" data-choice="lk-anchor" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:0">
+      <div class="plate pdark" style="min-height:120px">
+        <div class="lockrow">
+          <svg viewBox="0 0 112 110" width="52" height="51" aria-label="mark"><use href="#pmono" fill="#D69A4E"/>
+            <g clip-path="url(#bowlClip)" stroke="#141009" stroke-width="2.4" fill="none"><circle cx="54" cy="46" r="16"/><circle cx="54" cy="46" r="22.5"/><path d="M54 46 L86 46 M54 46 L80 26 M54 46 L80 66"/></g></svg>
+          <div class="sx gold">pangolin<span> anchor</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body"><h3>Pangolin Anchor</h3></div>
+  </div>
+
+  <div class="card" data-choice="lk-keep" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:0">
+      <div class="plate pdark" style="min-height:120px">
+        <div class="lockrow">
+          <svg viewBox="0 0 112 110" width="52" height="51" aria-label="mark"><use href="#pmono" fill="#D69A4E"/>
+            <g clip-path="url(#bowlClip)" stroke="#141009" stroke-width="2.4" fill="none"><circle cx="54" cy="46" r="16"/><circle cx="54" cy="46" r="22.5"/><path d="M54 46 L86 46 M54 46 L80 26 M54 46 L80 66"/></g></svg>
+          <div class="sx gold">pangolin<span> keep</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body"><h3>Pangolin Keep</h3></div>
+  </div>
+
+</div>
+
+<p class="subtitle" style="margin-top:16px">This is a clean-room SVG rebuild (not the reference art). Tell me if the monogram's working and I'll refine the curve, the scale count, or the wordmark type.</p>

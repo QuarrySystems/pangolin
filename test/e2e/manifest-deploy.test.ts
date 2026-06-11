@@ -1,8 +1,8 @@
-// E2E: `agora deploy --from <manifest>` reconciler end-to-end.
+// E2E: `pangolin deploy --from <manifest>` reconciler end-to-end.
 //
 // Drives the deploy subcommand via the full commander program + the
-// `attachDeployCmd` from `packages/agora-cli/src/cmd-deploy.ts` against a
-// content-aware fake `AgoraClient`. Pins three load-bearing properties:
+// `attachDeployCmd` from `packages/pangolin-cli/src/cmd-deploy.ts` against a
+// content-aware fake `PangolinClient`. Pins three load-bearing properties:
 //
 //   1. Registration call ORDER: the reconciler walks the manifest in
 //      capabilities → subagents → envs phases (asserted via vi's monotonic
@@ -21,7 +21,7 @@
 //      the deploy reconciler (not just direct client calls).
 //
 // `extends:` env inheritance and `from_env:` secret resolution: the current
-// `parseManifest` (packages/agora-cli/src/manifest-parser.ts) does NOT
+// `parseManifest` (packages/pangolin-cli/src/manifest-parser.ts) does NOT
 // support these fields. The acceptance criterion for this task allows
 // documenting the limitation and skipping — covered by the `it.skip` block
 // at the bottom of this file. When the parser learns those fields, drop the
@@ -39,13 +39,13 @@ import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
-// Relative imports into agora-cli/src — root vitest has no workspace-package
+// Relative imports into pangolin-cli/src — root vitest has no workspace-package
 // symlinks at <repo>/node_modules, so we go directly to the source-tree
 // barrels (same convention as the sibling e2e tests).
-import { buildProgram } from '../../packages/agora-cli/src/index.js';
+import { buildProgram } from '../../packages/pangolin-cli/src/index.js';
 
 // ---------------------------------------------------------------------------
-// Content-aware fake AgoraClient
+// Content-aware fake PangolinClient
 // ---------------------------------------------------------------------------
 //
 // Unlike the `vi.fn(() => 'sha256:cap')` fakes in the in-package unit tests,
@@ -187,7 +187,7 @@ async function runDeploy(fake: FakeClient, manifestPath: string): Promise<void> 
   const ctx = { getClient: async () => fake as any };
   // buildProgram already wires the deploy command; no separate attach needed.
   const program = buildProgram(ctx);
-  await program.parseAsync(['node', 'agora', 'deploy', '--from', manifestPath]);
+  await program.parseAsync(['node', 'pangolin', 'deploy', '--from', manifestPath]);
 }
 
 // ---------------------------------------------------------------------------
@@ -209,13 +209,13 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-describe('E2E: agora deploy reconciler', () => {
+describe('E2E: pangolin deploy reconciler', () => {
   it('registers capabilities then subagents then envs in manifest order', async () => {
     const capDir = join(manifestDir, 'caps', 'git-write');
     await mkdir(capDir, { recursive: true });
     await writeFile(join(capDir, 'tool.json'), '{}');
 
-    const manifestPath = join(manifestDir, 'agora-manifest.yaml');
+    const manifestPath = join(manifestDir, 'pangolin-manifest.yaml');
     await writeFile(
       manifestPath,
       manifestYaml({
@@ -254,7 +254,7 @@ describe('E2E: agora deploy reconciler', () => {
     await mkdir(capDir, { recursive: true });
     await writeFile(join(capDir, 'tool.json'), '{"version":1}');
 
-    const manifestPath = join(manifestDir, 'agora-manifest.yaml');
+    const manifestPath = join(manifestDir, 'pangolin-manifest.yaml');
     await writeFile(
       manifestPath,
       manifestYaml({
@@ -297,7 +297,7 @@ describe('E2E: agora deploy reconciler', () => {
     await mkdir(capDir, { recursive: true });
     await writeFile(join(capDir, 'tool.json'), '{"version":1}');
 
-    const manifestPath = join(manifestDir, 'agora-manifest.yaml');
+    const manifestPath = join(manifestDir, 'pangolin-manifest.yaml');
     await writeFile(
       manifestPath,
       manifestYaml({
@@ -334,7 +334,7 @@ describe('E2E: agora deploy reconciler', () => {
     await mkdir(capDir, { recursive: true });
     await writeFile(join(capDir, 'tool.json'), '{}');
 
-    const manifestPath = join(manifestDir, 'agora-manifest.yaml');
+    const manifestPath = join(manifestDir, 'pangolin-manifest.yaml');
     await writeFile(
       manifestPath,
       manifestYaml({
@@ -375,7 +375,7 @@ describe('E2E: agora deploy reconciler', () => {
 
   // `extends:` env inheritance and `from_env:` secret resolution are not
   // (yet) supported by `parseManifest` — see
-  // `packages/agora-cli/src/manifest-parser.ts`. The parser allows but does
+  // `packages/pangolin-cli/src/manifest-parser.ts`. The parser allows but does
   // not interpret these fields; the deploy reconciler forwards `values` /
   // `secrets` to `env.register` verbatim. When the parser grows these
   // semantics, drop `.skip` and assert:

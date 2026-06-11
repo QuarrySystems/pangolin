@@ -1,0 +1,46 @@
+{
+  "name": "@quarry-systems/pangolin-orchestrator",
+  "version": "0.1.0",
+  "license": "BUSL-1.1",
+  "description": "Orchestrator-engine (codename pangolin-offload) — named queues, depends_on resolution, resource locks, a fire-and-reconcile tick loop, and SQLite run-state behind pluggable Executor/Trigger seams.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/QuarrySystems/pangolin.git",
+    "directory": "packages/pangolin-orchestrator"
+  },
+  "homepage": "https://quarrysystems.github.io/pangolin",
+  "bugs": {
+    "url": "https://github.com/QuarrySystems/pangolin/issues"
+  },
+  "scripts": {
+    "lint": "eslint src --ext .ts",
+    "test": "vitest run",
+    "test:xproc": "tsc && vitest run --config vitest.xproc.config.ts",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@quarry-systems/pangolin-client": "workspace:*",
+    "@quarry-systems/pangolin-core": "workspace:*",
+    "better-sqlite3": "^11.0.0",
+    "cron-parser": "^4",
+    "zod": "^3"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "@quarry-systems/pangolin-worker": "workspace:*",
+    "@quarry-systems/pangolin-storage-local": "workspace:*",
+    "@quarry-systems/pangolin-secret-store": "workspace:*"
+  }
+}

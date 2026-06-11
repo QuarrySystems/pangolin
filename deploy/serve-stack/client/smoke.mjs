@@ -16,9 +16,9 @@
 
 import { readFile } from 'node:fs/promises';
 
-import { OperationsApi } from '@quarry-systems/agora-orchestrator';
+import { OperationsApi } from '@quarry-systems/pangolin-orchestrator';
 
-import client, { orch } from './agora.config.mjs';
+import client, { orch } from './pangolin.config.mjs';
 
 // 1. Tiny inline capability: one fixture file the smoke-edit subagent renames.
 await client.capabilities.register({
@@ -56,7 +56,7 @@ const runId = await api.submit(plan, 'human:smoke');
 // 4. Hand the operator the follow-ups.
 console.log(`submitted smoke run '${runId}' (1 item)`);
 console.log('');
-console.log('Follow along / verify (from deploy/serve-stack/client — the CLI resolves agora.config.mjs from cwd; tunnel still up):');
-console.log(`  pnpm exec agora orch watch ${runId}`);
-console.log(`  pnpm exec agora orch audit ${runId} --out bundle.json`);
-console.log('  pnpm exec agora verify bundle.json');
+console.log('Follow along / verify (from deploy/serve-stack/client — the CLI resolves pangolin.config.mjs from cwd; tunnel still up):');
+console.log(`  pnpm exec pangolin orch watch ${runId}`);
+console.log(`  pnpm exec pangolin orch audit ${runId} --out bundle.json`);
+console.log('  pnpm exec pangolin verify bundle.json');

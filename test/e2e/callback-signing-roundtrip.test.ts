@@ -4,12 +4,12 @@
 //
 //   1. The caller configures `work.callback.url`. `dispatchWork` (§6.2 step 4)
 //      mints a per-dispatch HMAC key in Secrets Manager and propagates the
-//      ARN to the worker via `AGORA_CALLBACK_TOKEN_REF`.
+//      ARN to the worker via `PANGOLIN_CALLBACK_TOKEN_REF`.
 //   2. The worker fetches the key (entrypoint step 4) and, for every
 //      lifecycle event it emits, POSTs an HMAC-signed payload to the
 //      configured callback URL. The signature scheme is hex HMAC-SHA256 over
 //      `${dispatchId}.${timestampIso}.${payload}` (see
-//      `packages/agora-client/src/callback-hmac.ts#signCallback`, which the
+//      `packages/pangolin-client/src/callback-hmac.ts#signCallback`, which the
 //      worker's `LifecycleEmitter` mirrors).
 //   3. The integrator (this test) stands up a local HTTP listener,
 //      captures the POSTs, re-computes the signature with the SAME key, and
@@ -17,7 +17,7 @@
 //      to sign is re-used here via the `signCallback` export — proving the
 //      symmetry property §7.3 promises.
 //
-// Replay-protection skew (§7.3): the spec requires the `X-Agora-Timestamp`
+// Replay-protection skew (§7.3): the spec requires the `X-Pangolin-Timestamp`
 // header to be within 5 minutes of the verifier's wall clock. The
 // roundtrip suite asserts this on every captured POST.
 //
@@ -53,7 +53,7 @@ import { WORKER_IMAGE } from './helpers/worker-image.js';
 // test still passes; if the WORKER drifts away from `signCallback`, this
 // test catches it. We also pull it through the package barrel (`../../`
 // dist path, matching make-client.ts) to exercise the public export shape.
-import { signCallback } from '../../packages/agora-client/dist/index.js';
+import { signCallback } from '../../packages/pangolin-client/dist/index.js';
 
 probeDocker();
 const storageRoot = useTempStorageRoot('e2e-callback');
@@ -70,7 +70,7 @@ beforeEach(() => {
   received = [];
   server = http.createServer((req, res) => {
     // We accept POSTs to any path; the test asserts on the captured body
-    // and headers regardless of path. The agora-worker only ever POSTs, so
+    // and headers regardless of path. The pangolin-worker only ever POSTs, so
     // GET / HEAD probes (some health checks) would be a wiring bug.
     let body = '';
     req.on('data', (chunk) => {
@@ -113,7 +113,7 @@ describe('E2E: callback signing roundtrip (§7.3)', () => {
       // `dispatch.finished`, which are the two POSTs we'll verify.
       const cap = await client.capabilities.register({
         name: 'noop-cap',
-        files: { 'agora-setup.sh': '#!/bin/sh\necho "setup ran"\n' },
+        files: { 'pangolin-setup.sh': '#!/bin/sh\necho "setup ran"\n' },
       });
       await client.subagent.register({
         name: 'echo-agent',
@@ -128,20 +128,20 @@ describe('E2E: callback signing roundtrip (§7.3)', () => {
       // CAPTURING THE HMAC KEY:
       //
       // `mintCallbackHmac` generates a random 32-byte hex key, stages it in
-      // Secrets Manager under `agora/callback-hmac/<dispatchId>`, and
+      // Secrets Manager under `pangolin/callback-hmac/<dispatchId>`, and
       // returns the ARN. The worker reads that same secret to sign each
       // POST. To verify signatures from the test side we need the key.
       //
       // Two ways to get it:
       //   (a) Patch `mintCallbackHmac` to surface the generated key — would
-      //       require modifying agora-client just for tests.
+      //       require modifying pangolin-client just for tests.
       //   (b) Read the secret back from Secrets Manager via the SAME ARN
       //       the worker uses, using the AWS SDK from the test process.
       //
       // We pick (b): we provide a fixed `dispatchId` so we can predict the
       // secret name, then after dispatch we resolve the secret out of band.
       // Using a deterministic dispatchId also lets us re-verify the header
-      // value `X-Agora-Dispatch-Id` matches.
+      // value `X-Pangolin-Dispatch-Id` matches.
       const dispatchId = `e2e-callback-${Date.now()}`;
 
       const result = await client.dispatch({
@@ -160,15 +160,15 @@ describe('E2E: callback signing roundtrip (§7.3)', () => {
       // The worker emits TWO lifecycle events on the happy path:
       // `dispatch.started` (entrypoint step 5) and `dispatch.finished`
       // (entrypoint step 14). Both go through `LifecycleEmitter.emit`,
-      // which POSTs to AGORA_CALLBACK_URL. We expect at least both.
+      // which POSTs to PANGOLIN_CALLBACK_URL. We expect at least both.
       expect(received.length).toBeGreaterThanOrEqual(2);
 
       // Resolve the HMAC key the worker used by fetching the same Secrets
       // Manager entry. The ARN pattern is fixed by `mintCallbackHmac`:
-      // `agora/callback-hmac/<dispatchId>`.
+      // `pangolin/callback-hmac/<dispatchId>`.
       //
       // RACE WARNING: `dispatchWork` fires its best-effort secret cleanup in
-      // a `finally` block. That cleanup tag-filters on `agora:dispatchId`
+      // a `finally` block. That cleanup tag-filters on `pangolin:dispatchId`
       // and `mintCallbackHmac` also tags with that key, so cleanup CAN
       // delete the callback HMAC secret out from under us. We mitigate by
       // (a) fetching immediately upon dispatch return (the dispatch's
@@ -186,7 +186,7 @@ describe('E2E: callback signing roundtrip (§7.3)', () => {
       const secretsClient = new SecretsManagerClient({});
       const secretRes = await secretsClient.send(
         new GetSecretValueCommand({
-          SecretId: `agora/callback-hmac/${dispatchId}`,
+          SecretId: `pangolin/callback-hmac/${dispatchId}`,
         }),
       );
       const hmacKey = secretRes.SecretString;
@@ -197,9 +197,9 @@ describe('E2E: callback signing roundtrip (§7.3)', () => {
       }
 
       // Verify every captured POST:
-      //   - X-Agora-Signature == sha256=<hex HMAC over `${id}.${ts}.${body}`>
-      //   - X-Agora-Dispatch-Id == the dispatch's id
-      //   - X-Agora-Timestamp parseable + within 5 minutes (§7.3 replay)
+      //   - X-Pangolin-Signature == sha256=<hex HMAC over `${id}.${ts}.${body}`>
+      //   - X-Pangolin-Dispatch-Id == the dispatch's id
+      //   - X-Pangolin-Timestamp parseable + within 5 minutes (§7.3 replay)
       // Verifying ALL captured POSTs (rather than just the first two)
       // catches a regression where one event kind is signed correctly but
       // another is mis-signed.
@@ -207,15 +207,15 @@ describe('E2E: callback signing roundtrip (§7.3)', () => {
       const skewBudgetMs = 5 * 60 * 1000;
 
       for (const post of received) {
-        const sigHeader = post.headers['x-agora-signature'];
-        const timestamp = post.headers['x-agora-timestamp'];
-        const seenDispatchId = post.headers['x-agora-dispatch-id'];
+        const sigHeader = post.headers['x-pangolin-signature'];
+        const timestamp = post.headers['x-pangolin-timestamp'];
+        const seenDispatchId = post.headers['x-pangolin-dispatch-id'];
         expect(typeof sigHeader).toBe('string');
         expect(typeof timestamp).toBe('string');
         expect(typeof seenDispatchId).toBe('string');
         expect(seenDispatchId).toBe(dispatchId);
 
-        // The `signCallback` helper from agora-client is the SAME code the
+        // The `signCallback` helper from pangolin-client is the SAME code the
         // worker's LifecycleEmitter mirrors — using it here proves the
         // client-side and worker-side signing are byte-for-byte symmetric.
         const expectedHex = signCallback({

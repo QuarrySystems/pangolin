@@ -3,12 +3,12 @@ title: "ADR-0008: needs_input uses request-stop-restart (Shape A), not in-flight
 description: "needs_input uses request-stop-restart (Shape A), not in-flight ask."
 status: accepted
 date: 2026-05-21
-deciders: agora-mvp-design
+deciders: pangolin-scale-mvp-design
 ---
 
 ## Context
 
-Sub-agents dispatched through agora regularly hit ambiguity mid-task: "I could
+Sub-agents dispatched through Pangolin Scale regularly hit ambiguity mid-task: "I could
 change function A or function B; which?" The MVP needs a convention for how a
 sub-agent surfaces that ambiguity back to its operator, and how the operator's
 answer gets threaded back into a continuation of the work.
@@ -17,7 +17,7 @@ Two structural shapes were weighed:
 
 - **Shape A — request-stop-restart.** The sub-agent emits a structured "I need
   input" outcome and terminates. The orchestrator (a Claude Code agent via
-  agora-mcp, or TypeScript code) routes the question to the right answerer
+  pangolin-mcp, or TypeScript code) routes the question to the right answerer
   (human via Slack, another agent, a database lookup), and re-dispatches the
   same subagent with the answer added to its `input`. Each dispatch is a fresh
   worker; continuity rides on `partial_state` carried through the re-dispatch.
@@ -58,7 +58,7 @@ From §6.9:
 > function B; which?" — should not guess. The MVP pattern for handling this is
 > **request-stop-restart**, not in-flight ask. The sub-agent exits with a
 > structured response indicating it needs input; the orchestrator (Claude Code
-> agent via agora-mcp, or TypeScript code) routes the question to the right
+> agent via pangolin-mcp, or TypeScript code) routes the question to the right
 > answerer (a human via Slack, another agent, a database lookup) and
 > re-dispatches with the answer added to input.
 

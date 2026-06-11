@@ -1,4 +1,4 @@
-// Canonical `AgoraClient` factory for E2E tests.
+// Canonical `PangolinClient` factory for E2E tests.
 //
 // Centralizing client construction means every Docker-using E2E suite is
 // wired the same way: `LocalDockerProvider` on the `local-docker` slot,
@@ -26,20 +26,20 @@
 // `pnpm -r build` from the repo root before invoking the suite.
 
 import {
-  AgoraClient,
+  PangolinClient,
   NoopCredentialProvider,
   StdoutResultSink,
-} from '../../../packages/agora-client/dist/index.js';
-import { LocalStorageProvider } from '../../../packages/agora-storage-local/dist/index.js';
+} from '../../../packages/pangolin-client/dist/index.js';
+import { LocalStorageProvider } from '../../../packages/pangolin-storage-local/dist/index.js';
 import {
   LocalDockerProvider,
   type LocalDockerProviderOpts,
-} from '../../../packages/agora-providers-local-docker/dist/index.js';
-import { AwsSecretStore } from '../../../packages/agora-secret-store/dist/index.js';
-import type { SecretStore } from '../../../packages/agora-core/dist/index.js';
+} from '../../../packages/pangolin-providers-local-docker/dist/index.js';
+import { AwsSecretStore } from '../../../packages/pangolin-secret-store/dist/index.js';
+import type { SecretStore } from '../../../packages/pangolin-core/dist/index.js';
 
 export interface MakeClientOpts {
-  /** `AgoraClient.namespace` — keep distinct per suite to isolate storage. */
+  /** `PangolinClient.namespace` — keep distinct per suite to isolate storage. */
   namespace: string;
   /** Absolute path to the per-test scratch dir (see `useTempStorageRoot`). */
   storageRoot: string;
@@ -54,9 +54,9 @@ export interface MakeClientOpts {
   secretStore?: SecretStore;
 }
 
-export function makeClient(opts: MakeClientOpts): AgoraClient {
+export function makeClient(opts: MakeClientOpts): PangolinClient {
   const store: SecretStore = opts.secretStore ?? new AwsSecretStore();
-  return new AgoraClient({
+  return new PangolinClient({
     namespace: opts.namespace,
     compute: { 'local-docker': new LocalDockerProvider(opts.dockerOpts ?? {}) },
     credentials: { none: new NoopCredentialProvider() },

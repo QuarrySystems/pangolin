@@ -5,11 +5,11 @@ sidebar:
   order: 5
 ---
 
-What actually happens between `agora dispatch run` and the JSON you get
+What actually happens between `pangolin dispatch run` and the JSON you get
 back. Useful for reading worker stdout, diagnosing failures, and
 understanding which layer to blame when something breaks.
 
-The authoritative source is `packages/agora-worker/src/entrypoint.ts` —
+The authoritative source is `packages/pangolin-worker/src/entrypoint.ts` —
 its 14-step prologue is the worker's runbook. This doc is the readable
 overview.
 
@@ -17,11 +17,11 @@ overview.
 
 A dispatch has two halves:
 
-1. **Orchestrator side** (your machine, where `agora` runs): resolves
+1. **Orchestrator side** (your machine, where `pangolin` runs): resolves
    names → registered hashes, picks a `ComputeProvider`, asks the provider
    to start a worker container, then awaits its exit.
 2. **Worker side** (inside the container): fetches the bundles, overlays
-   them onto a workspace, runs an optional `agora-setup.sh`, hands off to
+   them onto a workspace, runs an optional `pangolin-setup.sh`, hands off to
    the `RuntimeAdapter` (claude binary), and emits a terminal lifecycle
    event.
 
@@ -30,19 +30,19 @@ Most of what you see in stdout is the worker's structured-log stream.
 ## The 14 worker steps (collapsed)
 
 ```
-1. parse env vars               ← AGORA_* env tells the worker what to fetch
-2. load runtime adapter         ← .js plugin per `AGORA_ADAPTER` (claude-code by default)
+1. parse env vars               ← PANGOLIN_* env tells the worker what to fetch
+2. load runtime adapter         ← .js plugin per `PANGOLIN_ADAPTER` (claude-code by default)
 3. fetch + integrity-verify bundles  ← StorageProvider.get each ref, sha256-check
 4. wire callback HMAC + LifecycleEmitter
 5. emit `dispatch.started`
 6. overlay capability bundles   ← writes files to <workspace>/, merge rules per §6.3
 7. resolve env-bundle secrets   ← Secrets Manager lookups for `secrets:` entries
 8. merge env                    ← base + bundles + per-dispatch secrets
-9. run agora-setup.sh           ← if present at workspace root, bounded by timeout
+9. run pangolin-setup.sh           ← if present at workspace root, bounded by timeout
 10. start channel subscription  ← background poll for inbound channel messages
 11. invoke runtime adapter      ← claude --print <prompt>, captures stdout/stderr
 12. stop channel subscription
-13. resolve needs_input sentinel ← stat <workspace>/.agora/needs_input.json
+13. resolve needs_input sentinel ← stat <workspace>/.pangolin/needs_input.json
 14. emit terminal event         ← dispatch.finished / .needs_input / .failed / .cancelled
 ```
 
@@ -81,10 +81,10 @@ rejects a literal `seal` block), and no caller can omit or reorder it — every
 successful pipeline ends with the sealed output sentinel.
 
 A **declared pipeline** replaces the default: register a spec with
-[`agora pipeline register`](/agora/reference/cli/#agora-pipeline) (or
-[`client.pipeline.register`](/agora/reference/agora-client-api/#clientpipeline)),
+[`pangolin pipeline register`](/pangolin/reference/cli/#pangolin-pipeline) (or
+[`client.pipeline.register`](/pangolin/reference/pangolin-client-api/#clientpipeline)),
 then pin its ref on the work item's reserved `inputs.pipeline` key. The pinned
-spec rides the existing bundle channel (`AGORA_BUNDLE_REFS_JSON`), is
+spec rides the existing bundle channel (`PANGOLIN_BUNDLE_REFS_JSON`), is
 integrity-verified against its content hash, and is **re-validated by the
 worker** before running — a parse or validation failure routes through the
 established `integrity-failed` path, like any malformed bundle. Declared
@@ -110,17 +110,17 @@ The precedence chain (highest to lowest):
 An empty string is treated the same as unset at every step. The resolution is
 best-effort: if the subagent blob is unresolvable or unparseable, the executor
 falls back to `defaultModel` (which may be undefined) and the fire proceeds.
-The `AGORA_MODEL` env var is only injected into the worker when the resolved
+The `PANGOLIN_MODEL` env var is only injected into the worker when the resolved
 model is a non-empty string.
 
 For the level vocabulary (`fast` / `standard` / `max` and pass-through
 provider-native ids), see the
-[model field and level vocabulary table](/agora/reference/agora-client-api/#model-field-and-level-vocabulary).
+[model field and level vocabulary table](/pangolin/reference/pangolin-client-api/#model-field-and-level-vocabulary).
 
 ### Actual usage in the output sentinel
 
 After the runtime adapter exits, the worker seals an **`OutputSentinel`** to
-`.agora/output.json` (and uploads it to the per-dispatch dispatch-record URI).
+`.pangolin/output.json` (and uploads it to the per-dispatch dispatch-record URI).
 The sentinel optionally carries an additive `usage` block:
 
 ```typescript
@@ -170,7 +170,7 @@ patch. Registered secrets are redacted from the captured report.
 
 The command is language-agnostic — whatever shell string the subagent declares
 (`npm test`, `dotnet test`, `cargo test`, `pytest`, …), run in the workspace. Its
-toolchain must be present in the worker image or installed by `agora-setup.sh`.
+toolchain must be present in the worker image or installed by `pangolin-setup.sh`.
 The worker emits a `verify.ran` event:
 
 ```
@@ -186,10 +186,10 @@ The worker emits a `verify.ran` event:
 | `dispatch.finished` | Adapter exited 0, no needs_input sentinel | 0 |
 | `dispatch.needs_input` | Adapter wrote a valid needs_input sentinel; orchestrator should re-dispatch with the answer | 0 |
 | `dispatch.failed` | Anything else — see failure reasons below | non-zero |
-| `dispatch.cancelled` | `agora dispatch cancel <id>` was honored mid-flight | n/a |
+| `dispatch.cancelled` | `pangolin dispatch cancel <id>` was honored mid-flight | n/a |
 
 The vocabulary is intentionally closed. Future kinds would require an ADR
-amendment (see [ADR-0004 — lifecycle vocabulary closed at six](/agora/explanation/decisions/0004-lifecycle-vocabulary-closed-at-six/)).
+amendment (see [ADR-0004 — lifecycle vocabulary closed at six](/pangolin/explanation/decisions/0004-lifecycle-vocabulary-closed-at-six/)).
 
 Ordered across the worker's steps, the six events and the four
 `dispatch.failed` reason branch points look like this:
@@ -214,7 +214,7 @@ stateDiagram-v2
   dispatch_failed --> [*]
 ```
 
-The diagram follows the code (`packages/agora-worker/src/entrypoint.ts`):
+The diagram follows the code (`packages/pangolin-worker/src/entrypoint.ts`):
 `fetch-failed` covers both the step-4 callback-HMAC-key resolution and the
 step-7 env-bundle secret resolution, and `worker-failed` is the catch-all for
 several infra steps (storage construction 1b, adapter load 2, setup-script 9,
@@ -227,7 +227,7 @@ the table above are the most common case for each reason, not the only one.
 |---|---|---|
 | `integrity-failed` | Step 3 | A bundle's actual sha256 didn't match its declared `contentHash`. Storage tampering or a backend bug. |
 | `fetch-failed` | Step 7 | A secret reference couldn't be resolved (typo, missing IAM, AWS outage). |
-| `worker-failed` | Step 9 / 13 | `agora-setup.sh` exited non-zero or timed out; OR the needs_input sentinel was malformed (unparseable JSON, missing `question`, >1 MiB serialized). |
+| `worker-failed` | Step 9 / 13 | `pangolin-setup.sh` exited non-zero or timed out; OR the needs_input sentinel was malformed (unparseable JSON, missing `question`, >1 MiB serialized). |
 | `provider-failed` | Step 11 | Runtime adapter (claude binary) exited non-zero with no sentinel. Most common cause in dev: missing `ANTHROPIC_API_KEY`. |
 
 Each terminal event includes `durationMs` measured from worker start
@@ -256,7 +256,7 @@ Event field semantics:
 
 Notable absences:
 
-- **No `setup-script.ran` event when there's no `agora-setup.sh`.** Absent
+- **No `setup-script.ran` event when there's no `pangolin-setup.sh`.** Absent
   is the success state; the worker just moves to step 10.
 - **`runtime.adapter.ran` is only emitted when the adapter returns**
   (whether with exit 0 or non-zero). If `adapter.invoke()` THROWS — e.g.,
@@ -266,7 +266,7 @@ Notable absences:
 
 ## Claude Code permission modes
 
-The Claude Code runtime adapter reads `AGORA_CLAUDE_PERMISSION_MODE` from
+The Claude Code runtime adapter reads `PANGOLIN_CLAUDE_PERMISSION_MODE` from
 the dispatch's merged env to decide whether to pass
 `--dangerously-skip-permissions` to the spawned `claude --print`:
 
@@ -284,7 +284,7 @@ follow-up; not shipped today.
 
 ## Where `stdout` / `stderr` end up in the result
 
-The dispatch result JSON returned by `agora dispatch run` has both:
+The dispatch result JSON returned by `pangolin dispatch run` has both:
 
 ```json
 {
@@ -297,7 +297,7 @@ The dispatch result JSON returned by `agora dispatch run` has both:
 ```
 
 The `resolved` block is the audit trail: exactly which `contentHash` of
-each artifact actually ran. It's what `agora dispatch describe <id>`
+each artifact actually ran. It's what `pangolin dispatch describe <id>`
 returns later.
 
 ## Common diagnostic patterns
@@ -310,19 +310,19 @@ its stdout DOES show up in the `setup-script.ran` event.
 **"`provider-failed` with `runtime exited with code 1`."** Almost always
 missing `ANTHROPIC_API_KEY` in the dispatch's env. Check
 `result.resolved.env` for the env bundle that ran, then confirm the bundle
-includes the key (`agora env get <name>` shows the ref; the actual values
-require `agora env get` upgrades or a manual storage inspection).
+includes the key (`pangolin env get <name>` shows the ref; the actual values
+require `pangolin env get` upgrades or a manual storage inspection).
 
 **"setup-script.ran shows only one of my N skills installed."** Multiple
-capabilities each shipped an `agora-setup.sh`. Only one wins
+capabilities each shipped a `pangolin-setup.sh`. Only one wins
 (last-write-wins on the filename). See
-[Worker file layout](/agora/how-to/worker-file-layout/) — files at adapter-
+[Worker file layout](/pangolin/how-to/worker-file-layout/) — files at adapter-
 reserved paths (`.claude/skills/<name>/`) compose; setup scripts don't.
 
 **"runtime.adapter.ran stdout says 'git commands are being denied' / 'requires approval'."**
 You're hitting Claude Code's interactive permission gate inside a worker
 with no human to approve. Either you've set
-`AGORA_CLAUDE_PERMISSION_MODE=strict` deliberately, or your worker image
+`PANGOLIN_CLAUDE_PERMISSION_MODE=strict` deliberately, or your worker image
 predates the bypass-by-default change. Fix: leave the env var unset (or
 set it to `bypass`) and rebuild the worker image if you're running an old
 one.
@@ -333,6 +333,6 @@ For S3, check that nothing else is writing to the same prefix.
 
 ## See also
 
-- [ADR-0004 — why the lifecycle vocabulary is closed at six kinds](/agora/explanation/decisions/0004-lifecycle-vocabulary-closed-at-six/).
-- [ADR-0008](/agora/explanation/decisions/0008-needs-input-request-stop-restart/), [ADR-0009](/agora/explanation/decisions/0009-needs-input-sentinel-file-vs-exit-code/) — the needs_input convention.
-- [MVP spec](https://github.com/quarrysystems/agora/blob/main/docs/superpowers/specs/2026-05-21-agora-mvp-design.md) §6.2 (the 14-step lifecycle), §6.3 (overlay/merge), §5.7 (lifecycle event types).
+- [ADR-0004 — why the lifecycle vocabulary is closed at six kinds](/pangolin/explanation/decisions/0004-lifecycle-vocabulary-closed-at-six/).
+- [ADR-0008](/pangolin/explanation/decisions/0008-needs-input-request-stop-restart/), [ADR-0009](/pangolin/explanation/decisions/0009-needs-input-sentinel-file-vs-exit-code/) — the needs_input convention.
+- [MVP spec](https://github.com/quarrysystems/pangolin/blob/main/docs/superpowers/specs/2026-05-21-pangolin-scale-mvp-design.md) §6.2 (the 14-step lifecycle), §6.3 (overlay/merge), §5.7 (lifecycle event types).

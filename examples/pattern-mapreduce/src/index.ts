@@ -11,7 +11,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
-  AgoraOrchestrator,
+  PangolinOrchestrator,
   ManualTrigger,
   SqliteRunStateStore,
   AuditLog,
@@ -21,8 +21,8 @@ import {
   assembleBundle,
   verifyBundle,
   buildManifest,
-} from '@quarry-systems/agora-orchestrator';
-import type { Executor, Run } from '@quarry-systems/agora-orchestrator';
+} from '@quarry-systems/pangolin-orchestrator';
+import type { Executor, Run } from '@quarry-systems/pangolin-orchestrator';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PLAN_PATH = join(__dirname, '../plan.json');
@@ -31,12 +31,12 @@ const PLAN_PATH = join(__dirname, '../plan.json');
 // Content-addressed fake URIs (sha256-shaped, one per artifact)
 // ---------------------------------------------------------------------------
 
-const REF_A = 'agora://ns/artifact/a/sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
-const REF_B = 'agora://ns/artifact/b/sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
-const REF_C = 'agora://ns/artifact/c/sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
-const REF_MAP_A = 'agora://ns/artifact/map-a/sha256:1111111111111111111111111111111111111111111111111111111111111111';
-const REF_MAP_B = 'agora://ns/artifact/map-b/sha256:2222222222222222222222222222222222222222222222222222222222222222';
-const REF_MAP_C = 'agora://ns/artifact/map-c/sha256:3333333333333333333333333333333333333333333333333333333333333333';
+const REF_A = 'pangolin://ns/artifact/a/sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+const REF_B = 'pangolin://ns/artifact/b/sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+const REF_C = 'pangolin://ns/artifact/c/sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
+const REF_MAP_A = 'pangolin://ns/artifact/map-a/sha256:1111111111111111111111111111111111111111111111111111111111111111';
+const REF_MAP_B = 'pangolin://ns/artifact/map-b/sha256:2222222222222222222222222222222222222222222222222222222222222222';
+const REF_MAP_C = 'pangolin://ns/artifact/map-c/sha256:3333333333333333333333333333333333333333333333333333333333333333';
 
 // ---------------------------------------------------------------------------
 // Inline fake executor (mirrors pattern-harness.ts idKeyedExecutor shape).
@@ -72,7 +72,7 @@ function makeFakeExecutor(blobs: Map<string, Uint8Array>): Executor {
         ...(inputRefs ? { inputRefs } : {}),
       });
 
-      const manifestRef = `agora://ns/manifest/m/${manifest.manifestHash}`;
+      const manifestRef = `pangolin://ns/manifest/m/${manifest.manifestHash}`;
       blobs.set(manifestRef, bytes);
 
       const dispatchHash = `d-${ctx?.runId ?? ''}-${item.id}`;
@@ -119,7 +119,7 @@ async function main(): Promise<void> {
     const anchor = new LocalAnchor(store);
     const auditLog = new AuditLog({ store, signer: NoneSigner, anchor });
 
-    const orch = new AgoraOrchestrator({
+    const orch = new PangolinOrchestrator({
       store,
       executors: { dispatch: executor },
       triggers: { manual: new ManualTrigger() },

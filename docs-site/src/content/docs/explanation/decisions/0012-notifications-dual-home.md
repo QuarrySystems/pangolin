@@ -3,14 +3,14 @@ title: "ADR-0012: Notifications live in two homes by design"
 description: "Notifications live in two homes by design: capability content (behavior-tied) and dispatch field (operational)."
 status: accepted
 date: 2026-05-21
-deciders: agora-mvp-design
+deciders: pangolin-scale-mvp-design
 ---
 
 ## Context
 
 Notifications (HMAC-signed webhook calls fired by the worker on lifecycle events) need to be configurable. The natural design question is: where does the configuration live?
 
-An earlier revision of the spec put notifications only in capability content — a single `agora-notifications.json` file shipped inside the capability bundle, defining where alerts go. That had the appeal of one home, one source of truth, no merging logic.
+An earlier revision of the spec put notifications only in capability content — a single `pangolin-notifications.json` file shipped inside the capability bundle, defining where alerts go. That had the appeal of one home, one source of truth, no merging logic.
 
 Two pressures pulled it apart:
 
@@ -24,13 +24,13 @@ The decision turns on whether one-home simplicity is worth losing the role separ
 
 ## Decision
 
-From §10.1 of `docs/superpowers/specs/2026-05-21-agora-mvp-design.md`:
+From §10.1 of `docs/superpowers/specs/2026-05-21-pangolin-scale-mvp-design.md`:
 
-> **Notifications have two homes by design.** Capability-content notifications (`agora-notifications.json`) are behavior-tied — the capability author mandates alerts whenever the capability is in scope (e.g., "alert if this dangerous capability fires"). Dispatch-level notifications (`notifications: NotificationConfig[]` on `DispatchWork`) are operational — the SRE team owns where alerts for a specific dispatch go (PagerDuty, Slack, internal webhook). Both flow through the same HMAC-signing path; the worker merges both sources at boot. The redundancy is the point: two distinct concerns with two distinct homes. (This supersedes an earlier decision that put notifications only in capability content.)
+> **Notifications have two homes by design.** Capability-content notifications (`pangolin-notifications.json`) are behavior-tied — the capability author mandates alerts whenever the capability is in scope (e.g., "alert if this dangerous capability fires"). Dispatch-level notifications (`notifications: NotificationConfig[]` on `DispatchWork`) are operational — the SRE team owns where alerts for a specific dispatch go (PagerDuty, Slack, internal webhook). Both flow through the same HMAC-signing path; the worker merges both sources at boot. The redundancy is the point: two distinct concerns with two distinct homes. (This supersedes an earlier decision that put notifications only in capability content.)
 
 Two locations, each owned by a different role:
 
-- **Capability content** (`agora-notifications.json` inside the capability bundle). Authored by the capability author. Travels with the capability. Content-hashed with the rest of the bundle. The capability author uses this for alerts that are intrinsic to the capability's behavior — "this capability is dangerous; always notify."
+- **Capability content** (`pangolin-notifications.json` inside the capability bundle). Authored by the capability author. Travels with the capability. Content-hashed with the rest of the bundle. The capability author uses this for alerts that are intrinsic to the capability's behavior — "this capability is dangerous; always notify."
 - **Dispatch field** (`notifications: NotificationConfig[]` on `DispatchWork`). Set by the dispatcher, typically populated from the integrator's environment configuration. The SRE team uses this for operational routing — where the on-call team for this dispatch wants its alerts.
 
 The worker merges both sources at boot. Both flow through the same HMAC-signing path, so subscribers see one notification stream with consistent integrity guarantees regardless of which home contributed a given entry.

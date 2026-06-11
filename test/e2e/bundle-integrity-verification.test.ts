@@ -10,8 +10,8 @@
 //   3. Drive a `client.dispatch()` against `LocalDockerProvider` +
 //      `LocalStorageProvider`. The worker's `fetchBundles()` re-hashes the
 //      bytes it reads from storage; mismatch → IntegrityMismatchError →
-//      `reason: 'integrity-failed'` (see `packages/agora-worker/src/entrypoint.ts`
-//      §3 and `packages/agora-worker/src/bundle-fetcher.ts` header).
+//      `reason: 'integrity-failed'` (see `packages/pangolin-worker/src/entrypoint.ts`
+//      §3 and `packages/pangolin-worker/src/bundle-fetcher.ts` header).
 //   4. Assert the failure surfaces on `result.failure.reason` AND that the
 //      sub-agent never ran (no echo string in stdout) — the worker must fail
 //      before the runtime adapter is invoked.
@@ -21,11 +21,11 @@
 // always returns `integrity-failed` would be caught.
 //
 // LocalStorageProvider's on-disk layout (mirrored from
-// `packages/agora-storage-local/src/index.ts`):
+// `packages/pangolin-storage-local/src/index.ts`):
 //
 //   <rootDir>/<namespace>/<type>/<name>/<safeHash>.blob
 //
-// where `<safeHash>` is the agora-core contentHash `sha256:<hex>` with the
+// where `<safeHash>` is the pangolin-core contentHash `sha256:<hex>` with the
 // ":" replaced by "_" (Windows-friendly filenames). For this test that means
 // the capability blob lands at:
 //

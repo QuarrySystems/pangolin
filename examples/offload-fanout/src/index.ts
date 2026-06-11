@@ -1,13 +1,13 @@
 // offload-fanout — §7 acceptance demo (real-Docker run).
 //
 // Drives the full fan-out flow end-to-end against real containers:
-//   AgoraOrchestrator.tick (concurrency 2) → DispatchExecutor.fire (3 edit items in parallel,
+//   PangolinOrchestrator.tick (concurrency 2) → DispatchExecutor.fire (3 edit items in parallel,
 //   shared.ts serialized by its resourceLock) → reconcile → verify item depends on all three.
 //   After completion: fetch result_refs + assemble tamper-detecting audit bundle.
 //
 // Prerequisites (this is a LIVE run, not a unit test):
 //   - Docker reachable (local Desktop, or DOCKER_HOST → a remote daemon).
-//   - The worker image pullable: ghcr.io/quarrysystems/agora-worker:latest.
+//   - The worker image pullable: ghcr.io/quarrysystems/pangolin-worker:latest.
 //   - ANTHROPIC_API_KEY set in the environment.
 //     Run via: pnpm start:env   (reads ../../.env)   or export the var and `pnpm start`.
 
@@ -15,15 +15,15 @@ import { readFile, mkdtemp, mkdir, rm } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  AgoraClient,
+  PangolinClient,
   NoopCredentialProvider,
   StdoutResultSink,
-} from '@quarry-systems/agora-client';
-import { LocalStorageProvider } from '@quarry-systems/agora-storage-local';
-import { LocalDockerProvider } from '@quarry-systems/agora-providers-local-docker';
-import { LocalSecretStore } from '@quarry-systems/agora-secret-store';
+} from '@quarry-systems/pangolin-client';
+import { LocalStorageProvider } from '@quarry-systems/pangolin-storage-local';
+import { LocalDockerProvider } from '@quarry-systems/pangolin-providers-local-docker';
+import { LocalSecretStore } from '@quarry-systems/pangolin-secret-store';
 import {
-  AgoraOrchestrator,
+  PangolinOrchestrator,
   SqliteRunStateStore,
   ManualTrigger,
   DispatchExecutor,
@@ -35,17 +35,17 @@ import {
   LocalDirMailbox,
   OperationsApi,
   serve,
-} from '@quarry-systems/agora-orchestrator';
-import type { Run } from '@quarry-systems/agora-orchestrator';
+} from '@quarry-systems/pangolin-orchestrator';
+import type { Run } from '@quarry-systems/pangolin-orchestrator';
 import { tmpdir } from 'node:os';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PLAN_PATH = join(__dirname, '../plan.json');
-const WORKER_IMAGE = 'ghcr.io/quarrysystems/agora-worker:latest';
+const WORKER_IMAGE = 'ghcr.io/quarrysystems/pangolin-worker:latest';
 const RUN_TIMEOUT_MS = 300_000; // 5 min: fan-out of 3 edit items + verify
 
 // ---------------------------------------------------------------------------
-// Live-run guard: check the API key HERE (not in agora.config.mjs) so config
+// Live-run guard: check the API key HERE (not in pangolin.config.mjs) so config
 // import is always safe and composable.
 // ---------------------------------------------------------------------------
 const apiKeyRaw = process.env.ANTHROPIC_API_KEY;
@@ -64,7 +64,7 @@ async function main(): Promise<void> {
   // would let a later run read an earlier run's stale outbox records for the
   // reused runId — verifying them against this run's fresh store yields a
   // spurious `anchor-missing`. A fresh dir per run isolates each run cleanly.
-  const runDir = await mkdtemp(join(tmpdir(), 'agora-fanout-'));
+  const runDir = await mkdtemp(join(tmpdir(), 'pangolin-fanout-'));
   const mailboxDir = join(runDir, 'mailbox');
   const storageRoot = join(runDir, 'storage');
   const secretDir = join(runDir, 'secrets');
@@ -75,7 +75,7 @@ async function main(): Promise<void> {
 
   try {
     // 1. Wire the local-stack client.
-    const client = new AgoraClient({
+    const client = new PangolinClient({
       namespace: 'offload-fanout',
       compute: { 'local-docker': new LocalDockerProvider({ allowUnpinnedImage: true }) },
       storage: new LocalStorageProvider({ rootDir: storageRoot }),
@@ -137,7 +137,7 @@ async function main(): Promise<void> {
     const auditLog = new AuditLog({ store, signer, anchor });
 
     // 4. Orchestrator (concurrency 2 — edits fan out; shared.ts serialized by its lock).
-    const orchestrator = new AgoraOrchestrator({
+    const orchestrator = new PangolinOrchestrator({
       store,
       executors: {
         dispatch: new DispatchExecutor({

@@ -3,17 +3,17 @@ title: How an offload run executes
 description: How the orchestrator schedules a run — named queues, depends_on resolution, disjoint vs shared resource-locks, the fire-and-reconcile tick loop, and the patch escape.
 ---
 
-A single [`agora dispatch`](/agora/reference/cli/) runs one unit of work *now* and
+A single [`pangolin dispatch`](/pangolin/reference/cli/) runs one unit of work *now* and
 blocks until it exits. An **offload run** is different: you submit a whole DAG of
 work, and a long-running daemon fans it out safely across an isolated worker pool,
 unattended, producing a verifiable audit trail of exactly what ran. This page
 explains *how* that scheduling happens — the mechanics behind the
-[first offload run tutorial](/agora/tutorials/first-offload-run/), grounded in the
-`agora-orchestrator` engine.
+[first offload run tutorial](/pangolin/tutorials/first-offload-run/), grounded in the
+`pangolin-orchestrator` engine.
 
-For the *shape* of a plan see the [plan.json reference](/agora/reference/plan-json/);
+For the *shape* of a plan see the [plan.json reference](/pangolin/reference/plan-json/);
 for where the run sits in the whole system see the
-[architecture overview](/agora/explanation/architecture-overview/). This page is
+[architecture overview](/pangolin/explanation/architecture-overview/). This page is
 about the algorithm in the middle.
 
 ## The model: Queue, Run, WorkItem
@@ -79,7 +79,7 @@ is disjoint. But anything touching a shared `package.json` declares that path as
 lock, and every item holding it serializes against every other. `resourceLocks`
 answers "is it *safe* to run alongside what's already running?"
 
-In the [fan-out example](/agora/tutorials/first-offload-run/) the three `edit-*`
+In the [fan-out example](/pangolin/tutorials/first-offload-run/) the three `edit-*`
 items have disjoint per-file locks, so they are all eligible at once but only two
 run together (the queue is `concurrency: 2`); the third starts as soon as a slot
 frees. `verify` `depends_on` all three, so it waits regardless of locks.
@@ -87,7 +87,7 @@ frees. `verify` `depends_on` all three, so it waits regardless of locks.
 ## The fire-and-reconcile tick loop
 
 The daemon never *pushes* work and never blocks on a running item. It **polls**:
-each `tick()` advances one queue by one step, and the [`serve`](/agora/reference/cli/)
+each `tick()` advances one queue by one step, and the [`serve`](/pangolin/reference/cli/)
 loop calls `tick()` on a fixed interval (2 s in the example). A single tick runs
 four ordered phases:
 
@@ -183,12 +183,12 @@ circle back with a fix.
   and re-scan re-derives the same directive as a no-op.
 - **Provenance closure still holds.** Spawned items append to the *same* run
   and consume upstream products through the same `needs` machinery, so
-  `agora verify`'s closure check covers dynamically grown graphs with zero
+  `pangolin verify`'s closure check covers dynamically grown graphs with zero
   new verification code.
 
 ## Recurring submission (cron)
 
-`agora orch serve` + `agora orch submit` delivers *unattended* offload — you
+`pangolin orch serve` + `pangolin orch submit` delivers *unattended* offload — you
 submit once, walk away, and the daemon fans it out. **Cron adds the missing
 axis: *recurring* offload, with no client present at fire time.**
 
@@ -217,24 +217,24 @@ also coalesces cleanly.
 
 Schedules persist in a `schedules` table on the same SQLite database `serve`
 already owns, so they survive restarts. The operator surface is
-`agora orch schedule add|list|rm`; these verbs are CLI-only (not MCP-reachable).
+`pangolin orch schedule add|list|rm`; these verbs are CLI-only (not MCP-reachable).
 
 For the full architecture, catch-up policy, and idempotency mechanics, see the
-[cron scheduling design spec](https://github.com/quarrysystems/agora/blob/main/docs/superpowers/specs/2026-06-02-agora-cron-trigger-design.md).
+[cron scheduling design spec](https://github.com/quarrysystems/pangolin/blob/main/docs/superpowers/specs/2026-06-02-pangolin-scale-cron-trigger-design.md).
 For the how-to walkthrough, see
-[Schedule recurring runs](/agora/how-to/schedule-recurring-runs/).
+[Schedule recurring runs](/pangolin/how-to/schedule-recurring-runs/).
 
 ## The patch escape: how results leave the sandbox
 
 The sandbox is the product — by default nothing leaves the container. So how do
 you get the work back? On a successful item, the worker captures its workspace diff
-(`git diff`, excluding `.agora/`), uploads it to the `StorageProvider` as a
+(`git diff`, excluding `.pangolin/`), uploads it to the `StorageProvider` as a
 **content-addressed patch artifact**, and writes the artifact's ref into the
-sentinel `.agora/output.json`. On reconcile, the executor reads that `patchRef` and
+sentinel `.pangolin/output.json`. On reconcile, the executor reads that `patchRef` and
 records it as the item's **`result_ref`**:
 
 ```
-agora://<namespace>/artifact/<dispatchId>/sha256:<hash>
+pangolin://<namespace>/artifact/<dispatchId>/sha256:<hash>
 ```
 
 This is the one thing that escapes the sandbox by default, and it escapes as a
@@ -243,12 +243,12 @@ This is the one thing that escapes the sandbox by default, and it escapes as a
 storage to review it. A run that changes nothing produces no `result_ref`. The
 audit bundle's per-item records, likewise, carry refs only — never secret values —
 so the bundle is safe to hand an auditor (see
-[audit & guarantee tiers](/agora/explanation/audit-guarantee-tiers/)).
+[audit & guarantee tiers](/pangolin/explanation/audit-guarantee-tiers/)).
 
 ## Running serve in a container (self-hosted delivery)
 
 When `serve` itself runs **in a container** (the self-hosted topology — e.g.
-[`examples/offload-minio/`](https://github.com/quarrysystems/agora/tree/main/examples/offload-minio/),
+[`examples/offload-minio/`](https://github.com/quarrysystems/pangolin/tree/main/examples/offload-minio/),
 or Fargate) it launches workers as **siblings on the host Docker daemon**, not as
 children inside itself. That one fact dictates how config and secrets reach a
 worker: anything that lives only inside the `serve` container's filesystem is
@@ -304,7 +304,7 @@ The costs, concretely:
   `StorageProvider`.)
 - **Single-writer run-state.** One `serve` owns the SQLite DB — a throughput ceiling
   and SPOF for that orchestrator (deliberate for overnight offload; see
-  [ADR-0018](/agora/explanation/decisions/0018-orchestration-ships-as-a-layer/)).
+  [ADR-0018](/pangolin/explanation/decisions/0018-orchestration-ships-as-a-layer/)).
 - **Orchestration overhead.** submit → poll → tick → resolve → container spin →
   worker fetch → run. The overhead dwarfs a sub-second task; it's batch-shaped.
 
@@ -320,8 +320,8 @@ so you don't have to.
 
 ## See also
 
-- [Your first offload run](/agora/tutorials/first-offload-run/) — run this end to end.
-- [agora.config reference](/agora/reference/config/#targeting-a-self-hosted--s3-compatible-store-minio-localstack) — the self-hosted S3 / MinIO options.
-- [plan.json schema](/agora/reference/plan-json/) — every field of a Run / WorkItem.
-- [Architecture overview](/agora/explanation/architecture-overview/) — where the run sits in the whole system.
-- [Audit & guarantee tiers](/agora/explanation/audit-guarantee-tiers/) — what the audit bundle proves.
+- [Your first offload run](/pangolin/tutorials/first-offload-run/) — run this end to end.
+- [pangolin.config reference](/pangolin/reference/config/#targeting-a-self-hosted--s3-compatible-store-minio-localstack) — the self-hosted S3 / MinIO options.
+- [plan.json schema](/pangolin/reference/plan-json/) — every field of a Run / WorkItem.
+- [Architecture overview](/pangolin/explanation/architecture-overview/) — where the run sits in the whole system.
+- [Audit & guarantee tiers](/pangolin/explanation/audit-guarantee-tiers/) — what the audit bundle proves.

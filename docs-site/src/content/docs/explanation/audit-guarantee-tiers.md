@@ -1,12 +1,12 @@
 ---
 title: Audit & guarantee tiers
-description: How agora's audit trail works, and the difference between tamper-detecting and tamper-evident (external-immutable) guarantees.
+description: How Pangolin Scale's audit trail works, and the difference between tamper-detecting and tamper-evident (external-immutable) guarantees.
 ---
 
-When an offload run finishes, agora can produce a verifiable record of exactly
+When an offload run finishes, Pangolin Scale can produce a verifiable record of exactly
 what ran, with what inputs, under whose authority, and what each item produced.
 That record is the **audit bundle**. But "verifiable" is a word that earns very
-different weight depending on *where the proof lives* — and agora is deliberate,
+different weight depending on *where the proof lives* — and Pangolin Scale is deliberate,
 to the point of pedantry, about not claiming more than the deployment can prove.
 
 This page explains how the trail is built, the two strengths of claim it can
@@ -167,7 +167,7 @@ Being precise about the ceiling matters as much as the floor.
 
 - **No tier proves the *content* of the work was correct, safe, or reproducible.**
   The audit trail proves *what ran and what it produced* (by reference), not that
-  the output is good. agora's copy says "compliance-ready," never "compliant,"
+  the output is good. Pangolin Scale's copy says "compliance-ready," never "compliant,"
   "certified," or "reproducible AI output."
 - **`tamper-detecting` does not prevent or survive a determined rewrite.** An actor
   with write access to the store can rewrite both the log and the local root so
@@ -183,7 +183,7 @@ Being precise about the ceiling matters as much as the floor.
 
 ## The honesty constraints
 
-agora enforces a vocabulary discipline, and it is intentional rather than
+Pangolin Scale enforces a vocabulary discipline, and it is intentional rather than
 incidental:
 
 - The word **"tamper-evident"** is licensed *only* at the `external-immutable` tier
@@ -198,13 +198,13 @@ incidental:
 The reason is trust, not modesty for its own sake. The whole value of an audit
 trail is that someone relying on it can take its claim at face value. A guarantee
 that overstates itself is worse than a weaker one stated accurately, because it
-fails exactly when it is leaned on. So agora makes the system, the report, and the
+fails exactly when it is leaned on. So Pangolin Scale makes the system, the report, and the
 docs all say the same conservative thing — and where the code is conservative,
 this page is too.
 
 ## Where to go next
 
-- [Export & verify an audit bundle](/agora/how-to/verify-audit-bundle/) — produce a
+- [Export & verify an audit bundle](/pangolin/how-to/verify-audit-bundle/) — produce a
   bundle and read its report, tier and all.
-- [CLI reference](/agora/reference/cli/) — the `agora orch audit` command and its
+- [CLI reference](/pangolin/reference/cli/) — the `pangolin orch audit` command and its
   output shape.

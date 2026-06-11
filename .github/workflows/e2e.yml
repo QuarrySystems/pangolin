@@ -7,9 +7,9 @@ name: e2e
 # This job runs the logic/contract suites (credential rejection, content-hash
 # versioning, manifest deploy, MCP tool surface, monorepo bootstrap, the
 # in-process runtime-adapter seam). The container-backed suites are gated
-# behind `AGORA_E2E_DOCKER=1` (not set here) because they need the pinned
+# behind `PANGOLIN_E2E_DOCKER=1` (not set here) because they need the pinned
 # worker image pulled + a runtime — run those on a dedicated runner. The
-# live-AWS suite stays gated behind its AGORA_E2E_AWS_* env vars.
+# live-AWS suite stays gated behind its PANGOLIN_E2E_AWS_* env vars.
 
 on:
   pull_request:

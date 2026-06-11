@@ -22,10 +22,10 @@ pnpm --filter pattern-dogfood-example start
   items: implement, review, package
 
 === AFTER: graph status ===
-  implement: done resultRef=agora://ns/artifact/impl/sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaa…
+  implement: done resultRef=pangolin://ns/artifact/impl/sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaa…
   review: done verify.passed=false
   package: skipped
-  review-fix-1: done resultRef=agora://ns/artifact/fix/sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbb…
+  review-fix-1: done resultRef=pangolin://ns/artifact/fix/sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbb…
   review~2: done
   package~2: done
 
@@ -33,8 +33,8 @@ pnpm --filter pattern-dogfood-example start
   kind=run.extended  causeItemId=review  actor=pattern:default
 
 === review-fix-1 manifest inputRefs ===
-  work:     agora://ns/artifact/impl/sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-  findings: agora://ns/artifact/findings/sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+  work:     pangolin://ns/artifact/impl/sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  findings: pangolin://ns/artifact/findings/sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 
 === package~2 provenance ===
   inputRefs.work matches review-fix-1 resultRef: true
@@ -114,5 +114,5 @@ local development without any external dependencies.
 
 ## Related
 
-- Spec: `docs/superpowers/specs/2026-06-05-agora-pattern-layer-design.md`
-- Unit test (covered by): `packages/agora-orchestrator/test/pattern-dogfood.int.test.ts`
+- Spec: `docs/superpowers/specs/2026-06-05-pangolin-pattern-layer-design.md`
+- Unit test (covered by): `packages/pangolin-orchestrator/test/pattern-dogfood.int.test.ts`

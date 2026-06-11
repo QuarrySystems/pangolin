@@ -1,6 +1,6 @@
 # Roadmap
 
-> **Status posture.** agora is **source-available** under the Business Source
+> **Status posture.** Pangolin Scale is **source-available** under the Business Source
 > License 1.1. **V1 is shipped** — the offload orchestrator runs unattended,
 > escapes a reviewable patch per task, and produces a verifiable audit bundle.
 > What follows is **additive**: the V1.1 layer is a strict superset of what V1
@@ -11,7 +11,7 @@
 > No dates. Items move from *Later* → *Next* → *Now* as the work is pulled, not
 > on a schedule.
 
-agora is **mechanism, not policy**. It ships enforcement points and primitives;
+Pangolin Scale is **mechanism, not policy**. It ships enforcement points and primitives;
 it does not own roles, sharing, scheduling policy, or who-can-do-what. That is by
 design and shapes everything below.
 
@@ -37,8 +37,8 @@ below.
   content-addressed artifact, and surfaces it as `result_ref`.
 - **Retry / backoff** — per-item attempt counter, configurable `maxAttempts`,
   exponential backoff; exhausted items go `failed` and their dependents `skipped`.
-- **Operator surface** — CLI `agora orch serve | submit | status | watch | cancel
-  | audit`; the three client MCP tools (`agora_orchestrator_submit | _status |
+- **Operator surface** — CLI `pangolin orch serve | submit | status | watch | cancel
+  | audit`; the three client MCP tools (`pangolin_orchestrator_submit | _status |
   _watch`). `audit` is deliberately **not** on MCP — auditing is an operator
   action, not an AI-loop action. A CI allowlist check fails if any
   privileged/service method becomes MCP-reachable.
@@ -47,8 +47,8 @@ below.
   remain a contract, not yet a feature.
 - **Compliance & audit controls (the edge)** — signed dispatch manifest,
   Merkle-rooted audit log with a pluggable `AuditAnchor` tamper-evidence seam,
-  actor identity on every operation, and `agora orch audit` evidence export.
-  **Encryption-at-rest on S3 writes is agora-set** — `S3StorageProvider` takes an
+  actor identity on every operation, and `pangolin orch audit` evidence export.
+  **Encryption-at-rest on S3 writes is pangolin-set** — `S3StorageProvider` takes an
   `encryption` option to set server-side encryption (SSE-S3, or customer-managed
   SSE-KMS via `{ mode: 'aws:kms', kmsKeyId }`); when unset it inherits the bucket
   default (no-downgrade). Other at-rest layers — the SQLite run-state volume and
@@ -72,7 +72,7 @@ below.
   computes the policy for each item — but the result is currently **discarded**
   (`tick.ts`: `void effectTierPolicy(…)`, `// TODO(PR6)`). Nothing caches, snapshots,
   or gates on it yet. Acting on it is V1.1 (below).
-- **Cron scheduling** — `agora orch schedule add|list|rm` CLI verbs; schedules
+- **Cron scheduling** — `pangolin orch schedule add|list|rm` CLI verbs; schedules
   persisted in a `schedules` SQLite table via a config-owned `scheduleStore`
   (default `SqliteScheduleStore`). The cron scheduler acts as a Run *producer*
   feeding the existing submission inbox — no new Trigger primitive. Catch-up
@@ -82,11 +82,11 @@ below.
   (`{ from, select: patch | output }`, auto-unioned into `depends_on`); products
   are resolved at fire time, materialized into the consumer's workspace at
   `inputs/<key>`, sealed into the dispatch manifest as content-addressed
-  `inputRefs`, and `agora verify` proves **provenance closure** — every consumed
+  `inputRefs`, and `pangolin verify` proves **provenance closure** — every consumed
   ref is a sealed product of a completed item in the same run. This also closes
   the previously-deferred per-dispatch artifact I/O gap (content-addressed
   `outputs/` capture in, `inputs/<key>` overlay out, both in the manifest).
-  Pre-flight: `agora orch validate plan.json`. Demo:
+  Pre-flight: `pangolin orch validate plan.json`. Demo:
   [`examples/handoff-dag`](examples/handoff-dag/).
 - **Per-queue execution patterns** — `QueueConfig.pattern`: `staticDag`
   (identity; the default), `pipeline` (auto-chaining plus an `inputs.gate` policy
@@ -101,7 +101,7 @@ below.
   steps are now a pipeline runner over typed blocks (`agent` / `script` /
   `capture`; script lens `gate | verify`), byte-identical to the old path
   (golden-tested), with seal auto-appended; declared pipelines register via
-  `registerPipeline` / `agora pipeline register|validate|list`, are sealed into
+  `registerPipeline` / `pangolin pipeline register|validate|list`, are sealed into
   the manifest as `pipelineRef` at fire, and emit per-block `blocks[]` evidence.
   The **`data` pack** (`data.split` / `data.transform` / `data.aggregate` shapes,
   `dataset-ref` edge tags) is the second pack — domain-generality with zero
@@ -115,7 +115,7 @@ below.
   `AwsCredentialProvider`, and the `S3ObjectLockAnchor` for the
   external-immutable audit tier), but the maintainers have **not** run the full
   Fargate+S3 path end-to-end. Treat the
-  [Deploy to Fargate + S3](https://quarrysystems.github.io/agora/how-to/deploy-fargate-s3/)
+  [Deploy to Fargate + S3](https://quarrysystems.github.io/pangolin/how-to/deploy-fargate-s3/)
   guide as a first-run guide, not a tested recipe. Note: no concrete
   `S3LockClient` adapter ships — the interface is provided; you implement it.
 
@@ -149,9 +149,9 @@ V1 ships.
 - **Operationalize the `dev` pack** — the `dev.code-edit` / `dev.verify` shapes and
   the `PackRegistry` already exist in code (see "Now"), but the shapes are **not
   dispatchable yet**: pin the real worker-image digest (currently a `PLACEHOLDER`)
-  and enforce each shape's `outputSchema` via `.agora/output.json`.
+  and enforce each shape's `outputSchema` via `.pangolin/output.json`.
 - **Full typed output (enforcement)** — the worker **already writes**
-  `.agora/output.json` (a fixed `{schemaVersion, patchRef, summary}` sentinel) and
+  `.pangolin/output.json` (a fixed `{schemaVersion, patchRef, summary}` sentinel) and
   the executor reads `patchRef` from it to surface `result_ref` — that path is live.
   Deferred: validating the sentinel against each shape's `outputSchema`, and the
   richer `output` / `intents` / `signals` products (the types exist; nothing
@@ -165,7 +165,7 @@ V1 ships.
   derivation already ship and are computed per item (see "Now"), but the result is
   discarded. V1.1 makes the engine *act* on it: cache `pure` work, snapshot live
   state before `read-impure`, gate `write-impure` intents through interpreter policy.
-- **`Authorizer` seam** — an implementor-filled authorization policy. agora ships
+- **`Authorizer` seam** — an implementor-filled authorization policy. Pangolin Scale ships
   the chokepoint (the operations API) and identity primitives (`actor`, the
   client/service privilege split); it never owns roles. V1 is single-operator
   ("whoever launched"). **[seam free · impl Enterprise]** — the seam is open; a
@@ -204,20 +204,20 @@ These require **no refactor** when pulled — that is what the architecture boug
 
 ## Versioning & stability
 
-- agora is **pre-1.0 (`0.x`)**. Interfaces may change between minor versions
+- Pangolin Scale is **pre-1.0 (`0.x`)**. Interfaces may change between minor versions
   until 1.0.
-- `agora-core` is the **types-only contract**; every other package depends only
+- `pangolin-core` is the **types-only contract**; every other package depends only
   on it. Breaking changes are introduced there first and called out in the
   changelog.
 
 ## License & the Change Date
 
-agora is licensed under **BSL 1.1**. The Additional Use Grant permits all use
-**except offering agora as a hosted/managed orchestration service.** The
+Pangolin Scale is licensed under **BSL 1.1**. The Additional Use Grant permits all use
+**except offering Pangolin Scale as a hosted/managed orchestration service.** The
 **Change Date is four years from first publish**, at which point the license
 converts to **Apache-2.0**. Self-hosting is also the compliance model: regulated
 data never leaves your account. See [`LICENSING.md`](LICENSING.md) and
-[ADR-0017](https://quarrysystems.github.io/agora/explanation/decisions/0017-source-available-bsl/).
+[ADR-0017](https://quarrysystems.github.io/pangolin/explanation/decisions/0017-source-available-bsl/).
 
 ## Influencing the roadmap
 

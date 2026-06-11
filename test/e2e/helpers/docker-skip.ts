@@ -5,9 +5,9 @@
 // pulled and (for the claude-code adapter) a working runtime. Those
 // preconditions don't hold on a vanilla CI runner — ubuntu-latest HAS a
 // Docker daemon but not the image — so the suites are GATED behind an
-// explicit opt-in (mirrors the AGORA_E2E_AWS_* gating):
+// explicit opt-in (mirrors the PANGOLIN_E2E_AWS_* gating):
 //
-//   - run them with `AGORA_E2E_DOCKER=1 pnpm test:e2e` once the worker image
+//   - run them with `PANGOLIN_E2E_DOCKER=1 pnpm test:e2e` once the worker image
 //     is pulled locally;
 //   - without the flag (CI default, plain local runs) they PASS-as-skipped.
 //
@@ -36,10 +36,10 @@ let dockerAvailable = false;
  */
 export function probeDocker(): void {
   beforeAll(async () => {
-    // Opt-in: container E2E runs only when AGORA_E2E_DOCKER=1. A reachable
+    // Opt-in: container E2E runs only when PANGOLIN_E2E_DOCKER=1. A reachable
     // daemon alone isn't enough (the pinned worker image must also be pulled),
     // so CI — which sets neither — passes these suites as skipped.
-    if (process.env.AGORA_E2E_DOCKER !== '1') {
+    if (process.env.PANGOLIN_E2E_DOCKER !== '1') {
       dockerAvailable = false;
       return;
     }

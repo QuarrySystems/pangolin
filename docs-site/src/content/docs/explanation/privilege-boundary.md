@@ -5,7 +5,7 @@ sidebar:
   order: 4
 ---
 
-agora splits its operations into two classes:
+Pangolin Scale splits its operations into two classes:
 
 - **Deploy-time operations** create or modify executable artifacts —
   `capabilities.register()`, `subagent.register()` / `assign()`, `env.register()`.
@@ -23,7 +23,7 @@ deploy-time verbs never reach the AI loop.
 
 If an AI orchestrator could register capabilities or subagents, prompt injection
 becomes privilege escalation. Three distinct risks, each sufficient on its own
-([ADR-0005](/agora/explanation/decisions/0005-privileged-ops-never-ai-reachable/)):
+([ADR-0005](/pangolin/explanation/decisions/0005-privileged-ops-never-ai-reachable/)):
 
 1. **Capability content.** A capability defines the worker's authority surface —
    its bash patterns, MCP config, setup script. An AI tricked via repo content
@@ -36,29 +36,29 @@ becomes privilege escalation. Three distinct risks, each sufficient on its own
    at register time, and tool-call payloads land in transcripts and model logs.
 
 This is the AWS IAM pattern: a lambda doesn't create its own execution role; an
-admin provisions roles and the lambda references them. agora is the same —
+admin provisions roles and the lambda references them. Pangolin Scale is the same —
 artifacts are provisioned by humans, and dispatches reference them by name.
 
 ## The boundary is architectural, not policy
 
 Enforcement does not depend on the orchestrator behaving well. The
-[`agora-mcp`](/agora/reference/mcp-tools/) server exposes a frozen tuple of
-exactly **nine** run-time tools (`AGORA_TOOL_NAMES` in
-`packages/agora-mcp/src/tools.ts`):
+[`pangolin-mcp`](/pangolin/reference/mcp-tools/) server exposes a frozen tuple of
+exactly **nine** run-time tools (`PANGOLIN_TOOL_NAMES` in
+`packages/pangolin-mcp/src/tools.ts`):
 
 | # | Tool | Class |
 |---|---|---|
-| 1 | `agora_dispatch` | dispatch |
-| 2 | `agora_dispatch_describe` | dispatch |
-| 3 | `agora_dispatch_cancel` | dispatch |
-| 4 | `agora_capabilities_list` | catalog read (metadata only) |
-| 5 | `agora_subagents_list` | catalog read (metadata only) |
-| 6 | `agora_envs_list` | catalog read (metadata only) |
-| 7 | `agora_orchestrator_submit` | client orchestration |
-| 8 | `agora_orchestrator_status` | client orchestration |
-| 9 | `agora_orchestrator_watch` | client orchestration |
+| 1 | `pangolin_dispatch` | dispatch |
+| 2 | `pangolin_dispatch_describe` | dispatch |
+| 3 | `pangolin_dispatch_cancel` | dispatch |
+| 4 | `pangolin_capabilities_list` | catalog read (metadata only) |
+| 5 | `pangolin_subagents_list` | catalog read (metadata only) |
+| 6 | `pangolin_envs_list` | catalog read (metadata only) |
+| 7 | `pangolin_orchestrator_submit` | client orchestration |
+| 8 | `pangolin_orchestrator_status` | client orchestration |
+| 9 | `pangolin_orchestrator_watch` | client orchestration |
 
-No tool named `agora_*_register` or `agora_*_assign` exists on this surface — the
+No tool named `pangolin_*_register` or `pangolin_*_assign` exists on this surface — the
 source file's own header comment lists them as *"Deliberately ABSENT … excluded
 by §7.7,"* alongside the privileged `orchestrator_cancel`, the service-only
 `orchestrator_audit`, and the CLI-only `orchestrator_serve`. The catalog reads
@@ -67,17 +67,17 @@ never file contents, system-prompt bodies, or secret values.
 
 A CI allowlist check (`task-ci-mcp-tool-allowlist`) dumps the server's exposed
 tool names and asserts the set equals exactly those nine. Any addition fails the
-build; any name matching `agora_*_register` or `agora_*_assign` fails regardless
+build; any name matching `pangolin_*_register` or `pangolin_*_assign` fails regardless
 of intent. Without that check the boundary would be policy — and policy decays
 as code evolves.
 
 The escape hatch for self-modifying orchestration is to write a TypeScript
-orchestrator against `agora-client` directly, which means *a human wrote the
-orchestration code* — exactly the trust model agora wants.
+orchestrator against `pangolin-client` directly, which means *a human wrote the
+orchestration code* — exactly the trust model Pangolin Scale wants.
 
 ## See also
 
-- [ADR-0005 — Privileged operations are never reachable through an AI tool surface](/agora/explanation/decisions/0005-privileged-ops-never-ai-reachable/)
-- [MCP tools reference](/agora/reference/mcp-tools/) — the full nine-tool surface.
-- [Sandboxing AI agents](/agora/explanation/sandboxing-ai-agents/) — the broader "why."
+- [ADR-0005 — Privileged operations are never reachable through an AI tool surface](/pangolin/explanation/decisions/0005-privileged-ops-never-ai-reachable/)
+- [MCP tools reference](/pangolin/reference/mcp-tools/) — the full nine-tool surface.
+- [Sandboxing AI agents](/pangolin/explanation/sandboxing-ai-agents/) — the broader "why."
 </content>

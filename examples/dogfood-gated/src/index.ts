@@ -1,4 +1,4 @@
-// dogfood-gated RUN 3 — agora exercises the pattern layer's GATED CIRCLE-BACK
+// dogfood-gated RUN 3 — Pangolin Scale exercises the pattern layer's GATED CIRCLE-BACK
 // live on its own source tree (run 1 = independent fan-out #36; run 2 = typed-
 // product handoff on a dependent chain #51). Run 3 proves: gate red → audited
 // respawn → fix-consumes-findings → remapped downstream — with real Claude
@@ -26,7 +26,7 @@
 //     --model/level mapping and the sentinel `usage` block are worker-side; the
 //     run-2-era image silently ignores both. The all-sentinels-lack-usage failure
 //     in row 4 doubles as the stale-image preflight.
-//       docker build -f docker/agora-worker/Dockerfile -t ghcr.io/quarrysystems/agora-worker:main .
+//       docker build -f docker/pangolin-worker/Dockerfile -t ghcr.io/quarrysystems/pangolin-worker:main .
 //   - ANTHROPIC_API_KEY set. Run: `pnpm start:env` (reads ../../.env) or export it.
 
 import { readFile, writeFile, mkdtemp, mkdir, rm } from 'node:fs/promises';
@@ -34,15 +34,15 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import {
-  AgoraClient,
+  PangolinClient,
   NoopCredentialProvider,
   StdoutResultSink,
-} from '@quarry-systems/agora-client';
-import { LocalStorageProvider } from '@quarry-systems/agora-storage-local';
-import { LocalDockerProvider } from '@quarry-systems/agora-providers-local-docker';
-import { LocalSecretStore } from '@quarry-systems/agora-secret-store';
+} from '@quarry-systems/pangolin-client';
+import { LocalStorageProvider } from '@quarry-systems/pangolin-storage-local';
+import { LocalDockerProvider } from '@quarry-systems/pangolin-providers-local-docker';
+import { LocalSecretStore } from '@quarry-systems/pangolin-secret-store';
 import {
-  AgoraOrchestrator,
+  PangolinOrchestrator,
   SqliteRunStateStore,
   ManualTrigger,
   DispatchExecutor,
@@ -59,15 +59,15 @@ import {
   buildRunView,
   renderRunView,
   nextFrame,
-} from '@quarry-systems/agora-orchestrator';
+} from '@quarry-systems/pangolin-orchestrator';
 import type {
   Run,
   AuditBundle,
   DispatchExecutorManifest,
   StatusLike,
-} from '@quarry-systems/agora-orchestrator';
-import { parseAgoraUri, buildDispatchRecordUri } from '@quarry-systems/agora-core';
-import type { RuntimeUsage } from '@quarry-systems/agora-core';
+} from '@quarry-systems/pangolin-orchestrator';
+import { parsePangolinUri, buildDispatchRecordUri } from '@quarry-systems/pangolin-core';
+import type { RuntimeUsage } from '@quarry-systems/pangolin-core';
 import { EXECUTION_PATTERNS_TOPIC as TOPIC } from './config.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -76,7 +76,7 @@ const PLAN_PATH = join(__dirname, '../plan.json');
 const PATCHES_DIR = join(__dirname, '../patches');
 const NAMESPACE = 'dogfood-gated';
 // :main MUST be rebuilt from this branch — see the header preflight note.
-const WORKER_IMAGE = 'ghcr.io/quarrysystems/agora-worker:main';
+const WORKER_IMAGE = 'ghcr.io/quarrysystems/pangolin-worker:main';
 const RUN_TIMEOUT_MS = 900_000; // 15 min: red arc = up to 5 mostly-sequential dispatches.
 
 // Capability shipped to the apply-work-patch subagents: git-applies the upstream
@@ -89,7 +89,7 @@ const APPLY_WORK_SETUP_SH = '#!/bin/sh\nset -e\ngit init -q\ngit apply inputs/wo
 // Shared prompt scaffold (run-2 convention). {{{instructions}}} is unescaped so
 // the plan.json task text passes through verbatim (backticks/punctuation intact).
 const PROMPT =
-  'You are a coding agent working inside a workspace that holds a subset of the agora ' +
+  'You are a coding agent working inside a workspace that holds a subset of the pangolin-scale ' +
   'monorepo at real repository paths (e.g. `docs-site/src/content/...`, `packages/...`). ' +
   'Complete EXACTLY the task below. Create or edit only the file(s) the task names; ' +
   'change nothing else. Use the Edit/Write tools, then stop.\n\nTASK:\n{{{instructions}}}';
@@ -122,7 +122,7 @@ interface StatusBodyItem {
 async function main(): Promise<void> {
   // Fresh per-run dirs (a fixed path would let a later run read a prior run's stale
   // records for a reused runId).
-  const runDir = await mkdtemp(join(tmpdir(), 'agora-dogfood-gated-'));
+  const runDir = await mkdtemp(join(tmpdir(), 'pangolin-dogfood-gated-'));
   const mailboxDir = join(runDir, 'mailbox');
   const storageRoot = join(runDir, 'storage');
   const secretDir = join(runDir, 'secrets');
@@ -132,14 +132,14 @@ async function main(): Promise<void> {
   const store = new SqliteRunStateStore(); // :memory: — single-process
 
   // Hoisted so the readUsage helper (row 4) can reach client.storage.
-  let client: AgoraClient;
+  let client: PangolinClient;
 
   /** Sentinel read recipe (audit-pinned, spec §4): manifestRef → dispatchId →
    *  output.json → .usage. Best-effort by contract — any failure is (not captured). */
   async function readUsage(manifestRef: string | undefined): Promise<RuntimeUsage | undefined> {
     if (!manifestRef) return undefined;
     try {
-      const dispatchId = parseAgoraUri(manifestRef).name;
+      const dispatchId = parsePangolinUri(manifestRef).name;
       const bytes = await client.storage.get(buildDispatchRecordUri(NAMESPACE, dispatchId, 'output.json'));
       return (JSON.parse(new TextDecoder().decode(bytes)) as { usage?: RuntimeUsage }).usage;
     } catch {
@@ -149,7 +149,7 @@ async function main(): Promise<void> {
 
   try {
     // 1. Wire the local-stack client.
-    client = new AgoraClient({
+    client = new PangolinClient({
       namespace: NAMESPACE,
       compute: { 'local-docker': new LocalDockerProvider({ allowUnpinnedImage: true }) },
       storage: new LocalStorageProvider({ rootDir: storageRoot }),
@@ -165,7 +165,7 @@ async function main(): Promise<void> {
     await client.capabilities.register({ name: 'announce-seeds', files: await seedFiles(TOPIC.announceSeeds) });
     await client.capabilities.register({
       name: 'apply-work-patch',
-      files: { 'agora-setup.sh': APPLY_WORK_SETUP_SH },
+      files: { 'pangolin-setup.sh': APPLY_WORK_SETUP_SH },
     });
 
     // 3. Subagents (spec §3). All carry model:. fact-checker carries the #37
@@ -211,7 +211,7 @@ async function main(): Promise<void> {
 
     // 5. Orchestrator. The queue passes the Pattern OBJECT (`pipeline`) — the gate
     //    policy is NOT queue-level; it lives on the gate item's inputs.gate key.
-    const orchestrator = new AgoraOrchestrator({
+    const orchestrator = new PangolinOrchestrator({
       store,
       executors: {
         dispatch: new DispatchExecutor({
@@ -310,8 +310,8 @@ async function main(): Promise<void> {
     // 11b. PERSIST THE PROOF (the run's whole point — attempt 4's bundle was lost
     //      to the finally-cleanup; never again). bundle.json is the auditor
     //      artifact; verify-context.json carries the signer public key + the
-    //      anchored root(s) so a SEPARATE process — `pnpm exec agora verify
-    //      bundle.json` via this example's agora.config.mjs — can re-verify all
+    //      anchored root(s) so a SEPARATE process — `pnpm exec pangolin verify
+    //      bundle.json` via this example's pangolin.config.mjs — can re-verify all
     //      five rows without any access to this run's store or memory.
     const exampleDir = join(__dirname, '..');
     await writeFile(join(exampleDir, 'bundle.json'), JSON.stringify(bundle, null, 2));
@@ -342,7 +342,7 @@ async function main(): Promise<void> {
       ),
     );
     console.log('  proof persisted: bundle.json + verify-context.json');
-    console.log('  independent re-verify: pnpm exec agora verify bundle.json --full');
+    console.log('  independent re-verify: pnpm exec pangolin verify bundle.json --full');
 
     let ok = true; // the four §4 rows AND together into the honest exit code.
 
@@ -449,7 +449,7 @@ async function main(): Promise<void> {
       ok = false;
       console.error(
         '  Row 4 FAIL: no usage captured on any dispatch — rebuild the worker image from this branch ' +
-        '(docker build -f docker/agora-worker/Dockerfile -t ghcr.io/quarrysystems/agora-worker:main .)',
+        '(docker build -f docker/pangolin-worker/Dockerfile -t ghcr.io/quarrysystems/pangolin-worker:main .)',
       );
     } else {
       console.log('  Row 4 OK — at least one dispatch sealed usage.');
@@ -462,10 +462,10 @@ async function main(): Promise<void> {
     // 13. Honest exit. A failed ITEM alone does not fail the harness (Tier-0); the
     //     four §4 rows are the contract.
     if (!ok) {
-      console.error('\n=== dogfood run 3: one or more §4 acceptance rows FAILED — see above ===');
+      console.error('\n=== dogfood-gated run 3: one or more §4 acceptance rows FAILED — see above ===');
       process.exitCode = 1;
     } else {
-      console.log(`\n=== dogfood run 3 OK — ${redArc ? 'RED arc (circle-back)' : 'GREEN arc'}: all §4 rows green ===`);
+      console.log(`\n=== dogfood-gated run 3 OK — ${redArc ? 'RED arc (circle-back)' : 'GREEN arc'}: all §4 rows green ===`);
       console.log('   patches in examples/dogfood-gated/patches/ — Tier-0 review before merge.');
       if (redArc) {
         console.log('   red-arc apply order (spec §6): the FIX patch + announce~2 patch (NOT write-page + fix — both create the page).');

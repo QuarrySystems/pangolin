@@ -1,5 +1,5 @@
 /**
- * Root ESLint configuration for the Agora monorepo.
+ * Root ESLint configuration for the Pangolin Scale monorepo.
  *
  * Uses the legacy `.eslintrc.*` format (ESLint 8.x). Per-package configs
  * may extend this with package-specific rules.
@@ -26,7 +26,7 @@ module.exports = {
         caughtErrorsIgnorePattern: '^_',
       },
     ],
-    // The namespaced sub-API installers in agora-client deliberately capture
+    // The namespaced sub-API installers in pangolin-client deliberately capture
     // `const client = this` inside prototype getters (one inner factory is a
     // non-arrow function that needs the explicit reference). Permit that one
     // alias name; any other `this` alias still errors.

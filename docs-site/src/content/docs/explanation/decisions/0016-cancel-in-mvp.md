@@ -3,19 +3,19 @@ title: "ADR-0016: cancel() is in MVP, not v0.2"
 description: "cancel() is in MVP, not v0.2; best-effort cancellation via provider stop + worker SIGTERM trap."
 status: accepted
 date: 2026-05-21
-deciders: agora-mvp-design
+deciders: pangolin-scale-mvp-design
 ---
 
 ## Context
 
-`AgoraClient.cancel(dispatchId)` lets an operator stop a running dispatch
+`PangolinClient.cancel(dispatchId)` lets an operator stop a running dispatch
 before its compute-provider timeout fires. Implementing it spans three
 layers (§7.6):
 
 - The `ComputeProvider` interface needs a `stop()` method that each
   concrete provider implements (Fargate `StopTask`, local Docker
   `container.kill()`, etc.).
-- `agora-client` needs to expose `cancel(dispatchId)` and route it through
+- `pangolin-client` needs to expose `cancel(dispatchId)` and route it through
   the provider.
 - The worker needs to trap SIGTERM, attempt to emit `dispatch.cancelled`,
   release channel subscriptions, and exit cleanly.
@@ -44,10 +44,10 @@ Two pressures pushed the decision the other way:
 
 ## Decision
 
-From §10.1 of `docs/superpowers/specs/2026-05-21-agora-mvp-design.md`:
+From §10.1 of `docs/superpowers/specs/2026-05-21-pangolin-scale-mvp-design.md`:
 
 > **`cancel()` is in MVP, not v0.2.** Implementation cost is bounded (~1-2
-> days across provider stop implementations + agora-client + worker
+> days across provider stop implementations + pangolin-client + worker
 > SIGTERM handling, all already partially specced). The audit/operational
 > story benefits significantly; regulated buyers expect "stop a runaway
 > dispatch" as table-stakes.
@@ -74,14 +74,14 @@ What becomes easier:
 - The compliance conversation with regulated buyers shortens. "We can
   stop a dispatch" is a yes/no question and the answer is yes from
   MVP day one.
-- The `agora-mcp` surface includes `agora_dispatch_cancel` as a run-time
+- The `pangolin-mcp` surface includes `pangolin_dispatch_cancel` as a run-time
   tool (§4.6), giving orchestrator LLMs an operational primitive for
   recovering from their own bad dispatches.
 
 What becomes harder:
 
 - The MVP scope grew by a small but non-zero amount. Three packages
-  (`agora-core`, `agora-client`, `agora-worker`) plus each compute
+  (`pangolin-core`, `pangolin-client`, `pangolin-worker`) plus each compute
   provider implementation now have a `cancel` / `stop` path to test
   and maintain.
 - Cancellation semantics are best-effort, which means integrator code

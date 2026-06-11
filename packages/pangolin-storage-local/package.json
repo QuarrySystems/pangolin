@@ -1,0 +1,36 @@
+{
+  "name": "@quarry-systems/pangolin-storage-local",
+  "version": "0.1.0",
+  "license": "BUSL-1.1",
+  "description": "StorageProvider backed by the local filesystem — pairs with pangolin-providers-local-docker for the local stack.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/QuarrySystems/pangolin.git",
+    "directory": "packages/pangolin-storage-local"
+  },
+  "homepage": "https://quarrysystems.github.io/pangolin",
+  "bugs": {
+    "url": "https://github.com/QuarrySystems/pangolin/issues"
+  },
+  "scripts": {
+    "lint": "eslint src --ext .ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@quarry-systems/pangolin-core": "workspace:*"
+  },
+  "devDependencies": {}
+}

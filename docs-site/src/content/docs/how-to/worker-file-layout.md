@@ -1,9 +1,9 @@
 ---
 title: Put files where the worker finds them
-description: Where capability files land in the workspace, and the `agora-setup.sh` single-slot rule.
+description: Where capability files land in the workspace, and the `pangolin-setup.sh` single-slot rule.
 ---
 
-A **capability** is a directory of files that agora overlays onto the worker's
+A **capability** is a directory of files that Pangolin Scale overlays onto the worker's
 workspace before the runtime adapter (Claude Code, etc.) starts. This guide
 answers the question every capability author hits: *"I want my worker to have
 X — where do I put it?"*
@@ -17,20 +17,20 @@ engine) and §5.8 (runtime adapter seam). This page is the cookbook.
 |---|---|
 | A Claude Code skill | `.claude/skills/<skill-name>/SKILL.md` (+ any supporting files) |
 | Claude Code settings overrides | `.claude/settings.json` |
-| Claude Code plugin installs | `agora-plugins.json` |
-| A shell setup step | `agora-setup.sh` (⚠️ only one per dispatch — see below) |
+| Claude Code plugin installs | `pangolin-plugins.json` |
+| A shell setup step | `pangolin-setup.sh` (⚠️ only one per dispatch — see below) |
 | Arbitrary files at known paths | Just put them at the path you want |
 
 Register the directory once with the CLI:
 
 ```bash
-agora capabilities register --name <name> --from ./path/to/capability-dir
+pangolin capabilities register --name <name> --from ./path/to/capability-dir
 ```
 
 Or auto-generate from an existing on-disk convention (`.claude/skills/`,
-pokemon profiles, etc.) — see [Sync capabilities & subagents](/agora/how-to/sync-capabilities-subagents/).
+pokemon profiles, etc.) — see [Sync capabilities & subagents](/pangolin/how-to/sync-capabilities-subagents/).
 
-## How agora decides which file wins
+## How Pangolin Scale decides which file wins
 
 When a dispatch binds multiple capabilities, the worker overlays them in
 declared order. Conflicts at the same path are resolved per merge rule:
@@ -39,13 +39,13 @@ declared order. Conflicts at the same path are resolved per merge rule:
   `ClaudeCodeRuntimeAdapter`) declares paths it owns and how to merge them.
   For Claude Code: `.claude/settings.json` deep-merges (`union` on arrays),
   `.claude/skills/**` is last-write-wins per file.
-- **Agora-defined manifest paths** — `agora-setup.sh` is last-write-wins,
-  `agora-notifications.json` is array-union, `agora-channel.json` is
+- **Pangolin Scale-defined manifest paths** — `pangolin-setup.sh` is last-write-wins,
+  `pangolin-notifications.json` is array-union, `pangolin-channel.json` is
   last-write-wins.
 - **Everything else** — last-write-wins on the file path.
 
 The practical upshot: most things compose cleanly because each capability
-writes to its own subpath. The exception is `agora-setup.sh` — see below.
+writes to its own subpath. The exception is `pangolin-setup.sh` — see below.
 
 ## Recipe: ship a Claude Code skill
 
@@ -69,12 +69,12 @@ my-skill-cap/
 Register:
 
 ```bash
-agora capabilities register --name my-skill --from ./my-skill-cap
+pangolin capabilities register --name my-skill --from ./my-skill-cap
 ```
 
 Multiple capabilities can each ship their own skill — they land at different
 `.claude/skills/<distinct-name>/` paths, no conflict. This is exactly what
-`agora capabilities sync --provider claude-code` automates.
+`pangolin capabilities sync --provider claude-code` automates.
 
 ## Recipe: override Claude Code settings
 
@@ -96,7 +96,7 @@ union, the final settings.json has both.
 
 ## Recipe: install a tool in the worker
 
-Put an `agora-setup.sh` at your capability dir's root:
+Put a `pangolin-setup.sh` at your capability dir's root:
 
 ```sh
 #!/bin/sh
@@ -104,7 +104,7 @@ set -e
 apt-get update && apt-get install -y jq
 ```
 
-⚠️ **Single-slot constraint.** `agora-setup.sh` is last-write-wins on that
+⚠️ **Single-slot constraint.** `pangolin-setup.sh` is last-write-wins on that
 exact filename. If **two** of your bound capabilities each ship one, only
 the last one in resolved order runs — the others silently disappear. Three
 ways to work around this:
@@ -121,14 +121,14 @@ ways to work around this:
 
 ## Recipe: install Claude Code plugins
 
-The Claude Code adapter looks for `agora-plugins.json` after overlay and
+The Claude Code adapter looks for `pangolin-plugins.json` after overlay and
 runs `claude plugins install <name>` for each entry. This file's merge rule
 is `array-union`, so multiple capabilities can each contribute plugins
 without overwriting each other:
 
 ```
 my-plugin-cap/
-└── agora-plugins.json
+└── pangolin-plugins.json
 ```
 
 ```json
@@ -153,9 +153,9 @@ Worker workspace will have `<workspace>/fixtures/sample-input.json` etc.
 ## What you can't do (yet)
 
 - **Per-capability install scripts that compose.** See the single-slot
-  constraint above. There's no `agora-setup-<name>.sh` mechanism today.
-- **Skill enumeration from the AI surface.** `agora_capabilities_list` /
-  `agora_subagents_list` MCP tools throw `NOT_IMPLEMENTED` — until the
+  constraint above. There's no `pangolin-setup-<name>.sh` mechanism today.
+- **Skill enumeration from the AI surface.** `pangolin_capabilities_list` /
+  `pangolin_subagents_list` MCP tools throw `NOT_IMPLEMENTED` — until the
   storage layer grows `listNames(prefix)`, the AI has to be told skill names
   out-of-band.
 - **Auto-rebind subagents after a cap sync.** Subagent capability bindings
@@ -165,9 +165,9 @@ Worker workspace will have `<workspace>/fixtures/sample-input.json` etc.
 
 ## See also
 
-- [Sync capabilities & subagents](/agora/how-to/sync-capabilities-subagents/) — auto-generate capabilities and
+- [Sync capabilities & subagents](/pangolin/how-to/sync-capabilities-subagents/) — auto-generate capabilities and
   subagents from `.claude/skills/`, `.claude/agents/`, pokemon profiles, etc.
-- [Dispatch to a remote Docker daemon](/agora/how-to/remote-docker-dispatch/) — dispatch to a
+- [Dispatch to a remote Docker daemon](/pangolin/how-to/remote-docker-dispatch/) — dispatch to a
   remote Docker daemon over SSH.
 - MVP spec §6.3 — formal definition of the overlay/merge model.
-- [ADR-0005](/agora/explanation/decisions/0005-privileged-ops-never-ai-reachable/) — why register/assign are not exposed on the MCP surface.
+- [ADR-0005](/pangolin/explanation/decisions/0005-privileged-ops-never-ai-reachable/) — why register/assign are not exposed on the MCP surface.

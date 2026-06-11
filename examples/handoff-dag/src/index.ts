@@ -1,13 +1,13 @@
 // handoff-dag — §8 acceptance demo (real-Docker run).
 //
 // Drives the typed-product handoff flow end-to-end against real containers:
-//   AgoraOrchestrator.tick → DispatchExecutor.fire (edit-a produces patch → apply-patch
+//   PangolinOrchestrator.tick → DispatchExecutor.fire (edit-a produces patch → apply-patch
 //   binds it via `needs` and applies it with `git apply inputs/patch`).
 //   After completion: assemble the audit bundle + verifyBundle for provenance-closure proof.
 //
 // Prerequisites (this is a LIVE run, not a unit test):
 //   - Docker reachable (local Desktop, or DOCKER_HOST → a remote daemon).
-//   - The worker image pullable: ghcr.io/quarrysystems/agora-worker:latest.
+//   - The worker image pullable: ghcr.io/quarrysystems/pangolin-worker:latest.
 //   - ANTHROPIC_API_KEY set in the environment.
 //     Run via: pnpm start:env   (reads ../../.env)   or export the var and `pnpm start`.
 
@@ -16,15 +16,15 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { APPLY_PATCH_SETUP_SH } from './capabilities.js';
 import {
-  AgoraClient,
+  PangolinClient,
   NoopCredentialProvider,
   StdoutResultSink,
-} from '@quarry-systems/agora-client';
-import { LocalStorageProvider } from '@quarry-systems/agora-storage-local';
-import { LocalDockerProvider } from '@quarry-systems/agora-providers-local-docker';
-import { LocalSecretStore } from '@quarry-systems/agora-secret-store';
+} from '@quarry-systems/pangolin-client';
+import { LocalStorageProvider } from '@quarry-systems/pangolin-storage-local';
+import { LocalDockerProvider } from '@quarry-systems/pangolin-providers-local-docker';
+import { LocalSecretStore } from '@quarry-systems/pangolin-secret-store';
 import {
-  AgoraOrchestrator,
+  PangolinOrchestrator,
   SqliteRunStateStore,
   ManualTrigger,
   DispatchExecutor,
@@ -37,17 +37,17 @@ import {
   OperationsApi,
   verifyBundle,
   serve,
-} from '@quarry-systems/agora-orchestrator';
-import type { Run } from '@quarry-systems/agora-orchestrator';
+} from '@quarry-systems/pangolin-orchestrator';
+import type { Run } from '@quarry-systems/pangolin-orchestrator';
 import { tmpdir } from 'node:os';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PLAN_PATH = join(__dirname, '../plan.json');
-const WORKER_IMAGE = 'ghcr.io/quarrysystems/agora-worker:latest';
+const WORKER_IMAGE = 'ghcr.io/quarrysystems/pangolin-worker:latest';
 const RUN_TIMEOUT_MS = 300_000; // 5 min
 
 // ---------------------------------------------------------------------------
-// Live-run guard: check the API key HERE (not in agora.config.mjs) so config
+// Live-run guard: check the API key HERE (not in pangolin.config.mjs) so config
 // import is always safe and composable.
 // ---------------------------------------------------------------------------
 const apiKeyRaw = process.env.ANTHROPIC_API_KEY;
@@ -63,7 +63,7 @@ const apiKey: string = apiKeyRaw;
 
 async function main(): Promise<void> {
   // Per-run unique dirs to isolate each invocation.
-  const runDir = await mkdtemp(join(tmpdir(), 'agora-handoff-'));
+  const runDir = await mkdtemp(join(tmpdir(), 'pangolin-handoff-'));
   const mailboxDir = join(runDir, 'mailbox');
   const storageRoot = join(runDir, 'storage');
   const secretDir = join(runDir, 'secrets');
@@ -74,7 +74,7 @@ async function main(): Promise<void> {
 
   try {
     // 1. Wire the local-stack client.
-    const client = new AgoraClient({
+    const client = new PangolinClient({
       namespace: 'handoff-dag',
       compute: { 'local-docker': new LocalDockerProvider({ allowUnpinnedImage: true }) },
       storage: new LocalStorageProvider({ rootDir: storageRoot }),
@@ -87,9 +87,9 @@ async function main(): Promise<void> {
     // 2. Register subagents:
     //    code-edit: edits src/main.ts in the workspace (produces a patch artifact = result_ref).
     //    apply-patch: receives the upstream patch via `needs.patch` → inputs.inputRefs.patch
-    //      and applies it with `git apply inputs/patch` via agora-setup.sh.
+    //      and applies it with `git apply inputs/patch` via pangolin-setup.sh.
     //
-    // The `apply-patch` capability ships agora-setup.sh which runs before the agent adapter,
+    // The `apply-patch` capability ships pangolin-setup.sh which runs before the agent adapter,
     // AFTER the inputs/ overlay — so inputs/patch is already present when setup runs.
     const srcContent = '// main.ts\nexport const GREETING = "hello";\n';
     await client.capabilities.register({
@@ -99,7 +99,7 @@ async function main(): Promise<void> {
     await client.capabilities.register({
       name: 'handoff-cap-apply',
       files: {
-        'agora-setup.sh': APPLY_PATCH_SETUP_SH,
+        'pangolin-setup.sh': APPLY_PATCH_SETUP_SH,
       },
     });
 
@@ -114,12 +114,12 @@ async function main(): Promise<void> {
       capabilities: ['handoff-cap-edit'],
     });
 
-    // apply-patch: the patch from edit-a is overlaid as inputs/patch before agora-setup.sh
+    // apply-patch: the patch from edit-a is overlaid as inputs/patch before pangolin-setup.sh
     // runs `git apply inputs/patch`, building on the upstream edit.
     await client.subagent.register({
       name: 'apply-patch',
       systemPrompt:
-        'The upstream patch has already been applied to your workspace by agora-setup.sh. ' +
+        'The upstream patch has already been applied to your workspace by pangolin-setup.sh. ' +
         'Verify the file `src/main.ts` now contains SALUTATION (not GREETING), then exit 0.',
       capabilities: ['handoff-cap-apply'],
     });
@@ -130,7 +130,7 @@ async function main(): Promise<void> {
     const auditLog = new AuditLog({ store, signer, anchor });
 
     // 4. Orchestrator (concurrency 2; `apply-patch` depends_on edit-a via needs auto-union).
-    const orchestrator = new AgoraOrchestrator({
+    const orchestrator = new PangolinOrchestrator({
       store,
       executors: {
         dispatch: new DispatchExecutor({

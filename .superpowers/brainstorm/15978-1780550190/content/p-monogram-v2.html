@@ -1,0 +1,104 @@
+<h2>The "P" monogram — original rebuild (ref #1 direction)</h2>
+<p class="subtitle">Clean-room SVG in your gold/ink palette: smooth head + stem on the left, armour scales fanning on the right, hollow centre = the eye / coiled core. Big on ink + paper, then with each name.</p>
+
+<style>
+  .grid{display:flex;flex-wrap:wrap;gap:16px;margin:8px 0}
+  .plate{border-radius:16px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;padding:34px 26px;min-width:230px;flex:1}
+  .pdark{background:#141009}.plight{background:#F4F1EC;border:1px solid #E7E1D6}
+  .wmk{font-family:'Inter',system-ui,sans-serif;font-weight:700;letter-spacing:-.03em;font-size:38px;line-height:1}
+  .gold{color:#D69A4E}.ink{color:#1a1109}
+  .lockrow{display:flex;align-items:center;gap:13px}
+  .sx{font-family:'Inter',system-ui,sans-serif;font-weight:800;letter-spacing:-.03em;font-size:23px}
+  .sx span{font-weight:500;opacity:.6}
+</style>
+
+<!-- reusable P-monogram pangolin -->
+<svg width="0" height="0" style="position:absolute"><defs>
+  <clipPath id="ringClip"><path fill-rule="evenodd" d="M58 14 a30 30 0 1 0 0.01 0 Z M58 33 a11 11 0 1 1 -0.01 0 Z"/></clipPath>
+  <g id="pmark">
+    <!-- stem (smooth back) -->
+    <rect x="18" y="30" width="15" height="66" rx="7.5" fill="#C8843A"/>
+    <!-- bowl ring -->
+    <path fill="#C8843A" fill-rule="evenodd" d="M58 14 a30 30 0 1 0 0.01 0 Z M58 33 a11 11 0 1 1 -0.01 0 Z"/>
+    <!-- head tip at top -->
+    <path d="M50 16 L60 6 L66 19 Z" fill="#C8843A"/>
+    <!-- scale segmentation on the RIGHT half only -->
+    <g clip-path="url(#ringClip)" stroke="#3a2410" stroke-width="2" fill="none" stroke-linecap="round">
+      <path d="M58 28 A16 16 0 0 1 58 60"/>
+      <path d="M58 21 A23 23 0 0 1 58 67"/>
+      <path d="M69 44 L88 44"/>
+      <path d="M66.4 36.9 L81 24.7"/>
+      <path d="M66.4 51.1 L81 63.3"/>
+      <path d="M62 31 L71 19"/>
+      <path d="M62 57 L71 69"/>
+    </g>
+  </g>
+</defs></svg>
+
+<div class="grid">
+  <div class="card" data-choice="p-dark" onclick="toggleSelect(this)" style="flex:1;min-width:240px">
+    <div class="card-image" style="padding:0">
+      <div class="plate pdark">
+        <svg viewBox="0 0 110 108" width="120" height="118" aria-label="p monogram dark"><use href="#pmark"/></svg>
+        <div class="wmk gold">pangolin</div>
+      </div>
+    </div>
+    <div class="card-body"><h3>A · on ink</h3><p>Gold-on-ink, the ref #1 read: letter + scaled curl + hollow eye.</p></div>
+  </div>
+  <div class="card" data-choice="p-light" onclick="toggleSelect(this)" style="flex:1;min-width:240px">
+    <div class="card-image" style="padding:0">
+      <div class="plate plight">
+        <svg viewBox="0 0 110 108" width="120" height="118" aria-label="p monogram light"><use href="#pmark"/></svg>
+        <div class="wmk ink">pangolin</div>
+      </div>
+    </div>
+    <div class="card-body"><h3>B · on paper</h3><p>Same mark, light surface — holds in both polarities.</p></div>
+  </div>
+</div>
+
+<div class="label" style="margin-top:8px">Pick the name (same P-monogram on each):</div>
+<div class="cards" data-multiselect>
+
+  <div class="card" data-choice="name-scale" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:0">
+      <div class="plate pdark" style="min-height:118px"><div class="lockrow">
+        <svg viewBox="0 0 110 108" width="56" height="55" aria-label="mark"><use href="#pmark"/></svg>
+        <div class="sx gold">pangolin<span> scale</span></div>
+      </div></div>
+    </div>
+    <div class="card-body"><h3>Pangolin Scale</h3><p>pangolinscale.com ✅</p></div>
+  </div>
+
+  <div class="card" data-choice="name-anchor" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:0">
+      <div class="plate pdark" style="min-height:118px"><div class="lockrow">
+        <svg viewBox="0 0 110 108" width="56" height="55" aria-label="mark"><use href="#pmark"/></svg>
+        <div class="sx gold">pangolin<span> anchor</span></div>
+      </div></div>
+    </div>
+    <div class="card-body"><h3>Pangolin Anchor</h3><p>pangolinanchor.com ✅</p></div>
+  </div>
+
+  <div class="card" data-choice="name-keep" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:0">
+      <div class="plate pdark" style="min-height:118px"><div class="lockrow">
+        <svg viewBox="0 0 110 108" width="56" height="55" aria-label="mark"><use href="#pmark"/></svg>
+        <div class="sx gold">pangolin<span> keep</span></div>
+      </div></div>
+    </div>
+    <div class="card-body"><h3>Pangolin Keep</h3><p>pangolinkeep.com ✅</p></div>
+  </div>
+
+  <div class="card" data-choice="name-bare" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:0">
+      <div class="plate pdark" style="min-height:118px"><div class="lockrow">
+        <svg viewBox="0 0 110 108" width="56" height="55" aria-label="mark"><use href="#pmark"/></svg>
+        <div class="sx gold">pangolin</div>
+      </div></div>
+    </div>
+    <div class="card-body"><h3>Just "Pangolin"</h3><p>pangolin.run ✅</p></div>
+  </div>
+
+</div>
+
+<p class="subtitle" style="margin-top:16px">Original rebuild of ref #1 (not the stock art). If the curve/scale-fan needs tuning say so — then click the name to lock it.</p>

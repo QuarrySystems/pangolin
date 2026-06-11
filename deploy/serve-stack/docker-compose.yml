@@ -1,17 +1,17 @@
-# deploy/serve-stack — always-on agora serve stack (spec §2/§3).
+# deploy/serve-stack — always-on pangolin serve stack (spec §2/§3).
 #
 # Hardened from examples/offload-minio/docker-compose.yml. Deltas (spec §3):
 #   - restart: unless-stopped on minio / localstack / serve (long-lived services).
 #   - env_file: .env is PROJECT-LOCAL (cp .env.example .env in this directory);
 #     compose also interpolates ${DOCKER_GID} from the same file — no export step.
 #   - build context ../.. with deploy/serve-stack/Dockerfile (workspace-member build).
-#   - AGORA_SIGNER_SEED_PATH on serve: the persisted signer seed lives on the
+#   - PANGOLIN_SIGNER_SEED_PATH on serve: the persisted signer seed lives on the
 #     serve-data volume next to the SQLite DB.
 #   - NO localstack volume: community LocalStack has no state persistence — a
 #     volume would be misleading. Staged-secret loss across a localstack restart
 #     is absorbed by dispatch retry at reconcile (spec §4.9).
 #   - The worker image is CONFIG-level (DispatchExecutor.workerImage pins
-#     ghcr.io/quarrysystems/agora-worker:main) — `docker compose pull` does NOT
+#     ghcr.io/quarrysystems/pangolin-worker:main) — `docker compose pull` does NOT
 #     refresh it; the update procedure runs an explicit `docker pull`.
 # Healthchecks, pinned upstream image tags, and depends_on conditions are
 # preserved VERBATIM from the example (binding).
@@ -22,7 +22,7 @@
 # The serve container and the sibling Docker workers it launches reach MinIO at
 # http://host.docker.internal:9000 (resolved via `extra_hosts` below).
 
-name: agora-serve-stack
+name: pangolin-serve-stack
 
 services:
 
@@ -31,7 +31,7 @@ services:
   # ---------------------------------------------------------------------------
   minio:
     image: minio/minio:RELEASE.2025-09-07T16-13-09Z
-    container_name: agora-minio
+    container_name: pangolin-minio
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
@@ -57,7 +57,7 @@ services:
   # ---------------------------------------------------------------------------
   localstack:
     image: localstack/localstack:3.8
-    container_name: agora-localstack
+    container_name: pangolin-localstack
     restart: unless-stopped
     ports:
       - "4566:4566"
@@ -77,7 +77,7 @@ services:
   # ---------------------------------------------------------------------------
   minio-init:
     image: minio/mc:RELEASE.2025-08-13T08-35-41Z
-    container_name: agora-minio-init
+    container_name: pangolin-minio-init
     restart: "no"
     depends_on:
       minio:
@@ -92,20 +92,20 @@ services:
 
   # ---------------------------------------------------------------------------
   # serve-data-init — one-shot: chown the serve-data volume so the non-root
-  # agora user (uid 1000) can write the SQLite DB + signer seed on a fresh
+  # pangolin user (uid 1000) can write the SQLite DB + signer seed on a fresh
   # `docker compose up`. Docker creates named volumes root-owned; this fixes
   # that before serve starts.
   # ---------------------------------------------------------------------------
   serve-data-init:
     image: busybox
-    container_name: agora-serve-data-init
+    container_name: pangolin-serve-data-init
     volumes:
       - serve-data:/data
     command: ["sh", "-c", "chown -R 1000:1000 /data"]
     restart: "no"
 
   # ---------------------------------------------------------------------------
-  # serve — agora-orchestrator serve container (always-on)
+  # serve — pangolin-orchestrator serve container (always-on)
   # ---------------------------------------------------------------------------
   serve:
     build:
@@ -113,7 +113,7 @@ services:
       # (packages/*, examples/*, deploy/*, pnpm-workspace.yaml, pnpm-lock.yaml).
       context: ../..
       dockerfile: deploy/serve-stack/Dockerfile
-    container_name: agora-serve
+    container_name: pangolin-serve
     restart: unless-stopped
     depends_on:
       minio:
@@ -127,30 +127,30 @@ services:
     environment:
       # S3 / MinIO — host.docker.internal so the serve container reaches
       # the MinIO port exposed on the Docker host network (endpoint duality).
-      AGORA_S3_ENDPOINT: "http://host.docker.internal:9000"
+      PANGOLIN_S3_ENDPOINT: "http://host.docker.internal:9000"
       # Secrets Manager (LocalStack) — serve stages the per-dispatch secret here;
       # same host.docker.internal endpoint the worker uses (set via extraEnv).
       AWS_ENDPOINT_URL_SECRETS_MANAGER: "http://host.docker.internal:4566"
       AWS_ACCESS_KEY_ID: minioadmin
       AWS_SECRET_ACCESS_KEY: minioadmin
       AWS_REGION: us-east-1
-      # Config reads AGORA_S3_ACCESS_KEY / AGORA_S3_SECRET_KEY for its S3Client.
-      AGORA_S3_ACCESS_KEY: minioadmin
-      AGORA_S3_SECRET_KEY: minioadmin
+      # Config reads PANGOLIN_S3_ACCESS_KEY / PANGOLIN_S3_SECRET_KEY for its S3Client.
+      PANGOLIN_S3_ACCESS_KEY: minioadmin
+      PANGOLIN_S3_SECRET_KEY: minioadmin
       # Anthropic key is supplied by `env_file: .env` below — do NOT also list
       # it here: a compose `environment:` entry overrides `env_file`.
       # SQLite run-state DB — persisted on the named volume below.
-      AGORA_DB_PATH: /data/agora.db
+      PANGOLIN_DB_PATH: /data/pangolin.db
       # Persisted signer seed (spec S5) — generated 0600 on first boot, read on
       # every later boot; lives on the same volume so the keypair survives
       # restarts and the published public key stays stable.
-      AGORA_SIGNER_SEED_PATH: /data/signer-seed.hex
+      PANGOLIN_SIGNER_SEED_PATH: /data/signer-seed.hex
     volumes:
       # Docker socket — lets the serve container launch sibling worker containers.
       - /var/run/docker.sock:/var/run/docker.sock
-      # Named volume for the SQLite DB + signer seed — writable by uid 1000 (agora).
+      # Named volume for the SQLite DB + signer seed — writable by uid 1000 (pangolin).
       - serve-data:/data
-    # group_add: add the docker socket's GID so the non-root agora user (uid 1000)
+    # group_add: add the docker socket's GID so the non-root pangolin user (uid 1000)
     # can write to /var/run/docker.sock. Default 999 matches most Linux hosts;
     # set DOCKER_GID in this directory's .env if your host socket differs.
     group_add:

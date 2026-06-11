@@ -31,16 +31,16 @@ import { join } from 'node:path';
 // the source-tree barrels. Vitest transparently transpiles the `.ts` files
 // resolved by the `.js`-suffixed NodeNext import specifiers used inside the
 // worker source tree.
-import { runWorker } from '../../packages/agora-worker/src/index.js';
-import type { RunWorkerDeps } from '../../packages/agora-worker/src/entrypoint.js';
-import { LocalStorageProvider } from '../../packages/agora-storage-local/src/index.js';
+import { runWorker } from '../../packages/pangolin-worker/src/index.js';
+import type { RunWorkerDeps } from '../../packages/pangolin-worker/src/entrypoint.js';
+import { LocalStorageProvider } from '../../packages/pangolin-storage-local/src/index.js';
 import {
   computeContentHash,
   type LifecycleEvent,
-} from '../../packages/agora-core/src/index.js';
+} from '../../packages/pangolin-core/src/index.js';
 
 // ---------------------------------------------------------------------------
-// Helpers — bundle packing + URI assembly (mirror of agora-client's wire
+// Helpers — bundle packing + URI assembly (mirror of pangolin-client's wire
 // format; the worker's `unpackBundle` is the inverse).
 // ---------------------------------------------------------------------------
 
@@ -75,7 +75,7 @@ function jsonBytes(obj: unknown): Uint8Array {
 // Mock adapter source. CRITICAL property of this test: the file must import
 // ONLY Node built-ins. The acceptance criterion asserts this via grep on the
 // written file's contents — if a future edit accidentally pulls in an
-// `@quarry-systems/agora-runtime-claude-code` import, the test fails.
+// `@quarry-systems/pangolin-runtime-claude-code` import, the test fails.
 // ---------------------------------------------------------------------------
 
 const MOCK_ADAPTER_SOURCE = `
@@ -135,11 +135,11 @@ describe('E2E: RuntimeAdapter seam smoke test', () => {
     };
     const subagentBytes = jsonBytes(subagentDef);
     const { contentHash: subagentByteHash } = await storage.put(
-      'agora://ns/subagent/alpha',
+      'pangolin://ns/subagent/alpha',
       subagentBytes,
     );
     const subagentCanonicalHash = computeContentHash(subagentDef);
-    const subagentUri = `agora://ns/subagent/alpha/${subagentByteHash}`;
+    const subagentUri = `pangolin://ns/subagent/alpha/${subagentByteHash}`;
 
     // Capability bundle with a single marker file — the overlay step will
     // copy this into `workspaceDir` and we read it back below to prove the
@@ -153,10 +153,10 @@ describe('E2E: RuntimeAdapter seam smoke test', () => {
     };
     const capBytes = packBundle('cap-a', capFiles);
     const { contentHash: capByteHash } = await storage.put(
-      'agora://ns/capability/cap-a',
+      'pangolin://ns/capability/cap-a',
       capBytes,
     );
-    const capUri = `agora://ns/capability/cap-a/${capByteHash}`;
+    const capUri = `pangolin://ns/capability/cap-a/${capByteHash}`;
 
     // Env bundle exercises step 7 (resolve env-bundle secrets) and step 8
     // (merge env). No secretRefs => no Secrets Manager calls.
@@ -166,11 +166,11 @@ describe('E2E: RuntimeAdapter seam smoke test', () => {
     };
     const envBytes = jsonBytes(envDef);
     const { contentHash: envByteHash } = await storage.put(
-      'agora://ns/env/env-a',
+      'pangolin://ns/env/env-a',
       envBytes,
     );
     const envCanonicalHash = computeContentHash(envDef);
-    const envUri = `agora://ns/env/env-a/${envByteHash}`;
+    const envUri = `pangolin://ns/env/env-a/${envByteHash}`;
 
     const bundleRefs = {
       subagent: { uri: subagentUri, contentHash: subagentCanonicalHash },
@@ -179,12 +179,12 @@ describe('E2E: RuntimeAdapter seam smoke test', () => {
     };
 
     const env: Record<string, string> = {
-      AGORA_DISPATCH_ID: 'd-e2e-adapter-seam',
-      AGORA_NAMESPACE: 'ns',
-      AGORA_STORAGE_URI: `file://${storageRoot}`,
-      AGORA_BUNDLE_REFS_JSON: JSON.stringify(bundleRefs),
-      AGORA_INPUT_JSON: JSON.stringify({ name: 'world' }),
-      AGORA_RUNTIME_ADAPTER: 'mock',
+      PANGOLIN_DISPATCH_ID: 'd-e2e-adapter-seam',
+      PANGOLIN_NAMESPACE: 'ns',
+      PANGOLIN_STORAGE_URI: `file://${storageRoot}`,
+      PANGOLIN_BUNDLE_REFS_JSON: JSON.stringify(bundleRefs),
+      PANGOLIN_INPUT_JSON: JSON.stringify({ name: 'world' }),
+      PANGOLIN_RUNTIME_ADAPTER: 'mock',
     };
 
     const deps: RunWorkerDeps = {
@@ -223,7 +223,7 @@ describe('E2E: RuntimeAdapter seam smoke test', () => {
 
     // Seam contract: the mock adapter source on disk imports ONLY Node
     // built-ins. If a future edit accidentally pulls in
-    // `@quarry-systems/agora-runtime-claude-code` (or any non-Node import),
+    // `@quarry-systems/pangolin-runtime-claude-code` (or any non-Node import),
     // this test fails — proving the worker doesn't bind to Claude Code at
     // compile time.
     const adapterSource = await readFile(
@@ -247,7 +247,7 @@ describe('E2E: RuntimeAdapter seam smoke test', () => {
         `mock adapter must import only Node built-ins or relative paths, got: ${specifier}`,
       ).toBe(true);
       // Belt-and-suspenders: explicitly forbid the Claude Code adapter.
-      expect(specifier).not.toContain('agora-runtime-claude-code');
+      expect(specifier).not.toContain('pangolin-runtime-claude-code');
     }
   }, 60_000);
 });

@@ -13,12 +13,12 @@ re-dispatches with the answer added to `input`.
 This page covers what the sub-agent does, what the worker reports, and
 what the orchestrator does with the response.
 
-For the design rationale, see [ADR-0008](/agora/explanation/decisions/0008-needs-input-request-stop-restart/) (why request-stop-restart, not
-in-flight ask) and [ADR-0009](/agora/explanation/decisions/0009-needs-input-sentinel-file-vs-exit-code/) (why sentinel file, not exit code).
+For the design rationale, see [ADR-0008](/pangolin/explanation/decisions/0008-needs-input-request-stop-restart/) (why request-stop-restart, not
+in-flight ask) and [ADR-0009](/pangolin/explanation/decisions/0009-needs-input-sentinel-file-vs-exit-code/) (why sentinel file, not exit code).
 
 ## The contract in one paragraph
 
-The sub-agent writes a JSON file at `/workspace/.agora/needs_input.json`
+The sub-agent writes a JSON file at `/workspace/.pangolin/needs_input.json`
 before terminating. The runtime adapter detects it post-exit and reports
 its path. The worker reads, validates, and emits a `dispatch.needs_input`
 lifecycle event (not `dispatch.finished`) with the question payload. The
@@ -48,9 +48,9 @@ needs go in external storage with a pointer in `partial_state`.
 ## How the sub-agent learns the convention
 
 The `ClaudeCodeRuntimeAdapter` ships an overlay capability that teaches
-the convention: a `SKILL.md` at `.claude/skills/agora-needs-input/`
+the convention: a `SKILL.md` at `.claude/skills/pangolin-needs-input/`
 explaining when and how to write the sentinel. The adapter applies it
-before integrator capabilities unless `AGORA_DISABLE_NEEDS_INPUT_HELPER=
+before integrator capabilities unless `PANGOLIN_DISABLE_NEEDS_INPUT_HELPER=
 true` is set in the worker's env.
 
 This means most integrators don't have to do anything for `needs_input`
@@ -81,10 +81,10 @@ cleanly — it's not a failure, it's a deliberate stop. Billing ends.
 Three steps:
 
 1. **Route the question.** The orchestrator (a Claude Code agent driving
-   `agora_dispatch`, or TypeScript code in your own surface) takes the
+   `pangolin_dispatch`, or TypeScript code in your own surface) takes the
    `question` (and `options` / `context` if present) and routes it
    somewhere a human or another agent will answer. Slack, an internal
-   tool, a queued workflow — agora has no opinion.
+   tool, a queued workflow — Pangolin Scale has no opinion.
 2. **Receive the answer.** Out-of-band — whatever channel you chose.
 3. **Re-dispatch.** Call `client.dispatch({...})` again with the same
    subagent, same env, same target — but add the answer to `input` and
@@ -122,7 +122,7 @@ analytical work-so-far into `partial_state` before writing the sentinel,
 so the resumed dispatch doesn't redo the analysis. Without this, every
 re-dispatch starts from scratch and the round-trip cost dominates.
 
-The agora-needs-input-helper SKILL.md teaches this pattern; most stock
+The pangolin-needs-input-helper SKILL.md teaches this pattern; most stock
 Claude Code prompts pick it up naturally.
 
 ## Cost model — why this beats in-flight ask
@@ -152,9 +152,9 @@ common case. See ADR-0008 §3 for the full economic argument.
 
 ## See also
 
-- [ADR-0008](/agora/explanation/decisions/0008-needs-input-request-stop-restart/) — request-stop-restart vs in-flight ask, with the cost
+- [ADR-0008](/pangolin/explanation/decisions/0008-needs-input-request-stop-restart/) — request-stop-restart vs in-flight ask, with the cost
   argument.
-- [ADR-0009](/agora/explanation/decisions/0009-needs-input-sentinel-file-vs-exit-code/) — why a sentinel file and not an exit code.
+- [ADR-0009](/pangolin/explanation/decisions/0009-needs-input-sentinel-file-vs-exit-code/) — why a sentinel file and not an exit code.
 - MVP spec §6.9 — the formal protocol.
-- [Dispatch lifecycle](/agora/reference/dispatch-lifecycle/) — how `dispatch.needs_input`
+- [Dispatch lifecycle](/pangolin/reference/dispatch-lifecycle/) — how `dispatch.needs_input`
   fits in the 6-kind closed vocabulary.

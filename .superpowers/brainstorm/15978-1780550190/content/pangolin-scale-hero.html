@@ -1,0 +1,76 @@
+<h2>Pangolin Scale — ref #4, rebuilt faithfully</h2>
+<p class="subtitle">Original SVG recreation of image #4: green-gradient scale-built "P", light mint at top → deep teal at the base, on the dark-green field, with the pangolin / SCALE wordmark. This is the digital primary; a flat one-colour fallback shown small for contrast.</p>
+
+<style>
+  .stage{background:#1b2a22;border-radius:18px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;padding:48px 30px}
+  .wm{font-family:'Inter',system-ui,sans-serif;font-weight:500;letter-spacing:-.01em;font-size:46px;line-height:1;color:#EAF5EE;text-align:center}
+  .wm small{display:block;font-weight:600;letter-spacing:.46em;font-size:17px;margin-top:8px;text-indent:.46em;color:#5FB985}
+  .row{display:flex;flex-wrap:wrap;gap:16px;margin-top:16px}
+  .mini{background:#F4F1EC;border:1px solid #E7E1D6;border-radius:14px;display:flex;align-items:center;gap:14px;padding:20px 24px}
+  .mini .t{font-family:'Inter',system-ui,sans-serif;font-weight:600;font-size:24px;color:#13231b}
+  .mini .t small{display:block;font-weight:600;letter-spacing:.4em;font-size:11px;color:#2E8B5E;text-indent:.4em}
+  .label{font-size:11px;letter-spacing:.14em;text-transform:uppercase;opacity:.6;margin:22px 0 8px}
+</style>
+
+<svg width="0" height="0" style="position:absolute"><defs>
+  <path id="scl" d="M0 18 C -12 8 -13 -8 0 -16 C 13 -8 12 8 0 18 Z"/>
+  <linearGradient id="pg" gradientUnits="userSpaceOnUse" x1="50" y1="18" x2="74" y2="156">
+    <stop offset="0%"  stop-color="#C3ECC6"/>
+    <stop offset="32%" stop-color="#79C892"/>
+    <stop offset="66%" stop-color="#3FA06F"/>
+    <stop offset="100%" stop-color="#1E7A56"/>
+  </linearGradient>
+</defs></svg>
+
+<div class="card" data-choice="hero" onclick="toggleSelect(this)" style="max-width:none">
+  <div class="card-image" style="padding:0">
+    <div class="stage">
+      <svg viewBox="0 0 130 162" width="150" height="187" aria-label="pangolin scale logo">
+        <g fill="url(#pg)" stroke="#1b2a22" stroke-width="2.6" stroke-linejoin="round">
+          <use href="#scl" transform="translate(42,134)"/>
+          <use href="#scl" transform="translate(64,92) rotate(96)"/>
+          <use href="#scl" transform="translate(41,112) rotate(-3)"/>
+          <use href="#scl" transform="translate(86,88) rotate(66)"/>
+          <use href="#scl" transform="translate(40,90)"/>
+          <use href="#scl" transform="translate(95,66) rotate(38)"/>
+          <use href="#scl" transform="translate(40,66) rotate(3)"/>
+          <use href="#scl" transform="translate(86,44) rotate(12)"/>
+          <use href="#scl" transform="translate(42,44)"/>
+          <use href="#scl" transform="translate(64,36) rotate(-18)"/>
+        </g>
+      </svg>
+      <div class="wm">pangolin<small>SCALE</small></div>
+    </div>
+  </div>
+  <div class="card-body"><h3>Primary — green gradient (ref #4)</h3><p>The digital hero mark, faithful to your pick.</p></div>
+</div>
+
+<div class="label">favicon / one-colour fallback (same mark, flat)</div>
+<div class="row">
+  <div class="mini">
+    <svg viewBox="0 0 130 162" width="40" height="50" aria-label="favicon green flat">
+      <g fill="#2E8B5E" stroke="#F4F1EC" stroke-width="3">
+        <use href="#scl" transform="translate(42,134)"/><use href="#scl" transform="translate(64,92) rotate(96)"/>
+        <use href="#scl" transform="translate(41,112) rotate(-3)"/><use href="#scl" transform="translate(86,88) rotate(66)"/>
+        <use href="#scl" transform="translate(40,90)"/><use href="#scl" transform="translate(95,66) rotate(38)"/>
+        <use href="#scl" transform="translate(40,66) rotate(3)"/><use href="#scl" transform="translate(86,44) rotate(12)"/>
+        <use href="#scl" transform="translate(42,44)"/><use href="#scl" transform="translate(64,36) rotate(-18)"/>
+      </g>
+    </svg>
+    <div class="t">pangolin<small>SCALE</small></div>
+  </div>
+  <div class="mini" style="background:#13231b">
+    <svg viewBox="0 0 130 162" width="40" height="50" aria-label="favicon mono dark">
+      <g fill="#5FB985" stroke="#13231b" stroke-width="3">
+        <use href="#scl" transform="translate(42,134)"/><use href="#scl" transform="translate(64,92) rotate(96)"/>
+        <use href="#scl" transform="translate(41,112) rotate(-3)"/><use href="#scl" transform="translate(86,88) rotate(66)"/>
+        <use href="#scl" transform="translate(40,90)"/><use href="#scl" transform="translate(95,66) rotate(38)"/>
+        <use href="#scl" transform="translate(40,66) rotate(3)"/><use href="#scl" transform="translate(86,44) rotate(12)"/>
+        <use href="#scl" transform="translate(42,44)"/><use href="#scl" transform="translate(64,36) rotate(-18)"/>
+      </g>
+    </svg>
+    <div class="t" style="color:#EAF5EE">pangolin<small style="color:#5FB985">SCALE</small></div>
+  </div>
+</div>
+
+<p class="subtitle" style="margin-top:18px">Faithful to ref #4 (gradient + green + wordmark), rebuilt as an original vector. The flat minis prove the same mark survives one-colour / favicon sizes.</p>

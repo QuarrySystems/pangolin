@@ -1,0 +1,52 @@
+<h2>Organic curl — v3 (coil + tail, no stem)</h2>
+<p class="subtitle">Dropped the rectangular stem so it reads as a curled creature, not a letter: coiled body, flowing tapered tail, smooth back on the left, scales on the right, hollow core. Still an SVG approximation of ref #1's curves.</p>
+
+<style>
+  .plate{border-radius:16px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;padding:34px 26px}
+  .pdark{background:#141009}.plight{background:#F4F1EC;border:1px solid #E7E1D6}
+  .grid{display:flex;flex-wrap:wrap;gap:16px}
+  .wmk{font-family:'Inter',system-ui,sans-serif;font-weight:700;letter-spacing:-.03em;font-size:38px}
+  .gold{color:#D69A4E}.ink{color:#1a1109}
+  .lockrow{display:flex;align-items:center;gap:13px}
+  .sx{font-family:'Inter',system-ui,sans-serif;font-weight:800;letter-spacing:-.03em;font-size:23px}
+  .sx span{font-weight:500;opacity:.6}
+</style>
+
+<svg width="0" height="0" style="position:absolute"><defs>
+  <clipPath id="coilClip"><path fill-rule="evenodd" d="M56 16 a32 32 0 1 0 0.01 0 Z M56 36 a12 12 0 1 1 -0.01 0 Z"/></clipPath>
+  <g id="pmark2">
+    <!-- flowing tapered tail off the lower-left -->
+    <path d="M30 70 Q12 82 17 100 Q36 90 46 78 Z" fill="#C8843A"/>
+    <!-- coiled body (ring) -->
+    <path fill="#C8843A" fill-rule="evenodd" d="M56 16 a32 32 0 1 0 0.01 0 Z M56 36 a12 12 0 1 1 -0.01 0 Z"/>
+    <!-- smooth head/snout bump at top-left -->
+    <path d="M40 22 Q34 8 48 7 Q56 10 56 18 Z" fill="#C8843A"/>
+    <!-- scales on the right side only, following the coil -->
+    <g clip-path="url(#coilClip)" stroke="#3a2410" stroke-width="2" fill="none" stroke-linecap="round">
+      <path d="M56 30 A18 18 0 0 1 56 66"/>
+      <path d="M56 23 A25 25 0 0 1 56 73"/>
+      <path d="M68 48 Q82 46 88 48"/>
+      <path d="M64 33 Q76 26 82 30"/>
+      <path d="M64 63 Q76 70 82 66"/>
+    </g>
+  </g>
+</defs></svg>
+
+<div class="grid">
+  <div class="card" data-choice="v3-dark" onclick="toggleSelect(this)" style="flex:1;min-width:240px">
+    <div class="card-image" style="padding:0">
+      <div class="plate pdark"><svg viewBox="0 0 104 110" width="124" height="130" aria-label="organic curl dark"><use href="#pmark2"/></svg>
+      <div class="wmk gold">pangolin</div></div>
+    </div>
+    <div class="card-body"><h3>on ink</h3><p>Coil + tail reads as the curled animal, not a letter.</p></div>
+  </div>
+  <div class="card" data-choice="v3-light" onclick="toggleSelect(this)" style="flex:1;min-width:240px">
+    <div class="card-image" style="padding:0">
+      <div class="plate plight"><svg viewBox="0 0 104 110" width="124" height="130" aria-label="organic curl light"><use href="#pmark2"/></svg>
+      <div class="wmk ink">pangolin</div></div>
+    </div>
+    <div class="card-body"><h3>on paper</h3><p>Same mark, light surface.</p></div>
+  </div>
+</div>
+
+<p class="subtitle" style="margin-top:16px">This is closer to a curled pangolin than the P-with-stem — but the elegant continuous taper of your ref #1 really wants a vector designer / tool. Happy to keep tuning, or lock the <strong>name</strong> now (it doesn't depend on the final art) and hand the mark off with a proper brief.</p>

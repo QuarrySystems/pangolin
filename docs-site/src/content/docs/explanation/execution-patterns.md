@@ -3,7 +3,7 @@ title: Execution patterns
 description: How queue-level execution patterns (static-dag, pipeline, map-reduce) layer above the tick engine — the Pattern contract, the extendRun seam, run.extended audit entries, the gate/respawn circle-back, and the forward-arc-never-rewind invariant.
 ---
 
-The core tick engine described in [How an offload run executes](/agora/explanation/how-offload-runs/)
+The core tick engine described in [How an offload run executes](/pangolin/explanation/how-offload-runs/)
 handles one responsibility: advancing a fixed DAG of **WorkItems** through their
 status lattice. Execution patterns are a separate layer built *on top of* that
 engine — they let a queue answer a richer question: "now that some items have
@@ -51,16 +51,16 @@ concurrency remain the engine's job.
 
 ## Queue-level pattern binding
 
-Patterns are bound to queues programmatically through `AgoraOrchestratorOptions`,
+Patterns are bound to queues programmatically through `PangolinOrchestratorOptions`,
 not via a config file. A queue without a `pattern` has no pattern phase at all;
 binding `staticDag` explicitly produces the same behaviour with one no-op call
 per terminal item.
 
 ```ts
-import { AgoraOrchestrator } from '@quarry-systems/agora-orchestrator';
-import { mapReduce, pipeline } from '@quarry-systems/agora-orchestrator/patterns';
+import { PangolinOrchestrator } from '@quarry-systems/pangolin-orchestrator';
+import { mapReduce, pipeline } from '@quarry-systems/pangolin-orchestrator/patterns';
 
-const orchestrator = new AgoraOrchestrator({
+const orchestrator = new PangolinOrchestrator({
   store,
   executors,
   triggers,
@@ -215,7 +215,7 @@ flowchart LR
 edges; the dotted arrow marks the pattern's spawn trigger, not a graph edge.
 The failed `lint` stays permanently in history; the fix and gate copy extend
 the run forward. To watch these ghost respawn arcs appear and resolve in real
-time, see [`agora orch watch` — the live view](/agora/reference/cli/#agora-orch-watch--the-live-view).
+time, see [`pangolin orch watch` — the live view](/pangolin/reference/cli/#pangolin-orch-watch--the-live-view).
 
 ## The forward-arc-never-rewind invariant
 
@@ -245,7 +245,7 @@ This invariant is what keeps execution patterns safe:
   the same outcome.
 - **Audit closure is total.** Because no existing item ever points at a newly
   spawned item, every product consumed by a spawned item was already recorded
-  before the extension. `agora verify`'s provenance-closure check can walk the
+  before the extension. `pangolin verify`'s provenance-closure check can walk the
   entire graph — including dynamically grown branches — using exactly the same
   algorithm it applies to static DAGs.
 
@@ -285,13 +285,13 @@ which are expected to be O(terminal items) and free of I/O.
 
 ## See also
 
-- [How an offload run executes](/agora/explanation/how-offload-runs/) — the core
+- [How an offload run executes](/pangolin/explanation/how-offload-runs/) — the core
   tick engine that execution patterns sit above.
-- [plan.json schema](/agora/reference/plan-json/) — the WorkItem fields that
+- [plan.json schema](/pangolin/reference/plan-json/) — the WorkItem fields that
   patterns populate when spawning (`depends_on`, `resourceLocks`, `executor`,
   `needs`).
-- [Audit & guarantee tiers](/agora/explanation/audit-guarantee-tiers/) — how
-  `run.extended` entries are covered by the audit bundle and what `agora verify`
+- [Audit & guarantee tiers](/pangolin/explanation/audit-guarantee-tiers/) — how
+  `run.extended` entries are covered by the audit bundle and what `pangolin verify`
   checks.
-- [Architecture overview](/agora/explanation/architecture-overview/) — where
+- [Architecture overview](/pangolin/explanation/architecture-overview/) — where
   patterns fit in the whole system.

@@ -9,13 +9,13 @@
 # LocalStack 2+ moved the health endpoint to /_localstack/health.
 #
 # Env:
-#   AGORA_TEST_S3_ENDPOINT   default http://localhost:4566
+#   PANGOLIN_TEST_S3_ENDPOINT   default http://localhost:4566
 #   HEALTH_TIMEOUT_SECONDS   default 60
 #   HEALTH_POLL_INTERVAL     default 2
 
 set -euo pipefail
 
-ENDPOINT="${AGORA_TEST_S3_ENDPOINT:-http://localhost:4566}"
+ENDPOINT="${PANGOLIN_TEST_S3_ENDPOINT:-http://localhost:4566}"
 HEALTH_URL="${ENDPOINT%/}/_localstack/health"
 TIMEOUT="${HEALTH_TIMEOUT_SECONDS:-60}"
 INTERVAL="${HEALTH_POLL_INTERVAL:-2}"

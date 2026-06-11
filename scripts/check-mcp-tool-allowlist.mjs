@@ -1,17 +1,17 @@
 #!/usr/bin/env node
 // check-mcp-tool-allowlist.mjs — load-bearing architectural enforcement of
-// §7.7 / §10.6 of the agora-mvp spec and ADR-005 (privileged-ops-never-ai-reachable).
+// §7.7 / §10.6 of the pangolin-scale-mvp spec and ADR-005 (privileged-ops-never-ai-reachable).
 //
-// Imports `AGORA_TOOL_NAMES` and `AGORA_TOOL_METHODS` from the BUILT
-// `@quarry-systems/agora-mcp` package (dist/) and `PRIVILEGE` from the BUILT
-// `@quarry-systems/agora-orchestrator` package (dist/) — not the source — so
+// Imports `PANGOLIN_TOOL_NAMES` and `PANGOLIN_TOOL_METHODS` from the BUILT
+// `@quarry-systems/pangolin-mcp` package (dist/) and `PRIVILEGE` from the BUILT
+// `@quarry-systems/pangolin-orchestrator` package (dist/) — not the source — so
 // this script exercises what consumers actually install.
 //
 // Checks:
 //   1. Exposed run-time tool set equals exactly the nine documented names, in
 //      declaration order (no surprise additions).
-//   2. No name matches any forbidden pattern (`agora_*_register`,
-//      `agora_*_assign`) that would imply a privileged deploy-time operation
+//   2. No name matches any forbidden pattern (`pangolin_*_register`,
+//      `pangolin_*_assign`) that would imply a privileged deploy-time operation
 //      has leaked onto the MCP surface.
 //   3. §10.6 privilege intersection: no MCP-registered orchestrator tool maps
 //      to a non-mcp-eligible method (privileged, service, or audit-only).
@@ -21,7 +21,7 @@
 //   1  mismatch, forbidden pattern, or §10.6 violation; clear error to stderr
 //   1  dist/ missing (with `pnpm build` hint)
 //
-// Run from the agora repo root: `node scripts/check-mcp-tool-allowlist.mjs`.
+// Run from the pangolin-scale repo root: `node scripts/check-mcp-tool-allowlist.mjs`.
 // Import `computeLeaks` from this module without triggering process.exit.
 
 import { existsSync } from 'node:fs';
@@ -44,7 +44,7 @@ export function computeLeaks(toolNames, toolMethods, privilege) {
   const leaks = [];
   for (const tool of toolNames) {
     const method = toolMethods[tool];
-    if (!method) continue; // non-orch tool (e.g. agora_dispatch) — governed by forbidden-pattern check, not the privilege map
+    if (!method) continue; // non-orch tool (e.g. pangolin_dispatch) — governed by forbidden-pattern check, not the privilege map
     const policy = privilege[method];
     if (!policy || policy.mcp !== true) {
       leaks.push(
@@ -60,7 +60,7 @@ async function main() {
     __dirname,
     '..',
     'packages',
-    'agora-mcp',
+    'pangolin-mcp',
     'dist',
     'index.js',
   );
@@ -68,10 +68,10 @@ async function main() {
   if (!existsSync(MCP_DIST_ENTRY)) {
     console.error('✗ MCP tool allowlist check FAILED:');
     console.error(
-      `  agora-mcp build artifact not found at ${MCP_DIST_ENTRY}.`,
+      `  pangolin-mcp build artifact not found at ${MCP_DIST_ENTRY}.`,
     );
     console.error(
-      '  Build the package first: `pnpm -F @quarry-systems/agora-mcp build`',
+      '  Build the package first: `pnpm -F @quarry-systems/pangolin-mcp build`',
     );
     console.error('  (This script intentionally checks the BUILT output, not src/.)');
     process.exit(1);
@@ -81,7 +81,7 @@ async function main() {
     __dirname,
     '..',
     'packages',
-    'agora-orchestrator',
+    'pangolin-orchestrator',
     'dist',
     'index.js',
   );
@@ -89,45 +89,45 @@ async function main() {
   if (!existsSync(ORCH_DIST_ENTRY)) {
     console.error('✗ MCP tool allowlist check FAILED:');
     console.error(
-      `  agora-orchestrator build artifact not found at ${ORCH_DIST_ENTRY}.`,
+      `  pangolin-orchestrator build artifact not found at ${ORCH_DIST_ENTRY}.`,
     );
     console.error(
-      '  Build the package first: `pnpm -F @quarry-systems/agora-orchestrator build`',
+      '  Build the package first: `pnpm -F @quarry-systems/pangolin-orchestrator build`',
     );
     console.error('  (This script intentionally checks the BUILT output, not src/.)');
     process.exit(1);
   }
 
   const EXPECTED = [
-    'agora_dispatch',
-    'agora_dispatch_describe',
-    'agora_dispatch_cancel',
-    'agora_capabilities_list',
-    'agora_subagents_list',
-    'agora_envs_list',
-    'agora_orchestrator_submit',
-    'agora_orchestrator_status',
-    'agora_orchestrator_watch',
+    'pangolin_dispatch',
+    'pangolin_dispatch_describe',
+    'pangolin_dispatch_cancel',
+    'pangolin_capabilities_list',
+    'pangolin_subagents_list',
+    'pangolin_envs_list',
+    'pangolin_orchestrator_submit',
+    'pangolin_orchestrator_status',
+    'pangolin_orchestrator_watch',
   ];
 
-  const FORBIDDEN_PATTERNS = [/^agora_.*_register$/, /^agora_.*_assign$/];
+  const FORBIDDEN_PATTERNS = [/^pangolin_.*_register$/, /^pangolin_.*_assign$/];
 
   const mcpMod = await import(pathToFileURL(MCP_DIST_ENTRY).href);
-  const { AGORA_TOOL_NAMES, AGORA_TOOL_METHODS } = mcpMod;
+  const { PANGOLIN_TOOL_NAMES, PANGOLIN_TOOL_METHODS } = mcpMod;
 
-  if (!Array.isArray(AGORA_TOOL_NAMES)) {
+  if (!Array.isArray(PANGOLIN_TOOL_NAMES)) {
     console.error('✗ MCP tool allowlist check FAILED:');
     console.error(
-      '  Built agora-mcp package does not export AGORA_TOOL_NAMES as an array.',
+      '  Built pangolin-mcp package does not export PANGOLIN_TOOL_NAMES as an array.',
     );
     console.error('  See spec §7.7 and ADR-005 (privileged-ops-never-ai-reachable).');
     process.exit(1);
   }
 
-  if (!AGORA_TOOL_METHODS || typeof AGORA_TOOL_METHODS !== 'object') {
+  if (!PANGOLIN_TOOL_METHODS || typeof PANGOLIN_TOOL_METHODS !== 'object') {
     console.error('✗ MCP tool allowlist check FAILED:');
     console.error(
-      '  Built agora-mcp package does not export AGORA_TOOL_METHODS as an object.',
+      '  Built pangolin-mcp package does not export PANGOLIN_TOOL_METHODS as an object.',
     );
     console.error('  See spec §10.6.');
     process.exit(1);
@@ -139,13 +139,13 @@ async function main() {
   if (!PRIVILEGE || typeof PRIVILEGE !== 'object') {
     console.error('✗ MCP tool allowlist check FAILED:');
     console.error(
-      '  Built agora-orchestrator package does not export PRIVILEGE as an object.',
+      '  Built pangolin-orchestrator package does not export PRIVILEGE as an object.',
     );
     console.error('  See spec §10.6.');
     process.exit(1);
   }
 
-  const actual = [...AGORA_TOOL_NAMES];
+  const actual = [...PANGOLIN_TOOL_NAMES];
   const errors = [];
 
   if (
@@ -153,7 +153,7 @@ async function main() {
     !actual.every((n, i) => n === EXPECTED[i])
   ) {
     errors.push(
-      `agora-mcp tool set mismatch.\n    expected: ${JSON.stringify(EXPECTED)}\n    actual:   ${JSON.stringify(actual)}`,
+      `pangolin-mcp tool set mismatch.\n    expected: ${JSON.stringify(EXPECTED)}\n    actual:   ${JSON.stringify(actual)}`,
     );
   }
 
@@ -161,7 +161,7 @@ async function main() {
     for (const pattern of FORBIDDEN_PATTERNS) {
       if (pattern.test(name)) {
         errors.push(
-          `agora-mcp tool "${name}" matches forbidden pattern ${pattern}. ` +
+          `pangolin-mcp tool "${name}" matches forbidden pattern ${pattern}. ` +
             '§7.7: privileged operations are never reachable through the MCP tool surface.',
         );
       }
@@ -179,7 +179,7 @@ async function main() {
   }
 
   // §10.6 privilege intersection check
-  const leaks = computeLeaks(actual, AGORA_TOOL_METHODS, PRIVILEGE);
+  const leaks = computeLeaks(actual, PANGOLIN_TOOL_METHODS, PRIVILEGE);
   if (leaks.length > 0) {
     console.error('✗ MCP tool allowlist check FAILED (§10.6 privilege gate):');
     for (const leak of leaks) console.error('  ' + leak);
@@ -191,10 +191,10 @@ async function main() {
   }
 
   console.log(
-    `✓ agora-mcp exposes exactly the ${EXPECTED.length} documented run-time tools and no forbidden patterns.`,
+    `✓ pangolin-mcp exposes exactly the ${EXPECTED.length} documented run-time tools and no forbidden patterns.`,
   );
   console.log(
-    `✓ §10.6 privilege check passed — all ${Object.keys(AGORA_TOOL_METHODS).length} orch tool method mappings are mcp-eligible.`,
+    `✓ §10.6 privilege check passed — all ${Object.keys(PANGOLIN_TOOL_METHODS).length} orch tool method mappings are mcp-eligible.`,
   );
 }
 

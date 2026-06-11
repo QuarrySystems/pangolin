@@ -19,7 +19,7 @@ maintainers. The local Docker acceptance is verified live, but the spec records:
 > `result_ref`s + a verifiable tamper-detecting audit bundle); **the Fargate+S3
 > parity run is the one operator-deferred item.**
 >
-> — [`2026-05-29-agora-offload-v1-design.md`](https://github.com/quarrysystems/agora/blob/main/docs/superpowers/specs/2026-05-29-agora-offload-v1-design.md) (status header)
+> — [`2026-05-29-pangolin-offload-v1-design.md`](https://github.com/quarrysystems/pangolin/blob/main/docs/superpowers/specs/2026-05-29-pangolin-offload-v1-design.md) (status header)
 
 What follows is the documented production wiring, **grounded in the provider
 code that ships** — every class name and option below is real. Treat it as the
@@ -30,7 +30,7 @@ details the first time through.
 
 ## Prerequisites
 
-- A working local dispatch first. Do the [hello-world example](https://github.com/quarrysystems/agora/tree/main/examples/hello-world) on the local stack before swapping providers — it isolates "my wiring is wrong" from "my AWS setup is wrong."
+- A working local dispatch first. Do the [hello-world example](https://github.com/quarrysystems/pangolin/tree/main/examples/hello-world) on the local stack before swapping providers — it isolates "my wiring is wrong" from "my AWS setup is wrong."
 - An AWS account with an ECS cluster, a VPC with subnets and security groups, and an S3 bucket you control.
 - AWS credentials resolvable by the standard SDK chain (env vars, shared config/`~/.aws`, an instance/task role, or SSO). The provider does not take a `region` or static keys — it reads the ambient chain.
 - A worker image published to a registry your Fargate task can pull (ECR or GHCR), **pinned by digest**.
@@ -46,18 +46,18 @@ Build and push, then capture the digest:
 
 ```sh
 docker build \
-  -t public.ecr.aws/quarry-systems/agora-worker:v1 \
-  -f docker/agora-worker/Dockerfile .
+  -t public.ecr.aws/quarry-systems/pangolin-worker:v1 \
+  -f docker/pangolin-worker/Dockerfile .
 
-docker push public.ecr.aws/quarry-systems/agora-worker:v1
+docker push public.ecr.aws/quarry-systems/pangolin-worker:v1
 
 # Resolve the digest you will pin against:
 docker inspect --format='{{index .RepoDigests 0}}' \
-  public.ecr.aws/quarry-systems/agora-worker:v1
+  public.ecr.aws/quarry-systems/pangolin-worker:v1
 ```
 
 You dispatch against the digest form, e.g.
-`public.ecr.aws/quarry-systems/agora-worker@sha256:<64-hex>`.
+`public.ecr.aws/quarry-systems/pangolin-worker@sha256:<64-hex>`.
 
 <Aside type="note" title="The task definition also pins the image">
 On Fargate the **task definition** is what actually launches the container.
@@ -72,7 +72,7 @@ with what the task definition launches. Pin both to the same digest.
 There are **two distinct S3 concerns**, and they are wired by different code. Do
 not conflate them.
 
-**Artifact storage** is `S3StorageProvider` (`@quarry-systems/agora-storage-s3`).
+**Artifact storage** is `S3StorageProvider` (`@quarry-systems/pangolin-storage-s3`).
 It stores subagent/capability/env bundles and dispatch records. Create a bucket
 for it. Its constructor takes only:
 
@@ -88,7 +88,7 @@ and it has **no `region` constructor option**. Region (and any endpoint
 override) is set on the `S3Client` you inject via `client`. Object Lock on the
 artifact bucket, if you want it, is bucket-level AWS configuration that the
 provider neither requires nor manages — content-addressed blobs are already
-dedup-keyed by hash, but immutability there is your bucket policy, not agora's.
+dedup-keyed by hash, but immutability there is your bucket policy, not Pangolin Scale's.
 
 Server-side **encryption**, however, *is* set by the provider when you pass the
 `encryption` option (`{ mode: 'AES256' }` or customer-managed
@@ -96,9 +96,9 @@ Server-side **encryption**, however, *is* set by the provider when you pass the
 bucket default (no-downgrade).
 </Aside>
 
-**The tamper-evidence tier is a separate seam.** Object Lock that agora actively
+**The tamper-evidence tier is a separate seam.** Object Lock that Pangolin Scale actively
 uses lives in the **audit anchor**, not the storage provider. The orchestrator's
-`S3ObjectLockAnchor` (`@quarry-systems/agora-orchestrator`) writes the signed
+`S3ObjectLockAnchor` (`@quarry-systems/pangolin-orchestrator`) writes the signed
 Merkle root of each audit epoch to S3 Object Lock in **compliance mode**. That
 is the `external-immutable` guarantee tier:
 
@@ -123,12 +123,12 @@ report back to `tamper-detecting` regardless of which anchor you configured.
 optional retention in days (default 3650 ≈ 10 years):
 
 ```typescript
-import { S3ObjectLockAnchor } from '@quarry-systems/agora-orchestrator';
+import { S3ObjectLockAnchor } from '@quarry-systems/pangolin-orchestrator';
 
 // You supply the S3LockClient adapter: putObject(key, body, { retainUntil, mode: 'COMPLIANCE' })
 // and getObject(key). It writes versioned objects under audit/roots/<epochId>.json
 // with Object Lock compliance-mode retention.
-const anchor = new S3ObjectLockAnchor(s3LockClient, 'my-org-agora-audit', 3650);
+const anchor = new S3ObjectLockAnchor(s3LockClient, 'my-org-pangolin-scale-audit', 3650);
 ```
 
 Create the audit bucket **with Object Lock enabled at creation time** (S3
@@ -144,31 +144,31 @@ the not-yet-proven parity surface: there is no maintainer-shipped adapter to
 copy, so budget time to write and test it.
 </Aside>
 
-## 3. Swap providers in `agora.config`
+## 3. Swap providers in `pangolin.config`
 
 The local stack uses `LocalDockerProvider`, `LocalStorageProvider`, and
 `NoopCredentialProvider`. Swap each for its AWS counterpart. The class names and
 options below are the **real exported shapes** from the provider packages.
 
 ```typescript
-import { AgoraClient, StdoutResultSink } from '@quarry-systems/agora-client';
-import { FargateProvider } from '@quarry-systems/agora-providers-fargate';
-import { S3StorageProvider } from '@quarry-systems/agora-storage-s3';
-import { AwsCredentialProvider } from '@quarry-systems/agora-providers-aws-creds';
+import { PangolinClient, StdoutResultSink } from '@quarry-systems/pangolin-client';
+import { FargateProvider } from '@quarry-systems/pangolin-providers-fargate';
+import { S3StorageProvider } from '@quarry-systems/pangolin-storage-s3';
+import { AwsCredentialProvider } from '@quarry-systems/pangolin-providers-aws-creds';
 import { S3Client } from '@aws-sdk/client-s3';
 
 // Region (and any endpoint override) is set on the S3Client, NOT on the
 // provider — S3StorageProvider has no `region` option.
 const s3 = new S3Client({ region: 'us-east-1' });
 
-const client = new AgoraClient({
+const client = new PangolinClient({
   namespace: 'hello-world',
   compute: {
     fargate: new FargateProvider({
-      cluster: 'arn:aws:ecs:us-east-1:123456789012:cluster/agora',
+      cluster: 'arn:aws:ecs:us-east-1:123456789012:cluster/Pangolin Scale',
       // Family name WITHOUT revision — RunTask resolves the latest active
       // revision. Pin a specific one with `family:N`.
-      taskDefinitionFamily: 'agora-worker',
+      taskDefinitionFamily: 'pangolin-worker',
       subnets: ['subnet-abc', 'subnet-def'],
       securityGroups: ['sg-xyz'],
       // Default is 'DISABLED'; only ENABLE in a public subnet with no NAT.
@@ -181,10 +181,10 @@ const client = new AgoraClient({
     aws: new AwsCredentialProvider(),
   },
   storage: new S3StorageProvider({
-    bucket: 'my-org-agora-artifacts',
+    bucket: 'my-org-pangolin-scale-artifacts',
     client: s3,
-    // prefix: 'agora',   // optional
-    // Set server-side encryption on every object agora writes. Omit to inherit
+    // prefix: 'Pangolin Scale',   // optional
+    // Set server-side encryption on every object Pangolin Scale writes. Omit to inherit
     // the bucket default (SSE-S3, on by default since 2023). For customer-managed
     // keys: encryption: { mode: 'aws:kms', kmsKeyId: 'arn:aws:kms:...:key/...' }
     encryption: { mode: 'AES256' },
@@ -208,7 +208,7 @@ The provider drives `RunTask`/`DescribeTasks`/`StopTask`, but several things are
 fixed by the **task definition**, not by the dispatch. Get these right or the
 dispatch will fail at launch:
 
-1. **Container name must be `agora-worker`.** The provider overrides exactly this
+1. **Container name must be `pangolin-worker`.** The provider overrides exactly this
    container's environment, command, cpu, and memory per dispatch; if the task
    definition's container is named anything else, the override is dropped.
 2. **Image is locked in the task definition.** `RunTask` cannot change it — pin
@@ -240,7 +240,7 @@ const result = await client.dispatch({
   target: 'prod',
   // Digest-pinned — FargateProvider rejects unpinned images.
   workerImage:
-    'public.ecr.aws/quarry-systems/agora-worker@sha256:0123456789abcdef...',
+    'public.ecr.aws/quarry-systems/pangolin-worker@sha256:0123456789abcdef...',
 });
 ```
 
@@ -257,5 +257,5 @@ claims **`tamper-detecting`**.
 
 ## Next steps
 
-- [Export & verify an audit bundle](/agora/how-to/verify-audit-bundle/) — produce and check the tamper-evident bundle this anchor backs.
-- [Audit & guarantee tiers](/agora/explanation/audit-guarantee-tiers/) — the full model behind `detect` / `external-immutable` / `witnessed` and the `tamper-detecting` vs `tamper-evident` distinction.
+- [Export & verify an audit bundle](/pangolin/how-to/verify-audit-bundle/) — produce and check the tamper-evident bundle this anchor backs.
+- [Audit & guarantee tiers](/pangolin/explanation/audit-guarantee-tiers/) — the full model behind `detect` / `external-immutable` / `witnessed` and the `tamper-detecting` vs `tamper-evident` distinction.

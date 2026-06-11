@@ -3,15 +3,15 @@ title: Your first offload run
 description: Submit a three-task DAG, watch it fan out under resource locks, and verify the audit bundle.
 ---
 
-In the [first dispatch tutorial](/agora/tutorials/first-dispatch/) you ran one
+In the [first dispatch tutorial](/pangolin/tutorials/first-dispatch/) you ran one
 agent in one container. This tutorial graduates to the orchestrator: you submit
-a small DAG of tasks, the `agora orch` daemon fans them out in parallel under
+a small DAG of tasks, the `pangolin orch` daemon fans them out in parallel under
 per-file locks, each task escapes its work as a content-addressed patch
 artifact, and at the end you pull a tamper-detecting audit bundle that proves
 exactly what ran.
 
 The runnable version of everything below lives in the
-[`offload-fanout` example](https://github.com/quarrysystems/agora/tree/main/examples/offload-fanout).
+[`offload-fanout` example](https://github.com/quarrysystems/pangolin/tree/main/examples/offload-fanout).
 This tutorial walks the CLI path; the example also ships a one-command scripted
 run (`pnpm --filter offload-fanout-example start:env`) if you would rather see
 it drive itself first.
@@ -19,18 +19,18 @@ it drive itself first.
 ## Before you start
 
 You need everything from the first dispatch tutorial — Docker running, the
-worker image built, and `ANTHROPIC_API_KEY` set — plus an `agora.config.mjs`
-that exports an `orch` context alongside the `AgoraClient`. The orchestrator
+worker image built, and `ANTHROPIC_API_KEY` set — plus a `pangolin.config.mjs`
+that exports an `orch` context alongside the `PangolinClient`. The orchestrator
 verbs resolve a named `orch` export from your config (the same way `dispatch`
-resolves the default `AgoraClient`). The
-[`offload-fanout` example config](https://github.com/quarrysystems/agora/tree/main/examples/offload-fanout)
+resolves the default `PangolinClient`). The
+[`offload-fanout` example config](https://github.com/quarrysystems/pangolin/tree/main/examples/offload-fanout)
 is a ready-made one: it wires a `SqliteRunStateStore`, a `LocalAnchor`, a local
 signer, a `MailboxSubmissionTransport`, and a pre-built `serve` loop, and
 exports them all as `orch`.
 
 For what each of those pieces is and why, see the
-[CLI reference](/agora/reference/cli/) and the
-[audit & guarantee tiers explanation](/agora/explanation/audit-guarantee-tiers/).
+[CLI reference](/pangolin/reference/cli/) and the
+[audit & guarantee tiers explanation](/pangolin/explanation/audit-guarantee-tiers/).
 This tutorial just runs them.
 
 ## The plan
@@ -83,7 +83,7 @@ Each holds a distinct per-file `resourceLock`, so they fan out in parallel (the
 example queue runs at `concurrency: 2`). The `verify` item `depends_on` all
 three edits, so the orchestrator holds it back until every edit reaches `done` —
 it is the DAG gate. For the full field-by-field shape, see the
-[plan.json reference](/agora/reference/plan-json/).
+[plan.json reference](/pangolin/reference/plan-json/).
 
 ```mermaid
 flowchart TD
@@ -104,13 +104,13 @@ three and holds no locks, so it serializes after every edit reaches `done`.
 
 ### 1. Start the daemon
 
-From your deploy dir (the one with the `orch`-exporting `agora.config.mjs`),
+From your deploy dir (the one with the `orch`-exporting `pangolin.config.mjs`),
 start the long-running serve loop. It owns the run-state DB, polls the inbox,
 runs the reconcile tick loop, and publishes status plus the audit export. Run it
 in the background so you can submit against it:
 
 ```sh
-agora orch serve &
+pangolin orch serve &
 ```
 
 It exits cleanly on Ctrl-C / SIGTERM.
@@ -118,7 +118,7 @@ It exits cleanly on Ctrl-C / SIGTERM.
 ### 2. Submit the plan
 
 ```sh
-agora orch submit plan.json
+pangolin orch submit plan.json
 ```
 
 `submit` writes the run to the inbox and prints a run id. It is non-blocking —
@@ -128,7 +128,7 @@ the next two commands take it as an argument.
 ### 3. Watch it fan out
 
 ```sh
-agora orch watch <run-id>
+pangolin orch watch <run-id>
 ```
 
 `watch` renders a live pattern-aware view — status glyphs per item, redrawn
@@ -148,7 +148,7 @@ artifact you review later.
 Once the run is terminal, assemble the audit bundle:
 
 ```sh
-agora orch audit <run-id>
+pangolin orch audit <run-id>
 ```
 
 This prints the §6.5 evidence bundle as JSON (use `--out <path>` to write it to
@@ -161,7 +161,7 @@ DB — that is the **tamper-detecting** tier (`report.guarantee` reads
 `'external-immutable'` only when you swap in a stronger anchor like
 `S3ObjectLockAnchor`). What the tiers mean, and why `LocalAnchor` is
 tamper-detecting rather than tamper-evident or compliant, is covered in the
-[audit & guarantee tiers explanation](/agora/explanation/audit-guarantee-tiers/).
+[audit & guarantee tiers explanation](/pangolin/explanation/audit-guarantee-tiers/).
 
 ### 5. Stop the daemon
 
@@ -177,7 +177,7 @@ This tutorial runs entirely local-FS, which caps the audit at the
 **tamper-detecting** tier. To see the stronger **tamper-evident**
 (`external-immutable`) tier — and the *self-hosted remote* topology where `serve`
 runs in its own container and launches sibling workers — run the
-[`offload-minio` example](https://github.com/quarrysystems/agora/tree/main/examples/offload-minio).
+[`offload-minio` example](https://github.com/quarrysystems/pangolin/tree/main/examples/offload-minio).
 It swaps the local stack for free, S3-compatible substitutes (no AWS account):
 
 - storage, mailbox, and the audit anchor move to **MinIO** (`S3StorageProvider` +
@@ -191,20 +191,20 @@ It is one `docker compose up` plus `pnpm start`. Because `serve` and the workers
 are now separate containers, secrets reach workers via a network-reachable store
 (Secrets Manager — LocalStack here) and non-secret config via env bundles, rather
 than local-FS staging — the
-[self-hosted delivery model](/agora/explanation/how-offload-runs/#running-serve-in-a-container-self-hosted-delivery)
+[self-hosted delivery model](/pangolin/explanation/how-offload-runs/#running-serve-in-a-container-self-hosted-delivery)
 explains why, and the example's README walks the exact steps.
 
 ## Next steps
 
-- [Run it on MinIO](https://github.com/quarrysystems/agora/tree/main/examples/offload-minio) —
+- [Run it on MinIO](https://github.com/quarrysystems/pangolin/tree/main/examples/offload-minio) —
   the same fan-out against self-hosted S3, reaching the `external-immutable` audit
   tier (see the variant above).
-- [Self-hosted / S3-compatible config](/agora/reference/config/#targeting-a-self-hosted--s3-compatible-store-minio-localstack) — the `endpoint` / `S3Mailbox` / `extraEnv` knobs.
-- [Export & verify an audit bundle](/agora/how-to/verify-audit-bundle/) — take
+- [Self-hosted / S3-compatible config](/pangolin/reference/config/#targeting-a-self-hosted--s3-compatible-store-minio-localstack) — the `endpoint` / `S3Mailbox` / `extraEnv` knobs.
+- [Export & verify an audit bundle](/pangolin/how-to/verify-audit-bundle/) — take
   the bundle you just produced, export it, and verify it independently.
-- [Audit & guarantee tiers](/agora/explanation/audit-guarantee-tiers/) — what
+- [Audit & guarantee tiers](/pangolin/explanation/audit-guarantee-tiers/) — what
   `tamper-detecting` actually guarantees, and how to reach the stronger
   `external-immutable` tier.
-- [How an offload run executes](/agora/explanation/how-offload-runs/) — the
+- [How an offload run executes](/pangolin/explanation/how-offload-runs/) — the
   scheduling mechanics (queues, `depends_on`, resource-locks, the fire-and-reconcile
   tick loop) behind what you just ran.

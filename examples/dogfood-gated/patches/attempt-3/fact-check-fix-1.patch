@@ -9,7 +9,7 @@ index 0000000..ff6888d
 +description: How queue-level execution patterns (static-dag, pipeline, map-reduce) layer above the engine tick — including the extendRun seam, run.extended audit events, the gate/respawn circle-back, and the merged-graph validation invariant.
 +---
 +
-+The core engine described in [How an offload run executes](/agora/explanation/how-offload-runs/)
++The core engine described in [How an offload run executes](/pangolin/explanation/how-offload-runs/)
 +is deliberately simple: a DAG of WorkItems, a dependency resolver, and a
 +fire-and-reconcile tick loop. Execution patterns are a **strategy layer above that
 +engine** — they inspect terminal items after each tick and may append new items to
@@ -29,7 +29,7 @@ index 0000000..ff6888d
 +unsealed run, every tick, and may return a `SpawnDirective` — a batch of new
 +`WorkItem`s to be appended to the run — or `null`.
 +
-+Three built-in patterns ship with `agora-orchestrator`:
++Three built-in patterns ship with `pangolin-orchestrator`:
 +
 +- **`static-dag`** — the default no-op. `plan` is the identity; `onTaskDone` always
 +  returns `null`. The run is exactly what was submitted. Use this (or omit
@@ -61,11 +61,11 @@ index 0000000..ff6888d
 +
 +```ts
 +import {
-+  AgoraOrchestrator,
++  PangolinOrchestrator,
 +  staticDag, pipeline, mapReduce,
-+} from '@quarry-systems/agora-orchestrator';
++} from '@quarry-systems/pangolin-orchestrator';
 +
-+const orchestrator = new AgoraOrchestrator({
++const orchestrator = new PangolinOrchestrator({
 +  store, executors, triggers,
 +  queues: {
 +    default: { concurrency: 4 },                       // no pattern — static-dag behaviour
@@ -197,7 +197,7 @@ index 0000000..ff6888d
 +finds all ids already present, and continues. No dedup table, no idempotency key
 +— deterministic ids plus the id-skip filter provide it for free.
 +
-+**Provenance closure holds for dynamically grown runs.** The `agora verify`
++**Provenance closure holds for dynamically grown runs.** The `pangolin verify`
 +command checks that every input consumed by every item is traceable to an
 +upstream item's output in the same run. Spawned items enter the run through
 +`extendRun` the same way original items enter through `submitRun`; they carry the
@@ -212,12 +212,12 @@ index 0000000..ff6888d
 +
 +## See also
 +
-+- [How an offload run executes](/agora/explanation/how-offload-runs/) — the engine
++- [How an offload run executes](/pangolin/explanation/how-offload-runs/) — the engine
 +  mechanics that patterns layer above: tick loop, `depends_on`, `resourceLocks`,
 +  retry, and seal.
-+- [plan.json schema](/agora/reference/plan-json/) — the WorkItem fields, including
++- [plan.json schema](/pangolin/reference/plan-json/) — the WorkItem fields, including
 +  `depends_on`, `resourceLocks`, and `executor`, that patterns read and produce.
-+- [Audit & guarantee tiers](/agora/explanation/audit-guarantee-tiers/) — what
-+  `run.extended` events contribute to the audit bundle and what `agora verify` checks.
-+- [Your first offload run](/agora/tutorials/first-offload-run/) — a worked example
++- [Audit & guarantee tiers](/pangolin/explanation/audit-guarantee-tiers/) — what
++  `run.extended` events contribute to the audit bundle and what `pangolin verify` checks.
++- [Your first offload run](/pangolin/tutorials/first-offload-run/) — a worked example
 +  showing a static DAG before patterns are involved.

@@ -1,17 +1,17 @@
 ---
 title: Schedule recurring runs
-description: Wire a `scheduleStore` into your agora.config, register a cron schedule, and let `serve` fire it automatically.
+description: Wire a `scheduleStore` into your pangolin.config, register a cron schedule, and let `serve` fire it automatically.
 ---
 
-`agora orch submit` fires a run once. When you want to run the same plan on a
+`pangolin orch submit` fires a run once. When you want to run the same plan on a
 recurring schedule — nightly, hourly, weekly — wire a `scheduleStore` into your
-config and use `agora orch schedule add`. The `serve` driver polls due schedules
+config and use `pangolin orch schedule add`. The `serve` driver polls due schedules
 on each tick and submits them through the same inbox a client uses; no external
 scheduler is required.
 
 ## 1. Wire a `scheduleStore` into your config
 
-Open your `agora.config.mjs` (or `.ts`/`.js`) and add a `SqliteScheduleStore`
+Open your `pangolin.config.mjs` (or `.ts`/`.js`) and add a `SqliteScheduleStore`
 to the `orch` export. Pass it the **same database path** as your
 `SqliteRunStateStore` — they share one SQLite file:
 
@@ -22,7 +22,7 @@ import {
   SqliteRunStateStore,
   SqliteScheduleStore,
   serve,
-} from '@quarry-systems/agora-orchestrator';
+} from '@quarry-systems/pangolin-orchestrator';
 
 const dbPath = join(tmpdir(), 'my-orchestrator.db');
 const store = new SqliteRunStateStore(dbPath);
@@ -37,13 +37,13 @@ export const orch = {
 };
 ```
 
-Without `scheduleStore`, the `agora orch schedule` verbs error immediately with
+Without `scheduleStore`, the `pangolin orch schedule` verbs error immediately with
 a clear message; `serve` and all other `orch` verbs are unaffected.
 
 ## 2. Add a schedule
 
 ```bash
-agora orch schedule add \
+pangolin orch schedule add \
   --id nightly-audit \
   --cron "0 2 * * *" \
   --plan ./plans/audit.json
@@ -63,7 +63,7 @@ plan template, and actor are replaced, and the `nextDueAt` is recomputed.
 ## 3. Confirm the schedule
 
 ```bash
-agora orch schedule list
+pangolin orch schedule list
 ```
 
 Prints a tab-delimited line per schedule:
@@ -78,7 +78,7 @@ ISO timestamp of the most recent slot.
 ## 4. Start `serve` and let it fire
 
 ```bash
-agora orch serve
+pangolin orch serve
 ```
 
 `serve` polls due schedules on each tick (default 2 s). When a schedule's
@@ -114,7 +114,7 @@ runService: async (signal) => {
 ## 5. Remove a schedule
 
 ```bash
-agora orch schedule rm --id nightly-audit
+pangolin orch schedule rm --id nightly-audit
 ```
 
 The schedule is removed immediately. Any run already in flight continues
@@ -135,7 +135,7 @@ does not exist is a no-op.
 
 ## See also
 
-- [How an offload run executes](/agora/explanation/how-offload-runs/#recurring-submission-cron) — cron as an inbox producer, catch-up coalescing.
-- [CLI reference](/agora/reference/cli/#agora-orch) — full option listing for `schedule add|list|rm`.
-- [agora.config reference](/agora/reference/config/) — the `scheduleStore` field on the `orch` export.
-- [Design spec](https://github.com/quarrysystems/agora/blob/main/docs/superpowers/specs/2026-06-02-agora-cron-trigger-design.md) — architecture, catch-up policy, and idempotency mechanics.
+- [How an offload run executes](/pangolin/explanation/how-offload-runs/#recurring-submission-cron) — cron as an inbox producer, catch-up coalescing.
+- [CLI reference](/pangolin/reference/cli/#pangolin-orch) — full option listing for `schedule add|list|rm`.
+- [pangolin.config reference](/pangolin/reference/config/) — the `scheduleStore` field on the `orch` export.
+- [Design spec](https://github.com/quarrysystems/pangolin/blob/main/docs/superpowers/specs/2026-06-02-pangolin-scale-cron-trigger-design.md) — architecture, catch-up policy, and idempotency mechanics.

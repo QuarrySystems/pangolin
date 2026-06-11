@@ -1,0 +1,37 @@
+{
+  "name": "@quarry-systems/pangolin-providers-fargate",
+  "version": "0.1.0",
+  "license": "BUSL-1.1",
+  "description": "ComputeProvider backed by AWS ECS Fargate (RunTask / DescribeTasks / StopTask) — the production compute target.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/QuarrySystems/pangolin.git",
+    "directory": "packages/pangolin-providers-fargate"
+  },
+  "homepage": "https://quarrysystems.github.io/pangolin",
+  "bugs": {
+    "url": "https://github.com/QuarrySystems/pangolin/issues"
+  },
+  "scripts": {
+    "lint": "eslint src --ext .ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@aws-sdk/client-ecs": "^3.700.0",
+    "@quarry-systems/pangolin-core": "workspace:*"
+  },
+  "devDependencies": {}
+}

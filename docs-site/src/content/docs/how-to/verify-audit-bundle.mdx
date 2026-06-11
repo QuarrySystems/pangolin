@@ -5,7 +5,7 @@ description: Produce the exportable evidence bundle for a run, verify it, and re
 
 import { Aside } from '@astrojs/starlight/components';
 
-After a run seals, `agora orch audit <run-id>` assembles a verifiable evidence
+After a run seals, `pangolin orch audit <run-id>` assembles a verifiable evidence
 bundle: the per-item dispatch manifests, the hash-chained lifecycle log, the
 per-item outcomes, and a **verification report** that recomputes the Merkle root
 and checks it against the live anchor. This guide produces the bundle, reads the
@@ -15,24 +15,24 @@ result, and explains which guarantee tier the report can honestly assert.
 deliberately not exposed on MCP (auditing is an operator action, not an
 AI-loop action).
 
-## 1. Run `agora orch audit <run-id>`
+## 1. Run `pangolin orch audit <run-id>`
 
-With your `agora.config` orch context wired (transport + anchor + storage),
+With your `pangolin.config` orch context wired (transport + anchor + storage),
 point `audit` at a run that has sealed:
 
 ```sh
-agora orch audit <run-id>
+pangolin orch audit <run-id>
 ```
 
 By default the full bundle is printed to stdout as pretty JSON. To write it to a
 file instead, pass `--out`:
 
 ```sh
-agora orch audit <run-id> --out bundle.json
+pangolin orch audit <run-id> --out bundle.json
 ```
 
 The bundle is the §6.5 compliance artifact. Its top-level shape (from
-`AuditBundle` in `packages/agora-orchestrator/src/contracts/audit.ts`):
+`AuditBundle` in `packages/pangolin-orchestrator/src/contracts/audit.ts`):
 
 ```jsonc
 {
@@ -54,7 +54,7 @@ The bundle is the §6.5 compliance artifact. Its top-level shape (from
 `audit` reads the audit export the service published to the outbox on epoch
 seal. If no export has been published yet, the command throws
 `no audit export published yet for run <run-id>`. Let the run reach a terminal
-state (`agora orch watch <run-id>`) before auditing. The context must also carry
+state (`pangolin orch watch <run-id>`) before auditing. The context must also carry
 an `anchor` and `storage`, or `audit` throws
 `audit requires anchor + storage in the orch context`.
 </Aside>
@@ -76,7 +76,7 @@ The report fields (`VerificationReport`, `contracts/audit.ts:33`):
 | `guarantee` | The anchor's tier: `"detect"`, `"external-immutable"`, or `"witnessed"`. |
 | `claim` | What verification can *prove*: `"tamper-detecting"` or `"tamper-evident"`. |
 | `failure` | Present only when `intact` is `false`: the **first** failing check — one of `chain`, `anchor-missing`, `root-mismatch`, `signature`. |
-| `checks` | Collect-all per-check results: `chain`, `root`, `signature`, `anchor`, each `{ ok: true \| false \| 'n/a'; detail? }`. Every check is evaluated (no early return), so a failing bundle reports the state of all four. This is what `agora verify` renders as a checklist. |
+| `checks` | Collect-all per-check results: `chain`, `root`, `signature`, `anchor`, each `{ ok: true \| false \| 'n/a'; detail? }`. Every check is evaluated (no early return), so a failing bundle reports the state of all four. This is what `pangolin verify` renders as a checklist. |
 
 **`report.intact === true`** means every check passed: the lifecycle log has not
 been altered, and the recomputed root matches what the anchor holds.
@@ -94,7 +94,7 @@ which one:
 
 The CLI sets a **non-zero exit code** when the bundle does not verify
 (`if (!bundle.report.intact) process.exitCode = 1;` in
-`packages/agora-cli/src/cmd-orch.ts`), so `audit` is safe to gate a CI step or
+`packages/pangolin-cli/src/cmd-orch.ts`), so `audit` is safe to gate a CI step or
 an incident-review script on.
 
 ## 3. Interpret the guarantee tier
@@ -144,17 +144,17 @@ failing check — for an edited log entry:
 
 The process exits non-zero in this case.
 
-## 4. Hand the bundle to a third party — `agora verify`
+## 4. Hand the bundle to a third party — `pangolin verify`
 
 The bundle written by `--out` is a self-contained JSON file. It carries the
 dispatch manifests (refs only — `secretRefs` are references, never secret
 values), the full hash-chained `auditLog` (entries plus the anchored root), the
 per-item outcomes, and the report from the run that produced it.
 
-An independent party re-verifies it with the top-level `agora verify` command:
+An independent party re-verifies it with the top-level `pangolin verify` command:
 
 ```sh
-agora verify bundle.json
+pangolin verify bundle.json
 ```
 
 `verify` rebuilds an in-memory audit store from the bundle's entries, re-runs the
@@ -162,11 +162,11 @@ same `verify()` logic, and prints a human-readable checklist + hash-chained
 ledger. On a clean bundle:
 
 ```text
-  agora verify  ·  run_a3f9c2                  ✓ TAMPER-EVIDENT
+  pangolin verify  ·  run_a3f9c2                  ✓ TAMPER-EVIDENT
   ──────────────────────────────────────────────────────────
   ✓ chain        10 entries, hash-linked, no gaps
   ✓ root         merkle c4f1a9…  =  anchored root
-  ✓ signature    ed25519 / agora-prod  valid
+  ✓ signature    ed25519 / pangolin-prod  valid
   ✓ anchor       s3:my-audit-bucket  (external-immutable)
   …
 ```
@@ -178,7 +178,7 @@ script on. Pass `--json` to emit the raw `VerificationReport` instead, or `--ful
 to print every ledger row.
 
 <Aside type="caution" title="verify consults the LIVE anchor — not the bundle's embedded root">
-`agora verify` is **not** a pure function of the bundle file. Like `verify()`
+`pangolin verify` is **not** a pure function of the bundle file. Like `verify()`
 itself, it fetches the anchored root from the **live anchor**, never the copy
 embedded in the bundle (see the comment in `bundle.ts`: *"the data is UNTRUSTED;
 integrity comes from verify() comparing the recomputed root to the LIVE anchored
@@ -186,7 +186,7 @@ root"*). A bundle that carried its own trusted root would let a tamperer rewrite
 the log and the root together.
 
 So a third party still needs two things, and configures the anchor in their own
-`agora.config` (the same `orch` context `orch audit` uses):
+`pangolin.config` (the same `orch` context `orch audit` uses):
 
 1. **The bundle file** — carries the log entries (`auditLog.entries`).
 2. **Read access to the same anchor** that sealed the run. For the
@@ -200,7 +200,7 @@ trust domain of the anchor is the same as the trust domain of the log.
 </Aside>
 
 For programmatic use, the same check is the `verifyBundle(bundle, { anchor })`
-library entry point, exported from `@quarry-systems/agora-orchestrator` so an
+library entry point, exported from `@quarry-systems/pangolin-orchestrator` so an
 auditor can re-verify a handed-over bundle inside their own tooling.
 
 ## Next steps
@@ -208,5 +208,5 @@ auditor can re-verify a handed-over bundle inside their own tooling.
 <Aside type="note" title="Next steps">
 For the full model — why the tiers exist, what each guarantee means, and the
 honesty rules that keep the vocabulary truthful — read
-[Audit & guarantee tiers](/agora/explanation/audit-guarantee-tiers/).
+[Audit & guarantee tiers](/pangolin/explanation/audit-guarantee-tiers/).
 </Aside>

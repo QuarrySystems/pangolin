@@ -3,7 +3,7 @@ title: "ADR-0007: Inline secret TTL is auto-computed from dispatch timeout"
 description: "Inline secret TTL is auto-computed from dispatch timeout plus a 5-minute cleanup grace."
 status: accepted
 date: 2026-05-21
-deciders: agora-mvp-design
+deciders: pangolin-scale-mvp-design
 ---
 
 ## Context
@@ -11,7 +11,7 @@ deciders: agora-mvp-design
 When an integrator passes an inline secret to `env.register()`, the SDK
 stages it in AWS Secrets Manager and stores only the resulting ARN as part
 of the env bundle's content (§7.1). The staged secret needs a TTL so that,
-if the worker fails catastrophically before agora-client can clean up, the
+if the worker fails catastrophically before pangolin-client can clean up, the
 secret is auto-deleted rather than left dangling indefinitely.
 
 Prior guidance asked integrators to size `ttlSeconds` themselves
@@ -53,10 +53,10 @@ That is: take the dispatch's configured timeout (defaulting to 7200 seconds
 and use the sum as the Secrets Manager TTL on the staged inline secret.
 
 The cleanup grace covers the worker's SIGTERM trap and lifecycle-event
-emission window, plus the agora-client side's `awaitExit` + explicit
+emission window, plus the pangolin-client side's `awaitExit` + explicit
 secret deletion path (§7.6). If both of those succeed, the secret is
 deleted explicitly and the TTL is irrelevant. If catastrophic failure
-occurs (worker host crash, network partition between agora-client and
+occurs (worker host crash, network partition between pangolin-client and
 Secrets Manager, etc.), the TTL ensures Secrets Manager auto-deletes
 without operator intervention.
 

@@ -22,9 +22,9 @@ index 0000000..8f91572
 +every dynamically grown run graph correct.
 +
 +For the engine tick mechanics that patterns build on, see
-+[How an offload run executes](/agora/explanation/how-offload-runs/). For the run
++[How an offload run executes](/pangolin/explanation/how-offload-runs/). For the run
 +graph format that `extendRun` validates against, see the
-+[plan.json reference](/agora/reference/plan-json/).
++[plan.json reference](/pangolin/reference/plan-json/).
 +
 +## The three patterns
 +
@@ -192,7 +192,7 @@ index 0000000..8f91572
 +table.
 +
 +The `run.extended` entry is the point in the audit trail where the dynamic
-+growth becomes attributable and verifiable. `agora verify` reads it to
++growth becomes attributable and verifiable. `pangolin verify` reads it to
 +reconstruct the provenance graph covering both the original items and all
 +spawned items — no separate verification path for dynamic runs.
 +
@@ -256,7 +256,7 @@ index 0000000..8f91572
 +
 +## The forward-arc-never-rewind invariant
 +
-+Every item in every agora run graph obeys one structural rule:
++Every item in every pangolin-scale run graph obeys one structural rule:
 +
 +> **A `depends_on` edge may only point at an item whose id was present in
 +> the run graph at the time the dependent item was created.**
@@ -278,7 +278,7 @@ index 0000000..8f91572
 +  produces a valid state: each `run.extended` entry's `depends_on`
 +  references are already present from earlier entries or the original
 +  submit.
-+- **Provenance closure is total.** `agora verify` walks `depends_on`
++- **Provenance closure is total.** `pangolin verify` walks `depends_on`
 +  backward from every terminal item to the inputs. A forward arc would
 +  create a reference to a not-yet-existing node — a gap in the closure.
 +  The invariant means verify's walk always terminates at known inputs.
@@ -293,13 +293,13 @@ index 0000000..8f91572
 +
 +## See also
 +
-+- [How an offload run executes](/agora/explanation/how-offload-runs/) —
++- [How an offload run executes](/pangolin/explanation/how-offload-runs/) —
 +  the engine tick, dep-resolver, lock manager, and fire-and-reconcile
 +  loop that patterns build on.
-+- [plan.json schema](/agora/reference/plan-json/) — the item and edge
++- [plan.json schema](/pangolin/reference/plan-json/) — the item and edge
 +  format that `extendRun` validates against.
-+- [Audit & guarantee tiers](/agora/explanation/audit-guarantee-tiers/) —
++- [Audit & guarantee tiers](/pangolin/explanation/audit-guarantee-tiers/) —
 +  what the `run.extended` entries prove and how they compose with the
 +  rest of the audit bundle.
-+- [Architecture overview](/agora/explanation/architecture-overview/) —
++- [Architecture overview](/pangolin/explanation/architecture-overview/) —
 +  where patterns sit in the full system.

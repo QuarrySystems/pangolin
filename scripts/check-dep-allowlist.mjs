@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// check-dep-allowlist.mjs — architectural enforcement of agora's orthogonality
-// principle (§7.7 of the agora design).
+// check-dep-allowlist.mjs — architectural enforcement of pangolin-scale's orthogonality
+// principle (§7.7 of the pangolin-scale design).
 //
 // Walks every `package.json` in `packages/*` relative to the current working
 // directory and rejects any `dependencies`, `devDependencies`, or

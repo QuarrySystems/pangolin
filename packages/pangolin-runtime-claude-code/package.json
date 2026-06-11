@@ -1,0 +1,39 @@
+{
+  "name": "@quarry-systems/pangolin-runtime-claude-code",
+  "version": "0.1.0",
+  "license": "BUSL-1.1",
+  "description": "RuntimeAdapter implementation — prompt rendering, claude --print invocation, Claude-specific merge rules, and needs_input sentinel detection.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/QuarrySystems/pangolin.git",
+    "directory": "packages/pangolin-runtime-claude-code"
+  },
+  "homepage": "https://quarrysystems.github.io/pangolin",
+  "bugs": {
+    "url": "https://github.com/QuarrySystems/pangolin/issues"
+  },
+  "scripts": {
+    "lint": "eslint src --ext .ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc && node -e \"require('node:fs').cpSync('src/assets', 'dist/assets', { recursive: true })\"",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@quarry-systems/pangolin-core": "workspace:*",
+    "mustache": "^4.2.0"
+  },
+  "devDependencies": {
+    "@types/mustache": "^4.2.0"
+  }
+}

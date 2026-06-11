@@ -10,7 +10,7 @@ import { defineConfig } from 'vitest/config';
 //
 // Docker-dependent suites self-skip via `test/e2e/helpers/docker-skip.ts`
 // when no daemon answers; the live-AWS suite self-skips unless its
-// `AGORA_E2E_AWS_*` env vars are set.
+// `PANGOLIN_E2E_AWS_*` env vars are set.
 export default defineConfig({
   test: {
     include: ['test/**/*.test.ts'],

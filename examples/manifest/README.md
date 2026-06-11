@@ -1,13 +1,13 @@
 # `examples/manifest` — §4.5 worked manifest example
 
 A minimum-viable, runnable demonstration of declarative artifact
-registration via `agora deploy --from <manifest>`. This example pairs
+registration via `pangolin deploy --from <manifest>`. This example pairs
 with the §4.4 imperative `examples/hello-world` example: same
 artifacts, declarative shape instead of TypeScript glue.
 
 ## What this example demonstrates
 
-Five facets of the deploy manifest format covered by §4.5 of the agora
+Five facets of the deploy manifest format covered by §4.5 of the pangolin
 design:
 
 1. **Capability registration via `from:` directory** — `git-write/`
@@ -28,7 +28,7 @@ design:
 
 ## DAG 2 status — what works today
 
-The DAG 2 parser (`packages/agora-cli/src/manifest-parser.ts`) ships
+The DAG 2 parser (`packages/pangolin-cli/src/manifest-parser.ts`) ships
 the structural validators for `capabilities`, `subagents`, and `envs`.
 It does NOT yet implement:
 
@@ -51,8 +51,8 @@ unskip when the resolver lands.
 ## Running the example
 
 ```bash
-# From the repo root, against your local agora.config.ts:
-agora deploy --from examples/manifest/agora-manifest.yaml
+# From the repo root, against your local pangolin.config.ts:
+pangolin deploy --from examples/manifest/pangolin-manifest.yaml
 ```
 
 Expected output:
@@ -71,7 +71,7 @@ content (§4.3).
 
 | Path                                              | Purpose                                                      |
 | ------------------------------------------------- | ------------------------------------------------------------ |
-| `agora-manifest.yaml`                             | The §4.5 manifest itself.                                    |
+| `pangolin-manifest.yaml`                             | The §4.5 manifest itself.                                    |
 | `subagents/code-reviewer.yaml`                    | External subagent definition referenced via `from:`.         |
 | `caps/git-write/.claude/settings.json`            | Claude Code permissions fragment granting git + edit rights. |
 | `test/deploy.test.ts`                             | Smoke test: parses cleanly + reconciler call ordering.       |
@@ -92,7 +92,7 @@ The test asserts:
 - `parseManifest` accepts the example without throwing.
 - The capability + subagent + env shapes match the spec.
 - The deploy reconciler issues `capability → subagent → env` register
-  calls in that order against a fake `AgoraClient`.
+  calls in that order against a fake `Pangolin ScaleClient`.
 
 See `../../docs/decisions/` and the `4.5` section of the design doc
 for the canonical contract this example pins.

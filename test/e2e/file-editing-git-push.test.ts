@@ -7,7 +7,7 @@
 //   (a) a capability bundle granting `Bash(git:*)` + `Edit` + `Write`,
 //   (b) a `GH_TOKEN`-shaped env secret resolving credentials,
 //   (c) a sub-agent prompt directing Claude Code to clone, edit, commit,
-//       and push to a branch named conventionally `agora/dispatch-${ID}`.
+//       and push to a branch named conventionally `pangolin/dispatch-${ID}`.
 //
 // This test exercises the full pattern end-to-end. A bare git repository
 // is created in `beforeEach` to stand in for the remote. The capability
@@ -15,7 +15,7 @@
 // listed in §6.6's "Adapter-level hardening" table. The subagent's
 // system prompt directs Claude Code to operate against the stub remote.
 // After dispatch completes, the test inspects the bare repo's `branch -a`
-// output for an `agora/dispatch-*` ref and asserts that its tip carries
+// output for an `pangolin/dispatch-*` ref and asserts that its tip carries
 // the edit the sub-agent was instructed to make.
 //
 // SKIP semantics
@@ -24,7 +24,7 @@
 // Docker daemon (controller's dev box, CI without DinD) PASS-as-skipped.
 // On top of that, the placeholder all-zero `WORKER_IMAGE` digest will
 // fail to pull on any real daemon — so even with Docker present, the
-// test effectively skips until `AGORA_E2E_WORKER_IMAGE` points at a
+// test effectively skips until `PANGOLIN_E2E_WORKER_IMAGE` points at a
 // published worker image. Both gates are intentional: the contract this
 // file pins is what the pipeline SHOULD do when wired with real
 // infrastructure; the assertions exist so the wiring task lands against
@@ -38,7 +38,7 @@
 // out of the box. Two acceptable strategies for downstream wiring:
 //
 //   1. Custom `dockerOpts` injecting a Dockerode that adds a bind mount
-//      from `<bareRepo>` → `/agora-remote` and passes `file:///agora-remote`
+//      from `<bareRepo>` → `/pangolin-remote` and passes `file:///pangolin-remote`
 //      to the sub-agent as the clone URL. (Pure file:// — no networking.)
 //   2. Stand up a `git daemon --reuseaddr --base-path=<dir> --export-all`
 //      on the host and pass `git://host.docker.internal:<port>/<name>`
@@ -86,7 +86,7 @@ afterEach(async () => {
 
 describe('E2E: §6.5 — file-editing dispatch produces git push to a stub remote', () => {
   itIfDocker(
-    'subagent clones, edits, and pushes to a branch named agora/dispatch-<id> on the stub bare repo',
+    'subagent clones, edits, and pushes to a branch named pangolin/dispatch-<id> on the stub bare repo',
     async () => {
       const client = makeClient({
         namespace: 'git-push',
@@ -117,7 +117,7 @@ describe('E2E: §6.5 — file-editing dispatch produces git push to a stub remot
         2,
       );
 
-      // `agora-setup.sh` runs before the runtime adapter spawns Claude
+      // `pangolin-setup.sh` runs before the runtime adapter spawns Claude
       // Code (§6.4). We use it to (a) make the bare repo URL discoverable
       // to the sub-agent's bash invocations as `$REMOTE_URL` (it is also
       // in the merged process env via the env bundle's `values:`, but
@@ -131,7 +131,7 @@ describe('E2E: §6.5 — file-editing dispatch produces git push to a stub remot
       const setupSh = [
         '#!/bin/sh',
         'set -e',
-        'echo "agora-setup: REMOTE_URL=$REMOTE_URL"',
+        'echo "pangolin-setup: REMOTE_URL=$REMOTE_URL"',
         // Seed: clone, write a README, commit, push to main on the bare
         // repo. After this the bare repo has a real default branch the
         // sub-agent's clone-edit-push pattern can build on top of.
@@ -139,11 +139,11 @@ describe('E2E: §6.5 — file-editing dispatch produces git push to a stub remot
         'git -c init.defaultBranch=main init "$tmpseed" >/dev/null',
         '(cd "$tmpseed" && \\',
         '  echo "# initial" > README.md && \\',
-        '  git -c user.email=agora@example.com -c user.name=agora \\',
+        '  git -c user.email=pangolin@example.com -c user.name=pangolin \\',
         '    add README.md && \\',
-        '  git -c user.email=agora@example.com -c user.name=agora \\',
+        '  git -c user.email=pangolin@example.com -c user.name=pangolin \\',
         '    commit -m "initial" >/dev/null && \\',
-        '  git -c user.email=agora@example.com -c user.name=agora \\',
+        '  git -c user.email=pangolin@example.com -c user.name=pangolin \\',
         '    push "$REMOTE_URL" main >/dev/null)',
         'rm -rf "$tmpseed"',
       ].join('\n');
@@ -152,14 +152,14 @@ describe('E2E: §6.5 — file-editing dispatch produces git push to a stub remot
         name: 'git-write',
         files: {
           '.claude/settings.json': settingsJson,
-          'agora-setup.sh': setupSh,
+          'pangolin-setup.sh': setupSh,
         },
       });
 
       // The sub-agent's system prompt is the §6.5 contract restated for
       // Claude Code: clone the bundle's `$REMOTE_URL` into a temp dir,
       // edit `README.md` to append a sentinel line, commit under a
-      // stable identity, push to a branch named `agora/dispatch-<id>`.
+      // stable identity, push to a branch named `pangolin/dispatch-<id>`.
       //
       // The exact sentinel string ("EDIT FROM <id>") gives a downstream
       // assertion ("the branch CONTAINS THE EDIT the sub-agent produced")
@@ -169,13 +169,13 @@ describe('E2E: §6.5 — file-editing dispatch produces git push to a stub remot
         'in a single bash session. Do not ask follow-up questions.',
         '',
         '1. tmp=$(mktemp -d); git clone "$REMOTE_URL" "$tmp"; cd "$tmp"',
-        '2. git checkout -b "agora/dispatch-$AGORA_DISPATCH_ID"',
-        '3. echo "EDIT FROM $AGORA_DISPATCH_ID" >> README.md',
-        '4. git -c user.email=agora@example.com -c user.name=agora \\',
+        '2. git checkout -b "pangolin/dispatch-$PANGOLIN_DISPATCH_ID"',
+        '3. echo "EDIT FROM $PANGOLIN_DISPATCH_ID" >> README.md',
+        '4. git -c user.email=pangolin@example.com -c user.name=pangolin \\',
         '   add README.md',
-        '5. git -c user.email=agora@example.com -c user.name=agora \\',
-        '   commit -m "edit from dispatch $AGORA_DISPATCH_ID"',
-        '6. git push "$REMOTE_URL" "agora/dispatch-$AGORA_DISPATCH_ID"',
+        '5. git -c user.email=pangolin@example.com -c user.name=pangolin \\',
+        '   commit -m "edit from dispatch $PANGOLIN_DISPATCH_ID"',
+        '6. git push "$REMOTE_URL" "pangolin/dispatch-$PANGOLIN_DISPATCH_ID"',
         '7. exit 0',
       ].join('\n');
 
@@ -187,7 +187,7 @@ describe('E2E: §6.5 — file-editing dispatch produces git push to a stub remot
 
       // The bare repo URL flows through the env bundle's `values:` (a
       // public config, NOT a secret) so the worker's resolved env has
-      // `REMOTE_URL` set when `agora-setup.sh` runs and when the
+      // `REMOTE_URL` set when `pangolin-setup.sh` runs and when the
       // sub-agent's bash invocations inherit env. Treating this as
       // `values:` (and not `secrets:`) is correct: a `file://` URL or a
       // `git://localhost:<port>/<name>` URL is not credential-shaped, and
@@ -200,11 +200,11 @@ describe('E2E: §6.5 — file-editing dispatch produces git push to a stub remot
 
       // Mint a known dispatchId up front so the assertion can match the
       // exact branch name without parsing the worker's stdout. The
-      // sub-agent reads `$AGORA_DISPATCH_ID` from its process env (set
+      // sub-agent reads `$PANGOLIN_DISPATCH_ID` from its process env (set
       // by the worker per §6.1) and forms the branch as
-      // `agora/dispatch-$AGORA_DISPATCH_ID`.
+      // `pangolin/dispatch-$PANGOLIN_DISPATCH_ID`.
       const dispatchId = `e2e-${Date.now()}`;
-      const expectedBranch = `agora/dispatch-${dispatchId}`;
+      const expectedBranch = `pangolin/dispatch-${dispatchId}`;
 
       const result = await client.dispatch({
         dispatchId,
@@ -216,7 +216,7 @@ describe('E2E: §6.5 — file-editing dispatch produces git push to a stub remot
       } as any);
 
       // Acceptance: the dispatch completed without error AND a branch
-      // named `agora/dispatch-<id>` is visible on the bare repo. We
+      // named `pangolin/dispatch-<id>` is visible on the bare repo. We
       // check `branch -a` (covers both local and remote-tracking
       // namespaces — on a bare repo `branch -a` lists everything under
       // `refs/heads/`).

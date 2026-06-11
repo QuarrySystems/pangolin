@@ -5,7 +5,7 @@ description: Orchestrate from one machine, run workers on another's Docker daemo
 
 import { Aside } from '@astrojs/starlight/components';
 
-Run agora dispatches from one machine (the **orchestrator**) while the worker
+Run Pangolin Scale dispatches from one machine (the **orchestrator**) while the worker
 containers execute on a second machine (the **target**) over its Docker daemon.
 This is the "inward dispatch" leg of the substrate topology: the orchestrator
 reaches a remote Docker daemon to run workers.
@@ -24,7 +24,7 @@ Cloudflare Tunnel / portsandbox is reserved for the *outward* direction
 </Aside>
 
 <Aside type="note" title="Status">
-The agora-side seam is verified: `LocalDockerProvider` defaults to
+The Pangolin Scale-side seam is verified: `LocalDockerProvider` defaults to
 `new Docker()` (honors `DOCKER_HOST`) and also accepts an injected
 `docker?: Docker` client. The SSH→Docker hop below is a setup to validate with
 the marked ✅ check commands — it is environment-specific and not exercised in
@@ -37,7 +37,7 @@ CI.
 
 1. **Docker running**, with the worker image present locally. Get it
    there by any of: build from the repo (`docker build -t
-   ghcr.io/quarrysystems/agora-worker:latest -f docker/agora-worker/Dockerfile .`),
+   ghcr.io/quarrysystems/pangolin-worker:latest -f docker/pangolin-worker/Dockerfile .`),
    `docker save` on the orchestrator → `docker load` on the target, or pull the
    GHCR digest (needs auth if the package is private).
 
@@ -78,7 +78,7 @@ docker -H ssh://user@target ps   # ✅ should list the TARGET's containers
 ```
 
 `LocalDockerProvider` reads `DOCKER_HOST` automatically — no code change needed.
-To be explicit instead, inject the client in your agora config:
+To be explicit instead, inject the client in your Pangolin Scale config:
 
 ```typescript
 import Docker from 'dockerode';
@@ -88,7 +88,7 @@ new LocalDockerProvider({ docker: new Docker({ protocol: 'ssh', host: 'target', 
 ## C. Smoke test
 
 Run a hello-world-style dispatch, then check `docker ps` **on the target** — you
-should see the `agora-worker` container running *there* while the orchestrator's
+should see the `pangolin-worker` container running *there* while the orchestrator's
 CPU stays flat. That separation is the whole point.
 
 ## D. Fallback if `ssh://` misbehaves (common on Windows)
@@ -121,10 +121,10 @@ This sidesteps the named-pipe / dial-stdio path entirely.
 
 ## Next steps
 
-- [Deploy to Fargate + S3](/agora/how-to/deploy-fargate-s3/) — take the same
+- [Deploy to Fargate + S3](/pangolin/how-to/deploy-fargate-s3/) — take the same
   dispatch flow onto production AWS compute and S3 storage.
-- [Architecture overview](/agora/explanation/architecture-overview/) — the
+- [Architecture overview](/pangolin/explanation/architecture-overview/) — the
   inward vs outward dispatch topology and the privilege boundary between compute
   hosts.
-- [Sandboxing AI agents](/agora/explanation/sandboxing-ai-agents/) — what the
+- [Sandboxing AI agents](/pangolin/explanation/sandboxing-ai-agents/) — what the
   Docker isolation boundary guarantees and what it does not.

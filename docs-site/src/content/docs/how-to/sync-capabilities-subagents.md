@@ -1,15 +1,15 @@
 ---
 title: Sync capabilities & subagents
-description: Use `agora capabilities sync` / `agora subagent sync`; the `claude-code` and `stoa` providers.
+description: Use `pangolin capabilities sync` / `pangolin subagent sync`; the `claude-code` and `stoa` providers.
 ---
 
-The `agora capabilities sync` and `agora subagent sync` commands bulk-register
+The `pangolin capabilities sync` and `pangolin subagent sync` commands bulk-register
 content from an existing on-disk convention — Claude Code's skill/agent
 layout, stoa's pokemon profile layout, etc. — without writing capability or
 subagent definitions by hand.
 
 A **sync provider** is a small adapter that knows one tool's on-disk
-convention and produces agora-native shapes (`SubagentDef`, `CapabilityBundle`).
+convention and produces Pangolin Scale-native shapes (`SubagentDef`, `CapabilityBundle`).
 Each provider is selected with `--provider <name>`.
 
 ## Quick start
@@ -17,16 +17,16 @@ Each provider is selected with `--provider <name>`.
 ```bash
 # Walk .claude/skills/ recursively for SKILL.md markers; register each as
 # a capability that places files at .claude/skills/<name>/ in the worker.
-agora capabilities sync --provider claude-code
+pangolin capabilities sync --provider claude-code
 
-# Walk .claude/agents/*.md and register each as an agora subagent.
+# Walk .claude/agents/*.md and register each as a pangolin subagent.
 # systemPrompt = markdown body, model = frontmatter `model` if present.
-agora subagent sync --provider claude-code
+pangolin subagent sync --provider claude-code
 
 # Stoa pokemon profiles: reads .claude/skills/<pokemon>/_pokemon.json plus
 # the matching .claude/agents/<pokemon_id>.md, registers each pokemon as
 # one subagent with its full move list pre-bound as capabilities.
-agora subagent sync --provider stoa
+pangolin subagent sync --provider stoa
 ```
 
 All sync commands support:
@@ -62,7 +62,7 @@ Parses YAML frontmatter + markdown body. Maps:
 - frontmatter `name` (fallback to filename stem) → subagent name
 - frontmatter `model` → subagent model (if present)
 - markdown body → `systemPrompt`
-- frontmatter `description`, `tools`, `color` → **ignored** (no agora
+- frontmatter `description`, `tools`, `color` → **ignored** (no Pangolin Scale
   equivalents)
 
 Capabilities are **not bound** by this sync — Claude Code agent files don't
@@ -107,8 +107,8 @@ Today `--from` is single-valued. To pull from multiple roots, run the
 command per source:
 
 ```bash
-agora capabilities sync --provider claude-code --from ~/.claude/skills
-agora capabilities sync --provider claude-code --from .claude/skills
+pangolin capabilities sync --provider claude-code --from ~/.claude/skills
+pangolin capabilities sync --provider claude-code --from .claude/skills
 ```
 
 The dedup-by-content logic handles overlap within a single sync run silently
@@ -126,16 +126,16 @@ existing subagents still point at the old hashes.
 Recovery is mechanical: re-run the subagent sync after a capability sync.
 
 ```bash
-agora capabilities sync --provider claude-code   # new cap hashes
-agora subagent sync --provider stoa              # rebinds to new hashes
+pangolin capabilities sync --provider claude-code   # new cap hashes
+pangolin subagent sync --provider stoa              # rebinds to new hashes
 ```
 
 The order matters. Caps must exist before subagents reference them. There's
-no `agora sync` combined command today; you run each manually.
+no `pangolin sync` combined command today; you run each manually.
 
 ## Authoring a new sync provider
 
-A provider is a class implementing `SyncProvider` (`packages/agora-cli/src/
+A provider is a class implementing `SyncProvider` (`packages/pangolin-cli/src/
 providers/types.ts`):
 
 ```typescript
@@ -149,7 +149,7 @@ export interface SyncProvider {
 ```
 
 A provider is a pure data adapter — it reads filesystem and returns
-agora-native shapes. It does NOT call the `AgoraClient` or perform
+Pangolin Scale-native shapes. It does NOT call the `PangolinClient` or perform
 registration. The `cmd-*` files orchestrate by taking provider output and
 feeding it to the client.
 
@@ -158,7 +158,7 @@ inheritance. The `stoa` provider holds a `ClaudeCodeProvider` instance and
 delegates `loadCapabilities` to it.
 
 To register a provider, add an entry to the `PROVIDERS` map in
-`packages/agora-cli/src/providers/index.ts`:
+`packages/pangolin-cli/src/providers/index.ts`:
 
 ```typescript
 const PROVIDERS: ReadonlyMap<string, SyncProvider> = new Map<string, SyncProvider>([
@@ -173,8 +173,8 @@ through `resolveProvider(name)` from the same map.
 
 ## See also
 
-- [Put files where the worker finds them](/agora/how-to/worker-file-layout/) — where to put files for
-  the worker to pick them up; what `agora capabilities sync` automates.
-- [ADR-0005](/agora/explanation/decisions/0005-privileged-ops-never-ai-reachable/) — register/assign are not exposed on the MCP tool surface, which
-  is why sync runs from the CLI (and the per-launch `agora.config.{ts,js,mjs}`)
+- [Put files where the worker finds them](/pangolin/how-to/worker-file-layout/) — where to put files for
+  the worker to pick them up; what `pangolin capabilities sync` automates.
+- [ADR-0005](/pangolin/explanation/decisions/0005-privileged-ops-never-ai-reachable/) — register/assign are not exposed on the MCP tool surface, which
+  is why sync runs from the CLI (and the per-launch `pangolin.config.{ts,js,mjs}`)
   rather than from a dispatched worker.

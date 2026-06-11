@@ -3,12 +3,12 @@ title: "ADR-0003: RuntimeAdapter seam is introduced at MVP"
 description: "The RuntimeAdapter interface ships in MVP with the Claude Code adapter as the sole implementation."
 status: accepted
 date: 2026-05-21
-deciders: agora-mvp-design
+deciders: pangolin-scale-mvp-design
 ---
 
 ## Context
 
-The agora worker runs sub-agents inside containers. In MVP, the only sub-agent runtime that ships is Claude Code. Other plausible runtimes (Codex, Gemini CLI, custom harnesses) are on the post-MVP roadmap but explicitly out of MVP scope (§11 of the spec).
+The Pangolin Scale worker runs sub-agents inside containers. In MVP, the only sub-agent runtime that ships is Claude Code. Other plausible runtimes (Codex, Gemini CLI, custom harnesses) are on the post-MVP roadmap but explicitly out of MVP scope (§11 of the spec).
 
 The natural temptation when only one implementation exists is to inline runtime-specific concerns directly into the worker: write Claude-specific prompt rendering in the worker's main path, embed Claude-specific permission merge rules in the worker's overlay engine, hard-code Claude's `--print` invocation in the worker's process management, etc. This is the cheaper thing to ship in the very short term — no interface to design, no abstraction to defend, no second implementation to validate against.
 
@@ -21,7 +21,7 @@ Two forces push against deferral:
 
 ## Decision
 
-The `RuntimeAdapter` interface ships in MVP, with the Claude Code adapter as the sole implementation. Per §10.1 of `docs/superpowers/specs/2026-05-21-agora-mvp-design.md`:
+The `RuntimeAdapter` interface ships in MVP, with the Claude Code adapter as the sole implementation. Per §10.1 of `docs/superpowers/specs/2026-05-21-pangolin-scale-mvp-design.md`:
 
 > **RuntimeAdapter seam is introduced at MVP rather than deferred.** Even though MVP ships only one adapter (Claude Code), the abstraction exists in v0.1. The cost of adding the seam now is significantly lower than retrofitting it after Claude-specific assumptions calcify in the worker. The cost of *not* shipping it now is that every Claude-specific helper, merge rule, and invocation path becomes load-bearing worker code that future runtimes have to extract from. Adding the adapter interface plus one implementation is bounded work; extracting Claude-specific knowledge from a mature worker after the fact is significantly larger. The seam also makes the worker contract sharper: the worker is exactly the runtime-agnostic concerns (fetch, integrity, overlay engine, secrets, env, setup, channel, notifications, lifecycle), and the adapter is exactly the runtime-specific concerns (prompt rendering, runtime invocation, runtime-specific merge rules, needs_input signaling). Sharper boundaries mean fewer subtle bugs at the worker/runtime interface.
 

@@ -1,12 +1,12 @@
 // examples/offload-minio/test/e2e.test.ts
 //
 // E2E tests for the MinIO-backed offload demo.
-// Gated on AGORA_RUN_E2E: these tests require a live stack
+// Gated on PANGOLIN_RUN_E2E: these tests require a live stack
 // (MinIO container + serve container + worker image) and are SKIPPED
 // in normal CI / dev runs when the env var is absent.
 //
 // To run the live suite:
-//   AGORA_RUN_E2E=1 AGORA_S3_ENDPOINT=http://localhost:9000 pnpm test
+//   PANGOLIN_RUN_E2E=1 PANGOLIN_S3_ENDPOINT=http://localhost:9000 pnpm test
 
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'node:child_process';
@@ -18,15 +18,15 @@ import {
   LocalAnchor,
   NoneSigner,
   verify,
-} from '@quarry-systems/agora-orchestrator';
+} from '@quarry-systems/pangolin-orchestrator';
 import type {
   AuditStore,
   AuditEntryRow,
   AnchoredRoot,
-} from '@quarry-systems/agora-orchestrator';
+} from '@quarry-systems/pangolin-orchestrator';
 
 // Gate: skip unless the operator explicitly opts in to the live stack.
-const live = process.env.AGORA_RUN_E2E ? describe : describe.skip;
+const live = process.env.PANGOLIN_RUN_E2E ? describe : describe.skip;
 
 // ---------------------------------------------------------------------------
 // Minimal in-memory AuditStore — used only in Case 2.
@@ -72,9 +72,9 @@ live('offload-minio e2e — live stack required', () => {
       cwd: exampleDir,
       env: {
         ...process.env,
-        AGORA_S3_ENDPOINT: process.env.AGORA_S3_ENDPOINT ?? 'http://localhost:9000',
-        AGORA_S3_ACCESS_KEY: process.env.AGORA_S3_ACCESS_KEY ?? 'minioadmin',
-        AGORA_S3_SECRET_KEY: process.env.AGORA_S3_SECRET_KEY ?? 'minioadmin',
+        PANGOLIN_S3_ENDPOINT: process.env.PANGOLIN_S3_ENDPOINT ?? 'http://localhost:9000',
+        PANGOLIN_S3_ACCESS_KEY: process.env.PANGOLIN_S3_ACCESS_KEY ?? 'minioadmin',
+        PANGOLIN_S3_SECRET_KEY: process.env.PANGOLIN_S3_SECRET_KEY ?? 'minioadmin',
       },
       timeout: 300_000,
       encoding: 'utf8',
@@ -96,7 +96,7 @@ live('offload-minio e2e — live stack required', () => {
     //
     // We do NOT need to reach the live MinIO stack for this assertion — the
     // detection logic lives entirely in the orchestrator package and runs under
-    // AGORA_RUN_E2E just like the driver test above.
+    // PANGOLIN_RUN_E2E just like the driver test above.
     //
     // Steps:
     //   1. Build an in-memory AuditStore and populate it via AuditLog.

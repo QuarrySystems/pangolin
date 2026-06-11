@@ -12,7 +12,7 @@
 //   2. The module exposes a `main` function that exists and is callable
 //      (the body itself is exercised end-to-end only when Docker is
 //      available, which we don't assume in CI).
-//   3. The module wires up an `AgoraClient` whose construction doesn't
+//   3. The module wires up an `PangolinClient` whose construction doesn't
 //      throw — this is the smallest possible "did the imports resolve and
 //      the option shape validate" check and is what proves the build.
 //
@@ -38,7 +38,7 @@ describe('hello-world example', () => {
     expect(mod.__mainInvokedOnImport).toBe(false);
   });
 
-  it('buildClient() constructs an AgoraClient against fakes without throwing', async () => {
+  it('buildClient() constructs an PangolinClient against fakes without throwing', async () => {
     const { buildClient } = await import('../src/index.js');
     const { storageRoot, client, cleanup } = await buildClient();
     try {

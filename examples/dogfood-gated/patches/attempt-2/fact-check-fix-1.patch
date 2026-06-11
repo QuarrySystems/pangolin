@@ -10,7 +10,7 @@ index 0000000..4b600a9
 +---
 +
 +The core tick engine described in
-+[How an offload run executes](/agora/explanation/how-offload-runs/) is intentionally
++[How an offload run executes](/pangolin/explanation/how-offload-runs/) is intentionally
 +fixed: it processes a DAG you gave it at submit time and nothing more. **Execution
 +patterns** are the layer above that engine that lets a run grow safely *while it runs*
 +— a map step fans out to N workers whose count was unknown at submit time, or a gate
@@ -48,11 +48,11 @@ index 0000000..4b600a9
 +
 +## Queue-level pattern config
 +
-+Patterns are configured in `agora.config` at the queue level, not at the run level.
++Patterns are configured in `pangolin.config` at the queue level, not at the run level.
 +Every run submitted to that queue inherits the queue's pattern:
 +
 +```jsonc
-+// agora.config.ts (excerpt)
++// pangolin.config.ts (excerpt)
 +{
 +  "orchestrator": {
 +    "queues": [
@@ -206,18 +206,18 @@ index 0000000..4b600a9
 +  the graph it sees at each tick. New items are pending when they arrive; they ready
 +  when their `depends_on` complete; they fire, reconcile, and terminate exactly like
 +  submit-time items. No tick-loop code was modified to support patterns.
-+- **`agora verify` terminates.** Because the graph is always acyclic, the topological
++- **`pangolin verify` terminates.** Because the graph is always acyclic, the topological
 +  walk the verifier uses to check provenance closure always terminates and always
 +  produces a unique ordering. A dynamic run is not a special case for verification;
 +  it is just a larger acyclic graph.
 +
 +## See also
 +
-+- [How an offload run executes](/agora/explanation/how-offload-runs/) — the tick
++- [How an offload run executes](/pangolin/explanation/how-offload-runs/) — the tick
 +  engine that patterns layer on top of.
-+- [plan.json schema](/agora/reference/plan-json/) — `pattern` queue config fields and
++- [plan.json schema](/pangolin/reference/plan-json/) — `pattern` queue config fields and
 +  WorkItem spawn directive shape.
-+- [Audit & guarantee tiers](/agora/explanation/audit-guarantee-tiers/) — what
-+  `run.extended` entries contribute to the audit bundle and what `agora verify` checks.
-+- [Architecture overview](/agora/explanation/architecture-overview/) — where patterns
++- [Audit & guarantee tiers](/pangolin/explanation/audit-guarantee-tiers/) — what
++  `run.extended` entries contribute to the audit bundle and what `pangolin verify` checks.
++- [Architecture overview](/pangolin/explanation/architecture-overview/) — where patterns
 +  sit in the full system.

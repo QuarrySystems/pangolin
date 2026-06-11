@@ -1,0 +1,105 @@
+<h2>The OG mark — locked, now pick the name</h2>
+<p class="subtitle">Back to the original scaled-ball roundel (curled pangolin = overlapping armour scales, sealed). Shown big on ink + paper, then carrying each name finalist. Click the name lockup you want.</p>
+
+<style>
+  .grid{display:flex;flex-wrap:wrap;gap:16px;margin:8px 0}
+  .plate{border-radius:16px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;padding:34px 26px;min-width:230px;flex:1}
+  .pdark{background:#141009}.plight{background:#F4F1EC;border:1px solid #E7E1D6}
+  .wmk{font-family:'Inter',system-ui,sans-serif;font-weight:700;letter-spacing:-.03em;font-size:38px;line-height:1}
+  .gold{color:#D69A4E}.ink{color:#1a1109}
+  .lockrow{display:flex;align-items:center;gap:13px}
+  .sx{font-family:'Inter',system-ui,sans-serif;font-weight:800;letter-spacing:-.03em;font-size:23px}
+  .sx span{font-weight:500;opacity:.6}
+</style>
+
+<!-- reusable OG scaled-ball -->
+<svg width="0" height="0" style="position:absolute"><defs>
+  <clipPath id="ogBall"><circle cx="60" cy="60" r="48"/></clipPath>
+  <g id="ogmark">
+    <circle cx="60" cy="60" r="48" fill="#C2772E"/>
+    <g clip-path="url(#ogBall)" fill="none" stroke="#1a1109" stroke-width="2.6" stroke-linecap="round">
+      <path d="M-8 98 a14 14 0 0 1 28 0 M20 98 a14 14 0 0 1 28 0 M48 98 a14 14 0 0 1 28 0 M76 98 a14 14 0 0 1 28 0"/>
+      <path d="M6 80 a14 14 0 0 1 28 0 M34 80 a14 14 0 0 1 28 0 M62 80 a14 14 0 0 1 28 0 M90 80 a14 14 0 0 1 28 0"/>
+      <path d="M-8 62 a14 14 0 0 1 28 0 M20 62 a14 14 0 0 1 28 0 M48 62 a14 14 0 0 1 28 0 M76 62 a14 14 0 0 1 28 0"/>
+      <path d="M6 44 a14 14 0 0 1 28 0 M34 44 a14 14 0 0 1 28 0 M62 44 a14 14 0 0 1 28 0 M90 44 a14 14 0 0 1 28 0"/>
+      <path d="M-8 26 a14 14 0 0 1 28 0 M20 26 a14 14 0 0 1 28 0 M48 26 a14 14 0 0 1 28 0 M76 26 a14 14 0 0 1 28 0"/>
+    </g>
+    <circle cx="60" cy="60" r="48" fill="none" stroke="#1a1109" stroke-width="3"/>
+  </g>
+</defs></svg>
+
+<div class="grid">
+  <div class="card" data-choice="og-dark" onclick="toggleSelect(this)" style="flex:1;min-width:240px">
+    <div class="card-image" style="padding:0">
+      <div class="plate pdark">
+        <svg viewBox="0 0 120 120" width="118" height="118" aria-label="og mark dark"><use href="#ogmark"/></svg>
+        <div class="wmk gold">pangolin</div>
+      </div>
+    </div>
+    <div class="card-body"><h3>A · on ink</h3><p>The locked mascot.</p></div>
+  </div>
+  <div class="card" data-choice="og-light" onclick="toggleSelect(this)" style="flex:1;min-width:240px">
+    <div class="card-image" style="padding:0">
+      <div class="plate plight">
+        <svg viewBox="0 0 120 120" width="118" height="118" aria-label="og mark light"><use href="#ogmark"/></svg>
+        <div class="wmk ink">pangolin</div>
+      </div>
+    </div>
+    <div class="card-body"><h3>B · on paper</h3><p>Same mark, light surface.</p></div>
+  </div>
+</div>
+
+<div class="label" style="margin-top:8px">Pick the name (same OG mark on each):</div>
+<div class="cards" data-multiselect>
+
+  <div class="card" data-choice="name-scale" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:0">
+      <div class="plate pdark" style="min-height:120px">
+        <div class="lockrow">
+          <svg viewBox="0 0 120 120" width="56" height="56" aria-label="mark"><use href="#ogmark"/></svg>
+          <div class="sx gold">pangolin<span> scale</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body"><h3>Pangolin Scale</h3><p>scales-on-your-infra + armour pun. pangolinscale.com ✅</p></div>
+  </div>
+
+  <div class="card" data-choice="name-anchor" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:0">
+      <div class="plate pdark" style="min-height:120px">
+        <div class="lockrow">
+          <svg viewBox="0 0 120 120" width="56" height="56" aria-label="mark"><use href="#ogmark"/></svg>
+          <div class="sx gold">pangolin<span> anchor</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body"><h3>Pangolin Anchor</h3><p>chain-of-custody / audit anchor. pangolinanchor.com ✅</p></div>
+  </div>
+
+  <div class="card" data-choice="name-keep" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:0">
+      <div class="plate pdark" style="min-height:120px">
+        <div class="lockrow">
+          <svg viewBox="0 0 120 120" width="56" height="56" aria-label="mark"><use href="#ogmark"/></svg>
+          <div class="sx gold">pangolin<span> keep</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body"><h3>Pangolin Keep</h3><p>contain + keep-the-record. pangolinkeep.com ✅</p></div>
+  </div>
+
+  <div class="card" data-choice="name-bare" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:0">
+      <div class="plate pdark" style="min-height:120px">
+        <div class="lockrow">
+          <svg viewBox="0 0 120 120" width="56" height="56" aria-label="mark"><use href="#ogmark"/></svg>
+          <div class="sx gold">pangolin</div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body"><h3>Just "Pangolin"</h3><p>bare word + apex domain. pangolin.run ✅</p></div>
+  </div>
+
+</div>
+
+<p class="subtitle" style="margin-top:16px">OG mark is locked. Click the name lockup that wins and I'll finalize + save the brand decision.</p>

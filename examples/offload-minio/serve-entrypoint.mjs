@@ -7,8 +7,8 @@
 // the only caller of orchestrator.tick(); workers are launched as Docker siblings
 // via the mounted socket (wired in docker-compose, not here).
 
-import { serve } from '@quarry-systems/agora-orchestrator';
-import { orch } from './agora.config.mjs';
+import { serve } from '@quarry-systems/pangolin-orchestrator';
+import { orch } from './pangolin.config.mjs';
 
 const ac = new AbortController();
 process.on('SIGTERM', () => ac.abort());

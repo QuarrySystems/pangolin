@@ -8,8 +8,8 @@
 # Idempotent: both `mc mb` calls ignore "already exists" errors so re-runs are safe.
 #
 # Buckets created:
-#   agora-audit  — object-lock enabled (COMPLIANCE mode required by S3ObjectLockAnchor)
-#   agora-data   — normal bucket (storage + mailbox)
+#   pangolin-audit  — object-lock enabled (COMPLIANCE mode required by S3ObjectLockAnchor)
+#   pangolin-data   — normal bucket (storage + mailbox)
 #
 # Operator note: this script is executed inside the minio/mc container.
 # The alias "myminio" is configured at container startup via MC_HOST_myminio.
@@ -32,15 +32,15 @@ until mc alias list myminio >/dev/null 2>&1; do
   sleep 2
 done
 
-echo "[init-buckets] Creating bucket agora-audit (with object lock)..."
+echo "[init-buckets] Creating bucket pangolin-audit (with object lock)..."
 # --with-lock enables S3 Object Lock (required for COMPLIANCE mode anchoring).
 # --ignore-existing makes the command idempotent (exit 0 if bucket already exists).
-mc mb --with-lock --ignore-existing myminio/agora-audit
-mc ls myminio/agora-audit >/dev/null 2>&1 || { echo "[init-buckets] ERROR: agora-audit bucket not accessible after creation." >&2; exit 1; }
+mc mb --with-lock --ignore-existing myminio/pangolin-audit
+mc ls myminio/pangolin-audit >/dev/null 2>&1 || { echo "[init-buckets] ERROR: pangolin-audit bucket not accessible after creation." >&2; exit 1; }
 
-echo "[init-buckets] Creating bucket agora-data (standard)..."
-mc mb --ignore-existing myminio/agora-data
-mc ls myminio/agora-data >/dev/null 2>&1 || { echo "[init-buckets] ERROR: agora-data bucket not accessible after creation." >&2; exit 1; }
+echo "[init-buckets] Creating bucket pangolin-data (standard)..."
+mc mb --ignore-existing myminio/pangolin-data
+mc ls myminio/pangolin-data >/dev/null 2>&1 || { echo "[init-buckets] ERROR: pangolin-data bucket not accessible after creation." >&2; exit 1; }
 
 echo "[init-buckets] Bucket initialisation complete."
 mc ls myminio

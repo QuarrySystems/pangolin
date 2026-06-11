@@ -1,6 +1,6 @@
 ---
 title: Sandboxing AI agents
-description: Why real access control for AI agents has to live in the execution boundary, not in the agent's own toolbox — and how agora puts it there.
+description: Why real access control for AI agents has to live in the execution boundary, not in the agent's own toolbox — and how Pangolin Scale puts it there.
 sidebar:
   order: 2
 ---
@@ -11,14 +11,14 @@ Most "autonomous agent" setups have a security model that's basically: *trust th
 
 I kept seeing the same non-fix: *"add an authorization check as a tool the agent calls."* But think about what that is — the agent is both the thing being governed **and** the thing deciding whether to consult the governor. It can skip the call or ignore the "no." That's advisory, not enforcement. Real access control has to live somewhere the agent **can't route around it** — in the execution boundary, not in the agent's own toolbox.
 
-So I built **agora**: a runtime that dispatches each agent into a throwaway sandbox with **only** the capabilities and secrets you grant at dispatch time — and keeps the privileged controls out of the agent's reach entirely.
+So I built **Pangolin Scale**: a runtime that dispatches each agent into a throwaway sandbox with **only** the capabilities and secrets you grant at dispatch time — and keeps the privileged controls out of the agent's reach entirely.
 
 ## What that looks like
 
 You (the operator) register what an agent *is* and *gets*. Then you dispatch it:
 
 ```ts
-await client.capabilities.register({ name: 'echo-cap', files: { 'agora-setup.sh': '…' } });
+await client.capabilities.register({ name: 'echo-cap', files: { 'pangolin-setup.sh': '…' } });
 await client.subagent.register({ name: 'echo', capabilities: ['echo-cap'] });
 await client.env.register({ name: 'minimal', values: { LOG_LEVEL: 'info' } });
 
@@ -34,7 +34,7 @@ The agent runs in a fresh container that has the granted capability files and th
   "env":          [{ "name": "minimal",  "contentHash": "sha256:766c…" }] }
 === stdout ===
 {"kind":"worker.boot",...}
-{"kind":"setup-script.ran","exitCode":0,"stdout":"hello from agora-worker\n"}
+{"kind":"setup-script.ran","exitCode":0,"stdout":"hello from pangolin-worker\n"}
 {"kind":"dispatch.finished","exitCode":0}
 ```
 
@@ -42,17 +42,17 @@ Those hashes are a provable record of exactly which bytes ran — the audit trai
 
 ## The part that makes it unbypassable
 
-The agent's own tool surface (the MCP server it talks to) exposes **run-time tools only**. The privileged operations — `register`, `assign`: granting an agent more capabilities — are **CLI-only, operator-side, and never reach the AI loop.** The agent cannot grant itself more access, because the verb to do so isn't in its hands. Enforcement lives at the boundary, not in the agent's good behavior. See [The privilege boundary](/agora/explanation/privilege-boundary/).
+The agent's own tool surface (the MCP server it talks to) exposes **run-time tools only**. The privileged operations — `register`, `assign`: granting an agent more capabilities — are **CLI-only, operator-side, and never reach the AI loop.** The agent cannot grant itself more access, because the verb to do so isn't in its hands. Enforcement lives at the boundary, not in the agent's good behavior. See [The privilege boundary](/pangolin/explanation/privilege-boundary/).
 
 Same code path runs locally against Docker and in production against Fargate + S3 — the swap is constructor-only.
 
 ## What's *not* done yet (because honesty is the point)
 
-This is v0.1. Today agora enforces access by **grant-scoping + operator-only control + sandbox isolation + audit.** The next layer — a policy engine that *denies a specific action* an agent attempts, with on-behalf-of delegation — is wired but not shipped. I'm not going to show you a denial I haven't built. The execution sandbox is real today; the fine-grained policy is the roadmap.
+This is v0.1. Today Pangolin Scale enforces access by **grant-scoping + operator-only control + sandbox isolation + audit.** The next layer — a policy engine that *denies a specific action* an agent attempts, with on-behalf-of delegation — is wired but not shipped. I'm not going to show you a denial I haven't built. The execution sandbox is real today; the fine-grained policy is the roadmap.
 
 ## If you run agents
 
-agora is **source-available** under the Business Source License 1.1 (BSL) — self-host it, read it, build on it; you just can't resell it as a hosted service. (BSL ≠ OSI-approved free software — see [Licensing & BSL](/agora/explanation/licensing-bsl/) for the exact terms.)
+Pangolin Scale is **source-available** under the Business Source License 1.1 (BSL) — self-host it, read it, build on it; you just can't resell it as a hosted service. (BSL ≠ OSI-approved free software — see [Licensing & BSL](/pangolin/explanation/licensing-bsl/) for the exact terms.)
 
-If you're running autonomous or long-running agents and you've felt the *"this thing has way too much access and I can't prove what it did"* itch — I'd genuinely like to set agora up around your agent, for free, and hear where it falls short.
+If you're running autonomous or long-running agents and you've felt the *"this thing has way too much access and I can't prove what it did"* itch — I'd genuinely like to set Pangolin Scale up around your agent, for free, and hear where it falls short.
 </content>

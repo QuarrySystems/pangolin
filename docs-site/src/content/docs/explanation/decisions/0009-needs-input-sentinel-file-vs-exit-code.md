@@ -3,7 +3,7 @@ title: "ADR-0009: needs_input is signaled by a sentinel file, not by an exit cod
 description: "needs_input is signaled by a sentinel file at a documented path, not by an exit code."
 status: accepted
 date: 2026-05-21
-deciders: agora-mvp-design
+deciders: pangolin-scale-mvp-design
 ---
 
 ## Context
@@ -17,7 +17,7 @@ mechanisms were considered:
   need input." The runtime adapter inspects the exit code after the runtime
   binary terminates and maps the reserved value to a `needs_input` outcome.
 - **Sentinel file.** The sub-agent writes a structured JSON file to a
-  documented path (`/workspace/.agora/needs_input.json`) before terminating.
+  documented path (`/workspace/.pangolin/needs_input.json`) before terminating.
   The runtime adapter checks for the file's presence after the runtime exits
   and reads the payload from there. Exit code is ignored for the purpose of
   this signal.
@@ -66,9 +66,9 @@ From §6.9:
 > present.
 
 The sentinel path for the MVP `ClaudeCodeRuntimeAdapter` is
-`/workspace/.agora/needs_input.json`. The convention itself is agora-level;
-the content that teaches the sub-agent about it (the `agora-needs-input-helper`
-overlay) is adapter-provided — a `.claude/skills/agora-needs-input/SKILL.md`
+`/workspace/.pangolin/needs_input.json`. The convention itself is Pangolin Scale-level;
+the content that teaches the sub-agent about it (the `pangolin-needs-input-helper`
+overlay) is adapter-provided — a `.claude/skills/pangolin-needs-input/SKILL.md`
 for the Claude Code adapter, equivalent instruction surfaces for future
 adapters.
 
@@ -89,7 +89,7 @@ adapters.
   worker-side resolution rule is adapter-agnostic.
 - The convention is taught to the sub-agent through an adapter-provided
   helper overlay that is always applied unless the integrator opts out via
-  `AGORA_DISABLE_NEEDS_INPUT_HELPER=true`. Most integrators benefit from the
+  `PANGOLIN_DISABLE_NEEDS_INPUT_HELPER=true`. Most integrators benefit from the
   convention without thinking about it.
 - The cost of the sentinel-file approach is one filesystem stat per dispatch
   (negligible) plus the adapter-side wiring to report the path. The benefit

@@ -1,0 +1,40 @@
+{
+  "name": "@quarry-systems/pangolin-worker",
+  "version": "0.1.0",
+  "license": "BUSL-1.1",
+  "description": "Container-side runtime — one process per dispatch; fetches bundles, verifies integrity, overlays the workspace, resolves secrets, and hands off to a RuntimeAdapter.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/QuarrySystems/pangolin.git",
+    "directory": "packages/pangolin-worker"
+  },
+  "homepage": "https://quarrysystems.github.io/pangolin",
+  "bugs": {
+    "url": "https://github.com/QuarrySystems/pangolin/issues"
+  },
+  "scripts": {
+    "lint": "eslint src --ext .ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@aws-sdk/client-secrets-manager": "^3.700.0",
+    "@quarry-systems/pangolin-core": "workspace:*",
+    "@quarry-systems/pangolin-secret-store": "workspace:*",
+    "@quarry-systems/pangolin-storage-local": "workspace:*",
+    "@quarry-systems/pangolin-storage-s3": "workspace:*"
+  },
+  "devDependencies": {}
+}

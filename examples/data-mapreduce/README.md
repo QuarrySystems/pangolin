@@ -3,7 +3,7 @@
 > **ISOLATION CAVEAT (READ THIS FIRST)**
 >
 > This example uses **`InprocWorkerExecutor`** — a TEST FIXTURE from
-> `packages/agora-orchestrator/test/fixtures/inproc-worker-executor.ts`.
+> `packages/pangolin-orchestrator/test/fixtures/inproc-worker-executor.ts`.
 >
 > InprocWorkerExecutor runs worker pipelines **IN-PROCESS**. There is no
 > container sandbox, no network firewall, no filesystem isolation. Scripts
@@ -20,7 +20,7 @@ pipelines with zero engine changes. The entire orchestration engine
 (pattern, needs-resolver, audit chain, verifyBundle) is reused unchanged
 from the dev-domain dogfood example.
 
-Reference spec: `docs/superpowers/specs/2026-06-05-agora-block-runner-data-pack-design.md`
+Reference spec: `docs/superpowers/specs/2026-06-05-pangolin-block-runner-data-pack-design.md`
 (the block-pipeline runner + data pack design this example demonstrates).
 
 ## How it works
