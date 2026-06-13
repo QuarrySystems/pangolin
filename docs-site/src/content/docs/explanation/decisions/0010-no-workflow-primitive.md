@@ -50,7 +50,7 @@ The decision turns on whether Pangolin Scale ships the "named pre-composed dispa
 
 ## Decision
 
-From §10.1 of `docs/superpowers/specs/2026-05-21-pangolin-scale-mvp-design.md`:
+From §10.1 of `docs/superpowers/specs/2026-05-21-agora-mvp-design.md`:
 
 > **No `pangolin.workflow()` / `pangolin.procedure()` primitive.** Named pre-composed dispatch templates are sugar that integrators implement as wrapper functions around `dispatch()`. Revisit in v0.2 if multiple integrators independently reinvent the wrapper.
 

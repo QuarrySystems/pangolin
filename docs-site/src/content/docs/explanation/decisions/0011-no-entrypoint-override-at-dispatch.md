@@ -27,7 +27,7 @@ The decision turns on whether Pangolin Scale preserves "the worker image and cap
 
 ## Decision
 
-From §10.1 of `docs/superpowers/specs/2026-05-21-pangolin-scale-mvp-design.md`:
+From §10.1 of `docs/superpowers/specs/2026-05-21-agora-mvp-design.md`:
 
 > **No `entrypoint` override at dispatch time.** Container-level customization is handled by extending the worker image. Per-dispatch setup is handled by `pangolin-setup.sh` content in capability bundles — versioned, content-addressable, audit-friendly. Dispatch-time entrypoint override would lose those properties.
 

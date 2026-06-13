@@ -36,6 +36,6 @@ ADR that references the old one, not editing the existing file.
 ## Source
 
 These ADRs were extracted from §10.1 of the Pangolin Scale MVP design spec
-(`docs/superpowers/specs/2026-05-21-pangolin-scale-mvp-design.md`). Each ADR's `## Decision`
+(`docs/superpowers/specs/2026-05-21-agora-mvp-design.md`). Each ADR's `## Decision`
 section quotes the relevant spec passage verbatim.
 </content>

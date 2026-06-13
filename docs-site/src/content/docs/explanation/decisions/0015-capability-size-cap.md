@@ -38,7 +38,7 @@ moment they can do something about it without losing work.
 
 ## Decision
 
-From §10.1 of `docs/superpowers/specs/2026-05-21-pangolin-scale-mvp-design.md`:
+From §10.1 of `docs/superpowers/specs/2026-05-21-agora-mvp-design.md`:
 
 > **Capability size cap is 50 MiB, rejected at `register()` time.** Above
 > this, integrators are probably packaging the wrong thing (model files,

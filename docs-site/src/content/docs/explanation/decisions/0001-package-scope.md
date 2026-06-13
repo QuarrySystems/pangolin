@@ -19,7 +19,7 @@ The trade-off framing turned on whether the orthogonality principle — Pangolin
 
 ## Decision
 
-Pangolin Scale packages publish under `@quarry-systems/pangolin-*`. Per §10.1 of `docs/superpowers/specs/2026-05-21-pangolin-scale-mvp-design.md`:
+Pangolin Scale packages publish under `@quarry-systems/pangolin-*`. Per §10.1 of `docs/superpowers/specs/2026-05-21-agora-mvp-design.md`:
 
 > **Package scope is `@quarry-systems/pangolin-*`.** Originally weighed against `@pangolin-mcp/*` for "easier OSS spinout later." Spinouts happen when they happen regardless of npm scope; the orthogonality principle is enforced architecturally (CI allowlist on dependencies), not via separate scopes. Consistent platform story + easier release coordination + room to add `@quarry-systems/bedrock-*` and `@quarry-systems/stoa-*` alongside without scope thrash.
 

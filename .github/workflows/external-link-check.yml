@@ -1,0 +1,70 @@
+name: external-link-check
+
+# Outbound (external) link rot monitor for the docs. INTERNAL links are validated
+# at build time by starlight-links-validator (see docs.yml); this covers links that
+# leave the site.
+#
+# Posture: this is NOT a per-PR gate. Gating every docs change on third-party site
+# uptime would red-CI a PR for reasons unrelated to the change. Instead it runs on a
+# weekly schedule (+ manual dispatch) and opens an issue when links rot. The single
+# narrow pull_request trigger fires ONLY when this check's own config changes, so the
+# setup self-tests on the PR that edits it.
+
+on:
+  schedule:
+    - cron: '0 6 * * 1' # Mondays 06:00 UTC
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'lychee.toml'
+      - '.github/workflows/external-link-check.yml'
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  links:
+    name: external links
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check external links
+        id: lychee
+        uses: lycheeverse/lychee-action@v2
+        with:
+          # fail:false — never hard-fail the step; we decide what to do per event below.
+          fail: false
+          # Scope = the PUBLISHED docs site (docs-site/src/content). Deliberately NOT
+          # the repo READMEs/ROADMAP or docs/** specs: those use relative/repo-root
+          # paths at varying depths that a single base_url can't resolve coherently —
+          # their link correctness is a separate concern from outbound link rot.
+          args: >-
+            --config lychee.toml
+            --no-progress
+            "docs-site/src/content/**/*.md"
+            "docs-site/src/content/**/*.mdx"
+        env:
+          # Authenticated requests avoid github.com rate-limiting false positives.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Open issue on broken links (scheduled / manual)
+        if: ${{ steps.lychee.outputs.exit_code != 0 && github.event_name != 'pull_request' }}
+        uses: peter-evans/create-issue-from-file@v5
+        with:
+          title: 'Doc link rot: broken external links detected'
+          content-filepath: ./lychee/out.md
+          labels: documentation, link-rot
+
+      - name: Fail the config self-test if links are broken (pull_request only)
+        if: ${{ steps.lychee.outputs.exit_code != 0 && github.event_name == 'pull_request' }}
+        run: |
+          echo "::error::lychee found broken external links — see the report below."
+          { echo '## Broken external links'; cat ./lychee/out.md; } >> "$GITHUB_STEP_SUMMARY"
+          exit 1

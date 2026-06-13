@@ -32,7 +32,7 @@ The decision turns on whether MVP draws the namespace boundary at "internal sche
 
 ## Decision
 
-From §10.1 of `docs/superpowers/specs/2026-05-21-pangolin-scale-mvp-design.md`:
+From §10.1 of `docs/superpowers/specs/2026-05-21-agora-mvp-design.md`:
 
 > **MVP is strictly single-namespace.** No public cross-namespace addressing, no read-only cross-namespace primitive. Integrators who want to share capability libraries across namespaces use a shared deploy pipeline (CI job that registers the same artifacts into N namespaces in parallel) or republish manually. The internal storage URI scheme (`pangolin://<namespace>/...`) is structured to support cross-namespace later, but the public API surfaces none of it in MVP.
 

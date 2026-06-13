@@ -19,7 +19,7 @@ That experience also surfaced a more general point: the lifecycle vocabulary can
 
 ## Decision
 
-The lifecycle event vocabulary is closed at six kinds for MVP and extensible at minor-version boundaries. Per §10.1 of `docs/superpowers/specs/2026-05-21-pangolin-scale-mvp-design.md`:
+The lifecycle event vocabulary is closed at six kinds for MVP and extensible at minor-version boundaries. Per §10.1 of `docs/superpowers/specs/2026-05-21-agora-mvp-design.md`:
 
 > **Lifecycle event vocabulary is closed at six for MVP, extensible at minor versions.** Five-event closed-vocabulary commitment retired. Sixth event (`dispatch.needs_input`) added because squeezing it into `dispatch.finished` muddied downstream semantics. Future kinds (potentially `dispatch.heartbeat`, `dispatch.warning`) reserved. Integrators implementing telemetry hooks MUST handle unknown event kinds gracefully (log + skip).
 

@@ -14,7 +14,7 @@ spec. FSL is source-available: it forbids any **"Competing Use"** and converts
 each version to the permissive **MIT** license two years after release.
 
 The offload V1 delivery spec
-(`docs/superpowers/specs/2026-05-29-pangolin-offload-v1-design.md`, decision V1-D2)
+(`docs/superpowers/specs/2026-05-29-agora-offload-v1-design.md`, decision V1-D2)
 revisited the license as part of productizing the offload stack and chose the
 **Business Source License 1.1 (`BUSL-1.1` SPDX)** instead. The two specs
 therefore disagreed, and the `offload-launch` wave is where §8 of the V1 spec

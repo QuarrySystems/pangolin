@@ -253,7 +253,7 @@ already owns, so they survive restarts. The operator surface is
 `pangolin orch schedule add|list|rm`; these verbs are CLI-only (not MCP-reachable).
 
 For the full architecture, catch-up policy, and idempotency mechanics, see the
-[cron scheduling design spec](https://github.com/quarrysystems/pangolin/blob/main/docs/superpowers/specs/2026-06-02-pangolin-scale-cron-trigger-design.md).
+[cron scheduling design spec](https://github.com/quarrysystems/pangolin/blob/main/docs/superpowers/specs/2026-06-02-agora-cron-trigger-design.md).
 For the how-to walkthrough, see
 [Schedule recurring runs](/pangolin/how-to/schedule-recurring-runs/).
 
