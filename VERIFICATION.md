@@ -149,11 +149,14 @@ Given a `bundle` and a built `anchor` (read-only, see §4), plus optional
    - recompute `chainHash(canonEntry(entry), prevHash)` and assert it equals `entry.entryHash`;
    - assert `entry.prevHash` equals the previous entry's `entryHash` (`""` for `seq 0`).
    Stop at the first broken link (later links are meaningless once the chain is cut).
-   `canonEntry` is the canonical, key-sorted JSON serialization of the entry's logical
-   fields (excluding `entryHash`/`prevHash`); `chainHash(canon, prev) = SHA-256(prev || canon)`.
+   `canonEntry` is a **positional JSON array** with a pinned field order — NOT key-sorted
+   JSON / JCS — namely `[kind, runId, itemId, status, actor, manifestRef, resultRef, at, seq]`,
+   with absent optionals serialized as `null` (excludes `entryHash`/`prevHash`).
+   `chainHash(canon, prev) = SHA-256(canon || prev)` (the canonical bytes, then the prev hash).
 
 2. **Merkle root.** Recompute the Merkle root over the ordered list of `entryHash`es
-   (binary Merkle tree, SHA-256, duplicate-last-leaf on odd levels — `merkleRoot(leavesFromEntryHashes(...))`).
+   (binary Merkle tree, SHA-256). An odd trailing node at a level is **carried up unhashed**
+   (NOT duplicated) — `merkleRoot(leavesFromEntryHashes(...))`.
 
 3. **Anchor fetch.** Fetch the anchored root for this `epochId` (== `runId`) from the
    anchor source. If nothing is returned → `anchor` check fails (`anchor-missing`).
