@@ -1,0 +1,37 @@
+# External (outbound) link checking for the docs.
+#
+# Internal links are already validated at build time by starlight-links-validator
+# (see .github/workflows/docs.yml). This config covers links that LEAVE the site —
+# run by .github/workflows/external-link-check.yml on a weekly schedule (+ manual).
+
+# --- Network behaviour ------------------------------------------------------
+# External hosts are flaky; retry transient failures before reporting rot.
+max_retries = 3
+retry_wait_time = 2          # seconds between retries
+timeout = 20                 # seconds per request
+
+# A rate-limited response is transient, not a broken link.
+accept = ["200..=299", "429"]
+
+# --- Scope ------------------------------------------------------------------
+# Don't probe hosts that only make sense inside a deployment / example.
+exclude_loopback = true      # 127.0.0.1, localhost
+exclude_private = true       # RFC1918 ranges
+exclude_link_local = true
+
+# mailto:/tel: — we care about web link rot, not address reachability.
+include_mail = false
+
+# Specific URLs that are intentionally not GET-checkable.
+exclude = [
+  # freetsa is an RFC 3161 timestamp endpoint — POST-only; a GET link-check is meaningless.
+  '^https?://freetsa\.org/tsr',
+  # Hostnames that appear only in config/example snippets, never real web targets.
+  'host\.docker\.internal',
+  '^https?://example\.(com|org)',
+]
+
+# --- Caching ----------------------------------------------------------------
+# Speed up reruns; short TTL so rot is still caught within a week.
+cache = true
+max_cache_age = "2d"
