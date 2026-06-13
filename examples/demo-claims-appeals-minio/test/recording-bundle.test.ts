@@ -102,12 +102,14 @@ function makeFixture() {
       anchorId: 'fake-test-anchor',
       guarantee: 'detect',
       claim: 'tamper-detecting',
+      timeTier: 'asserted',
       checks: {
         chain: { ok: true },
         root: { ok: true },
         signature: { ok: 'n/a' },
         anchor: { ok: true },
         handoff: { ok: true, detail: 'no handoff edges' },
+        time: { ok: 'n/a' },
       },
     },
   };
