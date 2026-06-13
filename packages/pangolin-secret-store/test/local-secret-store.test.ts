@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, rm, readdir } from 'node:fs/promises';
+import { mkdtemp, rm, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { LocalSecretStore } from '../src/local-secret-store.js';
@@ -42,8 +42,9 @@ describe('LocalSecretStore', () => {
   });
 
   it('rejects a ref whose id is a path-traversal payload (defense-in-depth)', async () => {
-    // ids are server-minted UUIDs; a ref carrying path separators must never be
-    // joined into a filesystem path — it could read/write `.secret` files outside `dir`.
+    // A ref carrying path separators or `..` must never be joined into a filesystem
+    // path — it could read/write `.secret` files outside `dir`. The check is on path
+    // SAFETY, not id format, so legitimate non-UUID ids (below) still resolve.
     const store = new LocalSecretStore({ dir });
     await expect(store.resolve('local-secret://../../../etc/passwd')).rejects.toThrow(
       /invalid secret id/i,
@@ -51,6 +52,20 @@ describe('LocalSecretStore', () => {
     await expect(store.resolve('local-secret://..\\..\\windows\\system32\\config')).rejects.toThrow(
       /invalid secret id/i,
     );
+    await expect(store.resolve('local-secret://')).rejects.toThrow(/invalid secret id/i); // empty id
+  });
+
+  it('resolves a ref whose id is a safe non-UUID segment', async () => {
+    // ids are normally minted UUIDs, but the store must not OVER-reject: any id that is
+    // a safe single path segment (no separators, no `..`) is legitimate — e.g. a caller
+    // that stages with its own opaque id. Path-safety is the invariant, not UUID-shape.
+    const writer = new LocalSecretStore({ dir });
+    const staged = await writer.stage({ name: 'K', value: 'v', ttlSeconds: 1 });
+    // Sanity: a minted id round-trips.
+    expect(await writer.resolve(staged.ref)).toBe('v');
+    // A hand-constructed safe id also resolves.
+    await writeFile(join(dir, 'safe-name.secret'), 'hand-staged', { mode: 0o600 });
+    expect(await writer.resolve('local-secret://safe-name')).toBe('hand-staged');
   });
 
   it('resolves a ref written by a separate store instance over the same dir', async () => {
