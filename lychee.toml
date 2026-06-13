@@ -27,8 +27,12 @@ exclude_link_local = true
 # mailto:/tel: — we care about web link rot, not address reachability.
 include_mail = false
 
-# Specific URLs that are intentionally not GET-checkable.
+# Links that are intentionally not GET-checkable here.
 exclude = [
+  # Root-relative INTERNAL links (/pangolin/...) — starlight-links-validator already
+  # checks these at build; lychee can't resolve them without a root dir and shouldn't
+  # (this monitor is outbound-only). `scheme` alone doesn't suppress them, so exclude by path.
+  '^/',
   # freetsa is an RFC 3161 timestamp endpoint — POST-only; a GET link-check is meaningless.
   '^https?://freetsa\.org/tsr',
   # Hostnames that appear only in config/example snippets, never real web targets.
