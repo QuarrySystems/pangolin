@@ -63,7 +63,34 @@ export const GUARANTEE_RANK: Record<Guarantee, number> = { detect: 0, "external-
 
 export interface Signature { alg: string; bytes: Uint8Array; keyRef?: string; }
 export interface AnchorReceipt { anchorId: string; epochId: string; guarantee: Guarantee; at: number; locator?: string; }
-export interface AnchoredRoot { epochId: string; root: Uint8Array; signature?: Signature; receipt: AnchorReceipt; }
+
+/** Trusted-time evidence over a sealed Merkle root. A SEPARATE assurance dimension
+ *  from the tamper claim — never collapsed into tamper-evident/tamper-detecting. The
+ *  authoritative time lives INSIDE `token` (the RFC-3161 genTime); `at` is display-only.
+ *  Concrete ASN.1/CMS verification + TSA clients live in a later package — core only
+ *  defines the type + the injection point (see `verify`'s `verifyTimestamp`). */
+export interface TimestampToken {
+  alg: 'rfc3161';
+  token: Uint8Array;       // DER RFC 3161 TimeStampToken (CMS SignedData); base64 in JSON
+  at: string;              // ISO-8601 TSA-asserted time (display only; authoritative time is inside token)
+  tsaUrl?: string;
+}
+
+/** Pluggable trusted-time authority. The orchestrator's sealer obtains a token over the
+ *  sealed root best-effort (a TSA outage must never abort a seal). Implementations that
+ *  own the RFC-3161 client/ASN.1 weight live OUTSIDE core. */
+export interface TimestampAuthority {
+  readonly id: string;
+  timestamp(rootHash: Uint8Array): Promise<TimestampToken>;
+}
+
+/** Trusted-time tier reported ALONGSIDE the tamper claim. `tsa-attested` only when a token
+ *  is present AND an injected verifier confirmed it; otherwise `asserted` (the chain timestamps
+ *  are self-asserted by the sealer). A failed time check is INFORMATIONAL — it forces `asserted`
+ *  but never gates `intact` or sets `failure`. */
+export type TimeTier = 'asserted' | 'tsa-attested';
+
+export interface AnchoredRoot { epochId: string; root: Uint8Array; signature?: Signature; receipt: AnchorReceipt; timestamp?: TimestampToken; }
 
 export interface Signer { sign(rootHash: Uint8Array): Promise<Signature>; readonly keyRef?: string; }
 
@@ -94,8 +121,11 @@ export interface CheckResult {
 export interface VerificationReport {
   runId: string; intact: boolean; anchorId: string; guarantee: Guarantee;
   claim: 'tamper-evident' | 'tamper-detecting';
-  failure?: 'chain' | 'anchor-missing' | 'root-mismatch' | 'signature' | 'handoff';  // first failing check (kept for back-compat)
-  checks: { chain: CheckResult; root: CheckResult; signature: CheckResult; anchor: CheckResult; handoff: CheckResult };
+  /** Trusted-time tier — a SEPARATE dimension from `claim`. A failed `time` check forces
+   *  `asserted` but does NOT affect `intact`/`failure`/`claim`. */
+  timeTier: TimeTier;
+  failure?: 'chain' | 'anchor-missing' | 'root-mismatch' | 'signature' | 'handoff';  // first failing check (kept for back-compat). NOTE: no 'time' variant — time is informational.
+  checks: { chain: CheckResult; root: CheckResult; signature: CheckResult; anchor: CheckResult; handoff: CheckResult; time: CheckResult };
 }
 
 export interface AuditEntryRow extends AuditEntry { entryHash: string; prevHash: string; }

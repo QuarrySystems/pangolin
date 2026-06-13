@@ -1,15 +1,19 @@
-import type { AuditBundle, AuditStore, AuditAnchor, Signature, VerificationReport, CheckResult } from './audit.js';
+import type { AuditBundle, AuditStore, AuditAnchor, Signature, TimestampToken, VerificationReport, CheckResult } from './audit.js';
 import { verify, claimFor } from './audit-verify.js';
 
 export function verifyBundle(
   bundle: AuditBundle,
-  deps: { anchor: AuditAnchor; verifySignature?: (root: Uint8Array, sig: Signature) => boolean },
+  deps: {
+    anchor: AuditAnchor;
+    verifySignature?: (root: Uint8Array, sig: Signature) => boolean;
+    verifyTimestamp?: (root: Uint8Array, token: TimestampToken) => boolean;
+  },
 ): Promise<VerificationReport> {
   const entries = bundle.auditLog.entries;
   // verify() consults only store.getAuditEntries(runId), so a partial store suffices.
   // The double-cast documents that narrowing — revisit if verify() grows to call other AuditStore methods.
   const store = { getAuditEntries: () => entries } as Pick<AuditStore, 'getAuditEntries'> as AuditStore;
-  return verify(bundle.runId, { store, anchor: deps.anchor, verifySignature: deps.verifySignature }).then(
+  return verify(bundle.runId, { store, anchor: deps.anchor, verifySignature: deps.verifySignature, verifyTimestamp: deps.verifyTimestamp }).then(
     (base) => {
       const handoff = checkHandoffClosure(bundle);
       const intact = base.intact && handoff.ok !== false;

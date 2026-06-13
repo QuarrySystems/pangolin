@@ -4,6 +4,8 @@ import type {
   Signer,
   AuditAnchor,
   AnchorReceipt,
+  TimestampAuthority,
+  TimestampToken,
 } from '../contracts/index.js';
 import { canonEntry } from './canon.js';
 import { chainHash, merkleRoot, leavesFromEntryHashes } from './merkle.js';
@@ -16,6 +18,9 @@ export class AuditLog {
       store: AuditStore;
       signer: Signer;
       anchor: AuditAnchor;
+      /** Optional trusted-time authority. When present, sealEpoch obtains an RFC-3161 token
+       *  over the sealed root best-effort — a TSA outage must NEVER abort a seal. */
+      timestamper?: TimestampAuthority;
       /** Called when tryAppend swallows a store failure — surface the drop to the operator. */
       onDrop?: (entry: Omit<AuditEntry, 'seq'>, err: Error) => void;
     },
@@ -54,8 +59,17 @@ export class AuditLog {
     const hashes = this.deps.store.getAuditEntries(runId).map((e) => e.entryHash);
     const root = merkleRoot(leavesFromEntryHashes(hashes));
     const signature = await this.deps.signer.sign(root);
+    // Trusted-time: best-effort. A TSA outage must NOT abort the seal — drop is surfaced via onDrop.
+    let timestamp: TimestampToken | undefined;
+    if (this.deps.timestamper) {
+      try {
+        timestamp = await this.deps.timestamper.timestamp(root);
+      } catch (err) {
+        this.deps.onDrop?.({ runId, kind: 'run.completed', at: new Date(0).toISOString() }, err as Error);
+      }
+    }
     const receipt = await this.deps.anchor.anchor({ epochId: runId, root, signature });
-    this.deps.store.putAuditRoot({ epochId: runId, root, signature, receipt }); // durable seal marker
+    this.deps.store.putAuditRoot({ epochId: runId, root, signature, receipt, ...(timestamp ? { timestamp } : {}) }); // durable seal marker
     return receipt;
   }
 }

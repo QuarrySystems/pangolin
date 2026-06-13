@@ -1,4 +1,4 @@
-import type { AuditStore, AuditAnchor, VerificationReport, Signature } from './audit.js';
+import type { AuditStore, AuditAnchor, VerificationReport, Signature, TimestampToken, TimeTier } from './audit.js';
 import { GUARANTEE_RANK } from './audit.js';
 import type { Guarantee } from './audit.js';
 import { canonEntry } from './audit-canon.js';
@@ -17,6 +17,10 @@ export async function verify(
     store: AuditStore;
     anchor: AuditAnchor;
     verifySignature?: (root: Uint8Array, sig: Signature) => boolean;
+    /** Trusted-time injection point (mirrors verifySignature). Core never owns the
+     *  RFC-3161/ASN.1 weight — a token rides on the fetched AnchoredRoot and is verified
+     *  here only if a verifier is injected. Absent verifier => time check is 'n/a'. */
+    verifyTimestamp?: (root: Uint8Array, token: TimestampToken) => boolean;
   },
 ): Promise<VerificationReport> {
   const g = deps.anchor.guarantee;
@@ -60,12 +64,21 @@ export async function verify(
       ? deps.verifySignature(anchored.root, anchored.signature)
       : 'n/a';
 
+  // Trusted-time: a SEPARATE assurance dimension. The token rides on the fetched root;
+  // verify it only when a verifier is injected (core owns no ASN.1). A failed time check
+  // is INFORMATIONAL — it forces timeTier='asserted' but never gates `intact`/`failure`.
+  const tok = anchored?.timestamp;
+  const timeOk: boolean | 'n/a' =
+    tok && deps.verifyTimestamp ? deps.verifyTimestamp(anchored!.root, tok) : 'n/a';
+  const timeTier: TimeTier = timeOk === true ? 'tsa-attested' : 'asserted';
+
   const checks = {
     chain: { ok: chainOk, detail: chainDetail },
     root: { ok: rootOk },
     signature: { ok: sigOk },
     anchor: { ok: anchorOk },
     handoff: { ok: 'n/a' as const },
+    time: { ok: timeOk },
   };
 
   const intact = chainOk && anchorOk && rootOk !== false && sigOk !== false;
@@ -79,5 +92,5 @@ export async function verify(
 
   const claim = claimFor(intact, g);
 
-  return { runId, anchorId: deps.anchor.id, guarantee: g, intact, claim, failure, checks };
+  return { runId, anchorId: deps.anchor.id, guarantee: g, intact, claim, timeTier, failure, checks };
 }

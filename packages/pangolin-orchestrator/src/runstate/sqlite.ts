@@ -7,7 +7,7 @@
 //
 import Database from 'better-sqlite3';
 import type { VerifyOutcome } from '@quarry-systems/pangolin-core';
-import type { AnchoredRoot, AuditEntryRow, AuditStore, ItemState, Run, RunStateStore, RunStatus, TerminalStatus } from '../contracts/index.js';
+import type { AnchoredRoot, AuditEntryRow, AuditStore, ItemState, Run, RunStateStore, RunStatus, TerminalStatus, TimestampToken } from '../contracts/index.js';
 
 /** Shape of a row in the `items` table (column names are snake_case). */
 interface ItemRow {
@@ -53,7 +53,8 @@ CREATE TABLE IF NOT EXISTS audit_roots (
   epoch_id TEXT PRIMARY KEY, root BLOB NOT NULL,
   sig_alg TEXT, sig_bytes BLOB, sig_keyref TEXT,
   anchor_id TEXT NOT NULL, guarantee TEXT NOT NULL, receipt_at INTEGER NOT NULL,
-  locator TEXT, anchored_at TEXT NOT NULL);
+  locator TEXT, anchored_at TEXT NOT NULL,
+  ts_token TEXT);
 `;
 
 /** Columns added after the initial release — bring a pre-existing db up to date. */
@@ -89,6 +90,11 @@ export class SqliteRunStateStore implements RunStateStore, AuditStore {
     for (const [name, decl] of MIGRATIONS) {
       if (!cols.has(name)) this.db.exec(`ALTER TABLE items ADD COLUMN ${name} ${decl}`);
     }
+    // audit_roots gained an optional trusted-time token after the initial release.
+    const rootCols = new Set(
+      (this.db.prepare('PRAGMA table_info(audit_roots)').all() as { name: string }[]).map((c) => c.name),
+    );
+    if (!rootCols.has('ts_token')) this.db.exec('ALTER TABLE audit_roots ADD COLUMN ts_token TEXT');
   }
 
   ensureQueue(name: string, concurrency: number): void {
@@ -268,11 +274,20 @@ export class SqliteRunStateStore implements RunStateStore, AuditStore {
   }
 
   putAuditRoot(root: AnchoredRoot): void {
+    // Trusted-time token (optional): JSON with the DER bytes base64-encoded (the column is TEXT).
+    const tsTokenJson = root.timestamp
+      ? JSON.stringify({
+          alg: root.timestamp.alg,
+          token: Buffer.from(root.timestamp.token).toString('base64'),
+          at: root.timestamp.at,
+          ...(root.timestamp.tsaUrl ? { tsaUrl: root.timestamp.tsaUrl } : {}),
+        })
+      : null;
     this.db.prepare(
       `INSERT OR REPLACE INTO audit_roots
         (epoch_id, root, sig_alg, sig_bytes, sig_keyref,
-         anchor_id, guarantee, receipt_at, locator, anchored_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?)`
+         anchor_id, guarantee, receipt_at, locator, anchored_at, ts_token)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)`
     ).run(
       root.epochId,
       Buffer.from(root.root),
@@ -284,6 +299,7 @@ export class SqliteRunStateStore implements RunStateStore, AuditStore {
       root.receipt.at,
       root.receipt.locator ?? null,
       new Date().toISOString(),
+      tsTokenJson,
     );
   }
 
@@ -292,7 +308,7 @@ export class SqliteRunStateStore implements RunStateStore, AuditStore {
       epoch_id: string; root: Buffer;
       sig_alg: string | null; sig_bytes: Buffer | null; sig_keyref: string | null;
       anchor_id: string; guarantee: string; receipt_at: number;
-      locator: string | null; anchored_at: string;
+      locator: string | null; anchored_at: string; ts_token: string | null;
     }
     const row = this.db.prepare(
       'SELECT * FROM audit_roots WHERE epoch_id=?'
@@ -316,6 +332,16 @@ export class SqliteRunStateStore implements RunStateStore, AuditStore {
         bytes: new Uint8Array(row.sig_bytes),
       };
       if (row.sig_keyref !== null) result.signature.keyRef = row.sig_keyref;
+    }
+    if (row.ts_token !== null) {
+      const parsed = JSON.parse(row.ts_token) as { alg: TimestampToken['alg']; token: string; at: string; tsaUrl?: string };
+      const timestamp: TimestampToken = {
+        alg: parsed.alg,
+        token: new Uint8Array(Buffer.from(parsed.token, 'base64')),
+        at: parsed.at,
+      };
+      if (parsed.tsaUrl) timestamp.tsaUrl = parsed.tsaUrl;
+      result.timestamp = timestamp;
     }
     return result;
   }

@@ -8,6 +8,8 @@ import type {
   AnchoredRoot,
   AnchorReceipt,
   AuditEntry,
+  TimestampAuthority,
+  TimestampToken,
 } from '../../src/contracts/index.js';
 
 const fakeSigner = {
@@ -101,4 +103,35 @@ it('tryAppend counts dropped appends and invokes onDrop; healthy appends keep th
   });
   healthy.tryAppend({ runId: 'r', kind: 'run.submitted', at: 't0' });
   expect(healthy.droppedAppends).toBe(0);
+});
+
+// Trusted-time wiring: a configured timestamper stamps the sealed root; its absence/failure
+// must never abort the seal (best-effort posture mirroring tryAppend).
+it('sealEpoch stores a trusted-time token when a timestamper is configured', async () => {
+  const store = new SqliteRunStateStore();
+  const token: TimestampToken = { alg: 'rfc3161', token: new Uint8Array([1, 2, 3]), at: '2026-01-01T00:00:00Z' };
+  const timestamper: TimestampAuthority = { id: 'tsa-fake', async timestamp() { return token; } };
+  const log = new AuditLog({ store, signer: fakeSigner, anchor: fakeAnchor(), timestamper });
+  log.append({ runId: 'r', kind: 'run.submitted', at: 't0' });
+  await log.sealEpoch('r');
+  expect(store.getAuditRoot('r')!.timestamp).toEqual(token);
+});
+
+it('sealEpoch survives a throwing timestamper: seal succeeds, timestamp undefined, drop surfaced', async () => {
+  const store = new SqliteRunStateStore();
+  const dropped: string[] = [];
+  const timestamper: TimestampAuthority = {
+    id: 'tsa-down',
+    async timestamp() { throw new Error('TSA unreachable'); },
+  };
+  const log = new AuditLog({
+    store, signer: fakeSigner, anchor: fakeAnchor(), timestamper,
+    onDrop: (entry: Omit<AuditEntry, 'seq'>) => dropped.push(entry.kind),
+  });
+  log.append({ runId: 'r', kind: 'run.submitted', at: 't0' });
+  const receipt = await log.sealEpoch('r'); // does NOT throw
+  expect(receipt.epochId).toBe('r');
+  expect(store.getAuditRoot('r')).toBeDefined();        // seal still durable
+  expect(store.getAuditRoot('r')!.timestamp).toBeUndefined();
+  expect(dropped).toContain('run.completed');           // TSA failure surfaced via onDrop
 });
