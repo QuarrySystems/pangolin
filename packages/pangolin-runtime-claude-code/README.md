@@ -25,11 +25,11 @@ The worker normally constructs the adapter via `PANGOLIN_RUNTIME_ADAPTER=claude-
 
 ## Spec
 
-- [§5.8 RuntimeAdapter](../../docs/superpowers/specs/2026-05-21-pangolin-mvp-design.md#58-runtimeadapter) — the interface this package implements.
-- [§9 MVP deliverables](../../docs/superpowers/specs/2026-05-21-pangolin-mvp-design.md#9-mvp-deliverables) — the runtime-adapter smoke test that demonstrates the worker is genuinely runtime-agnostic.
+- [§5.8 RuntimeAdapter](https://github.com/QuarrySystems/pangolin/blob/main/docs/superpowers/specs/2026-05-21-agora-mvp-design.md#58-runtimeadapter) — the interface this package implements.
+- [§9 MVP deliverables](https://github.com/QuarrySystems/pangolin/blob/main/docs/superpowers/specs/2026-05-21-agora-mvp-design.md#9-mvp-deliverables) — the runtime-adapter smoke test that demonstrates the worker is genuinely runtime-agnostic.
 
 ## Decisions
 
-- [ADR-0003 — Runtime adapter seam at MVP](../../docs/decisions/0003-runtime-adapter-seam-at-mvp.md): why this seam exists in v0.1 with one implementation.
-- [ADR-0009 — needs_input sentinel file vs exit code](../../docs/decisions/0009-needs-input-sentinel-file-vs-exit-code.md): the signaling convention the adapter detects.
-- [ADR-0011 — No entrypoint override at dispatch](../../docs/decisions/0011-no-entrypoint-override-at-dispatch.md): why the `claude --print` invocation is fixed at adapter-build time.
+- [ADR-0003 — Runtime adapter seam at MVP](https://quarrysystems.github.io/pangolin/explanation/decisions/0003-runtime-adapter-seam-at-mvp/): why this seam exists in v0.1 with one implementation.
+- [ADR-0009 — needs_input sentinel file vs exit code](https://quarrysystems.github.io/pangolin/explanation/decisions/0009-needs-input-sentinel-file-vs-exit-code/): the signaling convention the adapter detects.
+- [ADR-0011 — No entrypoint override at dispatch](https://quarrysystems.github.io/pangolin/explanation/decisions/0011-no-entrypoint-override-at-dispatch/): why the `claude --print` invocation is fixed at adapter-build time.

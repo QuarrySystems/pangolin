@@ -28,10 +28,10 @@ The MCP server inherits the privileges of whoever launched it — there is no se
 
 ## Spec
 
-- [§4.6 The pangolin-mcp tool surface](../../docs/superpowers/specs/2026-05-21-pangolin-mvp-design.md#46-the-pangolin-mcp-tool-surface) — the six-tool allowlist this server enforces.
-- [§7.7 Privileged operations are never reachable through an AI tool surface](../../docs/superpowers/specs/2026-05-21-pangolin-mvp-design.md#77-privileged-operations-are-never-reachable-through-an-ai-tool-surface) — the rationale for the omitted register/assign operations.
+- [§4.6 The pangolin-mcp tool surface](https://github.com/QuarrySystems/pangolin/blob/main/docs/superpowers/specs/2026-05-21-agora-mvp-design.md#46-the-pangolin-mcp-tool-surface) — the six-tool allowlist this server enforces.
+- [§7.7 Privileged operations are never reachable through an AI tool surface](https://github.com/QuarrySystems/pangolin/blob/main/docs/superpowers/specs/2026-05-21-agora-mvp-design.md#77-privileged-operations-are-never-reachable-through-an-ai-tool-surface) — the rationale for the omitted register/assign operations.
 
 ## Decisions
 
-- [ADR-0005 — Privileged ops never AI-reachable](../../docs/decisions/0005-privileged-ops-never-ai-reachable.md): why this server omits `register` and `assign`.
-- [ADR-0006 — pangolin-mcp auth: whoever launched](../../docs/decisions/0006-pangolin-mcp-auth-whoever-launched.md): the trust model for the stdio transport.
+- [ADR-0005 — Privileged ops never AI-reachable](https://quarrysystems.github.io/pangolin/explanation/decisions/0005-privileged-ops-never-ai-reachable/): why this server omits `register` and `assign`.
+- [ADR-0006 — pangolin-mcp auth: whoever launched](https://quarrysystems.github.io/pangolin/explanation/decisions/0006-pangolin-mcp-auth-whoever-launched/): the trust model for the stdio transport.

@@ -31,10 +31,10 @@ new AwsCredentialProvider({
 
 ## Spec
 
-- [§5 Pluggable interfaces](../../docs/superpowers/specs/2026-05-21-pangolin-mvp-design.md#5-pluggable-interfaces) — the `CredentialProvider` contract this package implements.
-- [§7.5 Storage IAM](../../docs/superpowers/specs/2026-05-21-pangolin-mvp-design.md#75-storage-iam) — the IAM boundary this provider operates within.
+- [§5 Pluggable interfaces](https://github.com/QuarrySystems/pangolin/blob/main/docs/superpowers/specs/2026-05-21-agora-mvp-design.md#5-pluggable-interfaces) — the `CredentialProvider` contract this package implements.
+- [§7.5 Storage IAM](https://github.com/QuarrySystems/pangolin/blob/main/docs/superpowers/specs/2026-05-21-agora-mvp-design.md#75-storage-iam) — the IAM boundary this provider operates within.
 
 ## Decisions
 
-- [ADR-0001 — Package scope](../../docs/decisions/0001-package-scope.md): the `@quarry-systems/pangolin-*` namespace this package publishes under.
-- [ADR-0007 — Inline secret TTL auto-computed](../../docs/decisions/0007-inline-secret-ttl-auto-computed.md): the secrets lifecycle this credential provider supports for Secrets Manager access.
+- [ADR-0001 — Package scope](https://quarrysystems.github.io/pangolin/explanation/decisions/0001-package-scope/): the `@quarry-systems/pangolin-*` namespace this package publishes under.
+- [ADR-0007 — Inline secret TTL auto-computed](https://quarrysystems.github.io/pangolin/explanation/decisions/0007-inline-secret-ttl-auto-computed/): the secrets lifecycle this credential provider supports for Secrets Manager access.

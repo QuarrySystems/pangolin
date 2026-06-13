@@ -36,11 +36,11 @@ The full registration flow (`capabilities.register`, `subagent.register`, `subag
 
 ## Spec
 
-- [§3 Architecture overview](../../docs/superpowers/specs/2026-05-21-pangolin-mvp-design.md#3-architecture-overview) — where the client sits in the system.
-- [§4 Caller API](../../docs/superpowers/specs/2026-05-21-pangolin-mvp-design.md#4-caller-api) — the deploy-time and run-time surfaces this package implements.
+- [§3 Architecture overview](https://github.com/QuarrySystems/pangolin/blob/main/docs/superpowers/specs/2026-05-21-agora-mvp-design.md#3-architecture-overview) — where the client sits in the system.
+- [§4 Caller API](https://github.com/QuarrySystems/pangolin/blob/main/docs/superpowers/specs/2026-05-21-agora-mvp-design.md#4-caller-api) — the deploy-time and run-time surfaces this package implements.
 
 ## Decisions
 
-- [ADR-0001 — Package scope](../../docs/decisions/0001-package-scope.md): the `@quarry-systems/pangolin-*` namespace this package publishes under.
-- [ADR-0012 — Notifications dual-home](../../docs/decisions/0012-notifications-dual-home.md): why notification config lives on both capability content and the dispatch field.
-- [ADR-0013 — MVP single namespace](../../docs/decisions/0013-mvp-single-namespace.md): the registry boundary the client targets.
+- [ADR-0001 — Package scope](https://quarrysystems.github.io/pangolin/explanation/decisions/0001-package-scope/): the `@quarry-systems/pangolin-*` namespace this package publishes under.
+- [ADR-0012 — Notifications dual-home](https://quarrysystems.github.io/pangolin/explanation/decisions/0012-notifications-dual-home/): why notification config lives on both capability content and the dispatch field.
+- [ADR-0013 — MVP single namespace](https://quarrysystems.github.io/pangolin/explanation/decisions/0013-mvp-single-namespace/): the registry boundary the client targets.

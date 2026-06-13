@@ -30,10 +30,10 @@ The provider talks to `/var/run/docker.sock` on Unix or `//./pipe/docker_engine`
 
 ## Spec
 
-- [§5 Pluggable interfaces](../../docs/superpowers/specs/2026-05-21-pangolin-mvp-design.md#5-pluggable-interfaces) — the `ComputeProvider` contract this package implements.
-- [§7.4 Image pinning](../../docs/superpowers/specs/2026-05-21-pangolin-mvp-design.md#74-image-pinning) — the digest-pin requirement this provider enforces by default.
+- [§5 Pluggable interfaces](https://github.com/QuarrySystems/pangolin/blob/main/docs/superpowers/specs/2026-05-21-agora-mvp-design.md#5-pluggable-interfaces) — the `ComputeProvider` contract this package implements.
+- [§7.4 Image pinning](https://github.com/QuarrySystems/pangolin/blob/main/docs/superpowers/specs/2026-05-21-agora-mvp-design.md#74-image-pinning) — the digest-pin requirement this provider enforces by default.
 
 ## Decisions
 
-- [ADR-0001 — Package scope](../../docs/decisions/0001-package-scope.md): the `@quarry-systems/pangolin-*` namespace this package publishes under.
-- [ADR-0016 — Cancel in MVP](../../docs/decisions/0016-cancel-in-mvp.md): the SIGTERM-grace-SIGKILL contract this provider implements.
+- [ADR-0001 — Package scope](https://quarrysystems.github.io/pangolin/explanation/decisions/0001-package-scope/): the `@quarry-systems/pangolin-*` namespace this package publishes under.
+- [ADR-0016 — Cancel in MVP](https://quarrysystems.github.io/pangolin/explanation/decisions/0016-cancel-in-mvp/): the SIGTERM-grace-SIGKILL contract this provider implements.

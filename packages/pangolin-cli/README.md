@@ -35,20 +35,20 @@ The CLI expects an `pangolin.config.ts` in the working directory exporting an `P
 
 ## Guides
 
-- [Getting started](../../docs/getting-started.md) — zero-to-first-dispatch runbook including CLI wiring and `pangolin.config.mjs`.
-- [Dispatch lifecycle](../../docs/dispatch-lifecycle.md) — what each event in worker stdout means, and which step each `dispatch.failed.reason` maps to.
-- [Capability recipes](../../docs/capability-recipes.md) — where to put files so the worker picks them up (skills, settings, plugins, setup scripts), and the `pangolin-setup.sh` single-slot constraint that catches first-time authors.
-- [Sync providers](../../docs/sync-providers.md) — `pangolin capabilities sync` / `pangolin subagent sync` reference, the `claude-code` and `stoa` providers shipped today, and how to author a new one.
-- [needs_input](../../docs/needs-input.md) — how a sub-agent pauses for clarification and how to resume it.
-- [Writing a provider](../../docs/writing-a-provider.md) — plug in a new compute backend, storage layer, credential source, or result sink.
-- [Remote dispatch over SSH](../../docs/remote-dispatch-windows.md) — orchestrate from one machine, run workers on another's Docker daemon.
+- [Getting started](https://quarrysystems.github.io/pangolin/tutorials/first-dispatch/) — zero-to-first-dispatch runbook including CLI wiring and `pangolin.config.mjs`.
+- [Dispatch lifecycle](https://quarrysystems.github.io/pangolin/reference/dispatch-lifecycle/) — what each event in worker stdout means, and which step each `dispatch.failed.reason` maps to.
+- [Capability recipes](https://quarrysystems.github.io/pangolin/how-to/worker-file-layout/) — where to put files so the worker picks them up (skills, settings, plugins, setup scripts), and the `pangolin-setup.sh` single-slot constraint that catches first-time authors.
+- [Sync providers](https://quarrysystems.github.io/pangolin/how-to/sync-capabilities-subagents/) — `pangolin capabilities sync` / `pangolin subagent sync` reference, the `claude-code` and `stoa` providers shipped today, and how to author a new one.
+- [needs_input](https://quarrysystems.github.io/pangolin/how-to/handle-needs-input/) — how a sub-agent pauses for clarification and how to resume it.
+- [Writing a provider](https://quarrysystems.github.io/pangolin/how-to/write-a-provider/) — plug in a new compute backend, storage layer, credential source, or result sink.
+- [Remote dispatch over SSH](https://quarrysystems.github.io/pangolin/how-to/remote-docker-dispatch/) — orchestrate from one machine, run workers on another's Docker daemon.
 
 ## Spec
 
-- [§4.4 A worked Hello World](../../docs/superpowers/specs/2026-05-21-pangolin-mvp-design.md#44-a-worked-hello-world) — the end-to-end flow the CLI scripts.
-- [§4.5 Deploy manifest (CLI-driven registration)](../../docs/superpowers/specs/2026-05-21-pangolin-mvp-design.md#45-deploy-manifest-cli-driven-registration) — the manifest format `pangolin deploy` reconciles.
+- [§4.4 A worked Hello World](https://github.com/QuarrySystems/pangolin/blob/main/docs/superpowers/specs/2026-05-21-agora-mvp-design.md#44-a-worked-hello-world) — the end-to-end flow the CLI scripts.
+- [§4.5 Deploy manifest (CLI-driven registration)](https://github.com/QuarrySystems/pangolin/blob/main/docs/superpowers/specs/2026-05-21-agora-mvp-design.md#45-deploy-manifest-cli-driven-registration) — the manifest format `pangolin deploy` reconciles.
 
 ## Decisions
 
-- [ADR-0001 — Package scope](../../docs/decisions/0001-package-scope.md): the `@quarry-systems/pangolin-*` namespace this package publishes under.
-- [ADR-0005 — Privileged ops never AI-reachable](../../docs/decisions/0005-privileged-ops-never-ai-reachable.md): why `register` and `assign` are CLI-only and not exposed via MCP.
+- [ADR-0001 — Package scope](https://quarrysystems.github.io/pangolin/explanation/decisions/0001-package-scope/): the `@quarry-systems/pangolin-*` namespace this package publishes under.
+- [ADR-0005 — Privileged ops never AI-reachable](https://quarrysystems.github.io/pangolin/explanation/decisions/0005-privileged-ops-never-ai-reachable/): why `register` and `assign` are CLI-only and not exposed via MCP.
