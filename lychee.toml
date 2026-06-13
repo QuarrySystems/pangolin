@@ -30,9 +30,10 @@ include_mail = false
 
 # Links that are intentionally not GET-checkable here.
 exclude = [
-  # Internal links, now resolved against base_url to the site origin — already validated
-  # at build by starlight-links-validator, so skip them here (outbound-only monitor).
-  '^https://quarrysystems\.github\.io/pangolin/',
+  # Our OWN site host (links resolved against base_url, intra-page #anchors, etc.) is
+  # internal — already validated at build by starlight-links-validator. Skip the whole
+  # host so this stays an outbound-only monitor.
+  '^https://quarrysystems\.github\.io',
   # freetsa is an RFC 3161 timestamp endpoint — POST-only; a GET link-check is meaningless.
   '^https?://freetsa\.org/tsr',
   # Hostnames that appear only in config/example snippets, never real web targets.

@@ -41,17 +41,15 @@ jobs:
         with:
           # fail:false — never hard-fail the step; we decide what to do per event below.
           fail: false
-          # Scope = the PUBLISHED, user-facing surface. Deliberately excludes
-          # docs/** (internal specs/plans, full of historical pre-rename URLs) and
-          # CHANGELOG.md (historical) — link rot there isn't user-facing.
+          # Scope = the PUBLISHED docs site (docs-site/src/content). Deliberately NOT
+          # the repo READMEs/ROADMAP or docs/** specs: those use relative/repo-root
+          # paths at varying depths that a single base_url can't resolve coherently —
+          # their link correctness is a separate concern from outbound link rot.
           args: >-
             --config lychee.toml
             --no-progress
             "docs-site/src/content/**/*.md"
             "docs-site/src/content/**/*.mdx"
-            "README.md"
-            "ROADMAP.md"
-            "packages/*/README.md"
         env:
           # Authenticated requests avoid github.com rate-limiting false positives.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
