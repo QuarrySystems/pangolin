@@ -41,13 +41,16 @@ jobs:
         with:
           # fail:false — never hard-fail the step; we decide what to do per event below.
           fail: false
+          # Scope = the PUBLISHED, user-facing surface. Deliberately excludes
+          # docs/** (internal specs/plans, full of historical pre-rename URLs) and
+          # CHANGELOG.md (historical) — link rot there isn't user-facing.
           args: >-
             --config lychee.toml
             --no-progress
             "docs-site/src/content/**/*.md"
             "docs-site/src/content/**/*.mdx"
-            "docs/**/*.md"
-            "./*.md"
+            "README.md"
+            "ROADMAP.md"
             "packages/*/README.md"
         env:
           # Authenticated requests avoid github.com rate-limiting false positives.
