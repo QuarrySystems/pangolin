@@ -1,137 +1,157 @@
-# VersionId-pinning: sign the pinned S3 version into the seal evidence
+# VersionId-binding: bind the sealed S3 version into the signature (layered with earliest-read)
 
-> **Status:** design, approved 2026-06-13. Closes the same-second residual left by the
-> tamper-evident readiness fix (PR #69): the anchor read the *earliest* object version,
-> which a forgery PUT in the same wall-clock second as the seal could sort ahead of (S3
-> `LastModified` is second-granular). This pins the verifier to the exact sealed object
-> **version**, with the version bound into the signature so trust reduces to *(published
-> signer key + WORM bucket)* — the GTM's "verify the artifact, not the vendor" promise.
+> **Status:** design, approved-in-principle 2026-06-13, **revised after security audit**. Closes
+> the same-second residual left by PR #69 **without regressing** the malicious-operator defense
+> that #69's independent earliest-version read provides.
+>
+> **Audit-driven course-correction:** an earlier draft of this spec proposed *replacing* the
+> earliest-version read with "pin to the versionId supplied in the bundle." The spec audit
+> proved that is a **regression-that-looks-like-an-improvement**: a malicious/compromised operator
+> (holding the signing key) could forge a root, PUT it as a new version, validly sign
+> `(forgedRoot ‖ forgedVersionId)`, and a verifier trusting the bundle's versionId would read and
+> accept the forgery. The independent earliest-read defeats that; we must **keep it**. This spec
+> is the corrected, **layered** design.
 
 ## 1. Why
 
-The seal is the moat. PR #69 fixed the headline forge (re-PUT in a *later* second → caught
-by reading the earliest version) but left a documented residual: a same-second forgery can
-sort ahead of the original under a stable ascending sort on second-granular timestamps. The
-robust fix is to stop inferring "which version is the original" from timestamps and instead
-**pin the exact `VersionId` the seal wrote, and sign it** so the verifier trusts it via the
-key it already trusts. After this, an attacker who can write to the audit bucket (or even
-holds the key) cannot make the verifier read a forged version.
+PR #69 made `S3ObjectLockAnchor` read the **earliest** (original, COMPLIANCE-locked) S3 version,
+defeating an attacker who re-PUTs a forged root as a *later* version. Residual: S3 `LastModified`
+is second-granular, so a **same-second** forgery could tie for "earliest" and be selected. Closing
+that residual is the goal here — but the fix must not weaken the independent-anchor property.
 
-**Pre-v1: no backward compatibility.** There are no sealed bundles in the wild, so this
-**supersedes** #69's interim earliest-version read with a single clean pinned path — no
-fallback, no dual-path verifier.
+## 2. Threat model (the bar the design must clear)
 
-## 2. Trust model (why this is the right-sized rigor, not overkill)
+| Adversary | Attack | Must |
+|---|---|---|
+| External attacker, bucket write, **no key** | re-PUT forged root as a **later** version | reject |
+| External attacker, bucket write, **no key** | re-PUT forged root **same second** as seal | reject |
+| Malicious/compromised **operator** (holds key) | forge root, PUT new version, validly sign it, present a fresh bundle | reject |
 
-The auditor's only out-of-band root of trust is the **published signer public key**. We make
-the pinned version trustworthy via that same key:
+The owned GTM position is *"the auditor verifies independently — trust the artifact, not the
+vendor."* So trust must reduce to **(published signer key + WORM bucket)** with **no new trusted
+artifact** and **no reliance on an operator-supplied value** for what the verifier reads.
 
-- The seal signs over **`root ‖ versionId`** (was: `root` alone).
-- The verifier reads the `versionId` from the bundle (which is forgeable) but **verifies the
-  signature over `(root, versionId)` with the trusted pubkey** — a forged `(root, versionId)`
-  pair cannot carry a valid signature, so the attacker cannot substitute one.
-- The verifier then fetches the S3 object **by that exact `versionId`** (the COMPLIANCE-locked,
-  undeletable original) and confirms its root equals the recomputed Merkle root.
+## 3. Design — layered: earliest-read (independent anchor) + signed version-binding (backstop)
 
-Trust thus reduces to **pubkey + WORM bucket**, introducing no new trusted artifact. This is
-strictly the GTM's "trust the math, not us" framing; the alternative (a `versionId` trusted by
-the provenance of a handed-over context file) would add a weaker, off-pitch trust assumption.
+Two independent mechanisms, neither sufficient alone:
 
-## 3. Architecture
+1. **Independent earliest-version read (kept from #69).** The verifier ALWAYS reads the earliest
+   S3 version of `audit/roots/<epochId>.json`. The original is COMPLIANCE-locked (undeletable) and
+   no version can be created before it server-side, so the earliest **surviving** version is the
+   original — regardless of what any bundle claims. This is the defense against a malicious operator
+   and any later-second forgery; the verifier never trusts a bundle/operator-supplied versionId for
+   *which* version to read.
+2. **Signed version-binding (new — the same-second backstop).** The seal signs over
+   **`root ‖ versionId`**, where `versionId` is the S3 VersionId of the object it just wrote. The
+   verifier reads the earliest version, takes **that object's** root and VersionId **from S3**, and
+   verifies the bundle's signature over `(root ‖ versionId)` with the published key. A same-second
+   external forgery that ties for "earliest" carries a root/versionId the attacker could not sign
+   (no key) → signature fails → **fail-safe reject** (never a false accept).
+
+**The versionId used for the signature check always comes from S3, never from the bundle.** The
+bundle carries only the *signature* (verified against the out-of-band pubkey — a forged signature
+fails). Nothing the operator supplies steers the read.
 
 ### 3.1 Seal flow — anchor, then sign
-`AuditLog.sealEpoch` re-orders to **anchor → sign** (today it signs then anchors):
-
-1. `anchor.anchor({ epochId, root })` writes the root to S3 and returns an `AnchorReceipt`
-   now carrying **`versionId`** (the S3 version of the just-written object).
-2. Sign over **`root ‖ versionId`**: `signer.sign(signedPayload(root, versionId))`.
+`AuditLog.sealEpoch` re-orders to **anchor → sign**:
+1. `anchor.anchor({ epochId, root })` writes the root to S3 (COMPLIANCE) and returns an
+   `AnchorReceipt` carrying the just-written object's **`versionId`** (from `putObject`'s response).
+2. Sign over **`signedPayload(root, versionId)`** = `root` bytes ‖ UTF-8 `versionId`.
 3. `putAuditRoot({ epochId, root, signature, receipt /* incl. versionId */, timestamp? })`.
 
-`signedPayload(root, versionId)` is a fixed, pinned concatenation — `root` bytes followed by
-the UTF-8 `versionId` (documented in VERIFICATION.md so a third party can reproduce it).
+### 3.2 What S3 stores vs the bundle
+- S3 object: `{ epochId, rootHex, receipt }` — the immutable **root** witness. It does **not**
+  carry the signature (computed after the write; re-writing would create a new version).
+- The signature (over `root ‖ versionId`) lives in the bundle's `AnchoredRoot.signature`.
+- **Documented trade-off (audit):** authorship is *bundle-mediated*, not verifiable from S3 alone.
+  A third party with only S3 access can confirm the immutable root but not the signature — they
+  need the bundle + pubkey. This is intentional (binding the versionId requires anchor-then-sign);
+  it does not weaken the auditor flow, which always has the bundle.
 
-### 3.2 What S3 stores vs what the bundle carries
-- The **S3 object** stores only the root record (`{ epochId, rootHex, receipt }`). It does
-  **not** carry the signature (the signature is computed *after* the write and is not
-  re-written — a second PUT would create a new version, defeating the pin).
-- The **signature** lives in the bundle's `AnchoredRoot.signature` (where it already travels),
-  computed over `root ‖ versionId`.
-- The **`versionId`** lives in `AnchorReceipt.versionId`, carried in `AnchoredRoot.receipt`.
+### 3.3 Read / verify flow
+`S3ObjectLockAnchor.fetch(epochId)` (and `pangolin-verify`'s anchor-checked `buildAnchor`):
+1. `getObject(key)` → reads the **earliest** version → returns its bytes **and its VersionId**.
+2. Returns `AnchoredRoot { root: <S3 earliest root>, signature: <from bundle>, receipt: { versionId: <S3 earliest VersionId> } }`.
+3. `verify`: recompute Merkle root from entries → must equal the S3 root; verify the signature over
+   `signedPayload(S3root, S3versionId)` with the pubkey. **No bundle-supplied versionId is trusted
+   for the read** — the versionId in the signed payload is the one read from S3.
 
-### 3.3 Read / verify path
-`verify` is unchanged in shape (single algorithm); the read anchor changes:
-- The read anchor's `fetch(epochId)` does `getObject(key, versionId)` where `versionId` comes
-  from the trusted-via-signature `AnchoredRoot.receipt.versionId`, and returns `AnchoredRoot`
-  with that S3 root + the bundle's signature + receipt.
-- `verify` recomputes the Merkle root from the entries → must equal the S3-fetched (pinned)
-  root; verifies the signature over `root ‖ versionId` with the pubkey.
-- In `pangolin-verify`, `buildAnchor` (anchor-checked mode) reads `versionId` from the bundle's
-  `AnchoredRoot.receipt` and calls `getObject(key, versionId)`.
+If the earliest version fails the signature check (a same-second forgery tied ahead), the verifier
+**rejects** (fail-safe) rather than searching for a passing version — searching could let a
+validly-signed operator forgery through.
 
 ## 4. Interface changes (bounded)
 
-- `S3LockClient` (`pangolin-core`): `putObject(...)` → returns `{ versionId?: string }`;
-  `getObject(key: string, versionId: string)` — **versionId required** (pure pinning; the
-  #69 earliest-version inference is removed).
-- `AwsS3LockClient` (`pangolin-storage-s3`): `putObject` returns `r.VersionId`; `getObject`
-  becomes a plain `GetObjectCommand({ Bucket, Key, VersionId })` — the `ListObjectVersions`
-  earliest-version logic from #69 is **deleted** (superseded).
+- `S3LockClient` (`pangolin-core`): `putObject(...)` → returns `{ versionId?: string }`.
+  `getObject(key)` is **kept** (still reads the earliest version) but now returns
+  `{ body: Uint8Array; versionId?: string } | undefined` so the anchor can build the signed
+  payload. (Earliest-read is NOT removed; `getObject` does NOT take a versionId argument.)
+- `AwsS3LockClient` (`pangolin-storage-s3`): `putObject` returns `r.VersionId`; the existing
+  `ListObjectVersions` earliest-version logic stays and additionally returns the chosen VersionId.
+  The fail-loud `IsTruncated` guard stays.
 - `AnchorReceipt` (`pangolin-core`): add `versionId?: string`.
 - `S3ObjectLockAnchor` (`pangolin-orchestrator`): `anchor` captures the `versionId` into the
-  receipt; `fetch` reads `getObject(key, receipt.versionId)`. The anchored S3 JSON drops the
-  signature field.
-- `verify` (`pangolin-core`): the injected signature check is over `root ‖ versionId`.
-  Concretely the `verifySignature` callback becomes
-  `(root: Uint8Array, versionId: string | undefined, sig: Signature) => boolean`, and callers
-  build the payload via the shared `signedPayload` helper so seal and verify cannot drift.
-- `pangolin-verify` `verify-context.ts`: `buildAnchor` fetches by the bundle's
-  `receipt.versionId`; `makeVerifySignature` verifies over `root ‖ versionId`.
+  receipt; the anchored S3 JSON drops the signature; `fetch` surfaces the earliest VersionId into
+  the returned `AnchoredRoot.receipt.versionId`.
+- `verify` (`pangolin-core`): the injected signature check becomes
+  `verifySignature?: (root: Uint8Array, versionId: string | undefined, sig: Signature) => boolean`,
+  and the verifier passes the **S3-read** versionId. When `versionId` is undefined (detect tier /
+  no anchor), the payload is `root` alone — behavior identical to today.
+- `pangolin-verify` `verify-context.ts`: `makeVerifySignature` verifies over
+  `signedPayload(root, versionId)`; `buildAnchor` (anchor-checked) returns the earliest version's
+  root + VersionId from S3 (it does **not** read the versionId from the bundle).
 
 ## 5. The signed-payload helper (single source — DRY)
 
-A single exported `signedPayload(root: Uint8Array, versionId: string | undefined): Uint8Array`
-in `pangolin-core` (beside the audit primitives). Seal (`AuditLog.sealEpoch`) and every
-verifier use it, so the bytes-signed can never diverge. When `versionId` is absent (e.g. the
-`LocalAnchor` detect tier, which has no S3 version), the payload is just `root` — i.e. the
-detect tier signs the root as today; only the external-immutable tier binds a versionId.
+One exported `signedPayload(root: Uint8Array, versionId: string | undefined): Uint8Array` in
+`pangolin-core`, used by `AuditLog.sealEpoch` (sign side) and every verifier (check side) so the
+signed bytes cannot drift. `signedPayload(root, undefined) === root` (the detect tier / pre-anchor).
 
-## 6. Detect tier (LocalAnchor) is unaffected
+## 6. Detect tier (LocalAnchor) unaffected
 
-`LocalAnchor` (the `detect` tier) has no object versions; it keeps signing `root` alone
-(`signedPayload(root, undefined) === root`) and its mutable store is, by definition,
-tamper-detecting not tamper-evident. Version-pinning is an external-immutable-tier property.
+`LocalAnchor` (detect) has no S3 versions; it signs `root` alone (`versionId` undefined) and stays
+`tamper-detecting`. Version-binding is an external-immutable-tier property only.
 
-## 7. TDD (genuine red-green — new capability)
+## 7. Offline verify is tamper-detecting only
 
-This is a NEW guarantee (not characterizing existing behavior), so real red-green applies:
+`pangolin-verify` offline mode (no S3 access) cannot read the WORM version and therefore **cannot
+claim `tamper-evident`** — its ceiling is `tamper-detecting`, unchanged. Only anchor-checked mode
+(real S3 read of the earliest version) earns `tamper-evident`. The spec makes this explicit so an
+offline bundle can never be presented as version-bound-immutable.
 
-- **Deterministic unit test (the closer):** a versioned fake S3 where the forged version is
-  timestamped **≤** the original (simulating same-second-sorts-first). Assert: a non-pinned
-  earliest/timestamp read would select the forgery (the residual), but the pinned
-  `getObject(key, sealedVersionId)` selects the original → recomputed forged root ≠ pinned
-  original root → `root-mismatch`. The fake controls version order, so the same-second case is
-  reproduced deterministically (no real-clock flakiness).
-- **Signature-binding test:** a forged `(root, versionId)` fails signature verification (the
-  signature is over `root ‖ versionId`); swapping either the root or the versionId breaks it.
-- **Gap A contrast (updated):** the chain-consistent forge under the version-pinned
-  `S3ObjectLockAnchor` is caught regardless of the forged version's timestamp.
-- **MinIO e2e (updated):** seal → capture the sealed `versionId` (trusted) → forge + attacker
-  re-anchors a new version (any timestamp) → verify by the pinned versionId → `root-mismatch`.
+## 8. TDD (genuine red-green — new capability)
+
+- **Same-second external forgery (the closer) — deterministic:** a versioned fake S3 where the
+  forged version is timestamped **≤** the original and has NO valid signature. Assert the verifier,
+  reading earliest (which may tie to the forgery) + checking the signature, **rejects** (`root-mismatch`
+  or a signature failure) — never accepts. With #69's sign-root-only, a tie that selects the forgery
+  would NOT be caught by signature → demonstrates the new binding closes it.
+- **CRITICAL — malicious-operator rejection (the audit's required test):** an operator WITH the
+  signing key forges a root, PUTs it as a NEW version, validly signs `(forgedRoot ‖ forgedVersionId)`,
+  and presents a bundle. Assert the verifier reads the **earliest** (original) version and **rejects**
+  the forgery (recomputed forged root ≠ original S3 root). Proves the independent anchor is intact —
+  the regression the proposed-then-rejected design would have introduced.
+- **Signature-binding:** swapping either the root or the versionId in the signed payload breaks
+  verification.
+- **Gap A contrast (updated):** chain-consistent forge under the layered anchor is caught.
+- **MinIO e2e (updated):** seal → forge + attacker re-anchors a new version (later AND same-second
+  variants) → verify reads earliest + checks the bound signature → caught.
 - **Detect tier:** `LocalAnchor` clean run still `intact: true`, `tamper-detecting`.
 
-## 8. Scope (YAGNI)
+## 9. Scope (YAGNI) — pre-v1, no back-compat
 
-**In:** version capture + the `root ‖ versionId` signature binding + the pinned read + the
-removal of the earliest-version interim + the `signedPayload` helper. **Out:** a new anchor
-tier, KMS key custody (#5), authz-in-evidence (#2), retention/access-log (#3/#4), and any
-re-write of the signature into S3. Pre-v1 → no back-compat shims.
+**In:** capture the sealed `versionId`; sign `root ‖ versionId`; keep + extend the earliest-version
+read to surface its VersionId; the `signedPayload` helper; the malicious-operator + same-second
+tests; offline=tamper-detecting clarification. **Out:** a new anchor tier, KMS key custody (#5),
+authz-in-evidence (#2), retention/access-log (#3/#4), re-writing the signature into S3, and any
+"trust a bundle-supplied versionId" path (rejected by the audit). Pre-v1 → no compatibility shims.
 
-## 9. Risks
+## 10. Risks
 
 - **Seal re-order touches the most security-critical path.** Mitigated by the `signedPayload`
-  single-source helper (seal/verify can't drift) and the full audit suite as the regression net.
-- **The signature leaves the S3 object.** Intentional: the signature is computed after the
-  write and lives in the bundle, verified against the out-of-band pubkey. The S3 object is the
-  immutable *root* witness; authorship lives with the key. Documented in VERIFICATION.md.
-- **`getObject` now requires a versionId** — any caller without one is a compile error (good,
-  pre-v1); confirms no hidden latest-version read survives.
+  single-source helper + the full audit suite + the explicit malicious-operator test.
+- **Same-second-tie can fail-safe-REJECT a legitimate verify** if an attacker injects a same-second
+  version (DoS, not forgery). Acceptable: a false reject is safe and visible; a false accept is not.
+  The residual "operator races a forgery against their own honest seal in the same second" is
+  contrived and out of scope.
+- **Signature not in S3** (§3.2) — documented trade-off; the auditor flow always has the bundle.
