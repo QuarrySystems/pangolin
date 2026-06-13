@@ -16,4 +16,20 @@ d('AwsS3LockClient against MinIO object lock', () => {
     expect((await lock.getObject('audit/roots/e1.json'))).toEqual(new Uint8Array([1]));
     await expect(client.send(new DeleteObjectCommand({ Bucket: 'pangolin-audit', Key: 'audit/roots/e1.json' }))).rejects.toThrow();
   });
+
+  it('overwriting a key under COMPLIANCE retention is rejected', async () => {
+    const client = new S3Client({ endpoint: MINIO, forcePathStyle: true, region: 'us-east-1',
+      credentials: { accessKeyId: 'minioadmin', secretAccessKey: 'minioadmin' } });
+    await client.send(new CreateBucketCommand({ Bucket: 'pangolin-audit', ObjectLockEnabledForBucket: true })).catch(() => {});
+    const lock = new AwsS3LockClient({ client, bucket: 'pangolin-audit' });
+    const future = new Date(Date.now() + 60_000);
+    const key = `audit/roots/overwrite-${Date.now()}.json`;
+    await lock.putObject(key, new Uint8Array([1]), { retainUntil: future, mode: 'COMPLIANCE' });
+    // A second write to the SAME locked key must be rejected by COMPLIANCE.
+    await expect(
+      lock.putObject(key, new Uint8Array([2]), { retainUntil: future, mode: 'COMPLIANCE' }),
+    ).rejects.toThrow();
+    // And the original bytes still stand.
+    expect(await lock.getObject(key)).toEqual(new Uint8Array([1]));
+  });
 });
