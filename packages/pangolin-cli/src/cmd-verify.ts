@@ -17,11 +17,13 @@ export function attachVerifyCmd(program: Command, ctx: CliContext): void {
       } catch (err) {
         throw new Error(`pangolin verify: cannot read bundle at '${file}': ${(err as Error).message}`);
       }
-      const { anchor, verifySignature } = await ctx.getOrchContext();
+      const { anchor, verifySignature, verifyTimestamp } = await ctx.getOrchContext();
       if (!anchor) {
         throw new Error('pangolin verify: pangolin.config `orch` export provides no anchor');
       }
-      const report = await verifyBundle(bundle, { anchor, verifySignature });
+      // verifyTimestamp is additive: threaded only if the config supplies one (e.g. from
+      // @quarry-systems/pangolin-verify). Omitted by default — existing behavior unchanged.
+      const report = await verifyBundle(bundle, { anchor, verifySignature, verifyTimestamp });
       console.log(
         opts.json
           ? JSON.stringify(report, null, 2)

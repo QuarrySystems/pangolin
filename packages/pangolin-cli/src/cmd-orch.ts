@@ -7,7 +7,7 @@ import {
   pipeline, mapReduce, staticDag,
 } from '@quarry-systems/pangolin-orchestrator';
 import type {
-  SubmissionTransport, ControlChannel, AuditAnchor, Signature, ScheduleStore, Schedule, Run,
+  SubmissionTransport, ControlChannel, AuditAnchor, Signature, TimestampToken, ScheduleStore, Schedule, Run,
   Pattern, StatusLike,
 } from '@quarry-systems/pangolin-orchestrator';
 import { parsePangolinUri, buildDispatchRecordUri } from '@quarry-systems/pangolin-core';
@@ -20,6 +20,10 @@ export interface OrchContext {
   anchor?: AuditAnchor;
   storage?: { get(ref: string): Promise<Uint8Array> };
   verifySignature?: (root: Uint8Array, sig: Signature) => boolean;
+  /** Optional injected RFC 3161 trusted-time verifier (e.g. from @quarry-systems/pangolin-verify).
+   *  Additive — when present, `pangolin verify` reports the trusted-time tier; absent leaves
+   *  existing behavior unchanged (the time check stays 'n/a'/asserted). */
+  verifyTimestamp?: (root: Uint8Array, token: TimestampToken) => boolean;
   runService?: (signal: AbortSignal) => Promise<void>;   // pre-wired serve() for the `serve` verb
   scheduleStore?: ScheduleStore;   // config-owned; required for `schedule` verbs
 }

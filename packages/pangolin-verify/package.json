@@ -1,0 +1,44 @@
+{
+  "name": "@quarry-systems/pangolin-verify",
+  "version": "0.2.0",
+  "license": "BUSL-1.1",
+  "description": "Standalone audit-bundle verifier — the artifact an auditor runs. Owns the RFC 3161 / ASN.1 (pkijs) dependency so pangolin-core stays dependency-light.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "bin": {
+    "pangolin-verify": "dist/cli.js"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/QuarrySystems/pangolin.git",
+    "directory": "packages/pangolin-verify"
+  },
+  "homepage": "https://quarrysystems.github.io/pangolin",
+  "bugs": {
+    "url": "https://github.com/QuarrySystems/pangolin/issues"
+  },
+  "scripts": {
+    "lint": "eslint src --ext .ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@quarry-systems/pangolin-core": "workspace:*",
+    "asn1js": "3.0.10",
+    "commander": "^12.0.0",
+    "pkijs": "3.4.0",
+    "pvutils": "1.1.5"
+  },
+  "devDependencies": {}
+}
