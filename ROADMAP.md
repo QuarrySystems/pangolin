@@ -108,16 +108,39 @@ below.
   engine changes. Demo: [`examples/data-mapreduce`](examples/data-mapreduce/)
   (fully offline, real end-to-end).
 
+### Seal-compliance hardening — shipped
+
+Two items from the seal-compliance hardening list — previously listed here as
+gaps — are now built:
+
+- **Trusted time (#1)** — the audit log can attach an **RFC 3161 trusted-time
+  token** via a pluggable `TimestampAuthority` seam (`NoTimestampAuthority` is the
+  default floor — no token, no egress; `Rfc3161TimestampAuthority({url})` calls a
+  real TSA; `LocalCaTimestampAuthority` is the offline/test impl). Trusted time is a
+  **separate report dimension** — `timeTier: 'asserted' | 'tsa-attested'` — and is
+  **orthogonal to the tamper claim**: a failed or absent timestamp never downgrades
+  a tamper-evident/tamper-detecting verdict; it only sets `timeTier`.
+- **Standalone verifier (#6)** — `@quarry-systems/pangolin-verify`, a 14th package
+  with **zero orchestrator dependency** (depends only on `pangolin-core`), gives an
+  auditor `npx @quarry-systems/pangolin-verify <bundle.json>` without installing the
+  engine. Repo-root [`VERIFICATION.md`](VERIFICATION.md) is the auditor
+  reimplementation spec (bundle + verify-context format, algorithm, the two modes).
+
 ### Known gap in V1
 
-- **End-to-end Fargate + S3 parity is operator-deferred.** Every production
-  component exists in code (`FargateProvider`, `S3StorageProvider`,
-  `AwsCredentialProvider`, and the `S3ObjectLockAnchor` for the
-  external-immutable audit tier), but the maintainers have **not** run the full
-  Fargate+S3 path end-to-end. Treat the
+- **The tamper-evident-against-real-WORM proof is still pending.** Trusted *time* is
+  built (above), but the **external-immutable tier proven end-to-end against a real
+  S3 Object Lock bucket** is not. Every production component exists in code
+  (`FargateProvider`, `S3StorageProvider`, `AwsCredentialProvider`, and the
+  `S3ObjectLockAnchor` for the external-immutable audit tier), but the maintainers
+  have **not** run the full Fargate+S3 path end-to-end. This is the heaviest
+  leave-gate: no concrete `S3LockClient` adapter ships — the interface is provided;
+  you implement it. Treat the
   [Deploy to Fargate + S3](https://quarrysystems.github.io/pangolin/how-to/deploy-fargate-s3/)
-  guide as a first-run guide, not a tested recipe. Note: no concrete
-  `S3LockClient` adapter ships — the interface is provided; you implement it.
+  guide as a first-run guide, not a tested recipe.
+- **Seal-compliance items #2–#5 remain unbuilt** — authz-in-evidence, automated
+  retention policy, access-logging, and KMS key custody are still gaps (some land in
+  the V1.1 compliance-deepening item below).
 
 ---
 
@@ -180,11 +203,12 @@ V1 ships.
   impl Enterprise]** — the encryption/anchor/runtime seams are open; packaged
   RBAC, SSO, retention/purge, attestation/evidence-export, and SIEM/log-export
   tooling are Enterprise modules.
-- **`WitnessAnchor` audit tier** — pushes the audit root to a cross-org witness
-  (RFC 3161 TSA / transparency log) for customers who won't trust even their own
-  WORM admin. Additive third tier above `external-immutable`. **[seam free · impl
-  Enterprise]** — the anchor seam is open; a managed witness/transparency-log
-  implementation is an Enterprise module.
+- **`WitnessAnchor` audit tier** — pushes the audit *root* to a cross-org witness
+  (transparency log / notarization) for customers who won't trust even their own
+  WORM admin. Additive third *tamper* tier above `external-immutable` — distinct
+  from the already-shipped RFC 3161 trusted-*time* seam (which attests *when*, not a
+  cross-org tamper witness). **[seam free · impl Enterprise]** — the anchor seam is
+  open; a managed witness/transparency-log implementation is an Enterprise module.
 
 ---
 

@@ -103,15 +103,35 @@ audit bundle.
   currently **discarded** (`tick.ts`: `void effectTierPolicy(…)`, `// TODO(PR6)`).
   Nothing caches, snapshots, or gates on it yet. Acting on it is V1.1 (below).
 
+### Seal-compliance hardening — shipped
+
+Two items from the seal-compliance hardening list — previously listed as gaps — are
+now built:
+
+- **Trusted time (#1)** — the audit log can attach an **RFC 3161 trusted-time
+  token** via a pluggable `TimestampAuthority` seam (`NoTimestampAuthority` floor —
+  no token, no egress; `Rfc3161TimestampAuthority({url})` calls a real TSA;
+  `LocalCaTimestampAuthority` is the offline/test impl). Trusted time is a
+  **separate report dimension** — `timeTier: 'asserted' | 'tsa-attested'` —
+  **orthogonal to the tamper claim**: a failed or absent timestamp never downgrades
+  a tamper-evident/tamper-detecting verdict; it only sets `timeTier`.
+- **Standalone verifier (#6)** — `@quarry-systems/pangolin-verify`, a 14th package
+  with **zero orchestrator dependency** (depends only on `pangolin-core`), lets an
+  auditor run `npx @quarry-systems/pangolin-verify <bundle.json>` without the engine.
+  Repo-root `VERIFICATION.md` is the auditor reimplementation spec.
+
 ### Known gap in V1
 
-End-to-end **Fargate + S3 parity is operator-deferred.** Every production
-component exists in code (`FargateProvider`, `S3StorageProvider`,
-`AwsCredentialProvider`, and `S3ObjectLockAnchor` for the external-immutable audit
-tier), but the maintainers have not run the full Fargate+S3 path end-to-end. Treat
-[Deploy to Fargate + S3](/pangolin/how-to/deploy-fargate-s3/) as a first-run guide,
-not a tested recipe — and note that no concrete `S3LockClient` adapter ships (the
-interface is provided; you implement it).
+The **tamper-evident-against-real-WORM proof is still pending.** Trusted *time* is
+built (above), but the external-immutable tier **proven end-to-end against a real S3
+Object Lock bucket** is not. Every production component exists in code
+(`FargateProvider`, `S3StorageProvider`, `AwsCredentialProvider`, and
+`S3ObjectLockAnchor` for the external-immutable audit tier), but the maintainers have
+not run the full Fargate+S3 path end-to-end. This is the heaviest leave-gate: no
+concrete `S3LockClient` adapter ships (the interface is provided; you implement it).
+Treat [Deploy to Fargate + S3](/pangolin/how-to/deploy-fargate-s3/) as a first-run
+guide, not a tested recipe. Seal-compliance items **#2–#5** (authz-in-evidence,
+retention policy, access-logging, KMS key custody) also remain unbuilt.
 
 ## Next — V1.1 (additive, no refactor)
 

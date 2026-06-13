@@ -1,19 +1,19 @@
 ---
 title: Package map
-description: The thirteen Pangolin Scale packages and the package dependency graph (everything points at pangolin-core).
+description: The fourteen Pangolin Scale packages and the package dependency graph (everything points at pangolin-core).
 sidebar:
   order: 7
 ---
 
-Pangolin Scale ships as thirteen packages under `packages/`, all published under the
+Pangolin Scale ships as fourteen packages under `packages/`, all published under the
 `@quarry-systems/` npm scope. `pangolin-core` is the types-only contract sink;
 every other package depends on it and nothing else by default.
 
-## The thirteen packages
+## The fourteen packages
 
 | Package | One-liner |
 |---|---|
-| `pangolin-core` | Types-only contract package. Every other Pangolin Scale package depends on this; nothing depends on anything else by default. |
+| `pangolin-core` | Types-only contract package, and the single source of truth for the audit/verify core — the hash chain, Merkle root, canonicalization, `verify` / `verifyBundle`, and the audit + manifest types all live here. Every other Pangolin Scale package depends on this; nothing depends on anything else by default. |
 | `pangolin-client` | Caller-side SDK. `PangolinClient` is the single entry point integrators construct: registration + dispatch surface, with wired-in providers. |
 | `pangolin-cli` | The `pangolin` binary. Thin CLI over `PangolinClient` that resolves `pangolin.config.{ts,js,mjs}` and dispatches to subcommands. Canonical privileged entry point. |
 | `pangolin-mcp` | Stdio MCP server exposing the run-time, orchestration-safe tool surface. `register` / `assign` are deliberately absent — privileged ops never reach the AI loop. |
@@ -25,7 +25,8 @@ every other package depends on it and nothing else by default.
 | `pangolin-storage-s3` | `StorageProvider` backed by S3. Content-addressed object layout, integrity-verified on read. Production target. |
 | `pangolin-storage-local` | `StorageProvider` backed by the local filesystem. Pairs with `pangolin-providers-local-docker` for the local stack. |
 | `pangolin-secret-store` | `SecretStore` seam plus impls — `InlineSecretStager` (AWS Secrets Manager) and `LocalSecretStore` (on-disk staging). `pangolin-client` also depends on it. |
-| `pangolin-orchestrator` | Orchestrator engine (codename *pangolin-offload*): named queues, `depends_on` resolution, resource locks, a fire-and-reconcile tick loop, SQLite run-state, and a verifiable audit trail (tamper-detecting by default, tamper-evident at the S3 Object Lock tier), behind pluggable `Executor` / `Trigger` seams. Surfaces as `pangolin orch` + the client MCP tools. |
+| `pangolin-orchestrator` | Orchestrator engine (codename *pangolin-offload*): named queues, `depends_on` resolution, resource locks, a fire-and-reconcile tick loop, SQLite run-state, and a verifiable audit trail (tamper-detecting by default, tamper-evident at the S3 Object Lock tier), behind pluggable `Executor` / `Trigger` seams. The chain/Merkle/verify core + audit types now live in `pangolin-core`; the orchestrator re-exports them as shims for back-compat. Surfaces as `pangolin orch` + the client MCP tools. |
+| `pangolin-verify` | Standalone, **zero-orchestrator-dependency** audit-bundle verifier. Bin: `npx @quarry-systems/pangolin-verify <bundle.json> [--anchor <verify-context.json>] [--json] [--full]`. Depends only on `pangolin-core`. Exports `verifyBundle` plus the `TimestampAuthority` impls. Lets an auditor re-verify a handed-over bundle without installing the orchestrator. |
 
 :::note
 The README labels the pangolin-mcp tool surface as "exactly six run-time tools."
@@ -54,6 +55,7 @@ graph TD
   slocal[pangolin-storage-local]
   secretstore[pangolin-secret-store]
   orch[pangolin-orchestrator<br/><i>offload engine</i>]
+  verify[pangolin-verify<br/><i>standalone verifier</i>]
 
   client --> core
   client --> secretstore
@@ -68,6 +70,7 @@ graph TD
   slocal --> core
   secretstore --> core
   orch --> core
+  verify --> core
 ```
 
 No Pangolin Scale package depends on another Quarry Systems library (Stoa, Bedrock,

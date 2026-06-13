@@ -161,6 +161,61 @@ deliberately left as a type member so the verification rule already accommodates
 it the day an implementation lands. Until then, the highest claim any real
 deployment can earn is `tamper-evident` via `external-immutable`.
 
+## Trusted time — a separate dimension
+
+The anchor tiers above answer **"can the record be rewritten?"** They say nothing
+about **"can you prove *when* the record existed?"** Those are different questions,
+and Pangolin Scale keeps them as **separate, orthogonal dimensions** so that one
+never silently weakens the other.
+
+Trusted time is carried by a `timeTier` field on the report, with exactly two
+values:
+
+| `timeTier` | When | What it means |
+|---|---|---|
+| `asserted` | No timestamp token, or a token that could not be obtained/verified | The timestamps in the log are **self-asserted** by the run — true if you trust the operator's clock, but not independently provable. This is the **floor**, and it is self-evidencing: an `asserted` report openly says "this time is asserted, not attested." |
+| `tsa-attested` | A valid RFC 3161 timestamp token over the anchored root | A **third-party time-stamping authority** has cryptographically attested that the root existed at a given instant. Independently provable, independent of the operator's clock. |
+
+Trusted time is produced by a pluggable **`TimestampAuthority`** seam, configured on
+the `AuditLog` at deploy time (never asserted by the run). Three implementations
+ship:
+
+- **`NoTimestampAuthority`** — the default and the floor. Emits **no token** and
+  makes **no egress**. The report's `timeTier` is `asserted`.
+- **`Rfc3161TimestampAuthority({ url })`** — calls a real RFC 3161 TSA at the given
+  URL and attaches the returned token to the anchored root. A successful token earns
+  `timeTier: 'tsa-attested'`.
+- **`LocalCaTimestampAuthority`** — an offline/test authority that issues tokens
+  from a local CA, for exercising the `tsa-attested` path without network egress.
+
+The wiring: `AuditLog` gained an optional `timestamper` (the authority) and an
+optional `onTimestampFailure` hook; `AnchoredRoot` gained an optional `timestamp`
+token alongside the root and its signature.
+
+**The key invariant — time is orthogonal to the tamper claim.** A failed,
+unreachable, or absent timestamp **never** downgrades the `claim`. A
+`tamper-evident` run with no TSA configured is still `tamper-evident`; it is simply
+`tamper-evident` + `timeTier: asserted`. The only thing a timestamp failure does is
+leave (or set) `timeTier: 'asserted'`. The two axes compose freely:
+
+```mermaid
+flowchart LR
+  subgraph TAMPER["Tamper axis — *can it be rewritten?*"]
+    td["tamper-detecting"]
+    te["tamper-evident"]
+  end
+  subgraph TIME["Time axis — *when did it exist?* (orthogonal)"]
+    as["timeTier: asserted<br/>(NoTimestampAuthority / failed token)"]
+    tsa["timeTier: tsa-attested<br/>(valid RFC 3161 token)"]
+  end
+  td -.->|"independent — a missing token<br/>never collapses the tamper claim"| as
+  te -.-> tsa
+```
+
+This is the same honesty discipline as the tamper claim, applied to time: the report
+states *exactly* what it can prove on each axis, and a weaker result on one axis
+leaves the other untouched.
+
 ## What each tier does *not* guarantee
 
 Being precise about the ceiling matters as much as the floor.

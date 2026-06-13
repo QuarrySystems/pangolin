@@ -169,8 +169,23 @@ export an `orch` context carrying an `anchor`.
 
 | Args / options | Behavior |
 |---|---|
-| `verify <bundle.json>` · `--json`, `--full` | Reads and parses the bundle file, rebuilds an in-memory audit store from its `auditLog.entries`, and re-runs `verify()` against the **live anchor** — never the root embedded in the bundle. Prints a human-readable checklist + hash-chained ledger. `--json` emits the raw `VerificationReport` (including the collect-all `checks` map); `--full` prints every ledger row instead of head+tail. **Sets exit code `1` when the bundle does not verify.** See [Export & verify an audit bundle](/pangolin/how-to/verify-audit-bundle/). |
+| `verify <bundle.json>` · `--json`, `--full` | Reads and parses the bundle file, rebuilds an in-memory audit store from its `auditLog.entries`, and re-runs `verify()` against the **live anchor** — never the root embedded in the bundle. Prints a human-readable checklist + hash-chained ledger. `--json` emits the raw `VerificationReport` (including the collect-all `checks` map **and the `timeTier` field** — `asserted` vs `tsa-attested`, the orthogonal trusted-time dimension); `--full` prints every ledger row instead of head+tail. **Sets exit code `1` when the bundle does not verify.** See [Export & verify an audit bundle](/pangolin/how-to/verify-audit-bundle/). |
 
 The same check is available programmatically as `verifyBundle(bundle, { anchor })`,
-exported from `@quarry-systems/pangolin-orchestrator` for third parties who want to
-re-verify a handed-over bundle in their own tooling.
+exported canonically from `@quarry-systems/pangolin-core` (and re-exported from
+`@quarry-systems/pangolin-orchestrator` for back-compat) for third parties who want
+to re-verify a handed-over bundle in their own tooling.
+
+:::note[Orchestrator-free standalone verifier]
+An auditor who does **not** have the orchestrator can verify a bundle with the
+zero-dependency `@quarry-systems/pangolin-verify` package — no install required:
+
+```sh
+npx @quarry-systems/pangolin-verify <bundle.json> [--anchor <verify-context.json>]
+```
+
+Offline (default) recomputes against the bundle's embedded root (ceiling
+`tamper-detecting`); `--anchor <verify-context.json>` fetches the real WORM root
+(ceiling `tamper-evident`). See
+[Export & verify an audit bundle](/pangolin/how-to/verify-audit-bundle/#5-verify-without-the-orchestrator--quarry-systemspangolin-verify).
+:::

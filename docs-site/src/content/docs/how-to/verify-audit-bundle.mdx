@@ -32,7 +32,8 @@ pangolin orch audit <run-id> --out bundle.json
 ```
 
 The bundle is the §6.5 compliance artifact. Its top-level shape (from
-`AuditBundle` in `packages/pangolin-orchestrator/src/contracts/audit.ts`):
+`AuditBundle` in `packages/pangolin-core/src/audit.ts` — the orchestrator
+re-exports it for back-compat):
 
 ```jsonc
 {
@@ -229,8 +230,49 @@ flowchart LR
 ```
 
 For programmatic use, the same check is the `verifyBundle(bundle, { anchor })`
-library entry point, exported from `@quarry-systems/pangolin-orchestrator` so an
-auditor can re-verify a handed-over bundle inside their own tooling.
+library entry point. It lives canonically in `@quarry-systems/pangolin-core` (the
+single source of truth for the verify core), is also surfaced by
+`@quarry-systems/pangolin-verify` (the standalone verifier — see below), and is
+re-exported from `@quarry-systems/pangolin-orchestrator` for back-compat. An auditor
+can re-verify a handed-over bundle inside their own tooling from whichever package
+they already have.
+
+## 5. Verify without the orchestrator — `@quarry-systems/pangolin-verify`
+
+An auditor handed a bundle usually does **not** want to install the orchestrator
+engine just to check it. `@quarry-systems/pangolin-verify` is a standalone package
+with **zero orchestrator dependency** — it depends only on `pangolin-core` — and
+ships a bin you can run with no install:
+
+```sh
+npx @quarry-systems/pangolin-verify <bundle.json> [--anchor <verify-context.json>] [--json] [--full]
+```
+
+It runs in one of **two modes**, and the mode sets the ceiling on the tamper claim
+it can earn:
+
+- **Offline (default — no `--anchor`).** It recomputes the chain and the Merkle root
+  and compares against the **root embedded in the bundle**. With no external anchor
+  to consult, the strongest claim it can reach is **`tamper-detecting`** — it proves
+  the bundle is internally consistent, but not that the embedded root matches an
+  immutable external copy.
+- **Anchor-checked (`--anchor <verify-context.json>`).** The verify-context points
+  the verifier at the **real WORM anchored root** (e.g. the S3 Object Lock object).
+  The verifier fetches that external root and compares — exactly the check the
+  embedded copy cannot do alone — so a passing run can reach the
+  **`tamper-evident`** ceiling.
+
+The report it prints (and emits raw under `--json`) carries the same fields as
+`pangolin verify`, **including the `timeTier` field** (`asserted` vs `tsa-attested` —
+see [Audit & guarantee tiers → Trusted time](/pangolin/explanation/audit-guarantee-tiers/#trusted-time--a-separate-dimension)).
+`--full` prints every ledger row.
+
+<Aside type="note" title="The reimplementation spec">
+Repo-root `VERIFICATION.md` is the auditor reimplementation spec: it documents the
+bundle and verify-context formats, the verification algorithm, and the two modes
+(offline → tamper-detecting ceiling; anchor-checked → tamper-evident ceiling). A
+party who won't run *any* of our code can reimplement the verifier from it.
+</Aside>
 
 ## Next steps
 

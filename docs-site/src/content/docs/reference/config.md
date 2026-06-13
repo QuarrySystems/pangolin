@@ -132,6 +132,7 @@ const auditLog = new AuditLog({
   store,
   signer,
   anchor,
+  // timestamper: new Rfc3161TimestampAuthority({ url: 'https://freetsa.org/tsr' }),  // optional RFC 3161 trusted time
   // A dropped audit append means the sealed record is incomplete — surface it
   // (completeness is a SOC2 / EU AI Act Art 12 control). `auditLog.droppedAppends`
   // holds the running total.

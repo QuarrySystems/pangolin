@@ -14,6 +14,12 @@ Pangolin Scale seals every run into an exportable bundle whose verification
 - **An exportable evidence bundle** per run: the per-item dispatch manifests
   (references only — secret values never appear), the hash-chained lifecycle
   log, the signed and anchored Merkle root, and a verification report.
+- **An optional RFC 3161 trusted-time token** — when a `TimestampAuthority` is
+  configured, the bundle carries a third-party timestamp attesting *when* the
+  root existed, independently provable from the operator's clock
+  (`timeTier: tsa-attested`). Absent timestamps are self-evidencing — the report
+  openly reads `timeTier: asserted` rather than overclaiming. Trusted time is a
+  separate dimension and never changes the tamper claim.
 - **One-command re-verification** — `pangolin verify bundle.json` replays the
   hash chain, recomputes the Merkle root, fetches the anchored root from the
   live anchor, checks the signature, and checks provenance closure (every
