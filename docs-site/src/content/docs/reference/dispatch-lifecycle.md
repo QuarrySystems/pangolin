@@ -347,4 +347,4 @@ For S3, check that nothing else is writing to the same prefix.
 
 - [ADR-0004 — why the lifecycle vocabulary is closed at six kinds](/pangolin/explanation/decisions/0004-lifecycle-vocabulary-closed-at-six/).
 - [ADR-0008](/pangolin/explanation/decisions/0008-needs-input-request-stop-restart/), [ADR-0009](/pangolin/explanation/decisions/0009-needs-input-sentinel-file-vs-exit-code/) — the needs_input convention.
-- [MVP spec](https://github.com/quarrysystems/pangolin/blob/main/docs/superpowers/specs/2026-05-21-pangolin-scale-mvp-design.md) §6.2 (the 14-step lifecycle), §6.3 (overlay/merge), §5.7 (lifecycle event types).
+- [MVP spec](https://github.com/quarrysystems/pangolin/blob/main/docs/superpowers/specs/2026-05-21-agora-mvp-design.md) §6.2 (the 14-step lifecycle), §6.3 (overlay/merge), §5.7 (lifecycle event types).

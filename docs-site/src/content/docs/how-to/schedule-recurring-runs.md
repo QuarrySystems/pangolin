@@ -138,4 +138,4 @@ does not exist is a no-op.
 - [How an offload run executes](/pangolin/explanation/how-offload-runs/#recurring-submission-cron) — cron as an inbox producer, catch-up coalescing.
 - [CLI reference](/pangolin/reference/cli/#pangolin-orch) — full option listing for `schedule add|list|rm`.
 - [pangolin.config reference](/pangolin/reference/config/) — the `scheduleStore` field on the `orch` export.
-- [Design spec](https://github.com/quarrysystems/pangolin/blob/main/docs/superpowers/specs/2026-06-02-pangolin-scale-cron-trigger-design.md) — architecture, catch-up policy, and idempotency mechanics.
+- [Design spec](https://github.com/quarrysystems/pangolin/blob/main/docs/superpowers/specs/2026-06-02-agora-cron-trigger-design.md) — architecture, catch-up policy, and idempotency mechanics.

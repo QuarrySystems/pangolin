@@ -40,7 +40,7 @@ forcing both streams under the same ceiling.
 
 ## Decision
 
-From §10.1 of `docs/superpowers/specs/2026-05-21-pangolin-scale-mvp-design.md`:
+From §10.1 of `docs/superpowers/specs/2026-05-21-agora-mvp-design.md`:
 
 > **Stdout capped at 4 MiB, stderr at 256 KiB, with explicit truncation
 > markers.** 1 MiB stdout was too tight for typical agentic outputs

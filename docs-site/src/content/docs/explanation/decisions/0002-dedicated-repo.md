@@ -20,7 +20,7 @@ Physical co-location with other Quarry Systems code is not the same threat as co
 
 ## Decision
 
-Pangolin Scale lives in its own repository. Per §10.1 of `docs/superpowers/specs/2026-05-21-pangolin-scale-mvp-design.md`:
+Pangolin Scale lives in its own repository. Per §10.1 of `docs/superpowers/specs/2026-05-21-agora-mvp-design.md`:
 
 > **Dedicated repo.** Pangolin Scale lives in its own repo, not as another Nx app inside the existing `quarry-systems` monorepo and not inside a future `quarry-systems-platform` reference-orchestrator repo. Rationale: the orthogonality principle is enforced more durably when physical proximity to other Quarry Systems libraries can't introduce accidental coupling. The CI allowlist check (§8) catches dependency-level coupling; repo separation catches everything else (shared scripts, shared tsconfig fragments, shared utilities that drift into cross-references).
 

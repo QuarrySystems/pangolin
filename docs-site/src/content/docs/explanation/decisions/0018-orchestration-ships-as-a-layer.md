@@ -51,9 +51,9 @@ capability, and if so, *where* — bolted onto the client, or as a distinct laye
 
 **Pangolin Scale ships orchestration as a separate, opt-in layer — not as a primitive on
 `PangolinClient`.** Concretely (per the
-[Orchestrator architecture spec](https://github.com/quarrysystems/pangolin/blob/main/docs/superpowers/specs/2026-05-28-pangolin-scale-orchestrator-design.md)
+[Orchestrator architecture spec](https://github.com/quarrysystems/pangolin/blob/main/docs/superpowers/specs/2026-05-28-agora-orchestrator-design.md)
 and the
-[Offload V1 delivery spec](https://github.com/quarrysystems/pangolin/blob/main/docs/superpowers/specs/2026-05-29-pangolin-offload-v1-design.md),
+[Offload V1 delivery spec](https://github.com/quarrysystems/pangolin/blob/main/docs/superpowers/specs/2026-05-29-agora-offload-v1-design.md),
 shipped as pangolin-offload V1):
 
 - Orchestration lives in its **own package** `@quarry-systems/pangolin-orchestrator`,

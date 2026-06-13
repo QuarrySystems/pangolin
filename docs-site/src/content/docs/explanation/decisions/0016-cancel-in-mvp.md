@@ -44,7 +44,7 @@ Two pressures pushed the decision the other way:
 
 ## Decision
 
-From §10.1 of `docs/superpowers/specs/2026-05-21-pangolin-scale-mvp-design.md`:
+From §10.1 of `docs/superpowers/specs/2026-05-21-agora-mvp-design.md`:
 
 > **`cancel()` is in MVP, not v0.2.** Implementation cost is bounded (~1-2
 > days across provider stop implementations + pangolin-client + worker

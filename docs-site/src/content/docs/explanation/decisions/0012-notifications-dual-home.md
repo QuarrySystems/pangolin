@@ -24,7 +24,7 @@ The decision turns on whether one-home simplicity is worth losing the role separ
 
 ## Decision
 
-From §10.1 of `docs/superpowers/specs/2026-05-21-pangolin-scale-mvp-design.md`:
+From §10.1 of `docs/superpowers/specs/2026-05-21-agora-mvp-design.md`:
 
 > **Notifications have two homes by design.** Capability-content notifications (`pangolin-notifications.json`) are behavior-tied — the capability author mandates alerts whenever the capability is in scope (e.g., "alert if this dangerous capability fires"). Dispatch-level notifications (`notifications: NotificationConfig[]` on `DispatchWork`) are operational — the SRE team owns where alerts for a specific dispatch go (PagerDuty, Slack, internal webhook). Both flow through the same HMAC-signing path; the worker merges both sources at boot. The redundancy is the point: two distinct concerns with two distinct homes. (This supersedes an earlier decision that put notifications only in capability content.)
 

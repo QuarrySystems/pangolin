@@ -13,10 +13,11 @@ timeout = 20                 # seconds per request
 # A rate-limited response is transient, not a broken link.
 accept = ["200..=299", "429"]
 
-# Only check real outbound URLs. Root-relative internal links (e.g. /pangolin/...)
-# have no scheme and are already validated by starlight-links-validator at build —
-# restricting schemes here keeps this check to links that actually LEAVE the site.
-scheme = ["https", "http"]
+# Resolve root-relative internal links (e.g. /pangolin/...) against the site origin so
+# lychee can BUILD them — otherwise it reports "cannot build URL" before any exclude
+# filter applies. We then exclude the resolved internal prefix below, so this monitor
+# stays OUTBOUND-only (internal links remain starlight-links-validator's job at build).
+base_url = "https://quarrysystems.github.io"
 
 # --- Scope ------------------------------------------------------------------
 # Don't probe hosts that only make sense inside a deployment / example.
@@ -29,10 +30,9 @@ include_mail = false
 
 # Links that are intentionally not GET-checkable here.
 exclude = [
-  # Root-relative INTERNAL links (/pangolin/...) — starlight-links-validator already
-  # checks these at build; lychee can't resolve them without a root dir and shouldn't
-  # (this monitor is outbound-only). `scheme` alone doesn't suppress them, so exclude by path.
-  '^/',
+  # Internal links, now resolved against base_url to the site origin — already validated
+  # at build by starlight-links-validator, so skip them here (outbound-only monitor).
+  '^https://quarrysystems\.github\.io/pangolin/',
   # freetsa is an RFC 3161 timestamp endpoint — POST-only; a GET link-check is meaningless.
   '^https?://freetsa\.org/tsr',
   # Hostnames that appear only in config/example snippets, never real web targets.
