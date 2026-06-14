@@ -1,6 +1,16 @@
 # VersionId-binding: bind the sealed S3 version into the signature (layered with earliest-read)
 
-> **Status:** design, approved-in-principle 2026-06-13, **revised after security audit**. Closes
+> **STATUS: SUPERSEDED 2026-06-13** by
+> [`2026-06-13-require-signature-tamper-evident-design.md`](./2026-06-13-require-signature-tamper-evident-design.md).
+> Retained as the rejected-alternative record. Tracing the same-second attack against the actual
+> `verify()` logic showed the *load-bearing* fix is far smaller: the `tamper-evident` claim must
+> require a **verified signature** (a same-second forgery carries no valid signature → the claim
+> collapses, fail-safe). VersionId-binding ALSO needs that require-sig rule to close the hole (a
+> stripped-signature forgery still hits the `sigOk === 'n/a'` path), and adds a seal re-order +
+> moving the signature out of the WORM object for **no additional realistic coverage** — overkill.
+> The earliest-version read (this doc's correct insight) is kept by the superseding design.
+>
+> **Original status:** design, approved-in-principle 2026-06-13, **revised after security audit**. Closes
 > the same-second residual left by PR #69 **without regressing** the malicious-operator defense
 > that #69's independent earliest-version read provides.
 >
