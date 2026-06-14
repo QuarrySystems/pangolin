@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import type { AuditBundle, AuditAnchor, AuditEntryRow, AnchoredRoot, DispatchManifest } from '../../src/contracts/index.js';
+import type { AuditBundle, AuditAnchor, AuditEntryRow, AnchoredRoot, DispatchManifest, Signature } from '../../src/contracts/index.js';
 import { canonEntry } from '../../src/audit/canon.js';
 import { chainHash, merkleRoot, leavesFromEntryHashes } from '../../src/audit/merkle.js';
 import { verifyBundle } from '../../src/audit/verify-bundle.js';
@@ -10,15 +10,29 @@ import { verifyBundle } from '../../src/audit/verify-bundle.js';
 
 type GuaranteeType = 'detect' | 'external-immutable' | 'witnessed';
 
-/** Build a fake AuditAnchor that serves exactly one AnchoredRoot. */
-const anchorOf = (root: Uint8Array, guarantee: GuaranteeType = 'external-immutable') => ({
+/** A dummy signature; the injected verifySignature decides pass/fail, so the bytes are irrelevant. */
+const SIG: Signature = { alg: 'ed25519', bytes: new Uint8Array([9]) };
+
+/** Build a fake AuditAnchor that serves exactly one AnchoredRoot. Pass `signature` to model a
+ *  signed seal (the anchored root carries it) — required for the tamper-evident claim, which now
+ *  demands a verified signature. */
+const anchorOf = (
+  root: Uint8Array,
+  guarantee: GuaranteeType = 'external-immutable',
+  signature?: Signature,
+) => ({
   id: 'fake',
   guarantee,
   async anchor() {
     return { anchorId: 'fake', epochId: 'r', guarantee, at: 0 };
   },
   async fetch() {
-    return [{ epochId: 'r', root, receipt: { anchorId: 'fake', epochId: 'r', guarantee, at: 0 } }];
+    return [{
+      epochId: 'r',
+      root,
+      ...(signature ? { signature } : {}),
+      receipt: { anchorId: 'fake', epochId: 'r', guarantee, at: 0 },
+    }];
   },
 } satisfies AuditAnchor);
 
@@ -97,7 +111,11 @@ const REF_GHOST = 'sha256:deaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeadde
 
 it('verifies a self-contained sealed bundle against the supplied external anchor', async () => {
   const { bundle, root } = buildSealedBundle();
-  const r = await verifyBundle(bundle, { anchor: anchorOf(root, 'external-immutable') });
+  // Signed seal + a passing verifier: tamper-evident is EARNED (it now requires a verified signature).
+  const r = await verifyBundle(bundle, {
+    anchor: anchorOf(root, 'external-immutable', SIG),
+    verifySignature: () => true,
+  });
   expect(r.intact).toBe(true);
   expect(r.claim).toBe('tamper-evident');
 });
@@ -156,25 +174,11 @@ it('passes verifySignature through to verify() correctly', async () => {
 
 it('a bad verifySignature causes intact to be false', async () => {
   const { bundle, root } = buildSealedBundle();
-  // Add a signature field to the anchor fetch so signature check is triggered
-  const anchorWithSig: AuditAnchor = {
-    id: 'fake',
-    guarantee: 'external-immutable',
-    async anchor() {
-      return { anchorId: 'fake', epochId: 'r', guarantee: 'external-immutable', at: 0 };
-    },
-    async fetch() {
-      return [
-        {
-          epochId: 'r',
-          root,
-          signature: { alg: 'ed25519', bytes: new Uint8Array([9]) },
-          receipt: { anchorId: 'fake', epochId: 'r', guarantee: 'external-immutable', at: 0 },
-        },
-      ];
-    },
-  };
-  const r = await verifyBundle(bundle, { anchor: anchorWithSig, verifySignature: () => false });
+  // Signed anchor + a failing verifier: the signature check fires and fails.
+  const r = await verifyBundle(bundle, {
+    anchor: anchorOf(root, 'external-immutable', SIG),
+    verifySignature: () => false,
+  });
   expect(r.intact).toBe(false);
   expect(r.failure).toBe('signature');
 });
@@ -185,8 +189,11 @@ it('a bad verifySignature causes intact to be false', async () => {
 
 it('bundle with no manifests (zero inputRefs) reports handoff ok: true, no handoff edges', async () => {
   const { bundle, root } = buildSealedBundle();
-  // manifests: [] (default) — zero handoff edges
-  const r = await verifyBundle(bundle, { anchor: anchorOf(root) });
+  // manifests: [] (default) — zero handoff edges. Signed seal + verifier so the claim is earned.
+  const r = await verifyBundle(bundle, {
+    anchor: anchorOf(root, 'external-immutable', SIG),
+    verifySignature: () => true,
+  });
   expect(r.checks.handoff).toEqual({ ok: true, detail: 'no handoff edges' });
   expect(r.intact).toBe(true);
   expect(r.claim).toBe('tamper-evident');

@@ -19,7 +19,7 @@ export function verifyBundle(
       const intact = base.intact && handoff.ok !== false;
       const failure =
         base.failure ?? (handoff.ok === false ? ('handoff' as const) : undefined);
-      const claim = claimFor(intact, base.guarantee);
+      const claim = claimFor(intact, base.guarantee, base.checks.signature.ok);
       return { ...base, intact, failure, claim, checks: { ...base.checks, handoff } };
     },
   );
