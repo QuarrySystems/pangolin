@@ -4,9 +4,17 @@ import type { Guarantee } from './audit.js';
 import { canonEntry } from './audit-canon.js';
 import { chainHash, merkleRoot, leavesFromEntryHashes } from './audit-merkle.js';
 
-/** DRY claim rule (spec §7): tamper-evident only when guarantee >= external-immutable AND intact. */
-export function claimFor(intact: boolean, guarantee: Guarantee): 'tamper-evident' | 'tamper-detecting' {
-  return intact && GUARANTEE_RANK[guarantee] >= GUARANTEE_RANK['external-immutable']
+/** DRY claim rule (spec §7): tamper-evident requires guarantee >= external-immutable, an intact
+ *  structure, AND a VERIFIED signature. A same-second forgery carries no valid signature, so
+ *  sigOk !== true collapses the claim to tamper-detecting (fail-safe). intact stays structural. */
+export function claimFor(
+  intact: boolean,
+  guarantee: Guarantee,
+  sigOk: boolean | 'n/a',
+): 'tamper-evident' | 'tamper-detecting' {
+  return intact
+    && GUARANTEE_RANK[guarantee] >= GUARANTEE_RANK['external-immutable']
+    && sigOk === true
     ? 'tamper-evident'
     : 'tamper-detecting';
 }
@@ -90,7 +98,7 @@ export async function verify(
     : sigOk === false ? 'signature' as const
     : undefined;
 
-  const claim = claimFor(intact, g);
+  const claim = claimFor(intact, g, sigOk);
 
   return { runId, anchorId: deps.anchor.id, guarantee: g, intact, claim, timeTier, failure, checks };
 }

@@ -36,11 +36,12 @@ it('clean run intact; detect anchor -> tamper-detecting', async () => {
   });
 });
 
-it('external-immutable anchor on a clean run -> tamper-evident', async () => {
+it('external-immutable anchor on a clean run without verifySignature -> tamper-detecting', async () => {
   const store = new SqliteRunStateStore();
   const root = seed(store, 'r');
+  // No verifySignature injected: sigOk is 'n/a', so tamper-evident cannot be granted (fail-safe).
   expect((await verify('r', { store, anchor: anchorOf(root, 'external-immutable') })).claim).toBe(
-    'tamper-evident',
+    'tamper-detecting',
   );
 });
 
@@ -212,15 +213,23 @@ it('bare verify: checks.handoff.ok === n/a', async () => {
 });
 
 describe('claimFor', () => {
-  it('intact + external-immutable -> tamper-evident', () => {
-    expect(claimFor(true, 'external-immutable')).toBe('tamper-evident');
+  it('intact + external-immutable + verified signature -> tamper-evident', () => {
+    expect(claimFor(true, 'external-immutable', true)).toBe('tamper-evident');
   });
 
-  it('not intact + external-immutable -> tamper-detecting', () => {
-    expect(claimFor(false, 'external-immutable')).toBe('tamper-detecting');
+  it('intact + external-immutable but signature n/a -> tamper-detecting', () => {
+    expect(claimFor(true, 'external-immutable', 'n/a')).toBe('tamper-detecting');
   });
 
-  it('intact + detect -> tamper-detecting', () => {
-    expect(claimFor(true, 'detect')).toBe('tamper-detecting');
+  it('intact + external-immutable but signature failed -> tamper-detecting', () => {
+    expect(claimFor(true, 'external-immutable', false)).toBe('tamper-detecting');
+  });
+
+  it('not intact + external-immutable + verified signature -> tamper-detecting', () => {
+    expect(claimFor(false, 'external-immutable', true)).toBe('tamper-detecting');
+  });
+
+  it('intact + detect + verified signature -> tamper-detecting', () => {
+    expect(claimFor(true, 'detect', true)).toBe('tamper-detecting');
   });
 });

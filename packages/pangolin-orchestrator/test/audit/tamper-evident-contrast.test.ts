@@ -4,6 +4,7 @@ import { chainHash, merkleRoot, leavesFromEntryHashes } from '../../src/audit/me
 import { LocalAnchor, S3ObjectLockAnchor, type S3LockClient } from '../../src/audit/anchor.js';
 import { verify } from '../../src/audit/verify.js';
 import type { AuditEntryRow, AuditStore } from '../../src/contracts/index.js';
+import { createLocalSigner, verifyEd25519 } from '../../src/audit/signer.js';
 
 // A mutable in-memory AuditStore whose audit_entries array we can forge in place.
 function memStore(entries: AuditEntryRow[]) {
@@ -89,4 +90,55 @@ it('chain-consistent forge: S3ObjectLockAnchor (immutable) catches it -> root-mi
   expect(report.failure).toBe('root-mismatch');
   expect(report.intact).toBe(false);
   expect(report.claim).toBe('tamper-detecting');           // the tamper-evident claim correctly collapses
+});
+
+// Fake modeling the SAME-SECOND tie WORST CASE: when an attacker writes a forged version in
+// the SAME second as the seal, S3's version order at second-granularity is ambiguous, so the
+// earliest-read CAN return the forgery. This fake returns the most-recently written version to
+// model that worst case. (Contrast versionedFakeS3, which returns the earliest = later-second
+// case that #69 already defeats.)
+function sameSecondTieFakeS3(): S3LockClient {
+  const m = new Map<string, Uint8Array[]>();
+  return {
+    async putObject(key, body) { const v = m.get(key) ?? []; v.push(body); m.set(key, v); },
+    async getObject(key) { const v = m.get(key); return v?.[v.length - 1]; },
+  };
+}
+
+it('same-second forgery (unsigned) selected by the tie -> tamper-evident claim collapses', async () => {
+  const { rows, root } = buildRun('r');
+  const store = memStore(rows);
+  const signer = createLocalSigner();
+  const anchor = new S3ObjectLockAnchor(sameSecondTieFakeS3(), 'bucket');
+
+  // Honest SIGNED seal (version 0, lock-protected original).
+  await anchor.anchor({ epochId: 'r', root, signature: await signer.sign(root) });
+
+  // Attacker forges the chain and writes an UNSIGNED forged version in the same second (version 1).
+  const forgedRoot = forgeInPlace(store.entries);
+  await anchor.anchor({ epochId: 'r', root: forgedRoot }); // no signature
+
+  const report = await verify('r', {
+    store, anchor,
+    verifySignature: (r, sig) => verifyEd25519(r, sig, signer.publicKey),
+  });
+
+  // The read returned the forgery: its root matches the forged entries (rootOk true), but it
+  // carries NO signature -> sigOk 'n/a'. The tamper-evident claim MUST NOT be granted.
+  expect(report.checks.root.ok).toBe(true);        // forgery is structurally self-consistent
+  expect(report.checks.signature.ok).toBe('n/a');  // unsigned forgery — no verifiable authorship
+  expect(report.claim).toBe('tamper-detecting');   // pre-fix BUG: returns 'tamper-evident'
+});
+
+it('clean external-immutable run verified without a signature verifier -> tamper-detecting', async () => {
+  const { rows, root } = buildRun('r');
+  const store = memStore(rows);
+  const signer = createLocalSigner();
+  const anchor = new S3ObjectLockAnchor(versionedFakeS3(), 'bucket');
+  await anchor.anchor({ epochId: 'r', root, signature: await signer.sign(root) });
+
+  // No verifySignature injected -> the verifier cannot confirm authorship -> not tamper-evident.
+  const report = await verify('r', { store, anchor });
+  expect(report.intact).toBe(true);
+  expect(report.claim).toBe('tamper-detecting');   // pre-fix BUG: returns 'tamper-evident'
 });

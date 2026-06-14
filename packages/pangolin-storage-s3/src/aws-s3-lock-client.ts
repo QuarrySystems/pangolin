@@ -37,11 +37,13 @@ export class AwsS3LockClient implements S3LockClient {
     const versions = (listed.Versions ?? []).filter((v) => v.Key === key && v.VersionId);
     if (versions.length === 0) return undefined;
     versions.sort((a, b) => (a.LastModified?.getTime() ?? 0) - (b.LastModified?.getTime() ?? 0));
-    // KNOWN RESIDUAL (hardening follow-up): S3 LastModified is second-granular, so a forgery
-    // PUT in the SAME second as the seal could sort ahead of the original under a stable sort.
-    // The demonstrated attack (re-PUT in a later second) is defeated; closing the same-second
-    // race needs version-ID pinning — capture the sealed VersionId and carry it in the trusted
-    // (out-of-band) verify-context, then fetch by that exact VersionId. Deferred (larger change).
+    // SAME-SECOND NOTE: S3 LastModified is second-granular, so a forgery PUT in the SAME second
+    // as the seal could sort ahead of the original here and be returned. The later-second attack
+    // is defeated by this earliest-read; the same-second variant is closed at the CLAIM layer —
+    // tamper-evident now requires a VERIFIED signature (verify()/claimFor), and a same-second
+    // forgery carries no valid signature, so the claim collapses to tamper-detecting (fail-safe).
+    // (Version-ID pinning was considered and rejected as over-built — see
+    //  docs/superpowers/specs/2026-06-13-require-signature-tamper-evident-design.md.)
     const r = await this.o.client.send(
       new GetObjectCommand({ Bucket: this.o.bucket, Key: key, VersionId: versions[0]!.VersionId }),
     );
