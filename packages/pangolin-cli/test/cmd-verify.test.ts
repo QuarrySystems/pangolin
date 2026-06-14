@@ -9,8 +9,10 @@ import type {
   AuditAnchorReceipt,
   AuditEntryRow,
   AnchoredRoot,
+  Signature,
 } from '@quarry-systems/pangolin-orchestrator';
 import type { SubmissionTransport, ControlChannel } from '@quarry-systems/pangolin-orchestrator';
+import { createLocalSigner, verifyEd25519 } from '@quarry-systems/pangolin-orchestrator';
 import type { OrchContext } from '../src/cmd-orch.js';
 import { attachVerifyCmd } from '../src/cmd-verify.js';
 import type { CliContext } from '../src/index.js';
@@ -19,8 +21,13 @@ import type { CliContext } from '../src/index.js';
 // Helpers mirrored from verify-bundle.test.ts
 // ---------------------------------------------------------------------------
 
-/** Build a fake AuditAnchor that serves exactly one AnchoredRoot. */
-function anchorOf(root: Uint8Array, guarantee: 'detect' | 'external-immutable' | 'witnessed' = 'external-immutable'): AuditAnchor {
+/** Build a fake AuditAnchor that serves exactly one AnchoredRoot. Pass `signature` to model a
+ *  signed seal — the tamper-evident claim now requires a verified signature on the anchored root. */
+function anchorOf(
+  root: Uint8Array,
+  guarantee: 'detect' | 'external-immutable' | 'witnessed' = 'external-immutable',
+  signature?: Signature,
+): AuditAnchor {
   return {
     id: 'fake',
     guarantee,
@@ -29,7 +36,7 @@ function anchorOf(root: Uint8Array, guarantee: 'detect' | 'external-immutable' |
     },
     async fetch(range?: { epochId?: string }) {
       const epochId = range?.epochId ?? 'r';
-      return [{ epochId, root, receipt: { anchorId: 'fake', epochId, guarantee, at: 0 } }];
+      return [{ epochId, root, ...(signature ? { signature } : {}), receipt: { anchorId: 'fake', epochId, guarantee, at: 0 } }];
     },
   };
 }
@@ -74,7 +81,7 @@ async function buildSealedBundle(runId: string = 'r'): Promise<{ bundle: AuditBu
       checks: {
         chain: { ok: true },
         root: { ok: true },
-        signature: { ok: 'n/a' },
+        signature: { ok: true },
         anchor: { ok: true },
       },
     },
@@ -178,9 +185,14 @@ describe('attachVerifyCmd', () => {
     const bundlePath = join(tmpDir, 'clean-bundle.json');
     await writeFile(bundlePath, serializeBundle(bundle));
 
+    // TAMPER-EVIDENT now requires a VERIFIED signature: serve a real ed25519 signature on the
+    // anchored root and inject the matching verifier (the independent-auditor flow).
+    const signer = createLocalSigner();
+    const sig = await signer.sign(root);
     const oc: OrchContext = {
       transport: makeFakeTransport(),
-      anchor: anchorOf(root, 'external-immutable'),
+      anchor: anchorOf(root, 'external-immutable', sig),
+      verifySignature: (r: Uint8Array, s: Signature) => verifyEd25519(r, s, signer.publicKey),
     };
     const ctx = makeCtx(oc);
     const program = new Command();
