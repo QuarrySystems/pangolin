@@ -60,9 +60,10 @@ flowchart TD
 ```
 
 The `claim` is never asserted by the anchor directly: `verify` derives
-`tamper-evident` only when `GUARANTEE_RANK[g] >= GUARANTEE_RANK['external-immutable']`
-**and** every check passed; any failure collapses the claim back to
-`tamper-detecting`, so the local tier is never labelled tamper-evident.
+`tamper-evident` only when `GUARANTEE_RANK[g] >= GUARANTEE_RANK['external-immutable']`,
+every structural check passed, **and** the anchored root carried a verified
+signature; any failure collapses the claim back to `tamper-detecting`, so the
+local tier is never labelled tamper-evident.
 
 ## What verification actually checks
 
@@ -77,35 +78,46 @@ compares. In order, it:
    fails as `anchor-missing`.
 4. Compares the recomputed root to the anchored root — a difference fails as
    `root-mismatch`.
-5. If the anchored root is signed and a verifier was supplied, checks the
-   signature — a bad signature fails as `signature`.
+5. Checks the signature over the anchored root with the supplied verifier — a bad
+   signature fails as `signature`. A verified signature (`sigOk === true`) is
+   **required** for the `tamper-evident` claim: a missing signature or absent
+   verifier yields `sigOk: 'n/a'`, which does not fail the structural checks but
+   does collapse the claim to `tamper-detecting`.
 
-Any one of these failures makes the report `intact: false`, and — this is the
-crux — the report's `claim` collapses to `tamper-detecting` regardless of which
-anchor was configured. You do not get to advertise a strong guarantee for a run
-that did not verify.
+Any of the structural failures (1–4) makes the report `intact: false`, and — this
+is the crux — the report's `claim` collapses to `tamper-detecting` regardless of
+which anchor was configured. A signature that is missing or invalid leaves the
+structure `intact` but still denies the `tamper-evident` claim. Either way, you do
+not get to advertise a strong guarantee for a run that did not fully verify.
 
 ## The two claims
 
 The report carries a `claim` field with exactly two possible values, and the rule
-deciding between them is one line in `verify.ts`:
+deciding between them is the `claimFor` function in `audit-verify.ts`:
 
 ```ts
-const claim =
-  GUARANTEE_RANK[g] >= GUARANTEE_RANK['external-immutable']
-    ? 'tamper-evident'
-    : 'tamper-detecting';
+return intact
+  && GUARANTEE_RANK[guarantee] >= GUARANTEE_RANK['external-immutable']
+  && sigOk === true
+  ? 'tamper-evident'
+  : 'tamper-detecting';
 ```
 
 `GUARANTEE_RANK` orders the tiers `detect: 0`, `external-immutable: 1`,
 `witnessed: 2`. So a run is licensed to call itself **`tamper-evident`** *only*
-when its anchor's guarantee is at rank `external-immutable` or higher — and only
-when verification passed end-to-end. Everything else is **`tamper-detecting`**.
+when three things hold together: the structure verified intact, the anchor's
+guarantee is at rank `external-immutable` or higher, **and** the anchored root
+carried a **verified signature** (`sigOk === true`). A missing or invalid
+signature — `sigOk` of `false` or `'n/a'` — collapses the claim to
+`tamper-detecting`, fail-safe. (This required-signature condition closed the
+same-second-forgery residual; without it, an attacker with bucket write but no
+signing key could slip an unsigned forged root past the earliest-version read.)
+Everything else is **`tamper-detecting`**.
 
 | `claim` | When | What it means |
 |---|---|---|
 | `tamper-detecting` | anchor guarantee `detect`, or any verification failure | The log is internally consistent and any modification *will be caught on verify*. |
-| `tamper-evident` | anchor guarantee ≥ `external-immutable` **and** verification passed | The anchored root lives in a separate trust domain that resists rewriting, so the record stands even against an actor who controls the run database. |
+| `tamper-evident` | anchor guarantee ≥ `external-immutable`, verification passed, **and** a verified signature (`sigOk === true`) | The anchored root lives in a separate trust domain that resists rewriting *and* is signed, so the record stands even against an actor who controls the run database. |
 
 ## The anchor tiers
 

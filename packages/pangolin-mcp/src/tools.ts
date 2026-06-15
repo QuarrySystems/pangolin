@@ -1,6 +1,6 @@
 // @quarry-systems/pangolin-mcp — runtime tool surface.
 //
-// Registers the six MCP tools allowed on the run-time surface per §4.6 of
+// Registers the nine MCP tools allowed on the run-time surface per §4.6 of
 // the pangolin-mvp spec. Three catalog reads (metadata only — never file
 // contents, secret values, or system prompt bodies) and three dispatch
 // operations:
@@ -31,10 +31,7 @@
 import type { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import type { PangolinClient } from '@quarry-systems/pangolin-client';
 import type { OperationsApi, Run } from '@quarry-systems/pangolin-orchestrator';
-import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
-} from '@modelcontextprotocol/sdk/types.js';
+import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 
 /**
  * The exact nine tool names this server exposes, in declaration order.
@@ -98,12 +95,12 @@ const TOOL_DESCRIPTORS = [
         },
         capabilities: {
           description:
-            'If set, REPLACES the subagent\'s assigned capability set. ' +
+            "If set, REPLACES the subagent's assigned capability set. " +
             'Cannot be combined with addCapabilities.',
         },
         addCapabilities: {
           description:
-            'If set, APPENDS to the subagent\'s assigned capability set (override on name conflict).',
+            "If set, APPENDS to the subagent's assigned capability set (override on name conflict).",
         },
         secrets: {
           description:
@@ -158,8 +155,7 @@ const TOOL_DESCRIPTORS = [
   },
   {
     name: 'pangolin_dispatch_cancel',
-    description:
-      'Request cancellation of an in-flight dispatch by id. Returns void on success.',
+    description: 'Request cancellation of an in-flight dispatch by id. Returns void on success.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -281,7 +277,11 @@ const ORCH_NOT_CONFIGURED =
  * The optional third parameter `orch` wires the three orchestrator tools.
  * When absent, those tools return a clear not-configured isError response.
  */
-export function registerPangolinTools(server: Server, client: PangolinClient, orch?: OperationsApi): void {
+export function registerPangolinTools(
+  server: Server,
+  client: PangolinClient,
+  orch?: OperationsApi,
+): void {
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: TOOL_DESCRIPTORS,
   }));
@@ -343,7 +343,10 @@ export function registerPangolinTools(server: Server, client: PangolinClient, or
               isError: true,
             };
           }
-          const runId = await orch.submit(argsObj.plan as Run, (argsObj.actor as string) ?? 'agent:mcp');
+          const runId = await orch.submit(
+            argsObj.plan as Run,
+            (argsObj.actor as string) ?? 'agent:mcp',
+          );
           return {
             content: [{ type: 'text', text: runId }],
           };
