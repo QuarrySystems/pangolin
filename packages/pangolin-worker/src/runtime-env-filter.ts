@@ -32,7 +32,13 @@ const BUILTIN_ALLOW: ReadonlySet<string> = new Set([
 const BUILTIN_ALLOW_PREFIXES: ReadonlyArray<string> = ["LC_"];
 
 export interface FilterRuntimeEnvOpts {
-  /** Operator passthrough: exact names or `PREFIX_*` trailing-glob. Empty/whitespace ignored. */
+  /**
+   * Operator passthrough: exact names or `PREFIX_*` trailing-glob. Empty/whitespace
+   * entries are ignored. NOTE the blast radius of a bare `"*"`: it is a valid glob
+   * with an empty prefix, so it matches EVERY variable and re-opens the whole
+   * firewall (default-deny → default-allow). Prefer the narrowest prefix that
+   * covers the deploy's vars (e.g. `MYAPP_*`) over `*`.
+   */
   allow?: string[];
 }
 
