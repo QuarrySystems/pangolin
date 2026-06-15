@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtemp, rm, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { LocalSecretStore } from '../src/local-secret-store.js';
+import { LocalSecretStore, isUnsafeSegment } from '../src/local-secret-store.js';
 
 let dir: string;
 
@@ -117,5 +117,28 @@ describe('LocalSecretStore', () => {
     await store.stage({ name: 'X', value: 'PLAINTEXT_MARKER', ttlSeconds: 1 });
     const entries = await readdir(dir);
     expect(entries.length).toBeGreaterThan(0);
+  });
+});
+
+describe("isUnsafeSegment (path-safety primitive, F10)", () => {
+  it("rejects traversal / separator / empty / NUL ids and accepts safe ids", () => {
+    for (const bad of ["", ".", "..", "a/..", "../escape", "a/b", "a\\b", "a\0b"]) {
+      expect(isUnsafeSegment(bad)).toBe(true);
+    }
+    for (const ok of ["abc", "local-secret-id", "550e8400-e29b-41d4-a716-446655440000"]) {
+      expect(isUnsafeSegment(ok)).toBe(false);
+    }
+  });
+});
+
+describe("LocalSecretStore.cleanupByTag (F10 regression: normal path still cleans)", () => {
+  it("removes a tagged secret and leaves an untagged one", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "lss-f10-"));
+    const store = new LocalSecretStore({ dir });
+    const tagged = await store.stage({ name: "A", value: "va", ttlSeconds: 60, tags: { "pangolin:dispatchId": "d-1" } });
+    const other = await store.stage({ name: "B", value: "vb", ttlSeconds: 60, tags: { "pangolin:dispatchId": "d-2" } });
+    await store.cleanupByTag("pangolin:dispatchId", "d-1");
+    await expect(store.resolve(tagged.ref)).rejects.toThrow();
+    await expect(store.resolve(other.ref)).resolves.toBe("vb");
   });
 });
