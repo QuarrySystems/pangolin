@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -504,5 +504,102 @@ describe("worker lifecycle (SecretStore integration)", () => {
     // made it through, and that env-bundle resolved values are injected.
     expect(capturedEnv?.STATIC_VAR).toBe("static-value");
     expect(capturedEnv?.API_KEY).toBe(API_KEY_VALUE);
+  });
+
+  it("registers env-bundle plain `values` for log redaction (F1)", async () => {
+    // --- Setup workspace + adapters (mirrors sibling test) ---
+    const workDir = await mkdtemp(join(tmpdir(), "idx-test-work-"));
+    const adaptersRoot = await mkdtemp(join(tmpdir(), "idx-test-adapters-"));
+    cleanupDirs.push(workDir, adaptersRoot);
+
+    const adapterDir = join(adaptersRoot, "claude-code");
+    await mkdir(adapterDir, { recursive: true });
+    await writeFile(
+      join(adapterDir, "index.js"),
+      `export default function () {
+         return {
+           name: "claude-code",
+           reservedPaths: [],
+           invoke: async () => ({ exitCode: 7, stdout: "", stderr: "" }),
+         };
+       };\n`,
+      "utf-8",
+    );
+
+    // --- Build storage with subagent + capability bundle + env bundle ---
+    const subagentDef = { name: "alpha", systemPrompt: "do work" };
+    const subagentUri = "pangolin://ns/subagent/alpha/sha256:s";
+    const subagentHash = computeContentHash(subagentDef);
+
+    const capFiles = { "README.md": new TextEncoder().encode("hello\n") };
+    const capBytes = packBundle("cap-a", capFiles);
+    const capUri = "pangolin://ns/capability/cap-a/sha256:c";
+    const capHash = computeContentHash(capBytes);
+
+    // An env bundle with a secret-shaped string in `values` (NOT secretRefs).
+    const LEAKY_VALUE = "plainval-SHOULD-BE-REDACTED-1234567890";
+    const envDef = { values: { LEAKY: LEAKY_VALUE }, secretRefs: {} };
+    const envBytes = asJsonBytes(envDef);
+    const envUri = "pangolin://ns/env/env-f1/sha256:e";
+    const envHash = computeContentHash(envDef);
+
+    const storage = new FakeStorage();
+    storage.set(subagentUri, asJsonBytes(subagentDef));
+    storage.set(capUri, capBytes);
+    storage.set(envUri, envBytes);
+
+    const bundleRefs = {
+      subagent: { uri: subagentUri, contentHash: subagentHash },
+      capabilities: [{ uri: capUri, contentHash: capHash }],
+      env: [{ uri: envUri, contentHash: envHash }],
+    };
+
+    const env: Record<string, string> = {
+      PANGOLIN_DISPATCH_ID: "d-f1-1",
+      PANGOLIN_NAMESPACE: "ns",
+      PANGOLIN_STORAGE_URI: "file:///fake",
+      PANGOLIN_BUNDLE_REFS_JSON: JSON.stringify(bundleRefs),
+      PANGOLIN_RUNTIME_ADAPTER: "claude-code",
+    };
+
+    // Adapter returns non-zero exit with stderr echoing the leaky value so
+    // the failure path logs stderr through the redacting StructuredLogger.
+    const adapter: RuntimeAdapter = {
+      name: "claude-code",
+      reservedPaths: [],
+      invoke: async () => ({ exitCode: 7, stdout: "", stderr: `boom ${LEAKY_VALUE}` }),
+    };
+
+    const writes: string[] = [];
+    const spy = vi.spyOn(process.stdout, "write").mockImplementation(
+      (chunk: string | Uint8Array): boolean => {
+        writes.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString());
+        return true;
+      },
+    );
+
+    const deps: RunWorkerDeps = {
+      storage,
+      adapter,
+      adaptersRoot,
+      workspaceDir: workDir,
+      secretStore: {
+        name: "fake",
+        resolve: async () => "x",
+        stage: async () => ({ ref: "x", ttlSeconds: 1 }),
+        cleanupByTag: async () => {},
+      },
+      fetchImpl: async () => new Response(null, { status: 204 }),
+    };
+
+    try {
+      await runWorker(env, deps);
+    } finally {
+      spy.mockRestore();
+    }
+
+    const allLogs = writes.join("");
+    expect(allLogs).not.toContain(LEAKY_VALUE);
+    expect(allLogs).toContain("<redacted:secret>");
   });
 });

@@ -362,6 +362,13 @@ export async function runWorker(
       logger.registerSecret(value);
       resolvedSecrets[k] = value;
     }
+    // F1: register env-bundle plain `values` for redaction too. Redaction must
+    // not depend on the client-side scanner having classified a value as a
+    // secret — a misclassified credential in `values` is still scrubbed from
+    // the worker's logs. (registerSecret skips empty strings.)
+    for (const v of Object.values(def.values ?? {})) {
+      logger.registerSecret(v);
+    }
     envBundles.push({ values: def.values ?? {}, secrets: resolvedSecrets });
   }
 
