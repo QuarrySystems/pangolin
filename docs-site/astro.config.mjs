@@ -76,6 +76,7 @@ export default defineConfig({
             { slug: 'explanation/how-offload-runs' },
             { slug: 'explanation/typed-product-handoff' },
             { slug: 'explanation/execution-patterns' },
+            { slug: 'explanation/threat-model' },
             { slug: 'explanation/sandboxing-ai-agents' },
             { slug: 'explanation/audit-guarantee-tiers' },
             { slug: 'explanation/privilege-boundary' },
