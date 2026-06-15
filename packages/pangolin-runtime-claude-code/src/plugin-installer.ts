@@ -17,6 +17,12 @@ export interface InstallPluginsOptions {
   workspaceDir: string;
   env: Record<string, string>;
   claudeBin?: string;
+  /**
+   * Test/diagnostic hook for captured child output. Production callers omit it
+   * (success output is discarded; failure output rides the thrown error, which
+   * the worker logs through its redactor). Never written raw to fd1/fd2.
+   */
+  onOutput?: (chunk: { stream: "stdout" | "stderr"; text: string }) => void;
 }
 
 export async function installPluginsFromManifest(
@@ -44,23 +50,39 @@ export async function installPluginsFromManifest(
       const child = spawn(bin, ["plugins", "install", name], {
         cwd: opts.workspaceDir,
         env: opts.env,
-        stdio: "inherit",
+        // F3: capture, never inherit — the merged env carries secrets and the
+        // child's output must not reach the worker's fds unredacted.
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      let out = "";
+      let err = "";
+      child.stdout?.on("data", (d: Buffer | string) => {
+        const text = typeof d === "string" ? d : d.toString();
+        out += text;
+        opts.onOutput?.({ stream: "stdout", text });
+      });
+      child.stderr?.on("data", (d: Buffer | string) => {
+        const text = typeof d === "string" ? d : d.toString();
+        err += text;
+        opts.onOutput?.({ stream: "stderr", text });
       });
       child.on("exit", (code: number | null) => {
         if (code === 0) {
           resolve();
         } else {
+          const tail = `${out}${err}`.trim();
           reject(
             new Error(
-              `claude plugins install ${name} exited with code ${code}`,
+              `claude plugins install ${name} exited with code ${code}` +
+                (tail ? `: ${tail}` : ""),
             ),
           );
         }
       });
-      child.on("error", (err: Error) => {
+      child.on("error", (e: Error) => {
         reject(
           new Error(
-            `claude plugins install ${name} failed to spawn: ${err.message}`,
+            `claude plugins install ${name} failed to spawn: ${e.message}`,
           ),
         );
       });

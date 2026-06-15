@@ -8,25 +8,18 @@ import { EventEmitter } from "node:events";
 // installed. The mock factory must be self-contained (no closures over
 // test-scope vars) due to vitest hoisting.
 vi.mock("node:child_process", () => {
-  const calls: Array<{
-    bin: string;
-    args: ReadonlyArray<string>;
-    cwd: string | undefined;
-    env: Record<string, string> | undefined;
-  }> = [];
-  // Default behavior: every spawn exits 0. Tests can swap `nextExitCode`
-  // to simulate a failure.
-  const config = { nextExitCode: 0 as number };
-  function spawn(
-    bin: string,
-    args: ReadonlyArray<string>,
-    opts: { cwd?: string; env?: Record<string, string> } = {},
-  ): EventEmitter {
-    calls.push({ bin, args, cwd: opts.cwd, env: opts.env });
-    const ee = new EventEmitter();
-    const code = config.nextExitCode;
-    // Emit asynchronously so listeners attached after the call still fire.
-    setImmediate(() => ee.emit("exit", code));
+  const calls: Array<{ bin: string; args: string[]; stdio: unknown }> = [];
+  const config = { nextExitCode: 0, nextStdout: "", nextStderr: "" };
+  function spawn(bin: string, args: string[], opts: { stdio?: unknown; cwd?: string; env?: Record<string, string> } = {}) {
+    calls.push({ bin, args, stdio: opts.stdio });
+    const ee = new EventEmitter() as EventEmitter & { stdout: EventEmitter; stderr: EventEmitter };
+    ee.stdout = new EventEmitter();
+    ee.stderr = new EventEmitter();
+    setImmediate(() => {
+      if (config.nextStdout) ee.stdout.emit("data", Buffer.from(config.nextStdout));
+      if (config.nextStderr) ee.stderr.emit("data", Buffer.from(config.nextStderr));
+      ee.emit("exit", config.nextExitCode);
+    });
     return ee;
   }
   return {
@@ -36,7 +29,7 @@ vi.mock("node:child_process", () => {
     __config: config,
     __reset: () => {
       calls.length = 0;
-      config.nextExitCode = 0;
+      Object.assign(config, { nextExitCode: 0, nextStdout: "", nextStderr: "" });
     },
   };
 });
@@ -48,10 +41,9 @@ type MockCpModule = typeof cp & {
   __calls: Array<{
     bin: string;
     args: ReadonlyArray<string>;
-    cwd: string | undefined;
-    env: Record<string, string> | undefined;
+    stdio: unknown;
   }>;
-  __config: { nextExitCode: number };
+  __config: { nextExitCode: number; nextStdout: string; nextStderr: string };
   __reset: () => void;
 };
 
@@ -90,8 +82,6 @@ describe("installPluginsFromManifest", () => {
     expect(cpMock.__calls[0]).toMatchObject({
       bin: "claude",
       args: ["plugins", "install", "alpha"],
-      cwd: dir,
-      env: { FOO: "bar" },
     });
     expect(cpMock.__calls[1].args).toEqual(["plugins", "install", "beta"]);
     expect(cpMock.__calls[2].args).toEqual(["plugins", "install", "gamma"]);
@@ -167,5 +157,29 @@ describe("installPluginsFromManifest", () => {
       installPluginsFromManifest({ workspaceDir: dir, env: {} }),
     ).resolves.toBeUndefined();
     expect(cpMock.__calls).toHaveLength(0);
+  });
+
+  it("captures install output and throws with it on failure; never inherits stdio (F3)", async () => {
+    await writeFile(
+      join(dir, "pangolin-plugins.json"),
+      JSON.stringify(["p"]),
+      "utf8",
+    );
+
+    const workspaceDir = dir;
+    const cp2 = cpMock;
+    cp2.__config.nextStdout = "marker-OUTPUT-123";
+    cp2.__config.nextExitCode = 3;
+    const chunks: string[] = [];
+    await expect(
+      installPluginsFromManifest({
+        workspaceDir,
+        env: {},
+        claudeBin: "claude",
+        onOutput: (c) => chunks.push(c.text),
+      }),
+    ).rejects.toThrow(/plugins install .*code 3/s);
+    expect(chunks.join("")).toContain("marker-OUTPUT-123");
+    expect(cp2.__calls.at(-1)!.stdio).toEqual(["ignore", "pipe", "pipe"]);
   });
 });
