@@ -74,7 +74,11 @@ export async function loadVerifyContext(
   const raw = await readFile(path, 'utf8');
   const json = JSON.parse(raw) as VerifyContextJson;
   const signerPublicKey = json.signerPublicKeySpkiDer
-    ? createPublicKey({ key: Buffer.from(b64(json.signerPublicKeySpkiDer)), format: 'der', type: 'spki' })
+    ? createPublicKey({
+        key: Buffer.from(b64(json.signerPublicKeySpkiDer)),
+        format: 'der',
+        type: 'spki',
+      })
     : undefined;
   return {
     signerPublicKey,
@@ -150,7 +154,14 @@ export function buildAnchor(ctx: VerifyContext, bundle: AuditBundle): AuditAncho
             }
           : undefined;
         const epochId = range?.epochId ?? o.epochId;
-        return [{ epochId, root: Uint8Array.from(Buffer.from(o.rootHex, 'hex')), signature, receipt: o.receipt }];
+        return [
+          {
+            epochId,
+            root: Uint8Array.from(Buffer.from(o.rootHex, 'hex')),
+            signature,
+            receipt: o.receipt,
+          },
+        ];
       },
     };
   }
@@ -172,20 +183,34 @@ export function buildAnchor(ctx: VerifyContext, bundle: AuditBundle): AuditAncho
 
 // ── Injected verifier callbacks (what core's verifyBundle consumes) ───────────
 
-/** ed25519 verify over the root bytes, using the context's SPKI-DER public key.
+/** The single algorithm→node-crypto-verify mapping. ed25519 = PureEdDSA (digest null);
+ *  ecdsa-p256 = ECDSA over SHA-256, DER (node's default). Unknown alg → false. Never throws.
+ *  Sole place the per-alg verify is written; all verify callbacks in this module route through it. */
+function verifySignatureBytes(
+  alg: string,
+  root: Uint8Array,
+  key: KeyObject,
+  sigBytes: Uint8Array,
+): boolean {
+  try {
+    if (alg === 'ed25519') return edVerify(null, Buffer.from(root), key, Buffer.from(sigBytes));
+    if (alg === 'ecdsa-p256')
+      return edVerify('sha256', Buffer.from(root), key, Buffer.from(sigBytes));
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/** Verify over the root bytes, using the context's SPKI-DER public key.
+ *  Dispatches on sig.alg (ed25519 | ecdsa-p256) via verifySignatureBytes.
  *  Returns undefined when no key is configured (→ core treats the check as 'n/a'). */
 export function makeVerifySignature(
   ctx: VerifyContext,
 ): ((root: Uint8Array, sig: Signature) => boolean) | undefined {
   const key = ctx.signerPublicKey;
   if (!key) return undefined;
-  return (root, sig) => {
-    try {
-      return edVerify(null, Buffer.from(root), key, Buffer.from(sig.bytes));
-    } catch {
-      return false;
-    }
-  };
+  return (root, sig) => verifySignatureBytes(sig.alg, root, key, sig.bytes);
 }
 
 /** RFC 3161 time verify bound to the context's TSA CA certs. Returns undefined when no
