@@ -26,7 +26,7 @@ const REF_SCHEME = "local-secret://";
  *  single SAFE path segment. We validate path-safety (not id FORMAT — legitimate
  *  non-UUID ids must still resolve): reject empty, `.`/`..`, any `..` substring, path
  *  separators, and NUL. Mirrors LocalStorageProvider.assertSafeSegment. */
-function isUnsafeSegment(id: string): boolean {
+export function isUnsafeSegment(id: string): boolean {
   return (
     id.length === 0 ||
     id === "." ||
@@ -95,6 +95,7 @@ export class LocalSecretStore implements SecretStore {
     for (const entry of entries) {
       if (!entry.endsWith(".meta.json")) continue;
       const id = entry.slice(0, -".meta.json".length);
+      if (isUnsafeSegment(id)) continue;
       let meta: SecretMeta;
       try {
         meta = JSON.parse(await readFile(join(this.dir, entry), "utf8")) as SecretMeta;

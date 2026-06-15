@@ -292,6 +292,9 @@ function buildEnv(
     PANGOLIN_BUNDLE_REFS_JSON: JSON.stringify(refs),
     PANGOLIN_INPUT_JSON: JSON.stringify({ name: 'world' }),
     PANGOLIN_RUNTIME_ADAPTER: 'mock',
+    // Allow the mock adapter's scenario selector through the default-deny
+    // env firewall so scenario-driven tests (needs-input-*, etc.) work.
+    PANGOLIN_RUNTIME_ENV_ALLOW: 'MOCK_ADAPTER_SCENARIO',
     ...extra,
   };
 }

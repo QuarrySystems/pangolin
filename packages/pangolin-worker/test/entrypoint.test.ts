@@ -430,7 +430,8 @@ describe('runWorker', () => {
     expect(captured).not.toHaveProperty('AWS_CONTAINER_CREDENTIALS_RELATIVE_URI');
     // Config + benign vars survive.
     expect(captured!.AWS_REGION).toBe('us-east-1');
-    expect(captured!.LOG_LEVEL).toBe('debug');
+    // Default-deny: LOG_LEVEL is not a built-in and was not allow-listed.
+    expect(captured).not.toHaveProperty('LOG_LEVEL');
   });
 
   it('resolves per-dispatch secrets, injects them into the runtime env, and registers them for log redaction', async () => {

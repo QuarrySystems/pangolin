@@ -410,4 +410,15 @@ describe("parseWorkerEnv", () => {
       expect(parseWorkerEnv({ ...baseEnv(), PANGOLIN_MODEL: "" }).model).toBeUndefined();
     });
   });
+
+  describe("runtime env allow", () => {
+    it("parses PANGOLIN_RUNTIME_ENV_ALLOW into a trimmed string array", () => {
+      const cfg = parseWorkerEnv({ ...baseEnv(), PANGOLIN_RUNTIME_ENV_ALLOW: " FOO , BAR_* , ,BAZ " });
+      expect(cfg.runtimeEnvAllow).toEqual(["FOO", "BAR_*", "BAZ"]);
+    });
+    it("defaults runtimeEnvAllow to [] when unset", () => {
+      const cfg = parseWorkerEnv(baseEnv());
+      expect(cfg.runtimeEnvAllow).toEqual([]);
+    });
+  });
 });

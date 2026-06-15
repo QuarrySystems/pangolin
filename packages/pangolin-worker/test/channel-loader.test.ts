@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -183,6 +183,44 @@ describe("loadChannelIfPresent", () => {
     await new Promise((r) => setTimeout(r, 50));
     // stop() must resolve without throwing despite the iterator failure.
     await expect(handle!.stop()).resolves.toBeUndefined();
+  });
+
+  it("emits channel iteration errors through the injected log hook, not console (F6)", async () => {
+    const events: Array<{ kind: string; [k: string]: unknown }> = [];
+    await writeManifest({ adapter: "auth-fail", channel: "zeta" });
+    await writeAdapter(
+      "auth-fail",
+      `export default function () {
+         return {
+           name: "auth-fail",
+           subscribe(config) {
+             return {
+               async *[Symbol.asyncIterator]() {
+                 throw new Error("auth failed: bad credentials in amqp://user:s3cr3t@broker.example.com");
+               },
+             };
+           },
+         };
+       };\n`,
+    );
+
+    const consoleSpy = vi.spyOn(console, "error");
+    const handle = await loadChannelIfPresent({
+      workspaceDir: workDir,
+      adaptersRoot,
+      logEvent: (e) => events.push(e),
+    });
+    // Let the background drain hit the throw.
+    await new Promise((r) => setTimeout(r, 50));
+    await handle?.stop();
+
+    const channelErr = events.find((e) => e.kind === "channel.error");
+    expect(channelErr).toBeDefined();
+    expect(String(channelErr?.detail)).toContain("auth failed");
+    // The "not console" half of the claim: with a hook present, nothing is
+    // written raw to console (which would bypass the redactor).
+    expect(consoleSpy).not.toHaveBeenCalled();
+    consoleSpy.mockRestore();
   });
 
   it("creates the .pangolin/channel directory if missing", async () => {

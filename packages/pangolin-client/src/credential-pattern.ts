@@ -26,8 +26,8 @@ const CREDENTIAL_PATTERNS: ReadonlyArray<{ name: string; regex: RegExp }> = [
   { name: "google-api-key", regex: /\bAIza[A-Za-z0-9_-]{35}\b/ },
   { name: "slack-token", regex: /\bxox[baprs]-[A-Za-z0-9-]{10,}/ },
   { name: "stripe-key", regex: /\b[sr]k_(?:live|test)_[A-Za-z0-9]{16,}\b/ },
-  // PEM private-key armor. The first 16 chars folded into the error are
-  // just the header (`-----BEGIN RSA P`), never key material.
+  // PEM private-key armor. The first 8 chars folded into the error are
+  // just the header (`-----BEG`), never key material.
   { name: "private-key", regex: /-----BEGIN (?:[A-Z0-9]+ )?PRIVATE KEY-----/ },
 ];
 
@@ -48,7 +48,7 @@ export interface CredentialPatternCheckOpts {
  * `"capability:git-write:.claude/settings.json"`.
  *
  * The error `detail` contains the named pattern that matched and the first
- * 16 chars of the matched substring (truncated to avoid leaking the full
+ * 8 chars of the matched substring (truncated to avoid leaking the full
  * credential into logs).
  */
 export function assertNoCredentialPattern(
@@ -63,7 +63,7 @@ export function assertNoCredentialPattern(
     if (match) {
       throw new CredentialsInEnvError(
         field,
-        `${name} pattern matched: ${match[0].slice(0, 16)}...`,
+        `${name} pattern matched: ${match[0].slice(0, 8)}...`,
       );
     }
   }

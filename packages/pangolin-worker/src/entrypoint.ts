@@ -362,6 +362,13 @@ export async function runWorker(
       logger.registerSecret(value);
       resolvedSecrets[k] = value;
     }
+    // F1: register env-bundle plain `values` for redaction too. Redaction must
+    // not depend on the client-side scanner having classified a value as a
+    // secret — a misclassified credential in `values` is still scrubbed from
+    // the worker's logs. (registerSecret skips empty strings.)
+    for (const v of Object.values(def.values ?? {})) {
+      logger.registerSecret(v);
+    }
     envBundles.push({ values: def.values ?? {}, secrets: resolvedSecrets });
   }
 
@@ -389,16 +396,18 @@ export async function runWorker(
 
   // Step 8: merge env. The worker's own process.env seeds the base — PATH,
   // HOME, locale, AWS_REGION, etc. need to survive into the child runtime —
-  // but `filterRuntimeEnv` first strips the worker control plane (PANGOLIN_*)
-  // and the ambient AWS task-role credential chain (§7.7): a prompt-injected
-  // sub-agent must not inherit the worker's identity or the callback HMAC
-  // key reference. Credentials the sub-agent genuinely needs are supplied
-  // explicitly via an env bundle, which is merged on top of this base.
+  // but `filterRuntimeEnv` is DEFAULT-DENY: it passes only an allow-list of
+  // non-credential system vars (plus the operator's PANGOLIN_RUNTIME_ENV_ALLOW)
+  // and drops everything else — the worker control plane (PANGOLIN_*), the
+  // ambient AWS task-role credential chain, and any other inherited var — so a
+  // prompt-injected sub-agent cannot inherit the worker's identity or the
+  // callback HMAC key reference. Credentials the sub-agent genuinely needs are
+  // supplied explicitly via an env bundle, which is merged on top of this base.
   const rawBase: Record<string, string> = {};
   for (const [k, v] of Object.entries(env)) {
     if (v !== undefined) rawBase[k] = v;
   }
-  const baseEnv = filterRuntimeEnv(rawBase);
+  const baseEnv = filterRuntimeEnv(rawBase, { allow: cfg.runtimeEnvAllow });
   const mergedEnv = mergeEnv({
     envBundles,
     perDispatchSecrets,
@@ -449,6 +458,7 @@ export async function runWorker(
     channel = await loadChannelIfPresent({
       workspaceDir,
       adaptersRoot: deps.adaptersRoot,
+      logEvent: (event) => logger.log(event),
     });
   } catch (err) {
     logger.log({

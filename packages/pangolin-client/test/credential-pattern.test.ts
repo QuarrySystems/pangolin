@@ -272,17 +272,30 @@ describe("assertNoCredentialPattern", () => {
       }
     });
 
-    it("includes only the first 16 chars of the matched substring (does not leak full credential)", () => {
+    it("includes only the first 8 chars of the matched substring (does not leak full credential)", () => {
       const fullKey = "AKIAIOSFODNN7EXAMPLE"; // 20 chars
       try {
         assertNoCredentialPattern("values.FOO", fullKey);
         throw new Error("expected to throw");
       } catch (err) {
         const ciee = err as CredentialsInEnvError;
-        // first 16 chars present
-        expect(ciee.detail).toContain(fullKey.slice(0, 16));
+        // first 8 chars present
+        expect(ciee.detail).toContain(fullKey.slice(0, 8));
         // full key NOT present
         expect(ciee.detail).not.toContain(fullKey);
+      }
+    });
+
+    it("discloses at most 8 chars of the matched value in the error detail (F12)", () => {
+      const secret = "sk-ABCDEFGHIJKLMNOPQRST"; // openai-shaped: sk- + 20 alnum
+      try {
+        assertNoCredentialPattern("env-bundle:test:OPENAI", secret);
+        throw new Error("expected assertNoCredentialPattern to throw");
+      } catch (err) {
+        const detail = (err as Error).message;
+        expect(detail).not.toContain(secret);
+        expect(detail).toContain(secret.slice(0, 8));
+        expect(detail).not.toContain(secret.slice(0, 9));
       }
     });
   });

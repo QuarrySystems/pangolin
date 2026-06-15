@@ -184,7 +184,7 @@ export class LocalDockerProvider implements ComputeProvider {
     // (`local-secret://<id>`), so only the dir view differs across the mount.
     const secretDir = env.PANGOLIN_SECRET_STORE_DIR;
     if (secretDir) {
-      binds.push(`${secretDir}:${this.secretStoreMountTarget}`);
+      binds.push(`${secretDir}:${this.secretStoreMountTarget}:ro`);
       env.PANGOLIN_SECRET_STORE_DIR = this.secretStoreMountTarget;
     }
 
