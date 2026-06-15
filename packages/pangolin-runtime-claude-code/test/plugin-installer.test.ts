@@ -18,7 +18,7 @@ vi.mock("node:child_process", () => {
     setImmediate(() => {
       if (config.nextStdout) ee.stdout.emit("data", Buffer.from(config.nextStdout));
       if (config.nextStderr) ee.stderr.emit("data", Buffer.from(config.nextStderr));
-      ee.emit("exit", config.nextExitCode);
+      ee.emit("close", config.nextExitCode);
     });
     return ee;
   }
