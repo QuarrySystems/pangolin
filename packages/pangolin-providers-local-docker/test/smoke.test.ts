@@ -152,7 +152,7 @@ describe('LocalDockerProvider.run — secret store bind-mount', () => {
       HostConfig?: { Binds?: string[] };
     };
     expect(arg.HostConfig?.Binds).toContain(
-      '/host/tmp/pangolin-secrets-abc:/pangolin/secrets',
+      '/host/tmp/pangolin-secrets-abc:/pangolin/secrets:ro',
     );
     expect(arg.Env).toContain('PANGOLIN_SECRET_STORE_DIR=/pangolin/secrets');
   });
@@ -173,7 +173,7 @@ describe('LocalDockerProvider.run — secret store bind-mount', () => {
       Env: string[];
       HostConfig?: { Binds?: string[] };
     };
-    expect(arg.HostConfig?.Binds).toContain('/host/s:/custom/secrets');
+    expect(arg.HostConfig?.Binds).toContain('/host/s:/custom/secrets:ro');
     expect(arg.Env).toContain('PANGOLIN_SECRET_STORE_DIR=/custom/secrets');
   });
 
@@ -193,6 +193,23 @@ describe('LocalDockerProvider.run — secret store bind-mount', () => {
     expect((arg.HostConfig?.Binds ?? []).some((b) => b.includes('/pangolin/secrets'))).toBe(
       false,
     );
+  });
+
+  it('binds the per-dispatch secret dir read-only (F9)', async () => {
+    const createSpy = vi.fn(async () => ({ id: 'cs4', start: async () => {} }));
+    const provider = new LocalDockerProvider({
+      docker: { createContainer: createSpy } as never,
+    });
+
+    await provider.run(
+      baseSpec({ env: { PANGOLIN_SECRET_STORE_DIR: '/host/tmp/pangolin-secrets-abc' } }),
+      baseCtx,
+    );
+
+    const arg = createSpy.mock.calls[0]![0] as { HostConfig?: { Binds?: string[] } };
+    const binds = arg.HostConfig?.Binds ?? [];
+    const secretBind = binds.find((b) => b.includes('/pangolin/secrets'));
+    expect(secretBind?.endsWith(':ro')).toBe(true);
   });
 });
 
