@@ -8,10 +8,10 @@ import { EventEmitter } from "node:events";
 // installed. The mock factory must be self-contained (no closures over
 // test-scope vars) due to vitest hoisting.
 vi.mock("node:child_process", () => {
-  const calls: Array<{ bin: string; args: string[]; stdio: unknown }> = [];
+  const calls: Array<{ bin: string; args: string[]; stdio: unknown; cwd?: string; env?: Record<string, string> }> = [];
   const config = { nextExitCode: 0, nextStdout: "", nextStderr: "" };
   function spawn(bin: string, args: string[], opts: { stdio?: unknown; cwd?: string; env?: Record<string, string> } = {}) {
-    calls.push({ bin, args, stdio: opts.stdio });
+    calls.push({ bin, args, stdio: opts.stdio, cwd: opts.cwd, env: opts.env });
     const ee = new EventEmitter() as EventEmitter & { stdout: EventEmitter; stderr: EventEmitter };
     ee.stdout = new EventEmitter();
     ee.stderr = new EventEmitter();
@@ -42,6 +42,8 @@ type MockCpModule = typeof cp & {
     bin: string;
     args: ReadonlyArray<string>;
     stdio: unknown;
+    cwd?: string;
+    env?: Record<string, string>;
   }>;
   __config: { nextExitCode: number; nextStdout: string; nextStderr: string };
   __reset: () => void;
@@ -82,6 +84,8 @@ describe("installPluginsFromManifest", () => {
     expect(cpMock.__calls[0]).toMatchObject({
       bin: "claude",
       args: ["plugins", "install", "alpha"],
+      cwd: dir,
+      env: { FOO: "bar" },
     });
     expect(cpMock.__calls[1].args).toEqual(["plugins", "install", "beta"]);
     expect(cpMock.__calls[2].args).toEqual(["plugins", "install", "gamma"]);
@@ -178,7 +182,7 @@ describe("installPluginsFromManifest", () => {
         claudeBin: "claude",
         onOutput: (c) => chunks.push(c.text),
       }),
-    ).rejects.toThrow(/plugins install .*code 3/s);
+    ).rejects.toThrow(/plugins install .*code 3.*marker-OUTPUT-123/s);
     expect(chunks.join("")).toContain("marker-OUTPUT-123");
     expect(cp2.__calls.at(-1)!.stdio).toEqual(["ignore", "pipe", "pipe"]);
   });
