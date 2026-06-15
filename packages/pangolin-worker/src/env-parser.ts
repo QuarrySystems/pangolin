@@ -55,6 +55,10 @@ export interface WorkerConfig {
    * Requested model (control-plane; work.model pass-through). Opaque string — levels resolve in the adapter.
    */
   model?: string;
+  /**
+   * Operator passthrough allow-list for the runtime env firewall (exact names or `PREFIX_*` globs). Parsed from PANGOLIN_RUNTIME_ENV_ALLOW. Empty when unset.
+   */
+  runtimeEnvAllow: string[];
 }
 
 function parsePositiveInteger(raw: string, varName: string): number {
@@ -190,6 +194,9 @@ export function parseWorkerEnv(
   const disableNeedsInputHelper =
     env.PANGOLIN_DISABLE_NEEDS_INPUT_HELPER === "true";
 
+  const runtimeEnvAllow = (env.PANGOLIN_RUNTIME_ENV_ALLOW ?? "")
+    .split(",").map((s) => s.trim()).filter((s) => s.length > 0);
+
   return {
     dispatchId,
     namespace,
@@ -204,6 +211,7 @@ export function parseWorkerEnv(
     runtimeAdapter,
     setupTimeoutSeconds,
     disableNeedsInputHelper,
+    runtimeEnvAllow,
     ...(env.PANGOLIN_MODEL ? { model: env.PANGOLIN_MODEL } : {}),
   };
 }

@@ -405,7 +405,7 @@ export async function runWorker(
   for (const [k, v] of Object.entries(env)) {
     if (v !== undefined) rawBase[k] = v;
   }
-  const baseEnv = filterRuntimeEnv(rawBase);
+  const baseEnv = filterRuntimeEnv(rawBase, { allow: cfg.runtimeEnvAllow });
   const mergedEnv = mergeEnv({
     envBundles,
     perDispatchSecrets,
