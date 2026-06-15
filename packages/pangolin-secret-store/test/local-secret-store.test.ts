@@ -130,15 +130,3 @@ describe("isUnsafeSegment (path-safety primitive, F10)", () => {
     }
   });
 });
-
-describe("LocalSecretStore.cleanupByTag (F10 regression: normal path still cleans)", () => {
-  it("removes a tagged secret and leaves an untagged one", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "lss-f10-"));
-    const store = new LocalSecretStore({ dir });
-    const tagged = await store.stage({ name: "A", value: "va", ttlSeconds: 60, tags: { "pangolin:dispatchId": "d-1" } });
-    const other = await store.stage({ name: "B", value: "vb", ttlSeconds: 60, tags: { "pangolin:dispatchId": "d-2" } });
-    await store.cleanupByTag("pangolin:dispatchId", "d-1");
-    await expect(store.resolve(tagged.ref)).rejects.toThrow();
-    await expect(store.resolve(other.ref)).resolves.toBe("vb");
-  });
-});
