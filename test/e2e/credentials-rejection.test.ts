@@ -329,7 +329,7 @@ describe('E2E: credentials-in-env rejection at register() time', () => {
       );
     });
 
-    it('error message includes only first 16 chars of matched credential (no full leak)', async () => {
+    it('error message includes only first 8 chars of matched credential (no full leak)', async () => {
       const err = await captureRejection(
         makeClient().env.register({
           name: 'truncate-check',
@@ -337,10 +337,12 @@ describe('E2E: credentials-in-env rejection at register() time', () => {
         }),
       );
       expectCredentialsInEnvError(err);
-      // First 16 chars of the matched substring MUST be present.
-      expect(err.detail).toContain(AWS_ACCESS_KEY.slice(0, 16));
-      // The full 20-char credential MUST NOT be present anywhere in the
-      // surfaced error — neither detail nor composed message.
+      // First 8 chars of the matched substring MAY be present (the cap, F12).
+      expect(err.detail).toContain(AWS_ACCESS_KEY.slice(0, 8));
+      // No more than 8 chars are disclosed.
+      expect(err.detail).not.toContain(AWS_ACCESS_KEY.slice(0, 9));
+      // The full credential MUST NOT be present anywhere in the surfaced
+      // error — neither detail nor composed message.
       expect(err.detail).not.toContain(AWS_ACCESS_KEY);
       expect(err.message).not.toContain(AWS_ACCESS_KEY);
       // Truncation marker present.
