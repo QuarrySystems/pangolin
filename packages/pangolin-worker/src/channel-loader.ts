@@ -32,6 +32,12 @@ export interface LoadChannelOpts {
   workspaceDir: string;
   /** Override the adapters root for testing. Default: '/opt/pangolin/adapters'. */
   adaptersRoot?: string;
+  /**
+   * Redacting log sink. When provided, channel diagnostics are emitted through it
+   * (so the worker's StructuredLogger redaction applies) instead of raw console.error.
+   * Optional so standalone/tests still work.
+   */
+  logEvent?: (event: { kind: string; [k: string]: unknown }) => void;
 }
 
 interface ChannelManifest {
@@ -45,6 +51,12 @@ const STOP_TIMEOUT_MS = 10_000;
 export async function loadChannelIfPresent(
   opts: LoadChannelOpts,
 ): Promise<ChannelHandle | null> {
+  const logErr = (event: { kind: string; [k: string]: unknown }): void => {
+    if (opts.logEvent) opts.logEvent(event);
+    // eslint-disable-next-line no-console
+    else console.error(JSON.stringify(event));
+  };
+
   const manifestPath = join(opts.workspaceDir, "pangolin-channel.json");
   try {
     await access(manifestPath);
@@ -82,10 +94,7 @@ export async function loadChannelIfPresent(
         next = await iterator.next();
       } catch (err) {
         // §6.8 — adapter failure does not fail dispatch; log only.
-        // eslint-disable-next-line no-console
-        console.error(
-          `pangolin-worker: channel adapter ${cfg.adapter} errored: ${String(err)}`,
-        );
+        logErr({ kind: "channel.error", adapter: cfg.adapter, detail: String(err) });
         return;
       }
       if (next.done) return;
@@ -93,10 +102,7 @@ export async function loadChannelIfPresent(
       try {
         await appendFile(inboxPath, JSON.stringify(msg) + "\n");
       } catch (err) {
-        // eslint-disable-next-line no-console
-        console.error(
-          `pangolin-worker: failed to append channel message to ${inboxPath}: ${String(err)}`,
-        );
+        logErr({ kind: "channel.append-failed", inboxPath, detail: String(err) });
         // Keep looping — a single write failure should not silently
         // terminate the subscription either.
       }
@@ -105,10 +111,7 @@ export async function loadChannelIfPresent(
     // Defensive — the inner loop already catches, but if anything escapes
     // (e.g. a bad iterable that throws synchronously from Symbol.asyncIterator
     // delegation), still swallow per §6.8.
-    // eslint-disable-next-line no-console
-    console.error(
-      `pangolin-worker: channel loop crashed for ${cfg.adapter}: ${String(err)}`,
-    );
+    logErr({ kind: "channel.crashed", adapter: cfg.adapter, detail: String(err) });
   });
 
   return {

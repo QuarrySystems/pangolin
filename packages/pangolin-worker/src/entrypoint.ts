@@ -456,6 +456,7 @@ export async function runWorker(
     channel = await loadChannelIfPresent({
       workspaceDir,
       adaptersRoot: deps.adaptersRoot,
+      logEvent: (event) => logger.log(event),
     });
   } catch (err) {
     logger.log({

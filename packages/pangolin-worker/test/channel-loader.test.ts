@@ -185,6 +185,39 @@ describe("loadChannelIfPresent", () => {
     await expect(handle!.stop()).resolves.toBeUndefined();
   });
 
+  it("emits channel iteration errors through the injected log hook, not console (F6)", async () => {
+    const events: Array<{ kind: string; [k: string]: unknown }> = [];
+    await writeManifest({ adapter: "auth-fail", channel: "zeta" });
+    await writeAdapter(
+      "auth-fail",
+      `export default function () {
+         return {
+           name: "auth-fail",
+           subscribe(config) {
+             return {
+               async *[Symbol.asyncIterator]() {
+                 throw new Error("auth failed: bad credentials in amqp://user:s3cr3t@broker.example.com");
+               },
+             };
+           },
+         };
+       };\n`,
+    );
+
+    const handle = await loadChannelIfPresent({
+      workspaceDir: workDir,
+      adaptersRoot,
+      logEvent: (e) => events.push(e),
+    });
+    // Let the background drain hit the throw.
+    await new Promise((r) => setTimeout(r, 30));
+    await handle?.stop();
+
+    const channelErr = events.find((e) => e.kind === "channel.error");
+    expect(channelErr).toBeDefined();
+    expect(String(channelErr?.detail)).toContain("auth failed");
+  });
+
   it("creates the .pangolin/channel directory if missing", async () => {
     await writeManifest({ adapter: "stub2", channel: "epsilon" });
     await writeAdapter(
