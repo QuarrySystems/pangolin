@@ -21,6 +21,11 @@
 //   - Agent-needed credentials (ANTHROPIC_API_KEY etc.) already arrive via
 //     env bundle / per-dispatch secret merged on top of baseEnv — they do
 //     NOT need to be in BUILTIN_ALLOW.
+//   - REDACTION ASYMMETRY: values that pass this filter (built-ins and
+//     operator allow-listed vars) are NOT added to the log-redaction set —
+//     only env-bundle values + secret-lane values are. So never allow-list a
+//     credential-bearing var here; route credentials through the secret lane
+//     (env bundle / per-dispatch secret), which is both scoped and redacted.
 
 /** Non-credential system vars always allowed into the child runtime env. */
 const BUILTIN_ALLOW: ReadonlySet<string> = new Set([

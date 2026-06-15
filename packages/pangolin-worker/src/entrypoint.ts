@@ -396,11 +396,13 @@ export async function runWorker(
 
   // Step 8: merge env. The worker's own process.env seeds the base — PATH,
   // HOME, locale, AWS_REGION, etc. need to survive into the child runtime —
-  // but `filterRuntimeEnv` first strips the worker control plane (PANGOLIN_*)
-  // and the ambient AWS task-role credential chain (§7.7): a prompt-injected
-  // sub-agent must not inherit the worker's identity or the callback HMAC
-  // key reference. Credentials the sub-agent genuinely needs are supplied
-  // explicitly via an env bundle, which is merged on top of this base.
+  // but `filterRuntimeEnv` is DEFAULT-DENY: it passes only an allow-list of
+  // non-credential system vars (plus the operator's PANGOLIN_RUNTIME_ENV_ALLOW)
+  // and drops everything else — the worker control plane (PANGOLIN_*), the
+  // ambient AWS task-role credential chain, and any other inherited var — so a
+  // prompt-injected sub-agent cannot inherit the worker's identity or the
+  // callback HMAC key reference. Credentials the sub-agent genuinely needs are
+  // supplied explicitly via an env bundle, which is merged on top of this base.
   const rawBase: Record<string, string> = {};
   for (const [k, v] of Object.entries(env)) {
     if (v !== undefined) rawBase[k] = v;
