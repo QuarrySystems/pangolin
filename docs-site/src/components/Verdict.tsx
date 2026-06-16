@@ -9,6 +9,7 @@ const CHECK_ROWS: { key: keyof VerificationReport['checks']; label: string }[] =
   { key: 'time', label: 'time' }, // handoff omitted — n/a for a single-run demo
 ];
 
+/** The verdict banner + the two orthogonal axis badges (tamper + time). */
 export function Verdict({ report }: { report: VerificationReport | null }) {
   if (!report) return <div className="pv-verdict is-wait">Verifying…</div>;
   const evident = report.claim === 'tamper-evident';
@@ -33,20 +34,27 @@ export function Verdict({ report }: { report: VerificationReport | null }) {
         </span>
         <span className="pv-axis-badge">{report.anchorId} · {report.guarantee}</span>
       </div>
-      <div className="pv-checklist">
-        {CHECK_ROWS.map(({ key, label }) => {
-          const ok = report.checks[key].ok;
-          const cls = ok === true ? 'is-ok' : ok === false ? 'is-fail' : 'is-na';
-          const mark = ok === true ? '✓' : ok === false ? '✗' : '·';
-          return (
-            <div key={key} className={'pv-check ' + cls}>
-              <span className="mono">{mark}</span>
-              <span>{label}</span>
-              {report.checks[key].detail && <span className="mono">{report.checks[key].detail}</span>}
-            </div>
-          );
-        })}
-      </div>
+    </div>
+  );
+}
+
+/** A compact, full-width CLI-style strip of the per-check results. */
+export function Checklist({ report }: { report: VerificationReport | null }) {
+  if (!report) return null;
+  return (
+    <div className="pv-checklist" role="status" aria-label="verification checks">
+      {CHECK_ROWS.map(({ key, label }) => {
+        const ok = report.checks[key].ok;
+        const cls = ok === true ? 'is-ok' : ok === false ? 'is-fail' : 'is-na';
+        const mark = ok === true ? '✓' : ok === false ? '✗' : '·';
+        return (
+          <span key={key} className={'pv-check ' + cls}>
+            <span className="mono">{mark}</span>
+            <span>{label}</span>
+            {report.checks[key].detail && <span className="mono pv-check-detail">{report.checks[key].detail}</span>}
+          </span>
+        );
+      })}
     </div>
   );
 }

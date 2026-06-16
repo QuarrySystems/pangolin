@@ -7,7 +7,7 @@ import {
 import type { VerificationReport } from '@quarry-systems/pangolin-core';
 import { PRISTINE_ITEMS, TAMPERS } from '../lib/demoBundle';
 import { Graph } from './Graph';
-import { Verdict } from './Verdict';
+import { Verdict, Checklist } from './Verdict';
 import { Detail } from './Detail';
 import './verifier.css';
 
@@ -68,9 +68,17 @@ export default function ProvabilityVerifier() {
   return (
     <div className="pv-root">
       <header className="pv-header">
-        <div className="pv-brand"><div><div className="pv-eyebrow">Audit bundle verifier</div><div className="pv-wordmark">Pangolin</div></div></div>
+        <div className="pv-brand">
+          <div>
+            <div className="pv-eyebrow">Audit bundle verifier</div>
+            <div className="pv-wordmark">Pangolin</div>
+            <div className="pv-subtitle">Sealed change-order bundle · CO-0142</div>
+          </div>
+        </div>
         <Verdict report={report} />
       </header>
+
+      <Checklist report={report} />
 
       <section className="pv-controls">
         <span className="pv-ctl-label"><Zap size={13} /> Try to break the seal</span>

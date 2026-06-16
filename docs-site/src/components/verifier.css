@@ -8,18 +8,19 @@
   --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
   --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
   background:var(--ink); color:var(--text); font-family:var(--sans);
-  padding:28px clamp(16px,4vw,40px); box-sizing:border-box; border-radius:14px;
+  padding:22px clamp(14px,3vw,30px); box-sizing:border-box; border-radius:14px;
   -webkit-font-smoothing:antialiased; line-height:1.45;
 }
 .pv-root *{box-sizing:border-box;}
 .mono{font-family:var(--mono); font-variant-ligatures:none;}
 .pv-header{display:flex; justify-content:space-between; align-items:flex-start; gap:20px; flex-wrap:wrap;
-  padding-bottom:20px; border-bottom:1px solid var(--line);}
+  padding-bottom:16px; border-bottom:1px solid var(--line);}
 .pv-brand{display:flex; gap:12px; align-items:center;}
 .pv-eyebrow{font-size:10.5px; letter-spacing:.22em; text-transform:uppercase; color:var(--dim); font-weight:600;}
 .pv-wordmark{font-size:26px; font-weight:680; letter-spacing:-.02em; line-height:1; margin-top:3px;
   background:linear-gradient(180deg,#F0F4FA,#A9B6C7); -webkit-background-clip:text; background-clip:text; color:transparent;}
-.pv-verdict-wrap{display:flex; flex-direction:column; gap:10px; align-items:flex-end;}
+.pv-subtitle{font-size:12px; color:var(--dim); margin-top:7px; letter-spacing:.01em;}
+.pv-verdict-wrap{display:flex; flex-direction:column; gap:8px; align-items:flex-end; min-width:240px;}
 .pv-verdict{display:flex; gap:11px; align-items:center; padding:11px 16px; border-radius:12px;
   border:1px solid var(--line2); background:var(--panel);}
 .pv-verdict.is-wait{color:var(--muted);}
@@ -31,11 +32,13 @@
 .pv-axis-badge{font-size:11px; letter-spacing:.04em; padding:3px 9px; border-radius:20px; border:1px solid var(--line2); color:var(--muted);}
 .pv-axis-badge.is-evident{color:var(--teal); background:var(--teal-dim); border-color:var(--teal-line);}
 .pv-axis-badge.is-attested{color:var(--teal); background:var(--teal-dim); border-color:var(--teal-line);}
-.pv-checklist{display:flex; flex-direction:column; gap:1px;}
-.pv-check{display:flex; gap:10px; align-items:baseline; font-size:12.5px; padding:3px 0;}
-.pv-check .mono{color:var(--muted);}
+.pv-checklist{display:flex; flex-wrap:wrap; align-items:baseline; gap:7px 16px; margin:14px 0 2px;
+  padding:10px 14px; border:1px solid var(--line); border-radius:10px; background:var(--panel);}
+.pv-check{display:inline-flex; gap:7px; align-items:baseline; font-size:12.5px; color:var(--muted);}
+.pv-check .mono{font-weight:700;}
 .pv-check.is-fail{color:var(--red);} .pv-check.is-ok{color:var(--teal);} .pv-check.is-na{color:var(--dim);}
-.pv-controls{display:flex; justify-content:space-between; align-items:center; gap:16px; flex-wrap:wrap; padding:16px 0;}
+.pv-check-detail{color:var(--red); font-size:11px; font-weight:400;}
+.pv-controls{display:flex; justify-content:space-between; align-items:center; gap:14px; flex-wrap:wrap; padding:13px 0;}
 .pv-ctl-label{display:inline-flex; gap:7px; align-items:center; font-size:11px; letter-spacing:.16em;
   text-transform:uppercase; color:var(--dim); font-weight:600;}
 .pv-ctl-label svg{color:var(--bronze);}
@@ -111,5 +114,17 @@
 .pv-scale.is-broken .pv-s{stroke:var(--amber); fill:var(--amber); fill-opacity:.12;}
 .pv-crack{stroke:var(--red); stroke-width:1.6; fill:none; stroke-linecap:round; stroke-linejoin:round;}
 .pv-scale.is-broken .pv-crack{stroke:var(--amber);}
-@media (max-width:760px){ .pv-fields{grid-template-columns:1fr;} .pv-verdict-wrap{align-items:stretch;} }
+@media (max-width:760px){
+  .pv-root{padding:18px 14px;}
+  .pv-header{flex-direction:column; gap:14px;}
+  .pv-verdict-wrap{align-items:stretch; width:100%; min-width:0;}
+  .pv-axis{justify-content:flex-start;}
+  .pv-controls{flex-direction:column; align-items:stretch; gap:10px; padding:12px 0;}
+  .pv-ctl-btns{width:100%;}
+  .pv-tier{flex-wrap:wrap;}
+  .pv-tier button{flex:1 1 140px;}
+  .pv-fields{grid-template-columns:1fr;}
+  .pv-node{width:158px;}
+  .pv-levels{gap:34px;}
+}
 @media (prefers-reduced-motion:reduce){ .pv-edge.is-broken{stroke-dasharray:none;} }
