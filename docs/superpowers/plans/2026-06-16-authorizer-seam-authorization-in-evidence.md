@@ -162,7 +162,7 @@ describe('canonEntry authorization', () => {
 - [ ] **Step 3: Implement** — rewrite `canonEntry` in `audit-canon.ts`:
 ```ts
 import type { AuditEntry } from './audit.js';
-import { canonicalJsonString } from './canonical-json.js';   // sorted-key canonicalizer (already in core)
+import { canonicalJsonString } from './content-hash.js';   // sorted-key canonicalizer (core; same one manifest.ts uses)
 
 /** Positional JSON array — Pangolin Scale's pinned field order. Absent optionals → null.
  *  [kind, runId, itemId, status, actor, manifestRef, resultRef, at, seq] (+ canonicalized
@@ -176,7 +176,7 @@ export function canonEntry(e: AuditEntry): string {
   return JSON.stringify(arr);
 }
 ```
-> Verify the exact import path/name of core's sorted-key canonicalizer (`canonicalJsonString` is used in `audit/manifest.ts` via the core barrel) and use it so the appended element is key-order-stable.
+> `canonicalJsonString` is exported from `packages/pangolin-core/src/content-hash.js` (the same canonicalizer `audit/manifest.ts` uses) — import it from `./content-hash.js`, not a `canonical-json` module (which does not exist).
 
 - [ ] **Step 4: Run, verify PASS** — targeted test PASS; then `pnpm --filter @quarry-systems/pangolin-core test` (the whole core suite — confirms no existing entry-hash/vector test regresses, since absent-authorization entries are byte-identical).
 
@@ -202,11 +202,12 @@ git commit -m "feat(core): seal authorization into canonEntry (append-only; lega
 ```ts
 import { describe, it, expect } from 'vitest';
 import { verifyBundle } from '../src/audit-verify-bundle.js';
-import { manifestContentRef } from '../src/audit-verify-bundle.js';  // exported helper added in Step 3
+import { computeContentHash, buildPangolinUri } from '../src/index.js';
 import type { AuditBundle, DispatchManifest } from '../src/audit.js';
-// Helper: assemble a one-item bundle from a manifest so manifestRef == manifestContentRef(manifest).
-// (Use the test factory in packages/pangolin-core/test/support if present; else inline an offline anchor
-//  + a single item.fired entry whose manifestRef = manifestContentRef(manifest), and a matching root.)
+// Helper: assemble a one-item bundle from a manifest, minting bundle.items[0].manifestRef the SAME way
+// the dispatch executor does — buildPangolinUri({ namespace, type:'manifest', name:<dispatchId>,
+// contentHash: computeContentHash(manifest) }) — so the integrity check sees a genuine matching ref.
+// (Reuse the offline-anchor bundle factory the existing verify-bundle.test.ts / tamper-evident-contrast.test.ts use.)
 
 function bundleWith(manifest: DispatchManifest): AuditBundle { /* see support/make-bundle */ return /* … */ ({} as AuditBundle); }
 
@@ -231,8 +232,9 @@ describe('manifest integrity (Finding A)', () => {
 - [ ] **Step 2: Run, verify FAIL** — `pnpm --filter @quarry-systems/pangolin-core test -- verify-bundle-manifest-integrity` → the mutation test FAILS (verify currently reports intact).
 
 - [ ] **Step 3: Implement** — in `audit-verify-bundle.ts`:
-  - Export `manifestContentRef(m: DispatchManifest): string` — recompute the manifest's content address **the same way the dispatch executor does** when it returns `manifestRef`. (Locate that in `packages/pangolin-orchestrator/src/executors/dispatch.ts`; it content-addresses the bytes from `buildManifest`, which excludes nothing — it hashes the full manifest including `manifestHash`. Match it EXACTLY, or the comparison is meaningless. If it hashes the canonical manifest bytes, reuse the same `computeContentHash`/content-address fn from core.)
-  - In `verifyBundle`, after the base verify: for each `m` of `bundle.manifests`, find its `item.fired` entry (by `itemId`) and its sealed `manifestRef`; if `manifestRef` is present and `manifestContentRef(m) !== manifestRef`, set `manifestOk = false`.
+  - **How `manifestRef` is actually minted (verified):** `executors/dispatch.ts` does `contentHash = computeContentHash(bytes)` where `bytes = canonicalJsonString(manifest)` (the FULL manifest, including `manifestHash`), then `manifestRef = buildPangolinUri({ namespace, type: 'manifest', name: <dispatchId>, contentHash })` → a URI `pangolin://<ns>/manifest/<dispatchId>/<sha256:…>`. The URI embeds `namespace` + `dispatchId`, which are **not** in the manifest body — so do **NOT** reconstruct the full URI. Compare only the **content-hash segment**.
+  - Add a helper: `function manifestRefMatches(m: DispatchManifest, manifestRef: string): boolean { return parsePangolinUri(manifestRef).contentHash === computeContentHash(m); }` — importing `computeContentHash` + `parsePangolinUri` from core (`content-hash.js` / `uri.js`). `computeContentHash(m)` (object) canonicalizes to the same digest as `computeContentHash(canonicalJsonString(m)`-bytes), so this reproduces the sealed hash without re-deriving the URI.
+  - **Pair manifest → its sealed ref:** the per-item `manifestRef` lives on the bundle's export items (`bundle.items[*].manifestRef`, set when the executor returned it and `assembleBundle` fetched the manifest by it). Map by `itemId`: for each `m` of `bundle.manifests`, find `bundle.items.find(i => i.id === m.itemId)?.manifestRef`; if present and `!manifestRefMatches(m, ref)` → `manifestOk = false`. (Manifests whose item has no `manifestRef` — none today — are skipped.)
   - Fold into the result: `const intact = base.intact && handoff.ok !== false && manifestOk;` and `failure = base.failure ?? (manifestOk === false ? 'manifest' : handoff.ok === false ? 'handoff' : undefined);` (do NOT add a key to `checks` — that object's shape is load-bearing for consumer literals; `failure:'manifest'` + `intact:false` is the surfacing).
 
 - [ ] **Step 4: Run, verify PASS** — targeted test PASS; full core suite green.
@@ -377,9 +379,12 @@ git commit -m "feat(orchestrator): thread authorization through FireContext → 
 ### Task 6: `denied` terminal status + cascade
 
 **Files:**
+- Modify: `packages/pangolin-orchestrator/src/contracts/types.ts` (`RUN_STATUSES` + `TerminalStatus` — add `'denied'`)
 - Modify: `packages/pangolin-orchestrator/src/orchestrator.ts:40` (`TERMINAL_STATUSES`)
 - Modify: `packages/pangolin-orchestrator/src/engine/dep-resolver.ts:46-59` (`computeSkipped`)
 - Test: `packages/pangolin-orchestrator/test/engine/dep-resolver.test.ts` (extend or create)
+
+> **Type prerequisite:** `ItemState['status']` is the closed union `RunStatus = (typeof RUN_STATUSES)[number]`, and `store.setStatus(id, status: TerminalStatus, …)` is typed to `TerminalStatus = 'done'|'failed'|'skipped'|'cancelled'` (`contracts/types.ts`). Add `'denied'` to **both** `RUN_STATUSES` and `TerminalStatus` (and to `RunStateStore.setStatus`'s param type if it restates the union) — otherwise `store.setStatus(it.id, 'denied', …)` in Task 7 is a type error.
 
 - [ ] **Step 1: Write the failing test**
 ```ts
@@ -396,9 +401,9 @@ it('a pending item whose dependency is denied cascades to skipped', () => {
 - [ ] **Step 2: Run, verify FAIL** — denied dep does not yet trigger skip.
 
 - [ ] **Step 3: Implement**
-  - `orchestrator.ts:40`: `const TERMINAL_STATUSES = new Set(['done', 'failed', 'skipped', 'cancelled', 'denied']);`
-  - `dep-resolver.ts` `computeSkipped` (line ~55): add `denied` to the trigger — `return s === 'failed' || s === 'skipped' || s === 'cancelled' || s === 'denied' || isBlockedBy(i, dep);`
-  - Confirm `ItemState['status']` admits `'denied'` (if it's a string union, add it; if `string`, no change).
+  - `contracts/types.ts`: add `'denied'` to `RUN_STATUSES` and to `TerminalStatus` (and `RunStateStore.setStatus`'s param union if restated). This is the prerequisite for `setStatus(it.id, 'denied', …)` in Task 7.
+  - `orchestrator.ts:40`: `const TERMINAL_STATUSES = new Set(['done', 'failed', 'skipped', 'cancelled', 'denied']);` (this makes the seal predicate at `orchestrator.ts:248` treat a denied item as terminal → the run seals).
+  - `dep-resolver.ts` `computeSkipped` (line ~55): add `denied` to the trigger — `return s === 'failed' || s === 'skipped' || s === 'cancelled' || s === 'denied' || isBlockedBy(i, dep);`. (`computeNewlyReady` needs no change — it readies only on `dep.status === 'done'`, so a denied dep never readies dependents.)
 
 - [ ] **Step 4: Run, verify PASS** (dep-resolver + orchestrator suites green — esp. any "run seals when all terminal" test still holds with `denied` terminal).
 
@@ -437,10 +442,9 @@ if (decision.verdict === 'deny') {
   audit({ kind: 'item.denied', runId: it.runId, itemId: deNs(it.id), status: 'denied', actor: it.actor, at: auditAt, authorization: decision });
   continue;
 }
-// allow / not-evaluated → carry the decision to fire so it is sealed in the manifest:
-fireItem = { ...fireItem, __authorization: decision } as typeof fireItem; // see note
+// allow / not-evaluated → the decision rides to the executor via FireContext (below); no other plumbing.
 ```
-Then at `ex.fire(...)` (line ~123) pass `{ runId, actor, submittedAt, effectClass, authorization: decision }`. (Locks: only `acquireLocks` AFTER an allow — a denied item must release any locks; in the current code locks are acquired at line 115 *after* shape resolution, so place the gate before line 115 and only `acquireLocks` on allow.)
+Then at `ex.fire(...)` (line ~123) pass the decision through the `FireContext`: `ex.fire(fireItem, { runId: it.runId, actor: it.actor, submittedAt: it.submittedAt, effectClass, authorization: decision })`. The executor (Task 5) seals `ctx.authorization` into the manifest. **Do NOT** smuggle the decision onto the `WorkItem` — `FireContext` is the channel. (Locks: place the gate **before** `acquireLocks` at line 115, and only `acquireLocks` on allow — a denied item is never locked.)
 > Items with **no `subagentShape`** (raw executor items) have no `shape.effectTier` — give them a default effectClass `'unknown'` and still call `authorize` (so policy can govern them), or skip the gate per a documented default. Pick: default `effectClass='unknown'`, gate runs. State this in the test.
 
 - [ ] **Step 4: Run, verify PASS**; run the full orchestrator suite (the fire loop is hot — `NoneAuthorizer` default must leave every existing test green).
@@ -554,7 +558,7 @@ git commit -m "test(seal): e2e allow/deny authorization seal + regenerate affect
 ## Final task: full gate
 
 - [ ] **Step 1:** `pnpm install && pnpm -r build` (fresh-worktree, stale-dist guard).
-- [ ] **Step 2:** the full gate — `pnpm -r typecheck` && `pnpm -r test` && `pnpm test:e2e` (separate CI job) && `pnpm -r lint`. Fix any stale `VerificationReport`/manifest literal by satisfying the new shape (the additions are optional → expect few), never by loosening a security assertion. Run `pnpm run check:deps` — `pangolin-core`/orchestrator must import no policy-engine package.
+- [ ] **Step 2:** the full gate — `pnpm -r typecheck` && `pnpm -r test` && `pnpm test:e2e` (separate CI job) && `pnpm -r lint`. Fix any stale `VerificationReport`/manifest literal by satisfying the new shape (the additions are optional → expect few), never by loosening a security assertion. Run `pnpm run check:deps` (the clean-room undeclared-dep guard — it does NOT, by itself, enforce the no-policy-engine rule). The no-policy-engine invariant (acceptance #8) is confirmed **by inspection**: `pangolin-core`/orchestrator `package.json` + imports reference no Cedar/OPA/Cerbos/etc. package (none are added in this build — there is no external engine yet).
 - [ ] **Step 3:** Confirm acceptance #1–9 from the spec each map to a green test (esp. #2 manifest-integrity negative test, #3 run-seals-on-deny + cascade, #6 effectClass-from-shape).
 - [ ] **Step 4:** Final commit if fixtures changed.
 
