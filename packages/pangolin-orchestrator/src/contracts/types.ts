@@ -1,21 +1,30 @@
 import type { VerifyOutcome } from '@quarry-systems/pangolin-core';
 
-export const RUN_STATUSES = ['pending', 'ready', 'running', 'done', 'failed', 'skipped', 'cancelled'] as const;
+export const RUN_STATUSES = [
+  'pending',
+  'ready',
+  'running',
+  'done',
+  'failed',
+  'skipped',
+  'cancelled',
+  'denied',
+] as const;
 export type RunStatus = (typeof RUN_STATUSES)[number];
 
 /** The subset of RunStatus an item can hold once it stops moving. */
-export type TerminalStatus = 'done' | 'failed' | 'skipped' | 'cancelled';
+export type TerminalStatus = 'done' | 'failed' | 'skipped' | 'cancelled' | 'denied';
 
 export type EffectTier = 'pure' | 'read-impure' | 'write-impure';
 
 /** Selects WHICH typed product of an upstream item a binding consumes (spec §3). */
 export type OutputSelector =
-  | { kind: 'patch' }                 // the upstream's resultRef (dev patchRef) — degenerate dev case
+  | { kind: 'patch' } // the upstream's resultRef (dev patchRef) — degenerate dev case
   | { kind: 'output'; path: string }; // a file the upstream wrote to outputs/ (Wave A outputRefs)
 
 /** One typed-product handoff edge: input key -> upstream product. */
 export interface InputBinding {
-  from: string;            // upstream WorkItem id in the same Run
+  from: string; // upstream WorkItem id in the same Run
   select: OutputSelector;
 }
 
