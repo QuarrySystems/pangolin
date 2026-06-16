@@ -24,7 +24,8 @@
 | `packages/pangolin-orchestrator/src/engine/tick.ts` | modify | the fire gate (before `ex.fire()`): allow→thread decision; deny→`denied` + `item.denied` |
 | `packages/pangolin-orchestrator/src/engine/dep-resolver.ts` | modify | `computeSkipped` treats `denied` as a skip-trigger |
 | `packages/pangolin-orchestrator/src/orchestrator.ts` | modify | inject `Authorizer`; submit pre-check; add `denied` to `TERMINAL_STATUSES`; thread authorizer into `tick` |
-| `docs-site/.../reference/*` (verify-print honesty line) | modify | reflect `authzTier` (attests a recorded dispatch-level decision; still not mid-run governance) |
+| `packages/pangolin-orchestrator/src/audit/render.ts` (+ `packages/pangolin-verify/src/render.ts` for parity) | modify | print the `authzTier` line (the CLI uses the orchestrator renderer; the standalone binary uses the verify one) |
+| `docs-site/src/content/docs/how-to/verify-audit-bundle.mdx` | modify | honesty copy — now attests a recorded dispatch-level decision; still not mid-run governance |
 
 > **Type names (use verbatim everywhere):** `AuthorizationVerdict = 'allow' | 'deny' | 'not-evaluated'`; `Authorization` (the decision AND the sealed block — one DRY type); `AuthorizationContext`; `Authorizer`; `AuthzTier = 'none' | 'recorded' | 'authority-attested'`; item status string `'denied'`; report `failure` adds `'manifest'`.
 
@@ -515,22 +516,26 @@ git commit -m "feat(verify): derive orthogonal authzTier (none|recorded) from se
 
 ### Task 10: surface `authzTier` in `agora verify` print + honesty line
 
+> **IMPORTANT — there are TWO `renderVerification` functions.** The `agora`/CLI verify-print path uses **`packages/pangolin-orchestrator/src/audit/render.ts`** (imported by `pangolin-cli/src/cmd-verify.ts` + `cmd-orch.ts`), and that renderer currently has **NO `timeTier` line** (it ends after the `handoff` row) — so the authzTier line is a fresh addition there, not a copy of an existing time line. The standalone `pangolin-verify` binary uses a SEPARATE `packages/pangolin-verify/src/render.ts` (which *does* print a `timeTier` line). Update **both** renderers for parity.
+
 **Files:**
-- Modify: the verify renderer (`packages/pangolin-verify/src/render.ts` or the `agora verify` print path — locate via `renderVerification`) + the docs honesty line
-- Test: the renderer test (extend)
+- Modify: `packages/pangolin-orchestrator/src/audit/render.ts` (the `agora verify` / CLI path — primary)
+- Modify: `packages/pangolin-verify/src/render.ts` (the standalone binary — parity)
+- Test: `packages/pangolin-orchestrator/test/audit/render.test.ts` (extend — this is the existing renderer test; `pangolin-verify` has none, so add one there only if you want coverage on the second renderer)
+- Modify (docs honesty copy): `docs-site/src/content/docs/how-to/verify-audit-bundle.mdx` (the "what it does NOT prove" / tier copy lives here, NOT under `reference/`)
 
-- [ ] **Step 1: Write the failing test** — `renderVerification` of a report with `authzTier:'recorded'` includes a line naming authorization as a **recorded, operator-self-asserted dispatch-level** decision (not third-party attested); `authzTier:'none'` prints "authorization: not attested".
+- [ ] **Step 1: Write the failing test** (in `pangolin-orchestrator/test/audit/render.test.ts`) — `renderVerification` of a report with `authzTier:'recorded'` includes a line naming authorization as a **recorded, operator-self-asserted dispatch-level** decision (not third-party attested); `authzTier:'none'` prints "authorization: not attested"; absent `authzTier` (legacy reports) prints nothing new (back-compat).
 
-- [ ] **Step 2: Run, verify FAIL**.
+- [ ] **Step 2: Run, verify FAIL** — `pnpm --filter @quarry-systems/pangolin-orchestrator test -- audit/render`.
 
-- [ ] **Step 3: Implement** — add the `authzTier` line to the renderer (a separate line from the tamper claim + timeTier). Keep the self-asserted qualifier. Update the docs-site reference/verify-print copy: it now attests a *recorded dispatch-level* authorization decision; it still does **not** govern the agent's individual tool calls (mid-run).
+- [ ] **Step 3: Implement** — add an `authzTier` line to BOTH renderers (a separate line from the tamper claim + timeTier; print it only when `report.authzTier` is set so legacy reports are unchanged). Keep the self-asserted qualifier (`recorded` must never read as third-party-attested). Update the docs honesty copy in `how-to/verify-audit-bundle.mdx`: it now attests a *recorded dispatch-level* authorization decision; it still does **not** govern the agent's individual tool calls (mid-run).
 
-- [ ] **Step 4: Run, verify PASS**; docs build if the docs page changed (`pnpm --filter @pangolin/docs-site build`).
+- [ ] **Step 4: Run, verify PASS**; `pnpm --filter @pangolin/docs-site build` if the docs page changed.
 
 - [ ] **Step 5: Commit**
 ```bash
-git add packages/pangolin-verify/src/render.ts docs-site/... packages/pangolin-verify/test/...
-git commit -m "feat(verify): print authzTier as a separate self-asserted line; update honesty copy"
+git add packages/pangolin-orchestrator/src/audit/render.ts packages/pangolin-verify/src/render.ts packages/pangolin-orchestrator/test/audit/render.test.ts docs-site/src/content/docs/how-to/verify-audit-bundle.mdx
+git commit -m "feat(verify): print authzTier as a separate self-asserted line (both renderers); update honesty copy"
 ```
 
 ---
