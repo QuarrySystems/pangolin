@@ -1,0 +1,27 @@
+---
+title: Provability
+description: Try to break a Pangolin audit seal — tamper a bundle, flip the anchor tier, and watch the claim respond truthfully.
+---
+
+import ProvabilityVerifier from '../../components/ProvabilityVerifier.tsx';
+
+Pangolin's audit trail does not ask you to take "tamper-evident" on trust. Below is a real
+verifier over a sealed change-order bundle. Tamper a field, flip the anchor tier, and — once
+you have tampered — try to **re-seal as the attacker**. The verdict is the production
+`VerificationReport`: a tamper axis and a separate time axis, with the claim downgrading
+exactly when the real rule says it must.
+
+<ProvabilityVerifier client:only="react" />
+
+## What you just saw
+
+- **Tampering breaks the chain.** Each step's hash folds in its inputs; change one sealed
+  field and the break ripples downstream to the root.
+- **The tier decides the ceiling.** On `LocalAnchor` the root lives in the same store as the
+  log, so it can only ever claim **tamper-detecting**. On `S3 Object Lock` the root is external
+  and immutable, earning **tamper-evident** — see [Audit & guarantee tiers](/pangolin/explanation/audit-guarantee-tiers/).
+- **Re-sealing is the proof.** On the local tier the attacker rewrites the root and gets away
+  with it; on WORM the frozen anchored root no longer matches and verification fails with
+  `root-mismatch`. That is the whole difference.
+
+To verify a real exported bundle, see [Export & verify an audit bundle](/pangolin/how-to/verify-audit-bundle/).

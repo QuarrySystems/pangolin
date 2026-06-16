@@ -33,6 +33,7 @@ export default defineConfig({
       starlightLinksValidator({ errorOnRelativeLinks: true, errorOnInvalidHashes: true }),
     ],
     sidebar: [
+      { label: 'Provability', slug: 'provability' },
       {
         label: 'Use cases',
         items: [
