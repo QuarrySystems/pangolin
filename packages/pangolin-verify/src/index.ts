@@ -5,8 +5,9 @@
 // supplies the ed25519 + trusted-time verifier callbacks that core's verifyBundle injects.
 //
 // Public surface:
-//  - verifyTimestamp / LocalCaTimestampAuthority / Rfc3161TimestampAuthority (RFC 3161)
+//  - verifyTimestamp / verifyTimestampWithTime / LocalCaTimestampAuthority / Rfc3161TimestampAuthority (RFC 3161)
 //  - loadBundle / loadVerifyContext / buildAnchor / makeVerifySignature / makeVerifyTimestamp
+//  - trust root: makeVerifySignatureFromTrustRoot / extractVerifiedGenTime / parseTrustRoot / resolveKey / keyUsableAt
 //  - renderVerification (terminal summary)
 
 export {
@@ -22,6 +23,8 @@ export {
   buildAnchor,
   makeVerifySignature,
   makeVerifyTimestamp,
+  makeVerifySignatureFromTrustRoot,
+  extractVerifiedGenTime,
 } from './verify-context.js';
 export type {
   AnchorSpec,
@@ -30,6 +33,11 @@ export type {
   VerifyContextJson,
   VerifyContext,
 } from './verify-context.js';
+
+// Published trust root (keyRef → pubkey) + key-lifecycle policy.
+export { parseTrustRoot, resolveKey } from './trust-root.js';
+export type { TrustRoot, TrustRootKey } from './trust-root.js';
+export { keyUsableAt } from './revocation.js';
 
 export { renderVerification } from './render.js';
 export type { RenderOpts } from './render.js';

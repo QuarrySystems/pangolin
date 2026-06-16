@@ -265,7 +265,8 @@ export function makeVerifyTimestamp(
 /** Verify callback resolving the pubkey by sig.keyRef from a published trust root.
  *  No trust root → undefined (core 'n/a'). keyRef unknown → false (hard fail). alg must
  *  match the published entry. Crypto goes through the shared verifySignatureBytes primitive.
- *  `verifiedGenTime` is accepted now for the key-lifecycle gate added in Task 11 (unused here). */
+ *  `verifiedGenTime` (the RFC-3161-verified signing time, when available) drives the
+ *  key-lifecycle gate (validity window + time-bounded revocation). */
 export function makeVerifySignatureFromTrustRoot(
   trustRoot: TrustRoot | undefined,
   verifiedGenTime?: Date,
