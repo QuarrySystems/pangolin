@@ -26,6 +26,8 @@ export interface FireContext {
   runId?: string;
   actor?: string;
   submittedAt?: string;
+  effectClass?: string;
+  authorization?: import('@quarry-systems/pangolin-core').Authorization;
 }
 
 /**
