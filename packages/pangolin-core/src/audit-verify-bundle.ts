@@ -35,10 +35,26 @@ export function verifyBundle(
     verifyTimestamp: deps.verifyTimestamp,
   }).then((base) => {
     const handoff = checkHandoffClosure(bundle);
+    // Only `item.fired` audit ENTRIES carry a chain-anchored manifestRef (canonEntry seals it);
+    // bundle.items[*].manifestRef is copied verbatim from the UNTRUSTED export and is NOT chained.
+    // Tie each manifest back to the chain: the export ref must be one the audit log actually
+    // anchored (a forged/rewritten ref is absent from the chain → reject), THEN the manifest body
+    // must content-address to it.
+    const chainedManifestRefs = new Set<string>();
+    for (const e of entries) {
+      if (e.kind === 'item.fired' && e.manifestRef !== undefined) {
+        chainedManifestRefs.add(e.manifestRef);
+      }
+    }
     let manifestOk = true;
     for (const m of bundle.manifests) {
       const ref = bundle.items.find((i) => i.id === m.itemId)?.manifestRef;
-      if (ref !== undefined && !manifestRefMatches(m, ref)) {
+      if (ref === undefined) continue; // no ref to bind (unchanged posture)
+      // Unpinned refs carry no content commitment (no contentHash segment); there is nothing
+      // to chain-bind or content-check — skip them, exactly as manifestRefMatches does.
+      // Real sealed bundles always mint pinned refs, so this never weakens a production bundle.
+      if (!isPinnedRef(ref)) continue;
+      if (!chainedManifestRefs.has(ref) || !manifestRefMatches(m, ref)) {
         manifestOk = false;
         break;
       }
@@ -62,6 +78,16 @@ export function verifyBundle(
     const authzTier: AuthzTier = decided ? 'recorded' : 'none';
     return { ...base, intact, failure, claim, authzTier, checks: { ...base.checks, handoff } };
   });
+}
+
+/** Returns true iff `ref` is a pinned (content-addressed) pangolin:// URI.
+ *  Unpinned refs (no 4th segment / no contentHash) commit to nothing and must be skipped. */
+function isPinnedRef(ref: string): boolean {
+  try {
+    return parsePangolinUri(ref).contentHash !== undefined;
+  } catch {
+    return false; // unparseable → treat as unpinned
+  }
 }
 
 /** Returns true iff the manifest's recomputed content hash matches the hash embedded in the

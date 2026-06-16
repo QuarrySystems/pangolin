@@ -46,8 +46,18 @@ function anchorOf(root: Uint8Array): AuditAnchor {
   };
 }
 
-/** Build a 2-entry chained log and return its entries + Merkle root. */
-function buildEntries(runId: string): { entries: AuditEntryRow[]; root: Uint8Array } {
+/** Build a 3-entry chained log (run.submitted + item.fired + run.completed).
+ *
+ *  The `item.fired` entry is needed because the manifest-integrity chain-binding check
+ *  requires the export item's manifestRef to be present in the set of chain-anchored
+ *  item.fired refs. Without it, any bundle with a pinned manifestRef would verify as
+ *  not-intact (failure:'manifest'). This matches real orchestrator behaviour:
+ *  tick.ts writes the same manifestRef to both the export item and the chained entry.
+ */
+function buildEntries(
+  runId: string,
+  opts: { itemId: string; manifestRef: string },
+): { entries: AuditEntryRow[]; root: Uint8Array } {
   const mk = (
     e: Omit<AuditEntryRow, 'entryHash' | 'prevHash' | 'runId'>,
     prev: string,
@@ -58,9 +68,13 @@ function buildEntries(runId: string): { entries: AuditEntryRow[]; root: Uint8Arr
   };
 
   const e0 = mk({ seq: 0, kind: 'run.submitted', at: 't0' }, '');
-  const e1 = mk({ seq: 1, kind: 'run.completed', at: 't1' }, e0.entryHash);
-  const root = merkleRoot(leavesFromEntryHashes([e0.entryHash, e1.entryHash]));
-  return { entries: [e0, e1], root };
+  const e1 = mk(
+    { seq: 1, kind: 'item.fired', itemId: opts.itemId, manifestRef: opts.manifestRef, at: 't1' },
+    e0.entryHash,
+  );
+  const e2 = mk({ seq: 2, kind: 'run.completed', at: 't2' }, e1.entryHash);
+  const root = merkleRoot(leavesFromEntryHashes([e0.entryHash, e1.entryHash, e2.entryHash]));
+  return { entries: [e0, e1, e2], root };
 }
 
 /** Build a 2-entry chained log with an item.denied entry that carries authorization. */
@@ -147,7 +161,10 @@ function buildBundle(
 describe('authzTier derivation (orthogonal to tamper claim)', () => {
   it('none: no authorization on any manifest → authzTier === "none"', async () => {
     const m = minimalManifest(); // no authorization block
-    const { entries, root } = buildEntries('r1');
+    const { entries, root } = buildEntries('r1', {
+      itemId: m.itemId,
+      manifestRef: manifestRefOf(m),
+    });
     const anchoredRoot: AnchoredRoot = {
       epochId: 'r1',
       root,
@@ -170,7 +187,10 @@ describe('authzTier derivation (orthogonal to tamper claim)', () => {
       at: '2024-01-01T00:00:00Z',
     };
     const m = minimalManifest(auth);
-    const { entries, root } = buildEntries('r1');
+    const { entries, root } = buildEntries('r1', {
+      itemId: m.itemId,
+      manifestRef: manifestRefOf(m),
+    });
     const anchoredRoot: AnchoredRoot = {
       epochId: 'r1',
       root,
@@ -193,7 +213,10 @@ describe('authzTier derivation (orthogonal to tamper claim)', () => {
       at: '2024-01-01T00:00:00Z',
     };
     const m = minimalManifest(auth);
-    const { entries, root } = buildEntries('r1');
+    const { entries, root } = buildEntries('r1', {
+      itemId: m.itemId,
+      manifestRef: manifestRefOf(m),
+    });
     const anchoredRoot: AnchoredRoot = {
       epochId: 'r1',
       root,
@@ -264,7 +287,10 @@ describe('authzTier derivation (orthogonal to tamper claim)', () => {
   it('orthogonality: authzTier does not affect intact/claim — same intact bundle reports same claim regardless of authzTier', async () => {
     // Bundle A: no authorization (authzTier = 'none')
     const mNone = minimalManifest();
-    const { entries: entriesNone, root: rootNone } = buildEntries('r1');
+    const { entries: entriesNone, root: rootNone } = buildEntries('r1', {
+      itemId: mNone.itemId,
+      manifestRef: manifestRefOf(mNone),
+    });
     const anchoredRootNone: AnchoredRoot = {
       epochId: 'r1',
       root: rootNone,
@@ -282,7 +308,10 @@ describe('authzTier derivation (orthogonal to tamper claim)', () => {
       at: '2024-01-01T00:00:00Z',
     };
     const mRecorded = minimalManifest(auth);
-    const { entries: entriesRecorded, root: rootRecorded } = buildEntries('r1');
+    const { entries: entriesRecorded, root: rootRecorded } = buildEntries('r1', {
+      itemId: mRecorded.itemId,
+      manifestRef: manifestRefOf(mRecorded),
+    });
     const anchoredRootRecorded: AnchoredRoot = {
       epochId: 'r1',
       root: rootRecorded,

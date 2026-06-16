@@ -47,8 +47,19 @@ function anchorOf(root: Uint8Array, guarantee: GuaranteeType = 'detect'): AuditA
   };
 }
 
-/** Build a 2-entry chained log and return its entries + Merkle root. */
-function buildEntries(runId: string): { entries: AuditEntryRow[]; root: Uint8Array } {
+/** Build a 3-entry chained log (run.submitted + item.fired + run.completed) and return
+ *  its entries + Merkle root.
+ *
+ *  The `item.fired` entry carries `itemId` and `manifestRef` — mirroring what the real
+ *  orchestrator writes at fire time. This makes the synthetic chain FAITHFUL to reality:
+ *  tick.ts writes the SAME manifestRef to both the export item AND the chained audit entry.
+ *  Without this entry, `chainedManifestRefs` would be empty and the new binding check
+ *  would false-reject the positive test.
+ */
+function buildEntries(
+  runId: string,
+  opts: { itemId: string; manifestRef: string },
+): { entries: AuditEntryRow[]; root: Uint8Array } {
   const mk = (
     e: Omit<AuditEntryRow, 'entryHash' | 'prevHash' | 'runId'>,
     prev: string,
@@ -59,9 +70,13 @@ function buildEntries(runId: string): { entries: AuditEntryRow[]; root: Uint8Arr
   };
 
   const e0 = mk({ seq: 0, kind: 'run.submitted', at: 't0' }, '');
-  const e1 = mk({ seq: 1, kind: 'run.completed', at: 't1' }, e0.entryHash);
-  const root = merkleRoot(leavesFromEntryHashes([e0.entryHash, e1.entryHash]));
-  return { entries: [e0, e1], root };
+  const e1 = mk(
+    { seq: 1, kind: 'item.fired', itemId: opts.itemId, manifestRef: opts.manifestRef, at: 't1' },
+    e0.entryHash,
+  );
+  const e2 = mk({ seq: 2, kind: 'run.completed', at: 't2' }, e1.entryHash);
+  const root = merkleRoot(leavesFromEntryHashes([e0.entryHash, e1.entryHash, e2.entryHash]));
+  return { entries: [e0, e1, e2], root };
 }
 
 /**
@@ -78,7 +93,12 @@ function buildEntries(runId: string): { entries: AuditEntryRow[]; root: Uint8Arr
  */
 function bundleWith(m: DispatchManifest): { bundle: AuditBundle; anchor: AuditAnchor } {
   const runId = 'r1';
-  const { entries, root } = buildEntries(runId);
+  // Pass the correctly-minted manifestRef into buildEntries so the chain carries
+  // the item.fired entry that the new binding check requires.
+  const { entries, root } = buildEntries(runId, {
+    itemId: m.itemId,
+    manifestRef: manifestRefOf(m),
+  });
 
   const anchoredRoot: AnchoredRoot = {
     epochId: runId,
@@ -167,6 +187,45 @@ describe('manifest integrity (Finding A)', () => {
     // Forge the sealed authorization.verdict after the manifestRef was minted
     (bundle.manifests[0]!.authorization as { verdict: string }).verdict = 'allow';
 
+    const report = await verifyBundle(bundle, { anchor });
+
+    expect(report.intact).toBe(false);
+    expect(report.failure).toBe('manifest');
+  });
+
+  it('a fully-consistent forgery (verdict flipped + manifestHash recomputed + export ref rewritten) is rejected', async () => {
+    // Reproduce the confirmed forgery path:
+    //   (1) flip authorization.verdict deny → allow
+    //   (2) recompute manifestHash over the updated base (so body-integrity check alone passes)
+    //   (3) rewrite bundle.items[0].manifestRef to the NEW content address
+    //
+    // The chained item.fired entry still carries the ORIGINAL manifestRef — that's the
+    // chain-anchored truth. Without the chain-binding check, verify() returns intact:true.
+    const m = minimalManifest(); // verdict = 'deny'
+    const { bundle, anchor } = bundleWith(m);
+
+    // Step 1: flip the verdict in the manifest
+    (bundle.manifests[0]!.authorization as { verdict: string }).verdict = 'allow';
+
+    // Step 2: recompute manifestHash over the forged base (so manifestRefMatches body check passes)
+    const forgedManifest = bundle.manifests[0]!;
+    const {
+      manifestHash: _old,
+      signature: _sig,
+      ...forgedBase
+    } = forgedManifest as DispatchManifest & {
+      signature?: unknown;
+    };
+    const newManifestHash = computeContentHash(forgedBase);
+    (bundle.manifests[0] as { manifestHash: string }).manifestHash = newManifestHash;
+
+    // Step 3: rewrite the export item's manifestRef to the NEW content address
+    // (mimics attacker patching bundle.items[*].manifestRef to match the forged manifest)
+    const newRef = manifestRefOf(bundle.manifests[0]!);
+    bundle.items[0]!.manifestRef = newRef;
+
+    // The chain still holds the ORIGINAL item.fired.manifestRef — so the new ref
+    // is absent from chainedManifestRefs → must be rejected.
     const report = await verifyBundle(bundle, { anchor });
 
     expect(report.intact).toBe(false);
