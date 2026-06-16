@@ -113,6 +113,17 @@ threat-indexed view.
 | **Disputing _when_ it ran** | "You backdated this; you just set the clock" | An orthogonal **trusted-time** axis: an RFC 3161 timestamp token over the root yields `timeTier: tsa-attested`; without one it's honestly `asserted`. Time never silently weakens the tamper claim. | `tsa-attested` requires the auditor to supply trusted TSA CA certs; the default emits no token (floor: `asserted`). |
 | **"Trust us" verification** | An auditor must verify without trusting the vendor | A **standalone `pangolin-verify`** binary takes a bundle in and a report out, recomputing everything (it never trusts a stored verdict) and checking signatures against an auditor-supplied **published public key**. | Offline (no live anchor fetch) caps at `tamper-detecting`; the published-key trust root is the auditor's to distribute. |
 
+#### Signing-key trust: the anchor and the trust root are not the same thing
+
+Two of the rows above lean on the signing key (forging the anchored root, "trust us" verification), so it is worth being precise about *where the key's authenticity comes from* — because it is a common point of confusion. Pangolin has **two** "roots", and they defend different things:
+
+- The **WORM anchor** is an S3 Object-Lock store that holds the Merkle **root hash**. It proves the ledger was not altered after sealing. It is a live bucket written to at seal time.
+- The **trust root** is a published, static, **public** file that holds the signing **public key(s)** — keyed by a stable `keyRef`, with a lifecycle status. It proves *which key* signed a bundle. It contains no secrets, runs nothing, and is read only by the verifier.
+
+The designed resolution to the [signing-key-custody gap](#non-goals--roadmap) follows from that split: in production the private key lives in a **KMS/HSM** and never leaves it, while the matching **public key is published out-of-band** as that static trust-root file (a docs-site URL over TLS, a signed git tag, a CDN object, or a direct handoff). The verifier resolves the key by `keyRef` from the trust root the auditor already trusts — and **never** from the audit bundle. That last rule is the load-bearing one: a bundle-supplied key is self-attesting (a forger would simply ship their own key plus a matching signature), the same forgery class the earliest-version read and required-signature work ([#69](https://github.com/quarrysystems/pangolin/pull/69)/[#70](https://github.com/quarrysystems/pangolin/pull/70)) already closed. Rotation adds an entry to the file; revocation flips an entry to `revoked`, and a bundle signed under it fails unless a trusted (`tsa-attested`) timestamp proves it was signed before the revocation time.
+
+**Honest limit:** this is the *designed* production answer — it is **not yet built** (see [Non-goals & roadmap](#non-goals--roadmap)); today the seal signs with a local, ephemeral key, so a demo bundle's signature is demo-grade and should be described that way. And even in production, KMS custody stops key *exfiltration* and enables rotation/revocation — it does **not** stop an operator who legitimately holds signing access from signing a false record (that remains the [malicious-operator-with-the-key](#the-adversaries) non-goal, defended by the anchor + chain, not the key).
+
 ### Supply chain & network
 
 | Threat | Where it shows up | Mitigation | Honest limit |
@@ -137,8 +148,10 @@ Stated plainly, because overclaiming is the one thing an audit tool can't afford
   but not shipped. We won't show you a denial we haven't built.
 - **Production signing-key custody — demo-grade today.** The seal currently signs with a
   local, ephemeral key. The production design — a KMS/HSM-held key, a published public key
-  in the verify trust root, and rotation — is recorded as a decision but not yet built.
-  Until it is, treat a demo bundle's signature as demo-grade and say so.
+  in the verify trust root, and rotation/revocation — is recorded as a decision but not yet
+  built (see [Signing-key trust](#signing-key-trust-the-anchor-and-the-trust-root-are-not-the-same-thing)
+  for how the trust root resolves it). Until it is, treat a demo bundle's signature as
+  demo-grade and say so.
 - **Submission authorization — delegated to storage.** `actor` is identity, not authz;
   authorizing *who may submit* is the storage backend's ACLs.
 - **A hardened sandbox — out of scope.** Container/namespace isolation, not a microVM;

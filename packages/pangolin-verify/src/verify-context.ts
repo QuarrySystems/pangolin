@@ -15,7 +15,9 @@ import type {
   TimestampToken,
   S3LockClient,
 } from '@quarry-systems/pangolin-core';
-import { verifyTimestamp } from './timestamp-authority.js';
+import { verifyTimestamp, verifyTimestampWithTime } from './timestamp-authority.js';
+import { resolveKey, parseTrustRoot, type TrustRoot } from './trust-root.js';
+import { keyUsableAt } from './revocation.js';
 
 // ── Wire shapes (base64 for all binary fields; see VERIFICATION.md §2) ───────
 
@@ -41,6 +43,10 @@ export interface VerifyContextJson {
   anchor: AnchorSpec;
   /** Trusted TSA CA certs, each base64 DER. Omit/empty to skip the time check. */
   tsaCaCertsDer?: string[];
+  /** Out-of-band published trust root mapping keyRef → public key + lifecycle.
+   *  When present, signer verification uses makeVerifySignatureFromTrustRoot instead
+   *  of the single-key path. NEVER read from the bundle. */
+  trustRoot?: unknown;
 }
 
 /** The loaded, decoded verify-context. */
@@ -52,6 +58,10 @@ export interface VerifyContext {
    *  this leaf package carries no AWS SDK). Absent => anchor-checked falls back to a
    *  clear error at fetch time. */
   s3?: S3LockClient;
+  /** Validated trust root, decoded from the on-disk verify-context JSON.
+   *  When present, signer verification resolves the public key by sig.keyRef.
+   *  Never sourced from the bundle. */
+  trustRoot?: TrustRoot;
 }
 
 function b64(s: string): Uint8Array {
@@ -74,13 +84,23 @@ export async function loadVerifyContext(
   const raw = await readFile(path, 'utf8');
   const json = JSON.parse(raw) as VerifyContextJson;
   const signerPublicKey = json.signerPublicKeySpkiDer
-    ? createPublicKey({ key: Buffer.from(b64(json.signerPublicKeySpkiDer)), format: 'der', type: 'spki' })
+    ? createPublicKey({
+        key: Buffer.from(b64(json.signerPublicKeySpkiDer)),
+        format: 'der',
+        type: 'spki',
+      })
+    : undefined;
+  // If a trust root is present in the context, validate it fail-closed (disk-sourced
+  // manifest — any malformation is a fatal misconfiguration, not a soft skip).
+  const trustRoot: TrustRoot | undefined = json.trustRoot
+    ? parseTrustRoot(JSON.stringify(json.trustRoot))
     : undefined;
   return {
     signerPublicKey,
     anchor: json.anchor,
     tsaCaCertsDer: (json.tsaCaCertsDer ?? []).map(b64),
     s3: opts.s3,
+    trustRoot,
   };
 }
 
@@ -150,7 +170,14 @@ export function buildAnchor(ctx: VerifyContext, bundle: AuditBundle): AuditAncho
             }
           : undefined;
         const epochId = range?.epochId ?? o.epochId;
-        return [{ epochId, root: Uint8Array.from(Buffer.from(o.rootHex, 'hex')), signature, receipt: o.receipt }];
+        return [
+          {
+            epochId,
+            root: Uint8Array.from(Buffer.from(o.rootHex, 'hex')),
+            signature,
+            receipt: o.receipt,
+          },
+        ];
       },
     };
   }
@@ -170,22 +197,59 @@ export function buildAnchor(ctx: VerifyContext, bundle: AuditBundle): AuditAncho
   };
 }
 
+// ── Verified genTime extraction (for key-lifecycle gate at the CLI call site) ──
+
+/** Extract a TSA-verified genTime from the bundle's embedded anchored root, if present and
+ *  trusted by `ctx.tsaCaCertsDer`. Returns undefined when certs are absent, the root has no
+ *  timestamp token, or verification fails. Never returns a self-asserted / operator-supplied
+ *  time — ONLY a time proven by a verified RFC-3161 token.
+ *
+ *  Call this BEFORE building the signature callback so the lifecycle gate in
+ *  makeVerifySignatureFromTrustRoot can receive a trusted genTime. */
+export function extractVerifiedGenTime(ctx: VerifyContext, bundle: AuditBundle): Date | undefined {
+  if (ctx.tsaCaCertsDer.length === 0) return undefined;
+  const embeddedRoot = bundle.auditLog.root;
+  if (!embeddedRoot) return undefined;
+  const hydratedRoot = hydrateAnchoredRoot(embeddedRoot);
+  if (!hydratedRoot.timestamp) return undefined;
+  const result = verifyTimestampWithTime(
+    hydratedRoot.root,
+    hydratedRoot.timestamp,
+    ctx.tsaCaCertsDer,
+  );
+  return result.ok ? result.genTime : undefined;
+}
+
 // ── Injected verifier callbacks (what core's verifyBundle consumes) ───────────
 
-/** ed25519 verify over the root bytes, using the context's SPKI-DER public key.
+/** The single algorithm→node-crypto-verify mapping. ed25519 = PureEdDSA (digest null);
+ *  ecdsa-p256 = ECDSA over SHA-256, DER (node's default). Unknown alg → false. Never throws.
+ *  Sole place the per-alg verify is written; all verify callbacks in this module route through it. */
+function verifySignatureBytes(
+  alg: string,
+  root: Uint8Array,
+  key: KeyObject,
+  sigBytes: Uint8Array,
+): boolean {
+  try {
+    if (alg === 'ed25519') return edVerify(null, Buffer.from(root), key, Buffer.from(sigBytes));
+    if (alg === 'ecdsa-p256')
+      return edVerify('sha256', Buffer.from(root), key, Buffer.from(sigBytes));
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/** Verify over the root bytes, using the context's SPKI-DER public key.
+ *  Dispatches on sig.alg (ed25519 | ecdsa-p256) via verifySignatureBytes.
  *  Returns undefined when no key is configured (→ core treats the check as 'n/a'). */
 export function makeVerifySignature(
   ctx: VerifyContext,
 ): ((root: Uint8Array, sig: Signature) => boolean) | undefined {
   const key = ctx.signerPublicKey;
   if (!key) return undefined;
-  return (root, sig) => {
-    try {
-      return edVerify(null, Buffer.from(root), key, Buffer.from(sig.bytes));
-    } catch {
-      return false;
-    }
-  };
+  return (root, sig) => verifySignatureBytes(sig.alg, root, key, sig.bytes);
 }
 
 /** RFC 3161 time verify bound to the context's TSA CA certs. Returns undefined when no
@@ -196,4 +260,33 @@ export function makeVerifyTimestamp(
   if (ctx.tsaCaCertsDer.length === 0) return undefined;
   const certs = ctx.tsaCaCertsDer;
   return (root, token) => verifyTimestamp(root, token, certs);
+}
+
+/** Verify callback resolving the pubkey by sig.keyRef from a published trust root.
+ *  No trust root → undefined (core 'n/a'). keyRef unknown → false (hard fail). alg must
+ *  match the published entry. Crypto goes through the shared verifySignatureBytes primitive.
+ *  `verifiedGenTime` (the RFC-3161-verified signing time, when available) drives the
+ *  key-lifecycle gate (validity window + time-bounded revocation). */
+export function makeVerifySignatureFromTrustRoot(
+  trustRoot: TrustRoot | undefined,
+  verifiedGenTime?: Date,
+): ((root: Uint8Array, sig: Signature) => boolean) | undefined {
+  if (!trustRoot) return undefined;
+  return (root, sig) => {
+    const entry = resolveKey(trustRoot, sig.keyRef);
+    if (!entry) return false; // unrecognized signer = hard fail
+    if (entry.alg !== sig.alg) return false; // alg must match the published entry
+    if (!keyUsableAt(entry, verifiedGenTime)) return false; // lifecycle gate: window + revocation
+    let key: KeyObject;
+    try {
+      key = createPublicKey({
+        key: Buffer.from(entry.spkiDer, 'base64'),
+        format: 'der',
+        type: 'spki',
+      });
+    } catch {
+      return false; // malformed base64 / SPKI
+    }
+    return verifySignatureBytes(sig.alg, root, key, sig.bytes);
+  };
 }

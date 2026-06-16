@@ -19,14 +19,24 @@ export { serve } from './serve/driver.js';
 export type { ServeOptions } from './serve/driver.js';
 export { buildManifest } from './audit/manifest.js';
 export type { BuildManifestInput } from './audit/manifest.js';
-export type { DispatchManifest, DispatchExecutorManifest, ManifestSignature } from './contracts/manifest.js';
+export type {
+  DispatchManifest,
+  DispatchExecutorManifest,
+  ManifestSignature,
+} from './contracts/manifest.js';
 export { OperationsApi } from './operations-api.js';
 export type { OperationsApiDeps } from './operations-api.js';
 export { assembleBundle } from './audit/bundle.js';
 export { AuditLog } from './audit/audit-log.js';
 export { LocalAnchor, S3ObjectLockAnchor } from './audit/anchor.js';
 export type { S3LockClient } from './audit/anchor.js';
-export { createLocalSigner, NoneSigner, verifyEd25519 } from './audit/signer.js';
+export {
+  createLocalSigner,
+  NoneSigner,
+  verifyEd25519,
+  createLocalEcdsaSigner,
+  verifyEcdsaP256,
+} from './audit/signer.js';
 export { verify } from './audit/verify.js';
 export { renderVerification } from './audit/render.js';
 export { verifyBundle } from './audit/verify-bundle.js';
