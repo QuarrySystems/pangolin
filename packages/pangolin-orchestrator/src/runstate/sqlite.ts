@@ -6,8 +6,18 @@
 // separate processes are unsupported and will corrupt run-state.
 //
 import Database from 'better-sqlite3';
-import type { VerifyOutcome } from '@quarry-systems/pangolin-core';
-import type { AnchoredRoot, AuditEntryRow, AuditStore, ItemState, Run, RunStateStore, RunStatus, TerminalStatus, TimestampToken } from '../contracts/index.js';
+import type { Authorization, VerifyOutcome } from '@quarry-systems/pangolin-core';
+import type {
+  AnchoredRoot,
+  AuditEntryRow,
+  AuditStore,
+  ItemState,
+  Run,
+  RunStateStore,
+  RunStatus,
+  TerminalStatus,
+  TimestampToken,
+} from '../contracts/index.js';
 
 /** Shape of a row in the `items` table (column names are snake_case). */
 interface ItemRow {
@@ -48,6 +58,7 @@ CREATE TABLE IF NOT EXISTS audit_entries (
   run_id TEXT NOT NULL, seq INTEGER NOT NULL, kind TEXT NOT NULL,
   item_id TEXT, status TEXT, actor TEXT, manifest_ref TEXT, result_ref TEXT,
   at TEXT NOT NULL, entry_hash TEXT NOT NULL, prev_hash TEXT NOT NULL,
+  authorization TEXT,
   PRIMARY KEY (run_id, seq));
 CREATE TABLE IF NOT EXISTS audit_roots (
   epoch_id TEXT PRIMARY KEY, root BLOB NOT NULL,
@@ -92,9 +103,19 @@ export class SqliteRunStateStore implements RunStateStore, AuditStore {
     }
     // audit_roots gained an optional trusted-time token after the initial release.
     const rootCols = new Set(
-      (this.db.prepare('PRAGMA table_info(audit_roots)').all() as { name: string }[]).map((c) => c.name),
+      (this.db.prepare('PRAGMA table_info(audit_roots)').all() as { name: string }[]).map(
+        (c) => c.name,
+      ),
     );
     if (!rootCols.has('ts_token')) this.db.exec('ALTER TABLE audit_roots ADD COLUMN ts_token TEXT');
+    // audit_entries gained authorization (JSON) for fire-gate sealing.
+    const entryCols = new Set(
+      (this.db.prepare('PRAGMA table_info(audit_entries)').all() as { name: string }[]).map(
+        (c) => c.name,
+      ),
+    );
+    if (!entryCols.has('authorization'))
+      this.db.exec('ALTER TABLE audit_entries ADD COLUMN authorization TEXT');
   }
 
   ensureQueue(name: string, concurrency: number): void {
@@ -111,11 +132,20 @@ export class SqliteRunStateStore implements RunStateStore, AuditStore {
     );
     const tx = this.db.transaction((r: Run) => {
       for (const it of r.items)
-        ins.run(it.id, r.id, r.queue, it.executor,
-          JSON.stringify(it.inputs), JSON.stringify(it.depends_on),
-          JSON.stringify(it.resourceLocks), 'pending',
-          it.subagentShape ?? null, actor ?? null, submittedAt ?? null,
-          it.needs != null ? JSON.stringify(it.needs) : null);
+        ins.run(
+          it.id,
+          r.id,
+          r.queue,
+          it.executor,
+          JSON.stringify(it.inputs),
+          JSON.stringify(it.depends_on),
+          JSON.stringify(it.resourceLocks),
+          'pending',
+          it.subagentShape ?? null,
+          actor ?? null,
+          submittedAt ?? null,
+          it.needs != null ? JSON.stringify(it.needs) : null,
+        );
     });
     tx(run);
   }
@@ -135,7 +165,9 @@ export class SqliteRunStateStore implements RunStateStore, AuditStore {
   }
 
   setStatus(itemId: string, status: TerminalStatus, reason?: string): void {
-    this.db.prepare('UPDATE items SET status=?, reason=? WHERE id=?').run(status, reason ?? null, itemId);
+    this.db
+      .prepare('UPDATE items SET status=?, reason=? WHERE id=?')
+      .run(status, reason ?? null, itemId);
   }
 
   getItems(runId?: string): ItemState[] {
@@ -157,9 +189,11 @@ export class SqliteRunStateStore implements RunStateStore, AuditStore {
 
   queueConcurrency(queue: string): number {
     return (
-      (this.db.prepare('SELECT concurrency FROM queues WHERE name=?').get(queue) as
-        | { concurrency: number }
-        | undefined)?.concurrency ?? 0
+      (
+        this.db.prepare('SELECT concurrency FROM queues WHERE name=?').get(queue) as
+          | { concurrency: number }
+          | undefined
+      )?.concurrency ?? 0
     );
   }
 
@@ -187,15 +221,21 @@ export class SqliteRunStateStore implements RunStateStore, AuditStore {
 
   getActor(itemId: string): string | undefined {
     return (
-      (this.db.prepare('SELECT actor FROM items WHERE id=?').get(itemId) as { actor: string | null } | undefined)
-        ?.actor ?? undefined
+      (
+        this.db.prepare('SELECT actor FROM items WHERE id=?').get(itemId) as
+          | { actor: string | null }
+          | undefined
+      )?.actor ?? undefined
     );
   }
 
   getAttempts(itemId: string): number {
     return (
-      (this.db.prepare('SELECT attempts FROM items WHERE id=?').get(itemId) as { attempts: number | null } | undefined)
-        ?.attempts ?? 0
+      (
+        this.db.prepare('SELECT attempts FROM items WHERE id=?').get(itemId) as
+          | { attempts: number | null }
+          | undefined
+      )?.attempts ?? 0
     );
   }
 
@@ -204,7 +244,9 @@ export class SqliteRunStateStore implements RunStateStore, AuditStore {
   }
 
   requeue(itemId: string, notBeforeMs: number): void {
-    this.db.prepare("UPDATE items SET status='ready', next_attempt_at=? WHERE id=?").run(notBeforeMs, itemId);
+    this.db
+      .prepare("UPDATE items SET status='ready', next_attempt_at=? WHERE id=?")
+      .run(notBeforeMs, itemId);
   }
 
   setResultRef(itemId: string, ref: string): void {
@@ -216,7 +258,9 @@ export class SqliteRunStateStore implements RunStateStore, AuditStore {
   }
 
   setOutputRefs(itemId: string, outputRefs: Record<string, string>): void {
-    this.db.prepare('UPDATE items SET output_refs=? WHERE id=?').run(JSON.stringify(outputRefs), itemId);
+    this.db
+      .prepare('UPDATE items SET output_refs=? WHERE id=?')
+      .run(JSON.stringify(outputRefs), itemId);
   }
 
   setManifestRef(itemId: string, ref: string): void {
@@ -226,28 +270,46 @@ export class SqliteRunStateStore implements RunStateStore, AuditStore {
   // ── AuditStore ────────────────────────────────────────────────────────────
 
   appendAuditEntry(r: AuditEntryRow): void {
-    this.db.prepare(
-      `INSERT INTO audit_entries
-        (run_id,seq,kind,item_id,status,actor,manifest_ref,result_ref,at,entry_hash,prev_hash)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?)`
-    ).run(
-      r.runId, r.seq, r.kind,
-      r.itemId ?? null, r.status ?? null, r.actor ?? null,
-      r.manifestRef ?? null, r.resultRef ?? null,
-      r.at, r.entryHash, r.prevHash,
-    );
+    this.db
+      .prepare(
+        `INSERT INTO audit_entries
+        (run_id,seq,kind,item_id,status,actor,manifest_ref,result_ref,at,entry_hash,prev_hash,authorization)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+      )
+      .run(
+        r.runId,
+        r.seq,
+        r.kind,
+        r.itemId ?? null,
+        r.status ?? null,
+        r.actor ?? null,
+        r.manifestRef ?? null,
+        r.resultRef ?? null,
+        r.at,
+        r.entryHash,
+        r.prevHash,
+        r.authorization !== undefined ? JSON.stringify(r.authorization) : null,
+      );
   }
 
   getAuditEntries(runId: string): AuditEntryRow[] {
     interface AuditEntryDbRow {
-      run_id: string; seq: number; kind: string;
-      item_id: string | null; status: string | null; actor: string | null;
-      manifest_ref: string | null; result_ref: string | null;
-      at: string; entry_hash: string; prev_hash: string;
+      run_id: string;
+      seq: number;
+      kind: string;
+      item_id: string | null;
+      status: string | null;
+      actor: string | null;
+      manifest_ref: string | null;
+      result_ref: string | null;
+      at: string;
+      entry_hash: string;
+      prev_hash: string;
+      authorization: string | null;
     }
-    const rows = this.db.prepare(
-      'SELECT * FROM audit_entries WHERE run_id=? ORDER BY seq'
-    ).all(runId) as AuditEntryDbRow[];
+    const rows = this.db
+      .prepare('SELECT * FROM audit_entries WHERE run_id=? ORDER BY seq')
+      .all(runId) as AuditEntryDbRow[];
     return rows.map((row): AuditEntryRow => {
       const entry: AuditEntryRow = {
         runId: row.run_id,
@@ -262,14 +324,16 @@ export class SqliteRunStateStore implements RunStateStore, AuditStore {
       if (row.actor !== null) entry.actor = row.actor;
       if (row.manifest_ref !== null) entry.manifestRef = row.manifest_ref;
       if (row.result_ref !== null) entry.resultRef = row.result_ref;
+      if (row.authorization !== null)
+        entry.authorization = JSON.parse(row.authorization) as Authorization;
       return entry;
     });
   }
 
   getAuditChainHead(runId: string): string {
-    const row = this.db.prepare(
-      'SELECT entry_hash FROM audit_entries WHERE run_id=? ORDER BY seq DESC LIMIT 1'
-    ).get(runId) as { entry_hash: string } | undefined;
+    const row = this.db
+      .prepare('SELECT entry_hash FROM audit_entries WHERE run_id=? ORDER BY seq DESC LIMIT 1')
+      .get(runId) as { entry_hash: string } | undefined;
     return row?.entry_hash ?? '';
   }
 
@@ -283,36 +347,45 @@ export class SqliteRunStateStore implements RunStateStore, AuditStore {
           ...(root.timestamp.tsaUrl ? { tsaUrl: root.timestamp.tsaUrl } : {}),
         })
       : null;
-    this.db.prepare(
-      `INSERT OR REPLACE INTO audit_roots
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO audit_roots
         (epoch_id, root, sig_alg, sig_bytes, sig_keyref,
          anchor_id, guarantee, receipt_at, locator, anchored_at, ts_token)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?)`
-    ).run(
-      root.epochId,
-      Buffer.from(root.root),
-      root.signature?.alg ?? null,
-      root.signature ? Buffer.from(root.signature.bytes) : null,
-      root.signature?.keyRef ?? null,
-      root.receipt.anchorId,
-      root.receipt.guarantee,
-      root.receipt.at,
-      root.receipt.locator ?? null,
-      new Date().toISOString(),
-      tsTokenJson,
-    );
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+      )
+      .run(
+        root.epochId,
+        Buffer.from(root.root),
+        root.signature?.alg ?? null,
+        root.signature ? Buffer.from(root.signature.bytes) : null,
+        root.signature?.keyRef ?? null,
+        root.receipt.anchorId,
+        root.receipt.guarantee,
+        root.receipt.at,
+        root.receipt.locator ?? null,
+        new Date().toISOString(),
+        tsTokenJson,
+      );
   }
 
   getAuditRoot(epochId: string): AnchoredRoot | undefined {
     interface AuditRootDbRow {
-      epoch_id: string; root: Buffer;
-      sig_alg: string | null; sig_bytes: Buffer | null; sig_keyref: string | null;
-      anchor_id: string; guarantee: string; receipt_at: number;
-      locator: string | null; anchored_at: string; ts_token: string | null;
+      epoch_id: string;
+      root: Buffer;
+      sig_alg: string | null;
+      sig_bytes: Buffer | null;
+      sig_keyref: string | null;
+      anchor_id: string;
+      guarantee: string;
+      receipt_at: number;
+      locator: string | null;
+      anchored_at: string;
+      ts_token: string | null;
     }
-    const row = this.db.prepare(
-      'SELECT * FROM audit_roots WHERE epoch_id=?'
-    ).get(epochId) as AuditRootDbRow | undefined;
+    const row = this.db.prepare('SELECT * FROM audit_roots WHERE epoch_id=?').get(epochId) as
+      | AuditRootDbRow
+      | undefined;
     if (!row) return undefined;
 
     const result: AnchoredRoot = {
@@ -334,7 +407,12 @@ export class SqliteRunStateStore implements RunStateStore, AuditStore {
       if (row.sig_keyref !== null) result.signature.keyRef = row.sig_keyref;
     }
     if (row.ts_token !== null) {
-      const parsed = JSON.parse(row.ts_token) as { alg: TimestampToken['alg']; token: string; at: string; tsaUrl?: string };
+      const parsed = JSON.parse(row.ts_token) as {
+        alg: TimestampToken['alg'];
+        token: string;
+        at: string;
+        tsaUrl?: string;
+      };
       const timestamp: TimestampToken = {
         alg: parsed.alg,
         token: new Uint8Array(Buffer.from(parsed.token, 'base64')),
