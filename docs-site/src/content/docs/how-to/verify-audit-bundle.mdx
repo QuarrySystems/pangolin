@@ -107,7 +107,7 @@ proves. It is derived in `verify.ts` from the anchor's `guarantee` — the
 | Anchor | `guarantee` | report `claim` | What it proves | What it does NOT prove |
 |---|---|---|---|---|
 | `LocalAnchor` (default) | `detect` | **`tamper-detecting`** | Catches accidental or clumsy mutation of the log. | The anchored root lives in the **same store** as the log — it is *not* evidence against an attacker who controls that store. |
-| `S3ObjectLockAnchor` | `external-immutable` | **`tamper-evident`** | The signed root lives in S3 Object Lock (compliance mode) — a separate trust domain that survives a DB-side tamper attempt. | It records *what ran* (environment + inputs by hash); it does not reproduce the agent's *output*, and it is not a compliance certification. |
+| `S3ObjectLockAnchor` | `external-immutable` | **`tamper-evident`** | The signed root lives in S3 Object Lock (compliance mode) — a separate trust domain that survives a DB-side tamper attempt. | It records *what ran* (environment + inputs by hash) and attests a **recorded dispatch-level authorization decision** (operator-self-asserted). It does **not** govern the agent's individual tool calls mid-run, does not reproduce the agent's *output*, and is not a compliance certification. |
 
 <Aside type="caution" title="Why the claim can downgrade">
 The claim is scoped to what `verify()` can actually prove at audit time, not to
@@ -264,7 +264,9 @@ it can earn:
 
 The report it prints (and emits raw under `--json`) carries the same fields as
 `pangolin verify`, **including the `timeTier` field** (`asserted` vs `tsa-attested` —
-see [Audit & guarantee tiers → Trusted time](/pangolin/explanation/audit-guarantee-tiers/#trusted-time--a-separate-dimension)).
+see [Audit & guarantee tiers → Trusted time](/pangolin/explanation/audit-guarantee-tiers/#trusted-time--a-separate-dimension))
+and the **`authzTier` field** (`recorded` — dispatch-level, operator-self-asserted; or `none` — not attested).
+Note that `authzTier: 'recorded'` attests only that an authorization decision was recorded at the dispatch level (operator-self-asserted); it does **not** govern the agent's individual tool calls mid-run.
 `--full` prints every ledger row.
 
 <Aside type="note" title="The reimplementation spec">

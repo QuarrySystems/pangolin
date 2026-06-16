@@ -97,6 +97,20 @@ export function renderVerification(bundle: AuditBundle, opts: RenderOpts = {}): 
   const timeDetail = time.detail ?? `time tier: ${r.timeTier}`;
   lines.push(`  ${mark(time, color)} time         ${timeDetail}`);
 
+  // Authorization is a SEPARATE dimension from the tamper claim — show the tier when present.
+  // Legacy reports (no authzTier field) render unchanged: nothing is printed.
+  if (r.authzTier !== undefined) {
+    let authzDetail: string;
+    if (r.authzTier === 'recorded') {
+      authzDetail = 'recorded (dispatch-level, operator-self-asserted — not third-party attested)';
+    } else if (r.authzTier === 'none') {
+      authzDetail = 'not attested';
+    } else {
+      authzDetail = 'authority-attested';
+    }
+    lines.push(`  ─ authorization  ${authzDetail}`);
+  }
+
   lines.push('  ' + sep);
   lines.push(`  ${'seq'.padStart(4)}  ${'hash'.padEnd(6)}  kind`);
   lines.push(...buildLedger(bundle.auditLog.entries, failingSeq, full, color));

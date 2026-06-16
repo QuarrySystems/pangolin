@@ -32,11 +32,11 @@ function greenBundle(checksOverrides?: Partial<VerificationReport['checks']>): A
       guarantee: 'external-immutable',
       claim: 'tamper-evident',
       checks: {
-        chain:     { ok: true },
-        root:      { ok: true },
+        chain: { ok: true },
+        root: { ok: true },
         signature: { ok: 'n/a' },
-        anchor:    { ok: true },
-        handoff:   { ok: true, detail: '0 input refs accounted for' },
+        anchor: { ok: true },
+        handoff: { ok: true, detail: '0 input refs accounted for' },
         ...checksOverrides,
       },
     },
@@ -58,11 +58,11 @@ function tamperedBundle(): AuditBundle {
       claim: 'tamper-detecting',
       failure: 'chain',
       checks: {
-        chain:     { ok: false, detail: 'entry 7 hash ≠ recomputed' },
-        root:      { ok: 'n/a' },
+        chain: { ok: false, detail: 'entry 7 hash ≠ recomputed' },
+        root: { ok: 'n/a' },
         signature: { ok: 'n/a' },
-        anchor:    { ok: true },
-        handoff:   { ok: true, detail: '0 input refs accounted for' },
+        anchor: { ok: true },
+        handoff: { ok: true, detail: '0 input refs accounted for' },
       },
     },
   };
@@ -139,10 +139,10 @@ describe('ledger head+tail with …(n more)', () => {
         guarantee: 'external-immutable',
         claim: 'tamper-evident',
         checks: {
-          chain:     { ok: true },
-          root:      { ok: true },
+          chain: { ok: true },
+          root: { ok: true },
           signature: { ok: 'n/a' },
-          anchor:    { ok: true },
+          anchor: { ok: true },
         },
       },
     };
@@ -194,6 +194,40 @@ describe('verdict line', () => {
 });
 
 // ---------------------------------------------------------------------------
+// authzTier row (authorizer-seam spec §10)
+// ---------------------------------------------------------------------------
+
+describe('authzTier row', () => {
+  function bundleWithAuthzTier(
+    tier: 'none' | 'recorded' | 'authority-attested' | undefined,
+  ): AuditBundle {
+    const b = greenBundle();
+    if (tier !== undefined) {
+      b.report.authzTier = tier;
+    }
+    return b;
+  }
+
+  it('recorded → prints authorization line with "recorded" and "self-asserted"', () => {
+    const out = renderVerification(bundleWithAuthzTier('recorded'), { color: false });
+    expect(out).toMatch(/authorization/i);
+    expect(out).toMatch(/recorded/i);
+    expect(out).toMatch(/self-asserted/i);
+  });
+
+  it('none → prints authorization line saying "not attested"', () => {
+    const out = renderVerification(bundleWithAuthzTier('none'), { color: false });
+    expect(out).toMatch(/authorization/i);
+    expect(out).toMatch(/not attested/i);
+  });
+
+  it('absent (legacy report) → no authorization line appears', () => {
+    const out = renderVerification(bundleWithAuthzTier(undefined), { color: false });
+    expect(out).not.toMatch(/authorization/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Handoff row (Wave-C spec §7)
 // ---------------------------------------------------------------------------
 
@@ -209,7 +243,12 @@ describe('handoff row', () => {
 
   it('marks a failed handoff with the failure glyph', () => {
     const out = renderVerification(
-      greenBundle({ handoff: { ok: false, detail: 'item b input patch: ref-abc not produced by declared output' } }),
+      greenBundle({
+        handoff: {
+          ok: false,
+          detail: 'item b input patch: ref-abc not produced by declared output',
+        },
+      }),
       { color: false },
     );
     expect(out).toMatch(/✗ handoff/);

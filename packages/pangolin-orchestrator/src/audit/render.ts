@@ -113,6 +113,20 @@ export function renderVerification(bundle: AuditBundle, opts: RenderOpts = {}): 
   const handoffDetail = handoff.detail ?? (handoff.ok === 'n/a' ? 'n/a' : String(handoff.ok));
   lines.push(`  ${mark(handoff, color)} handoff      ${handoffDetail}`);
 
+  // Authorization is a SEPARATE dimension from the tamper claim — show the tier when present.
+  // Legacy reports (no authzTier field) render unchanged: nothing is printed.
+  if (r.authzTier !== undefined) {
+    let authzDetail: string;
+    if (r.authzTier === 'recorded') {
+      authzDetail = 'recorded (dispatch-level, operator-self-asserted — not third-party attested)';
+    } else if (r.authzTier === 'none') {
+      authzDetail = 'not attested';
+    } else {
+      authzDetail = 'authority-attested';
+    }
+    lines.push(`  ─ authorization  ${authzDetail}`);
+  }
+
   lines.push('  ' + sep);
 
   // Ledger
