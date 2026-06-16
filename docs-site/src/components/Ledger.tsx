@@ -20,6 +20,7 @@ export function Ledger({ items, statuses, selected, onSelect, onEdit }: {
   onEdit: (id: string, field: 'outputPayload' | 'scope', value: string) => void;
 }) {
   const order = topoOrder(items);
+  const idx: Record<string, number> = Object.fromEntries(order.map((id, i) => [id, i]));
   const byId = new Map(items.map((i) => [i.id, i]));
   const wrapRef = useRef<HTMLDivElement>(null);
   const dotRefs = useRef<Record<string, HTMLSpanElement | null>>({});
@@ -65,14 +66,18 @@ export function Ledger({ items, statuses, selected, onSelect, onEdit }: {
     <div className="pv-ledger" ref={wrapRef}>
       <svg className="pv-rail-edges" aria-hidden="true">
         {conns.map((c, i) => {
-          // Bow each edge left; longer spans (skip-edges across the diamond) bow further
-          // so they clear the intermediate dot — a commit-graph-style rail.
-          const dx = Math.min(16, Math.abs(c.y2 - c.y1) * 0.22);
-          const my = (c.y1 + c.y2) / 2;
-          return (
-            <path key={i} className={'pv-rail-edge is-' + connState(c)}
-              d={`M ${c.x2} ${c.y2} C ${c.x2 - dx} ${my}, ${c.x1 - dx} ${my}, ${c.x1} ${c.y1}`} />
-          );
+          // Adjacent parent→child: a straight vertical segment on the spine. Skip-edges (the
+          // two diagonal legs of the diamond) bow left into a side lane to clear the dot(s)
+          // they pass — a commit-graph-style rail.
+          const gap = Math.abs((idx[c.to] ?? 0) - (idx[c.from] ?? 0));
+          const d =
+            gap <= 1
+              ? `M ${c.x1} ${c.y1} L ${c.x2} ${c.y2}`
+              : (() => {
+                  const lane = Math.min(c.x1, c.x2) - (12 + (gap - 2) * 8);
+                  return `M ${c.x1} ${c.y1} C ${lane} ${c.y1 + 10}, ${lane} ${c.y2 - 10}, ${c.x2} ${c.y2}`;
+                })();
+          return <path key={i} className={'pv-rail-edge is-' + connState(c)} d={d} />;
         })}
       </svg>
 
