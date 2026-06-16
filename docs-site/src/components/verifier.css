@@ -12,6 +12,10 @@
   -webkit-font-smoothing:antialiased; line-height:1.45;
 }
 .pv-root *{box-sizing:border-box;}
+/* Neutralise Starlight markdown-content styles that leak into the island and knock flex
+   items off their shared centerline (injected margins / button & input resets). */
+.pv-root :is(button,input,label,p,h3,section,header,div,span,svg){margin:0;}
+.pv-root button{font-family:inherit; line-height:1.2;}
 .mono{font-family:var(--mono); font-variant-ligatures:none;}
 
 /* header */
@@ -54,15 +58,15 @@
 .pv-ctl-btns{align-items:center;}
 .pv-ctl-label svg{color:var(--bronze);}
 .pv-ctl-btns{display:flex; gap:8px; flex-wrap:wrap; align-items:center;}
-.pv-tamper{font-family:var(--sans); font-size:12.5px; color:var(--text); background:var(--panel);
-  border:1px solid var(--line2); padding:8px 13px; border-radius:9px; cursor:pointer; transition:all .14s;}
+.pv-tamper{font-family:var(--sans); font-size:12.5px; line-height:1.2; white-space:nowrap; color:var(--text);
+  background:var(--panel); border:1px solid var(--line2); padding:8px 13px; border-radius:9px; cursor:pointer; transition:all .14s;}
 .pv-tamper:hover{border-color:var(--red-line); color:var(--red); background:var(--red-dim);}
 .pv-restore{display:inline-flex; gap:6px; align-items:center; font-family:var(--sans); font-size:12.5px;
   color:var(--muted); background:transparent; border:1px solid var(--line); padding:8px 13px; border-radius:9px;
   cursor:pointer; transition:all .14s;}
 .pv-restore:hover{color:var(--teal); border-color:var(--teal-line);}
-.pv-tier{display:inline-flex; gap:4px; align-items:stretch; border:1px solid var(--line2); border-radius:9px; padding:4px;}
-.pv-tier button{display:inline-flex; align-items:center; font:inherit; font-size:12px; line-height:1; color:var(--muted);
+.pv-tier{display:inline-flex; gap:4px; align-items:center; border:1px solid var(--line2); border-radius:9px; padding:4px;}
+.pv-tier button{display:inline-flex; align-items:center; white-space:nowrap; font:inherit; font-size:12px; line-height:1.2; color:var(--muted);
   background:transparent; border:0; padding:7px 11px; border-radius:6px; cursor:pointer;}
 .pv-tier button.is-on{background:var(--panel2); color:var(--text);}
 .pv-reseal{display:inline-flex; gap:6px; align-items:center; font-size:12.5px; color:var(--red); background:var(--red-dim);
