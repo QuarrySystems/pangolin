@@ -35,30 +35,53 @@ export function verifyBundle(
     verifyTimestamp: deps.verifyTimestamp,
   }).then((base) => {
     const handoff = checkHandoffClosure(bundle);
-    // Only `item.fired` audit ENTRIES carry a chain-anchored manifestRef (canonEntry seals it);
-    // bundle.items[*].manifestRef is copied verbatim from the UNTRUSTED export and is NOT chained.
-    // Tie each manifest back to the chain: the export ref must be one the audit log actually
-    // anchored (a forged/rewritten ref is absent from the chain → reject), THEN the manifest body
-    // must content-address to it.
-    const chainedManifestRefs = new Set<string>();
+    // Manifest integrity (spec §7 / Finding A). The TRUSTED anchor for each fired item's manifest
+    // is its `item.fired` audit entry's manifestRef — canonEntry seals it and the chain/root/anchor
+    // checks above guarantee its authenticity. The export's bundle.items[*].manifestRef is copied
+    // verbatim from the UNTRUSTED export, and the item↔manifest join (find by itemId) is attacker-
+    // controllable, so we DO NOT consult it here. Instead we bind the bundle's manifests to the
+    // chain BIDIRECTIONALLY, purely by content hash:
+    //   forward — every PINNED chained ref must be backed by a present manifest that content-
+    //             addresses to it. A forged/rewritten/downgraded ref leaves the ORIGINAL chained
+    //             ref un-backed (no preimage for its fixed hash) → reject.
+    //   reverse — every present manifest THAT CARRIES AN AUTHORIZATION must content-address to some
+    //             PINNED chained ref. Forward already binds every sealed manifest body; reverse's
+    //             additional job is to stop an UNANCHORED authorization from entering evidence — an
+    //             appended/orphaned forged manifest bearing an `allow` verdict (itemId renamed,
+    //             export id renamed, or the export item's manifestRef stripped) matches nothing →
+    //             reject, and authzTier stays honest. Manifests without an authorization block carry
+    //             no claim this check anchors (and were never bound pre-feature), so they are left to
+    //             the forward check; this also keeps handoff-only fixtures (chain-unbound, authz-free
+    //             manifests) from false-failing.
+    // Unpinned chained refs commit to no content; they occur ONLY in fake-executor test fixtures
+    // (real executors always mint pinned, content-addressed refs). When the chain contains any such
+    // ref we relax the REVERSE direction, since a present manifest may legitimately correspond to
+    // an uncommitted fixture item. Chained entries are tamper-anchored, so an attacker cannot
+    // inject an unpinned entry to disable the reverse check without breaking the Merkle root.
+    const pinnedChainedRefs: string[] = [];
+    let sawUnpinnedChainedRef = false;
     for (const e of entries) {
-      if (e.kind === 'item.fired' && e.manifestRef !== undefined) {
-        chainedManifestRefs.add(e.manifestRef);
-      }
+      if (e.kind !== 'item.fired' || e.manifestRef === undefined) continue;
+      if (isContentAddressed(e.manifestRef)) pinnedChainedRefs.push(e.manifestRef);
+      else sawUnpinnedChainedRef = true;
     }
     let manifestOk = true;
-    for (const m of bundle.manifests) {
-      const ref = bundle.items.find((i) => i.id === m.itemId)?.manifestRef;
-      if (ref === undefined) continue; // no ref to bind (unchanged posture)
-      // The gate is the TRUSTED chain, NEVER the untrusted export ref's own shape: the export ref
-      // MUST be one the audit log actually anchored via an `item.fired` entry. A forged ref — whether
-      // rewritten to a new content address OR downgraded to an unpinned form to dodge the content
-      // check — is absent from the anchored set and is rejected here. (A genuinely-unpinned ref that
-      // IS in the chain — fake-executor test fixtures only; real executors always mint pinned refs —
-      // passes membership, after which manifestRefMatches harmlessly skips the content check.)
-      if (!chainedManifestRefs.has(ref) || !manifestRefMatches(m, ref)) {
+    // forward: each pinned chained ref is covered by a present, content-matching manifest
+    for (const ref of pinnedChainedRefs) {
+      if (!bundle.manifests.some((m) => manifestRefMatches(m, ref))) {
         manifestOk = false;
         break;
+      }
+    }
+    // reverse: each present AUTHORIZATION-bearing manifest is bound to some pinned chained ref
+    // (relaxed only when the chain carries uncommitted/unpinned fixture refs — see above)
+    if (manifestOk && !sawUnpinnedChainedRef) {
+      for (const m of bundle.manifests) {
+        if (m.authorization === undefined) continue; // no anchored claim → forward check governs
+        if (!pinnedChainedRefs.some((ref) => manifestRefMatches(m, ref))) {
+          manifestOk = false;
+          break;
+        }
       }
     }
     const intact = base.intact && handoff.ok !== false && manifestOk;
@@ -70,16 +93,32 @@ export function verifyBundle(
           ? ('handoff' as const)
           : undefined);
     const claim = claimFor(intact, base.guarantee, base.checks.signature.ok);
+    // authzTier reflects authorizations the bundle can actually substantiate. The manifest-borne
+    // verdict counts ONLY when the manifests passed the integrity binding above (else a forged or
+    // orphaned manifest could flip the tier); the `item.denied` verdict is chain-sealed, so it
+    // counts unconditionally.
     const decided =
-      bundle.manifests.some(
-        (m) => m.authorization !== undefined && m.authorization.verdict !== 'not-evaluated',
-      ) ||
+      (manifestOk &&
+        bundle.manifests.some(
+          (m) => m.authorization !== undefined && m.authorization.verdict !== 'not-evaluated',
+        )) ||
       bundle.auditLog.entries.some(
         (e) => e.kind === 'item.denied' && e.authorization?.verdict === 'deny',
       );
     const authzTier: AuthzTier = decided ? 'recorded' : 'none';
     return { ...base, intact, failure, claim, authzTier, checks: { ...base.checks, handoff } };
   });
+}
+
+/** True iff `ref` is a pinned (content-addressed) pangolin:// URI carrying a contentHash segment.
+ *  Applied ONLY to TRUSTED chained refs (never the untrusted export ref) to decide whether the
+ *  chain made a content commitment that must be enforced. Unpinned/unparseable → no commitment. */
+function isContentAddressed(ref: string): boolean {
+  try {
+    return parsePangolinUri(ref).contentHash !== undefined;
+  } catch {
+    return false;
+  }
 }
 
 /** Returns true iff the manifest's recomputed content hash matches the hash embedded in the

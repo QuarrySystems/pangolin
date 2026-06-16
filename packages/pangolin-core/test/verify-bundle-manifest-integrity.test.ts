@@ -240,14 +240,26 @@ describe('manifest integrity (Finding A)', () => {
     expect(report.failure).toBe('manifest');
   });
 
-  it('REJECTS a downgraded export ref (unpinned) that diverges from the chained pinned ref', async () => {
-    // Downgrade attack: the chain anchored a PINNED ref, but the attacker rewrites the export
-    // item ref to an unpinned form (pangolin://manifests/<id>) hoping the integrity check will
-    // "skip" it. The gate is the TRUSTED chain, not the export ref's shape: the downgraded ref is
-    // absent from the anchored item.fired set, so it must be rejected — NOT skipped.
+  it('REJECTS a forged manifest even when the export ref is downgraded to unpinned to dodge the check', async () => {
+    // Downgrade variant: forge the manifest body self-consistently AND rewrite the export item ref
+    // to an unpinned form (pangolin://manifests/<id>), hoping the integrity check "skips" it. The
+    // check binds to the TRUSTED chained ref (still pinned, still original) by content, never to
+    // the export ref, so the forged manifest no longer content-addresses to the chained ref and is
+    // rejected. (Downgrading the export ref ALONE, without forging, is benign — the export ref is
+    // untrusted and never read.)
     const m = minimalManifest();
-    const { bundle, anchor } = bundleWith(m); // chain + export both = pinned manifestRefOf(m)
-    bundle.items[0]!.manifestRef = 'pangolin://manifests/item-a'; // attacker downgrades the export ref only
+    const { bundle, anchor } = bundleWith(m);
+
+    (bundle.manifests[0]!.authorization as { verdict: string }).verdict = 'allow';
+    const forged = bundle.manifests[0]!;
+    const {
+      manifestHash: _h,
+      signature: _s,
+      ...forgedBase
+    } = forged as DispatchManifest & { signature?: unknown };
+    (bundle.manifests[0] as { manifestHash: string }).manifestHash = computeContentHash(forgedBase);
+
+    bundle.items[0]!.manifestRef = 'pangolin://manifests/item-a'; // downgrade the export ref
 
     const report = await verifyBundle(bundle, { anchor });
 
@@ -269,5 +281,70 @@ describe('manifest integrity (Finding A)', () => {
 
     expect(report.intact).toBe(true);
     expect(report.failure).not.toBe('manifest');
+  });
+
+  it('REJECTS a forged manifest orphaned from its item (verdict flipped + manifestHash recomputed + itemId renamed)', async () => {
+    // Join-evasion: forge the manifest body self-consistently, then break the item↔manifest join
+    // by renaming the manifest's itemId (and the export item's id) so the manifest joins no
+    // ref-bearing item. The integrity check must NOT rely on that join — the original PINNED
+    // chained ref is now un-backed (forward) and the orphan manifest matches no chained ref
+    // (reverse), so either way it is rejected.
+    const m = minimalManifest(); // verdict 'deny'
+    const { bundle, anchor } = bundleWith(m);
+
+    // forge body self-consistently
+    (bundle.manifests[0]!.authorization as { verdict: string }).verdict = 'allow';
+    const forged = bundle.manifests[0]!;
+    const {
+      manifestHash: _h,
+      signature: _s,
+      ...forgedBase
+    } = forged as DispatchManifest & { signature?: unknown };
+    (bundle.manifests[0] as { manifestHash: string }).manifestHash = computeContentHash(forgedBase);
+
+    // orphan it: rename the manifest's itemId AND the export item's id so the join fails
+    (bundle.manifests[0] as { itemId: string }).itemId = 'orphaned';
+    bundle.items[0]!.id = 'orphaned';
+    // (also strip the export item's ref to model the third join-evasion form)
+    delete (bundle.items[0] as { manifestRef?: string }).manifestRef;
+
+    const report = await verifyBundle(bundle, { anchor });
+
+    expect(report.intact).toBe(false);
+    expect(report.failure).toBe('manifest');
+  });
+
+  it('REJECTS an extra forged manifest appended to the bundle (reverse coverage)', async () => {
+    // The attacker leaves the honest manifest intact (so the forward check still finds it for the
+    // chained ref) but APPENDS a second, self-consistent forged manifest carrying an 'allow'
+    // verdict and a novel itemId. It content-addresses to no chained ref → reverse rejects it,
+    // and it must not flip authzTier to 'recorded'.
+    const m = minimalManifest();
+    const { bundle, anchor } = bundleWith(m);
+
+    const extraBase = {
+      schemaVersion: 1 as const,
+      runId: 'r1',
+      itemId: 'ghost',
+      parent: 'run:r1',
+      executor: 'dispatch',
+      executorManifest: {},
+      secretRefs: [] as string[],
+      actor: 'human:test',
+      firedAt: '2024-01-01T00:00:00Z',
+      authorization: {
+        verdict: 'allow' as const,
+        principal: 'policy:test',
+        policyRef: 'sha256:0000',
+        effectClass: 'dispatch.default',
+        at: '2024-01-01T00:00:00Z',
+      },
+    };
+    bundle.manifests.push({ ...extraBase, manifestHash: computeContentHash(extraBase) });
+
+    const report = await verifyBundle(bundle, { anchor });
+
+    expect(report.intact).toBe(false);
+    expect(report.failure).toBe('manifest');
   });
 });
