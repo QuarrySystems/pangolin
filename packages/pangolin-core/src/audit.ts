@@ -42,6 +42,11 @@ export interface DispatchManifest {
   firedAt: string; // ISO-8601, when this item was fired
   manifestHash: string; // sha256:<hex> self-hash over all fields above
   signature?: ManifestSignature; // offload-audit; omitted in offload-escape
+  /** Dispatch-level authorization sealed at fire. INTEGRITY INVARIANT: a consumer must NOT trust a
+   *  per-manifest `authorization.verdict` read directly off a bundle unless verifyBundle reported
+   *  intact (it binds each authorization-bearing manifest to a chain-anchored `item.fired` ref,
+   *  forward + reverse). Prefer the verified `VerificationReport.authzTier`, which already gates on
+   *  that binding, over reading verdicts off raw manifests. */
   authorization?: Authorization;
 }
 
