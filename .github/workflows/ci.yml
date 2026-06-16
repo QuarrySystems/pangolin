@@ -45,6 +45,13 @@ jobs:
       - name: Build
         run: pnpm -r build
 
+      # Clean-room dependency guard: every built dist may only import declared deps (or Node
+      # builtins). Catches the undeclared-dependency / phantom-hoist class (a package imported
+      # but missing from its package.json) that workspace hoisting hides until a clean consumer
+      # hits MODULE_NOT_FOUND. Runs after build so dist/ exists.
+      - name: Clean-room dependency guard
+        run: pnpm run check:deps
+
       - name: Lint
         run: pnpm -r lint
 
