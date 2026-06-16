@@ -159,8 +159,14 @@ function buildCertSync(args: BuildCertArgs): pkijs.Certificate {
   }
 
   // The TBS and outer signatureAlgorithm must both name RSA-SHA256, then sign the TBS.
-  cert.signature = new pkijs.AlgorithmIdentifier({ algorithmId: OID_RSA_SHA256, algorithmParams: new asn1js.Null() });
-  cert.signatureAlgorithm = new pkijs.AlgorithmIdentifier({ algorithmId: OID_RSA_SHA256, algorithmParams: new asn1js.Null() });
+  cert.signature = new pkijs.AlgorithmIdentifier({
+    algorithmId: OID_RSA_SHA256,
+    algorithmParams: new asn1js.Null(),
+  });
+  cert.signatureAlgorithm = new pkijs.AlgorithmIdentifier({
+    algorithmId: OID_RSA_SHA256,
+    algorithmParams: new asn1js.Null(),
+  });
   const tbs = toUint8(cert.encodeTBS().toBER(false));
   // pkijs caches the TBS bytes in `tbsView`; toSchema() re-emits from that cache, so it
   // must be seated for a manually-signed cert (cert.sign() does this internally).
@@ -188,59 +194,60 @@ function buildCertSync(args: BuildCertArgs): pkijs.Certificate {
  * `trustedCerts` — some embedded/trusted cert byte-matches a trusted cert AND issued (signed)
  * the leaf (or IS the leaf), and that issuer's validity window also contains genTime.
  */
-export function verifyTimestamp(
+export function verifyTimestampWithTime(
   root: Uint8Array,
   token: TimestampToken,
   trustedCerts: Uint8Array[],
-): boolean {
+): { ok: boolean; genTime?: Date } {
   try {
     const asn1 = ber(token.token);
-    if (asn1.offset === -1) return false;
+    if (asn1.offset === -1) return { ok: false };
 
     const contentInfo = new pkijs.ContentInfo({ schema: asn1.result });
-    if (contentInfo.contentType !== pkijs.id_ContentType_SignedData) return false;
+    if (contentInfo.contentType !== pkijs.id_ContentType_SignedData) return { ok: false };
     const signedData = new pkijs.SignedData({ schema: contentInfo.content });
-    if (signedData.encapContentInfo.eContentType !== pkijs.id_eContentType_TSTInfo) return false;
+    if (signedData.encapContentInfo.eContentType !== pkijs.id_eContentType_TSTInfo)
+      return { ok: false };
 
     const eContent = signedData.encapContentInfo.eContent;
-    if (!eContent) return false;
+    if (!eContent) return { ok: false };
     const tstDer = extractEContentBytes(eContent);
     const tstInfo = new pkijs.TSTInfo({ schema: ber(tstDer).result });
 
     // (2) messageImprint == SHA-256(root), and the imprint hash algo is SHA-256.
-    if (tstInfo.messageImprint.hashAlgorithm.algorithmId !== OID_SHA256) return false;
+    if (tstInfo.messageImprint.hashAlgorithm.algorithmId !== OID_SHA256) return { ok: false };
     const imprint = hexView(tstInfo.messageImprint.hashedMessage);
     const expected = imprintHash(root);
     if (imprint.length !== expected.length || !imprint.every((b, i) => b === expected[i])) {
-      return false;
+      return { ok: false };
     }
     // FINDINGS gotcha #4: genTime is a pkijs `Time`; read `.value` for the JS Date.
     const genTime = tstInfo.genTime;
-    if (!(genTime instanceof Date)) return false;
+    if (!(genTime instanceof Date)) return { ok: false };
 
     const certs = (signedData.certificates ?? []).filter(
       (c): c is pkijs.Certificate => c instanceof pkijs.Certificate,
     );
     const signerInfo = signedData.signerInfos[0];
-    if (!signerInfo) return false;
+    if (!signerInfo) return { ok: false };
     const sid = signerInfo.sid;
-    if (!(sid instanceof pkijs.IssuerAndSerialNumber)) return false;
+    if (!(sid instanceof pkijs.IssuerAndSerialNumber)) return { ok: false };
     const wantSerial = Buffer.from(hexView(sid.serialNumber));
     const leaf = certs.find(
       (c) => Buffer.compare(Buffer.from(hexView(c.serialNumber)), wantSerial) === 0,
     );
-    if (!leaf) return false;
+    if (!leaf) return { ok: false };
 
     // (I1) The signer leaf MUST carry the id-kp-timeStamping EKU (RFC 3161 §2.3) — otherwise
     // any cert the trusted CA issued for any purpose could mint accepted timestamps.
-    if (!certHasTsaEku(leaf)) return false;
+    if (!certHasTsaEku(leaf)) return { ok: false };
 
     // (I2) genTime must fall within the leaf's validity window.
-    if (!certValidAt(leaf, genTime)) return false;
+    if (!certValidAt(leaf, genTime)) return { ok: false };
 
     // (3) The SignerInfo signature is RSA-PKCS1-v1.5/SHA-256. Verify synchronously with
     // node:crypto. Two CMS shapes (I3):
-    if (signerInfo.signatureAlgorithm.algorithmId !== OID_RSA_SHA256) return false;
+    if (signerInfo.signatureAlgorithm.algorithmId !== OID_RSA_SHA256) return { ok: false };
     const sigBytes = Buffer.from(hexView(signerInfo.signature));
     const leafPubKey = publicKeyOf(leaf);
     if (signerInfo.signedAttrs) {
@@ -249,21 +256,23 @@ export function verifyTimestamp(
       // re-tagged the leading byte from the [0] IMPLICIT context tag to the SET-OF tag 0x31
       // (CMS/PKCS#7 rule), so it is exactly the bytes the signature was computed over.
       const signedAttrsDer = new Uint8Array(signerInfo.signedAttrs.encodedValue);
-      if (signedAttrsDer.byteLength === 0 || signedAttrsDer[0] !== 0x31) return false;
-      if (!nodeVerify('sha256', Buffer.from(signedAttrsDer), leafPubKey, sigBytes)) return false;
+      if (signedAttrsDer.byteLength === 0 || signedAttrsDer[0] !== 0x31) return { ok: false };
+      if (!nodeVerify('sha256', Buffer.from(signedAttrsDer), leafPubKey, sigBytes))
+        return { ok: false };
 
       // Bind the signed attrs to the actual TSTInfo content:
       //   message-digest (1.2.840.113549.1.9.4) == SHA-256(tstDer)
       const md = findAttrOctetString(signerInfo.signedAttrs.attributes, OID_MESSAGE_DIGEST_ATTR);
-      if (!md) return false;
+      if (!md) return { ok: false };
       const tstHash = imprintHash(tstDer);
-      if (md.length !== tstHash.length || !md.every((b, i) => b === tstHash[i])) return false;
+      if (md.length !== tstHash.length || !md.every((b, i) => b === tstHash[i]))
+        return { ok: false };
       //   content-type (1.2.840.113549.1.9.3) == id-ct-TSTInfo
       const ct = findAttrOid(signerInfo.signedAttrs.attributes, OID_CONTENT_TYPE_ATTR);
-      if (ct !== OID_CT_TSTINFO) return false;
+      if (ct !== OID_CT_TSTINFO) return { ok: false };
     } else {
       // No signed attributes: the signature is directly over the TSTInfo DER (local-CA case).
-      if (!nodeVerify('sha256', Buffer.from(tstDer), leafPubKey, sigBytes)) return false;
+      if (!nodeVerify('sha256', Buffer.from(tstDer), leafPubKey, sigBytes)) return { ok: false };
     }
 
     // (4) Chain to a trusted cert. The trust anchor may be EMBEDDED in the token (the
@@ -275,11 +284,11 @@ export function verifyTimestamp(
     const leafDer = Buffer.from(certDer(leaf));
     for (const trustedDer of trustedCerts) {
       const tBuf = Buffer.from(trustedDer);
-      if (Buffer.compare(tBuf, leafDer) === 0) return true; // trusted self-signed leaf
+      if (Buffer.compare(tBuf, leafDer) === 0) return { ok: true, genTime }; // trusted self-signed leaf
       const trustedCert = parseCert(trustedDer);
       // (I2) the issuing CA's validity window must also contain genTime.
       if (trustedCert && certValidAt(trustedCert, genTime) && certSignedBy(leaf, trustedCert)) {
-        return true;
+        return { ok: true, genTime };
       }
     }
     // Also walk one embedded hop: an embedded intermediate that is itself trusted (byte
@@ -287,12 +296,21 @@ export function verifyTimestamp(
     for (const cand of certs) {
       const candDer = Buffer.from(certDer(cand));
       if (!trustedCerts.some((t) => Buffer.compare(Buffer.from(t), candDer) === 0)) continue;
-      if (certValidAt(cand, genTime) && certSignedBy(leaf, cand)) return true;
+      if (certValidAt(cand, genTime) && certSignedBy(leaf, cand)) return { ok: true, genTime };
     }
-    return false;
+    return { ok: false };
   } catch {
-    return false;
+    return { ok: false };
   }
+}
+
+/** Back-compat boolean wrapper (unchanged contract for makeVerifyTimestamp + importers). */
+export function verifyTimestamp(
+  root: Uint8Array,
+  token: TimestampToken,
+  trustedCerts: Uint8Array[],
+): boolean {
+  return verifyTimestampWithTime(root, token, trustedCerts).ok;
 }
 
 /** Parse an X.509 DER cert; returns undefined (never throws) on malformed input. */
@@ -468,7 +486,10 @@ export class LocalCaTimestampAuthority implements TimestampAuthority {
         new asn1js.Set({ value: attrs.map((a) => a.toSchema()) }).toBER(false),
       );
       const signature = nodeSign('sha256', Buffer.from(setOfDer), this.tsaPrivKey);
-      signerInfo.signedAttrs = new pkijs.SignedAndUnsignedAttributes({ type: 0, attributes: attrs });
+      signerInfo.signedAttrs = new pkijs.SignedAndUnsignedAttributes({
+        type: 0,
+        attributes: attrs,
+      });
       signerInfo.signature = new asn1js.OctetString({ valueHex: new Uint8Array(signature) });
     } else {
       // No signed attributes: sign the eContent (the TSTInfo DER) directly.

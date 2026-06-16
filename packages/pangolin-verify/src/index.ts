@@ -11,6 +11,7 @@
 
 export {
   verifyTimestamp,
+  verifyTimestampWithTime,
   LocalCaTimestampAuthority,
   Rfc3161TimestampAuthority,
 } from './timestamp-authority.js';
