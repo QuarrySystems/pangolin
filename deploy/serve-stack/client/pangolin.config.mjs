@@ -79,6 +79,32 @@ const verifySignature = (root, sig) => {
 };
 
 // ---------------------------------------------------------------------------
+// PRODUCTION ALTERNATIVE: trust-root manifest (KMS key tier).
+//
+// When the serve container signs with a KMS key (createKmsSigner from
+// @quarry-systems/pangolin-signer-aws-kms), replace the verifySignature above
+// with the block below. The trust-root manifest maps keyRef → public key; the
+// verifier resolves the key from it — NEVER from the bundle itself (a
+// bundle-supplied key is self-attesting/forgeable). See:
+//   https://quarrysystems.github.io/pangolin/reference/trust-root/
+//
+// import { parseTrustRoot, makeVerifySignatureFromTrustRoot } from '@quarry-systems/pangolin-verify';
+//
+// // Fetch the manifest through a channel you already trust (TLS docs-site URL,
+// // signed git tag, CDN object — not a path inside the audit bundle).
+// const trustRootJson = readFileSync(new URL('./trust-root.json', import.meta.url), 'utf8');
+// const trustRoot = parseTrustRoot(trustRootJson); // throws on malformed input
+//
+// // Build a verifySignature bound to this trust root. Pass a verified genTime
+// // (RFC-3161 tsa-attested) if available so revocation + validity-window checks
+// // are time-accurate; omit (undefined) when none is present.
+// const verifySignature = makeVerifySignatureFromTrustRoot(trustRoot, /* genTime */ undefined);
+//
+// The existing ed25519 wiring above uses a single fetched key and is correct for
+// the local/demo signing path (createLocalSigner / createLocalEcdsaSigner).
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
 // PangolinClient — registration verbs (capabilities/subagent register) + storage.
 // No compute / no targets: the laptop never dispatches workers — the serve
 // container does. Namespace MUST equal the serve config's.
