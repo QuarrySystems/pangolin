@@ -10,6 +10,8 @@ import {
   verifyBundle,
   createLocalEcdsaSigner,
   verifyEcdsaP256,
+  NoneAuthorizer,
+  createConfigAuthorizer,
 } from '../src/index.js';
 import { it, expect } from 'vitest';
 it('exposes the audit primitives from the package root', () => {
@@ -26,4 +28,8 @@ it('exposes the audit primitives from the package root', () => {
 it('exposes renderVerification and verifyBundle from the package root', () => {
   expect(typeof renderVerification).toBe('function');
   expect(typeof verifyBundle).toBe('function');
+});
+it('exposes NoneAuthorizer and createConfigAuthorizer from the package root', () => {
+  expect(typeof NoneAuthorizer.authorize).toBe('function');
+  expect(typeof createConfigAuthorizer).toBe('function');
 });
