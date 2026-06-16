@@ -31,12 +31,18 @@ const PLAN_PATH = join(__dirname, '../plan.json');
 // Content-addressed fake URIs (sha256-shaped, one per artifact)
 // ---------------------------------------------------------------------------
 
-const REF_A = 'pangolin://ns/artifact/a/sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
-const REF_B = 'pangolin://ns/artifact/b/sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
-const REF_C = 'pangolin://ns/artifact/c/sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
-const REF_MAP_A = 'pangolin://ns/artifact/map-a/sha256:1111111111111111111111111111111111111111111111111111111111111111';
-const REF_MAP_B = 'pangolin://ns/artifact/map-b/sha256:2222222222222222222222222222222222222222222222222222222222222222';
-const REF_MAP_C = 'pangolin://ns/artifact/map-c/sha256:3333333333333333333333333333333333333333333333333333333333333333';
+const REF_A =
+  'pangolin://ns/artifact/a/sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+const REF_B =
+  'pangolin://ns/artifact/b/sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+const REF_C =
+  'pangolin://ns/artifact/c/sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
+const REF_MAP_A =
+  'pangolin://ns/artifact/map-a/sha256:1111111111111111111111111111111111111111111111111111111111111111';
+const REF_MAP_B =
+  'pangolin://ns/artifact/map-b/sha256:2222222222222222222222222222222222222222222222222222222222222222';
+const REF_MAP_C =
+  'pangolin://ns/artifact/map-c/sha256:3333333333333333333333333333333333333333333333333333333333333333';
 
 // ---------------------------------------------------------------------------
 // Inline fake executor (mirrors pattern-harness.ts idKeyedExecutor shape).
@@ -85,7 +91,11 @@ function makeFakeExecutor(blobs: Map<string, Uint8Array>): Executor {
       const itemId = dispatchMap.get(dispatchHash);
       if (itemId === undefined) return null;
 
-      const outputRefsForSplit: Record<string, string> = { 'a.json': REF_A, 'b.json': REF_B, 'c.json': REF_C };
+      const outputRefsForSplit: Record<string, string> = {
+        'a.json': REF_A,
+        'b.json': REF_B,
+        'c.json': REF_C,
+      };
       const outputRefsForMapA: Record<string, string> = { result: REF_MAP_A };
       const outputRefsForMapB: Record<string, string> = { result: REF_MAP_B };
       const outputRefsForMapC: Record<string, string> = { result: REF_MAP_C };
@@ -131,14 +141,19 @@ async function main(): Promise<void> {
     const raw = await readFile(PLAN_PATH, 'utf-8');
     const plan = JSON.parse(raw) as Run;
 
-    const runId = orch.submitRun(plan, 'human:demo');
-    console.log(`Submitted run '${runId}' — plan has ${plan.items.length} item(s) (splitter only).`);
+    const runId = await orch.submitRun(plan, 'human:demo');
+    console.log(
+      `Submitted run '${runId}' — plan has ${plan.items.length} item(s) (splitter only).`,
+    );
 
     // Tick until all items are terminal.
     for (let i = 0; i < 64; i++) {
       await orch.tick('default');
       const statuses = orch.getStatus(runId).map((s) => s.status);
-      if (statuses.length > 0 && statuses.every((s) => ['done', 'failed', 'skipped', 'cancelled'].includes(s))) {
+      if (
+        statuses.length > 0 &&
+        statuses.every((s) => ['done', 'failed', 'skipped', 'cancelled'].includes(s))
+      ) {
         break;
       }
     }
@@ -149,7 +164,9 @@ async function main(): Promise<void> {
     for (const s of itemStatuses.sort((a, b) => a.id.localeCompare(b.id))) {
       console.log(`  ${s.id}: ${s.status}`);
     }
-    console.log(`  Total items: ${itemStatuses.length} (plan submitted 1; orchestrator grew to ${itemStatuses.length})`);
+    console.log(
+      `  Total items: ${itemStatuses.length} (plan submitted 1; orchestrator grew to ${itemStatuses.length})`,
+    );
 
     // 2. Print run.extended audit entries (cause + actor).
     const exp = orch.getAuditExport(runId);
@@ -159,7 +176,9 @@ async function main(): Promise<void> {
       console.log('  (none)');
     }
     for (const entry of extendedEntries) {
-      console.log(`  kind=${entry.kind}  actor=${entry.actor}  causeItemId=${entry.itemId ?? '(none)'}`);
+      console.log(
+        `  kind=${entry.kind}  actor=${entry.actor}  causeItemId=${entry.itemId ?? '(none)'}`,
+      );
     }
 
     // 3. assembleBundle → verifyBundle — prove provenance closure.

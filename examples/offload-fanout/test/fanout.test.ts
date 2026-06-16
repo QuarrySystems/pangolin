@@ -97,7 +97,11 @@ describe('offload-fanout example', () => {
         return { dispatchHash, manifestRef };
       },
       async reconcile(h: string) {
-        return { status: 'done' as const, output: { exitCode: 0 }, resultRef: 'pangolin://artifacts/' + h };
+        return {
+          status: 'done' as const,
+          output: { exitCode: 0 },
+          resultRef: 'pangolin://artifacts/' + h,
+        };
       },
     };
 
@@ -120,7 +124,7 @@ describe('offload-fanout example', () => {
       const plan = JSON.parse(raw) as Run;
 
       // Submit and tick to completion
-      const runId = orchestrator.submitRun(plan, 'human:test');
+      const runId = await orchestrator.submitRun(plan, 'human:test');
 
       // Tick until all items are terminal (max 20 ticks for safety)
       for (let i = 0; i < 20; i++) {
@@ -172,7 +176,12 @@ describe('offload-fanout example', () => {
         // root must be defined (sealed after all items terminal)
         expect(auditExport.root).toBeDefined();
 
-        await transport.publish({ runId, kind: 'audit', body: auditExport, at: new Date().toISOString() });
+        await transport.publish({
+          runId,
+          kind: 'audit',
+          body: auditExport,
+          at: new Date().toISOString(),
+        });
 
         // Build OperationsApi and call .audit(runId)
         const api = new OperationsApi({

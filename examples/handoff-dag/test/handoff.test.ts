@@ -98,7 +98,9 @@ describe('handoff-dag example', () => {
       async fire(item, ctx?: FireContext) {
         const dispatchHash = 'dh-' + item.id;
         // Extract inputRefs that the tick injected (for needs-wired items)
-        const inputRefs = (item.inputs as Record<string, unknown>)?.inputRefs as Record<string, string> | undefined;
+        const inputRefs = (item.inputs as Record<string, unknown>)?.inputRefs as
+          | Record<string, string>
+          | undefined;
 
         const { manifest, bytes } = buildManifest({
           runId: ctx?.runId ?? '',
@@ -117,7 +119,10 @@ describe('handoff-dag example', () => {
 
         // For edit-a: produce a content-addressed patch artifact
         if (item.id === 'edit-a') {
-          const patchBytes = enc({ type: 'patch', content: '--- a/file\n+++ b/file\n@@\n-old\n+new' });
+          const patchBytes = enc({
+            type: 'patch',
+            content: '--- a/file\n+++ b/file\n@@\n-old\n+new',
+          });
           const resultRef = 'pangolin://artifacts/patch-' + dispatchHash;
           blobs.set(resultRef, patchBytes);
           resultRefByDispatchHash.set(dispatchHash, resultRef);
@@ -152,7 +157,7 @@ describe('handoff-dag example', () => {
       const plan = JSON.parse(raw) as Run;
 
       // Submit (normalizes needs → depends_on auto-union)
-      const runId = orchestrator.submitRun(plan, 'human:test');
+      const runId = await orchestrator.submitRun(plan, 'human:test');
 
       // Tick until all items are terminal (max 20 ticks for safety)
       for (let i = 0; i < 20; i++) {
@@ -194,7 +199,12 @@ describe('handoff-dag example', () => {
         const auditExport = orchestrator.getAuditExport(runId);
         expect(auditExport.root).toBeDefined();
 
-        await transport.publish({ runId, kind: 'audit', body: auditExport, at: new Date().toISOString() });
+        await transport.publish({
+          runId,
+          kind: 'audit',
+          body: auditExport,
+          at: new Date().toISOString(),
+        });
 
         // Build OperationsApi and call .audit(runId)
         const api = new OperationsApi({
@@ -216,8 +226,13 @@ describe('handoff-dag example', () => {
         const report = await verifyBundle(bundle, { anchor });
 
         // Key assertions
-        expect(report.intact, `report.intact should be true; failure: ${report.failure}`).toBe(true);
-        expect(report.checks.handoff.ok, `handoff check should be true; detail: ${report.checks.handoff.detail}`).toBe(true);
+        expect(report.intact, `report.intact should be true; failure: ${report.failure}`).toBe(
+          true,
+        );
+        expect(
+          report.checks.handoff.ok,
+          `handoff check should be true; detail: ${report.checks.handoff.detail}`,
+        ).toBe(true);
         expect(report.checks.handoff.detail).toMatch(/input ref/);
 
         // The base bundle report is also intact (chain + anchor)

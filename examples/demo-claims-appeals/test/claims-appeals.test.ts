@@ -76,7 +76,11 @@ describe('demo-claims-appeals example', () => {
         return { dispatchHash, manifestRef };
       },
       async reconcile(h: string) {
-        return { status: 'done' as const, output: { exitCode: 0 }, resultRef: 'pangolin://artifacts/' + h };
+        return {
+          status: 'done' as const,
+          output: { exitCode: 0 },
+          resultRef: 'pangolin://artifacts/' + h,
+        };
       },
     };
 
@@ -94,7 +98,7 @@ describe('demo-claims-appeals example', () => {
 
       const raw = await readFile(PLAN_PATH, 'utf-8');
       const plan = JSON.parse(raw) as Run;
-      const runId = orchestrator.submitRun(plan, 'human:test');
+      const runId = await orchestrator.submitRun(plan, 'human:test');
 
       for (let i = 0; i < 20; i++) {
         await orchestrator.tick('default');
@@ -127,7 +131,12 @@ describe('demo-claims-appeals example', () => {
         const transport = new MailboxSubmissionTransport(new LocalDirMailbox(tmpDir));
         const auditExport = orchestrator.getAuditExport(runId);
         expect(auditExport.root).toBeDefined();
-        await transport.publish({ runId, kind: 'audit', body: auditExport, at: new Date().toISOString() });
+        await transport.publish({
+          runId,
+          kind: 'audit',
+          body: auditExport,
+          at: new Date().toISOString(),
+        });
 
         const api = new OperationsApi({
           transport,

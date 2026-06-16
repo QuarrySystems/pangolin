@@ -97,7 +97,7 @@ async function main(): Promise<void> {
     });
 
     // 4. Submit a one-item Run. The item NAMES the subagent + carries worker input.
-    const runId = orch.submitRun({
+    const runId = await orch.submitRun({
       id: 'run-1',
       queue: 'default',
       items: [
