@@ -91,13 +91,21 @@ function buildEntries(
  *
  * Only mutating m AFTER bundleWith() was called will break manifest integrity.
  */
-function bundleWith(m: DispatchManifest): { bundle: AuditBundle; anchor: AuditAnchor } {
+function bundleWith(
+  m: DispatchManifest,
+  opts: { chainRef?: string; itemRef?: string } = {},
+): { bundle: AuditBundle; anchor: AuditAnchor } {
   const runId = 'r1';
+  // The chained item.fired ref is the TRUSTED anchor; the export item ref is what a consumer
+  // (or attacker) presents. They are byte-identical for honest bundles (tick writes the same
+  // value to both); tests can override each independently to model genuine-unpinned vs. forgery.
+  const chainRef = opts.chainRef ?? manifestRefOf(m);
+  const itemRef = opts.itemRef ?? manifestRefOf(m);
   // Pass the correctly-minted manifestRef into buildEntries so the chain carries
   // the item.fired entry that the new binding check requires.
   const { entries, root } = buildEntries(runId, {
     itemId: m.itemId,
-    manifestRef: manifestRefOf(m),
+    manifestRef: chainRef,
   });
 
   const anchoredRoot: AnchoredRoot = {
@@ -114,7 +122,7 @@ function bundleWith(m: DispatchManifest): { bundle: AuditBundle; anchor: AuditAn
       {
         id: m.itemId,
         status: 'done',
-        manifestRef: manifestRefOf(m),
+        manifestRef: itemRef,
       },
     ],
     // The pre-populated report is a type-satisfying placeholder only;
@@ -232,12 +240,30 @@ describe('manifest integrity (Finding A)', () => {
     expect(report.failure).toBe('manifest');
   });
 
-  it('SKIPS an unpinned manifestRef (no contentHash) instead of false-failing', async () => {
-    // Simplified / non-content-addressed refs (e.g. some test fixtures: pangolin://manifests/<id>)
-    // carry no integrity commitment, so there is nothing to verify — the check must skip, not flag.
+  it('REJECTS a downgraded export ref (unpinned) that diverges from the chained pinned ref', async () => {
+    // Downgrade attack: the chain anchored a PINNED ref, but the attacker rewrites the export
+    // item ref to an unpinned form (pangolin://manifests/<id>) hoping the integrity check will
+    // "skip" it. The gate is the TRUSTED chain, not the export ref's shape: the downgraded ref is
+    // absent from the anchored item.fired set, so it must be rejected — NOT skipped.
     const m = minimalManifest();
-    const { bundle, anchor } = bundleWith(m);
-    bundle.items[0]!.manifestRef = 'pangolin://manifests/item-a'; // 2-segment, unpinned
+    const { bundle, anchor } = bundleWith(m); // chain + export both = pinned manifestRefOf(m)
+    bundle.items[0]!.manifestRef = 'pangolin://manifests/item-a'; // attacker downgrades the export ref only
+
+    const report = await verifyBundle(bundle, { anchor });
+
+    expect(report.intact).toBe(false);
+    expect(report.failure).toBe('manifest');
+  });
+
+  it('TOLERATES a genuinely-unpinned ref when chain and export agree (fake-executor fixtures)', async () => {
+    // Real executors always mint pinned refs; some fake-executor test fixtures (e.g. handoff-dag)
+    // mint an unpinned ref like pangolin://manifests/<dispatchHash>. Because tick writes the SAME
+    // value to both the chained item.fired entry AND the export item, the ref IS a chain member —
+    // it passes membership, after which manifestRefMatches harmlessly skips the content check
+    // (an unpinned ref commits to nothing). This must verify intact, not false-reject.
+    const unpinned = 'pangolin://manifests/item-a';
+    const m = minimalManifest();
+    const { bundle, anchor } = bundleWith(m, { chainRef: unpinned, itemRef: unpinned });
 
     const report = await verifyBundle(bundle, { anchor });
 

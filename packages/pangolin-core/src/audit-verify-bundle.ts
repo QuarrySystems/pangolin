@@ -50,10 +50,12 @@ export function verifyBundle(
     for (const m of bundle.manifests) {
       const ref = bundle.items.find((i) => i.id === m.itemId)?.manifestRef;
       if (ref === undefined) continue; // no ref to bind (unchanged posture)
-      // Unpinned refs carry no content commitment (no contentHash segment); there is nothing
-      // to chain-bind or content-check — skip them, exactly as manifestRefMatches does.
-      // Real sealed bundles always mint pinned refs, so this never weakens a production bundle.
-      if (!isPinnedRef(ref)) continue;
+      // The gate is the TRUSTED chain, NEVER the untrusted export ref's own shape: the export ref
+      // MUST be one the audit log actually anchored via an `item.fired` entry. A forged ref — whether
+      // rewritten to a new content address OR downgraded to an unpinned form to dodge the content
+      // check — is absent from the anchored set and is rejected here. (A genuinely-unpinned ref that
+      // IS in the chain — fake-executor test fixtures only; real executors always mint pinned refs —
+      // passes membership, after which manifestRefMatches harmlessly skips the content check.)
       if (!chainedManifestRefs.has(ref) || !manifestRefMatches(m, ref)) {
         manifestOk = false;
         break;
@@ -78,16 +80,6 @@ export function verifyBundle(
     const authzTier: AuthzTier = decided ? 'recorded' : 'none';
     return { ...base, intact, failure, claim, authzTier, checks: { ...base.checks, handoff } };
   });
-}
-
-/** Returns true iff `ref` is a pinned (content-addressed) pangolin:// URI.
- *  Unpinned refs (no 4th segment / no contentHash) commit to nothing and must be skipped. */
-function isPinnedRef(ref: string): boolean {
-  try {
-    return parsePangolinUri(ref).contentHash !== undefined;
-  } catch {
-    return false; // unparseable → treat as unpinned
-  }
 }
 
 /** Returns true iff the manifest's recomputed content hash matches the hash embedded in the
