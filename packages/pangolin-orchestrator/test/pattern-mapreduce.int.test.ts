@@ -1,4 +1,4 @@
-// packages/pangolin-orchestrator/test/pattern-mapreduce.int.test.ts
+﻿// packages/pangolin-orchestrator/test/pattern-mapreduce.int.test.ts
 //
 // End-to-end offline proof of dynamic-spawn provability (design spec §9):
 // a fake splitter "produces" N=3 outputs (unknown at submit time), the map-reduce
@@ -99,7 +99,7 @@ describe('pattern-mapreduce integration — happy path', () => {
       queues: { default: { concurrency: 5, pattern: mapReduce } },
     });
 
-    const runId = orch.submitRun({ ...SPLITTER_RUN_BASE, id: 'mr-happy' }, 'human:test');
+    const runId = await orch.submitRun({ ...SPLITTER_RUN_BASE, id: 'mr-happy' }, 'human:test');
     await driveUntilDone(orch, 64, runId);
 
     // 1a. All expected items are done
@@ -171,7 +171,7 @@ describe('pattern-mapreduce integration — failed map', () => {
       maxAttempts: 1,
     });
 
-    const runId = orch.submitRun({ ...SPLITTER_RUN_BASE, id: 'mr-failmap' }, 'human:test');
+    const runId = await orch.submitRun({ ...SPLITTER_RUN_BASE, id: 'mr-failmap' }, 'human:test');
     await driveUntilDone(orch, 64, runId);
 
     const statuses = orch.getStatus(runId);
@@ -211,7 +211,7 @@ describe('pattern-mapreduce integration — crash-replay', () => {
       queues: { default: { concurrency: 5, pattern: mapReduce } },
     });
 
-    const runId = orch1.submitRun({ ...SPLITTER_RUN_BASE, id: 'mr-replay' }, 'human:test');
+    const runId = await orch1.submitRun({ ...SPLITTER_RUN_BASE, id: 'mr-replay' }, 'human:test');
 
     // Drive until the maps exist in the store (splitter done + map items spawned)
     await driveUntil(orch1, () => {

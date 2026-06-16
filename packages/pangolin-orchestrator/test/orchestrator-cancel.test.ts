@@ -48,7 +48,7 @@ describe('cancelRun', () => {
   it('cancels all pending/ready items and leaves running items untouched', async () => {
     const store = new SqliteRunStateStore();
     const orch = makeOrch(store);
-    const runId = orch.submitRun(twoItemRun, 'human:brett');
+    const runId = await orch.submitRun(twoItemRun, 'human:brett');
 
     // At this point: a=ready, b=pending
     const beforeCancel = orch.getStatus(runId);
@@ -69,7 +69,7 @@ describe('cancelRun', () => {
   it('does NOT cancel running items', async () => {
     const store = new SqliteRunStateStore();
     const orch = makeOrch(store);
-    const runId = orch.submitRun(twoItemRun);
+    const runId = await orch.submitRun(twoItemRun);
 
     // Manually put 'a' into running state (namespaced in store)
     store.setRunning(`${runId}\x1fa`, 'some-hash');
@@ -85,10 +85,10 @@ describe('cancelRun', () => {
     store.close();
   });
 
-  it('is idempotent — cancelling already-cancelled run does not throw', () => {
+  it('is idempotent — cancelling already-cancelled run does not throw', async () => {
     const store = new SqliteRunStateStore();
     const orch = makeOrch(store);
-    const runId = orch.submitRun(twoItemRun);
+    const runId = await orch.submitRun(twoItemRun);
 
     orch.cancelRun(runId, 'human:brett');
     expect(() => orch.cancelRun(runId, 'human:brett')).not.toThrow();
@@ -98,10 +98,10 @@ describe('cancelRun', () => {
 });
 
 describe('cancelItem', () => {
-  it('cancels a single pending item by logical id, leaves other items untouched', () => {
+  it('cancels a single pending item by logical id, leaves other items untouched', async () => {
     const store = new SqliteRunStateStore();
     const orch = makeOrch(store);
-    const runId = orch.submitRun(twoItemRun);
+    const runId = await orch.submitRun(twoItemRun);
 
     // Cancel only 'b' (which is pending)
     orch.cancelItem(runId, 'b', 'human:brett');
@@ -116,7 +116,7 @@ describe('cancelItem', () => {
   it('does NOT cancel a running item', async () => {
     const store = new SqliteRunStateStore();
     const orch = makeOrch(store);
-    const runId = orch.submitRun(twoItemRun);
+    const runId = await orch.submitRun(twoItemRun);
 
     // Fire 'a' so it goes running
     store.setRunning(`${runId}\x1fa`, 'some-hash');
@@ -135,7 +135,7 @@ describe('cancelItem', () => {
     // Then tick should cascade b -> skipped via computeSkipped.
     const store = new SqliteRunStateStore();
     const orch = makeOrch(store);
-    const runId = orch.submitRun(twoItemRun);
+    const runId = await orch.submitRun(twoItemRun);
 
     // Cancel only 'a' (which is ready)
     orch.cancelItem(runId, 'a', 'human:brett');
@@ -152,12 +152,12 @@ describe('cancelItem', () => {
     store.close();
   });
 
-  it('does NOT append an audit entry when itemId does not exist', () => {
+  it('does NOT append an audit entry when itemId does not exist', async () => {
     // Guard: calling cancelItem with a non-existent itemId must be a no-op
     // and must NOT write phantom entries to the tamper-evident audit log.
     const store = new SqliteRunStateStore();
     const { orch } = makeOrchWithAudit(store);
-    const runId = orch.submitRun(twoItemRun, 'human:brett');
+    const runId = await orch.submitRun(twoItemRun, 'human:brett');
 
     // Baseline: only 'run.submitted' entry exists
     const beforeCount = store.getAuditEntries(runId).length;
@@ -171,11 +171,11 @@ describe('cancelItem', () => {
     store.close();
   });
 
-  it('does NOT append an audit entry when item is already terminal (cancelled)', () => {
+  it('does NOT append an audit entry when item is already terminal (cancelled)', async () => {
     // Guard: cancelling an already-cancelled item must not write a second phantom entry.
     const store = new SqliteRunStateStore();
     const { orch } = makeOrchWithAudit(store);
-    const runId = orch.submitRun(twoItemRun, 'human:brett');
+    const runId = await orch.submitRun(twoItemRun, 'human:brett');
 
     // First cancel — legitimate; should append one run.cancelled entry
     orch.cancelItem(runId, 'a', 'human:brett');
@@ -219,7 +219,7 @@ describe('TERMINAL_STATUSES includes cancelled', () => {
   it('a fully-cancelled run is considered settled (all items are terminal)', async () => {
     const store = new SqliteRunStateStore();
     const orch = makeOrch(store);
-    const runId = orch.submitRun(twoItemRun);
+    const runId = await orch.submitRun(twoItemRun);
 
     orch.cancelRun(runId, 'human:brett');
     await orch.tick('default'); // cascade b to skipped

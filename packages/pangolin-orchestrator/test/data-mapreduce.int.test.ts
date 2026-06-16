@@ -1,4 +1,4 @@
-// packages/pangolin-orchestrator/test/data-mapreduce.int.test.ts
+﻿// packages/pangolin-orchestrator/test/data-mapreduce.int.test.ts
 //
 // Fully real, fully offline end-to-end data map-reduce proof:
 //   - Real PangolinOrchestrator + real mapReduce pattern
@@ -338,7 +338,7 @@ describe('data-mapreduce integration — happy path', () => {
       queues: { default: { concurrency: 5, pattern: mapReduce } },
     });
 
-    const runId = orch.submitRun(buildRun('data-mr-happy', fx), 'human:test');
+    const runId = await orch.submitRun(buildRun('data-mr-happy', fx), 'human:test');
     await driveUntilDone(orch, 128, runId);
 
     // 1. Final graph: all 6 items done; N=3 map items derived from CSV
@@ -404,7 +404,7 @@ describe('data-mapreduce integration — numerical correctness', () => {
       queues: { default: { concurrency: 5, pattern: mapReduce } },
     });
 
-    const runId = orch.submitRun(buildRun('data-mr-sums', fx), 'human:test');
+    const runId = await orch.submitRun(buildRun('data-mr-sums', fx), 'human:test');
     await driveUntilDone(orch, 128, runId);
 
     // Find reduce item's output for 'total.json'
@@ -446,7 +446,7 @@ describe('data-mapreduce integration — crash-replay', () => {
       queues: { default: { concurrency: 5, pattern: mapReduce } },
     });
 
-    const runId = orch1.submitRun(buildRun('data-mr-replay', fx), 'human:test');
+    const runId = await orch1.submitRun(buildRun('data-mr-replay', fx), 'human:test');
 
     // Drive until the map items exist (split is done)
     await driveUntil(orch1, () => {

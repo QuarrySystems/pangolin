@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+﻿import { describe, it, expect } from 'vitest';
 import { PangolinOrchestrator } from '../../src/orchestrator.js';
 import { tick } from '../../src/engine/tick.js';
 import { SqliteRunStateStore } from '../../src/runstate/sqlite.js';
@@ -71,7 +71,7 @@ describe('engine-wiring audit integration', () => {
       queues: { default: { concurrency: 1 } },
       auditLog,
     });
-    const runId = orch.submitRun(
+    const runId = await orch.submitRun(
       { id: 'r', queue: 'default', items: [{ id: 'a', executor: 'x', inputs: {}, depends_on: [], resourceLocks: [] }] },
       'human:brett',
     );
@@ -101,7 +101,7 @@ describe('engine-wiring audit integration', () => {
       triggers: { manual: new ManualTrigger() },
       queues: { default: { concurrency: 1 } },
     });
-    const runId = orch.submitRun({
+    const runId = await orch.submitRun({
       id: 'r2',
       queue: 'default',
       items: [{ id: 'a', executor: 'x', inputs: {}, depends_on: [], resourceLocks: [] }],
@@ -124,7 +124,7 @@ describe('engine-wiring audit integration', () => {
       maxAttempts: 3,
       auditLog,
     });
-    const runId = orch.submitRun(
+    const runId = await orch.submitRun(
       { id: 'r3', queue: 'default', items: [{ id: 'b', executor: 'flaky', inputs: {}, depends_on: [], resourceLocks: [] }] },
       'human:brett',
     );
@@ -175,7 +175,7 @@ describe('engine-wiring audit integration', () => {
       maxAttempts: 1, // exhaust immediately — one attempt is terminal
       auditLog,
     });
-    const runId = orch.submitRun(
+    const runId = await orch.submitRun(
       {
         id: 'r4',
         queue: 'default',
@@ -223,7 +223,7 @@ describe('engine-wiring audit integration', () => {
     expect(throwLog.droppedAppends).toBeGreaterThan(0);
   });
 
-  it('constructor throws a clear error when auditLog is provided but store does not implement AuditStore', () => {
+  it('constructor throws a clear error when auditLog is provided but store does not implement AuditStore', async () => {
     // A store that is MISSING getAuditRoot (not a full AuditStore)
     const bareStore = {
       getItems: () => [],

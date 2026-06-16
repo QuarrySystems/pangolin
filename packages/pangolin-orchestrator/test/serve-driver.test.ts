@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+﻿import { describe, it, expect } from 'vitest';
 import { PangolinOrchestrator, SqliteRunStateStore, ManualTrigger } from '../src/index.js';
 import type { SubmissionEnvelope, SubmissionTransport, OutboxRecord } from '../src/index.js';
 import { serve } from '../src/serve/driver.js';
@@ -166,7 +166,7 @@ describe('serve driver', () => {
     });
 
     // Pre-submit a run directly so the reconcile-first tick can fire it
-    orch.submitRun({
+    await orch.submitRun({
       id: 'run-2',
       queue: 'default',
       items: [{ id: 'b', executor: 'x', inputs: {}, depends_on: [], resourceLocks: [] }],
@@ -416,7 +416,7 @@ describe('serve driver', () => {
     // Override submitRun to always throw
     const origSubmit = orch.submitRun.bind(orch);
     let firstCall = true;
-    orch.submitRun = (...args) => {
+    orch.submitRun = async (...args) => {
       if (firstCall) {
         firstCall = false;
         throw new Error('ingest failed: unknown queue');
@@ -516,7 +516,7 @@ describe('serve driver', () => {
       queue: 'default',
       items: [{ id: 'res-a', executor: 'x', inputs: {}, depends_on: [], resourceLocks: [] }],
     };
-    orch.submitRun(run, 'human:test');
+    await orch.submitRun(run, 'human:test');
 
     // Build a transport whose publish throws on the first call
     const throwingTransport = makeThrowingTransport();

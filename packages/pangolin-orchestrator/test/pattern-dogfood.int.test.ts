@@ -1,4 +1,4 @@
-// packages/pangolin-orchestrator/test/pattern-dogfood.int.test.ts
+﻿// packages/pangolin-orchestrator/test/pattern-dogfood.int.test.ts
 //
 // End-to-end offline proof of the gated circle-back (spec §9): implement → review(gate) → package
 // on the pipeline pattern, with deterministic red/green keyed by item id.
@@ -140,7 +140,7 @@ describe('pattern-dogfood: circle-back happy path', () => {
         queues: { default: { concurrency: 5, pattern: pipeline } },
       });
 
-      const runId = orch.submitRun(
+      const runId = await orch.submitRun(
         { id: 'dogfood-happy', queue: 'default', items: RUN_ITEMS },
         'human:test',
       );
@@ -208,7 +208,7 @@ describe('pattern-dogfood: circle-back happy path', () => {
       queues: { default: { concurrency: 5, pattern: pipeline } },
     });
 
-    const runId = orch.submitRun(
+    const runId = await orch.submitRun(
       { id: 'dogfood-ext-entry', queue: 'default', items: RUN_ITEMS },
       'human:test',
     );
@@ -265,7 +265,7 @@ describe('pattern-dogfood: maxFixAttempts exhaustion', () => {
         queues: { default: { concurrency: 5, pattern: pipeline } },
       });
 
-      const runId = orch.submitRun(
+      const runId = await orch.submitRun(
         { id: 'dogfood-exhaust', queue: 'default', items: RUN_ITEMS },
         'human:test',
       );
@@ -309,7 +309,7 @@ describe('pattern-dogfood: cancelled run never resurrected', () => {
         queues: { default: { concurrency: 5, pattern: pipeline } },
       });
 
-      const runId = orch.submitRun(
+      const runId = await orch.submitRun(
         { id: 'dogfood-cancel', queue: 'default', items: RUN_ITEMS },
         'human:test',
       );

@@ -48,7 +48,7 @@ describe('audit acceptance — §6.3/§10 end-to-end gates', () => {
       auditLog,
     });
 
-    const runId = orch.submitRun(RUN('r1'), 'human:brett');
+    const runId = await orch.submitRun(RUN('r1'), 'human:brett');
     await drive(orch);
 
     // Sanity: run sealed before verify (getAuditRoot persists the completed seal)
@@ -82,7 +82,7 @@ describe('audit acceptance — §6.3/§10 end-to-end gates', () => {
       auditLog,
     });
 
-    const runId = orch.submitRun(RUN('r2'), 'human:brett');
+    const runId = await orch.submitRun(RUN('r2'), 'human:brett');
     await drive(orch);
 
     // Sanity: run sealed before verify (getAuditRoot persists the completed seal)
@@ -111,7 +111,7 @@ describe('audit acceptance — §6.3/§10 end-to-end gates', () => {
       auditLog,
     });
 
-    const runId = orch.submitRun(RUN('r3'), 'human:brett');
+    const runId = await orch.submitRun(RUN('r3'), 'human:brett');
     await drive(orch);
 
     // Prove the run sealed clean BEFORE the tamper — this makes the mutation the causal agent
@@ -144,7 +144,7 @@ describe('audit acceptance — §6.3/§10 end-to-end gates', () => {
     });
 
     const run = RUN('r4', { token: SECRET });
-    const runId = orch.submitRun(run, 'human:brett');
+    const runId = await orch.submitRun(run, 'human:brett');
     await drive(orch);
 
     // Sanity: run sealed before verify (getAuditRoot persists the completed seal)

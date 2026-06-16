@@ -1,4 +1,4 @@
-// packages/pangolin-orchestrator/test/extend-run.test.ts
+﻿// packages/pangolin-orchestrator/test/extend-run.test.ts
 import { describe, it, expect } from 'vitest';
 import { SqliteRunStateStore } from '../src/runstate/sqlite.js';
 import { idKeyedExecutor, makeOrch, driveUntilDone } from './fixtures/pattern-harness.js';
@@ -10,7 +10,7 @@ function wi(id: string, executor = 'dispatch', depends_on: string[] = [], extra:
 }
 
 describe('extendRun — unknown runId', () => {
-  it('throws when the runId does not exist in the store', () => {
+  it('throws when the runId does not exist in the store', async () => {
     const store = new SqliteRunStateStore();
     const blobs = new Map<string, Uint8Array>();
     const executor = idKeyedExecutor(blobs, () => ({ status: 'done' }));
@@ -22,13 +22,13 @@ describe('extendRun — unknown runId', () => {
 });
 
 describe('extendRun — id-skip idempotency', () => {
-  it('re-appending the same item ids is a no-op (returns [] and adds zero rows)', () => {
+  it('re-appending the same item ids is a no-op (returns [] and adds zero rows)', async () => {
     const store = new SqliteRunStateStore();
     const blobs = new Map<string, Uint8Array>();
     const executor = idKeyedExecutor(blobs, () => ({ status: 'done' }));
     const { orch } = makeOrch(store, executor);
 
-    orch.submitRun({ id: 'r1', queue: 'default', items: [wi('a')] });
+    await orch.submitRun({ id: 'r1', queue: 'default', items: [wi('a')] });
 
     // Append item 'b'
     const first = orch.extendRun('r1', [wi('b')], 'human:test');
@@ -43,13 +43,13 @@ describe('extendRun — id-skip idempotency', () => {
     store.close();
   });
 
-  it('id-skip does not append an audit entry when all items are duplicates', () => {
+  it('id-skip does not append an audit entry when all items are duplicates', async () => {
     const store = new SqliteRunStateStore();
     const blobs = new Map<string, Uint8Array>();
     const executor = idKeyedExecutor(blobs, () => ({ status: 'done' }));
     const { orch } = makeOrch(store, executor);
 
-    orch.submitRun({ id: 'r1', queue: 'default', items: [wi('a')] });
+    await orch.submitRun({ id: 'r1', queue: 'default', items: [wi('a')] });
 
     // Append 'b' once
     orch.extendRun('r1', [wi('b')], 'human:test');
@@ -75,7 +75,7 @@ describe('extendRun — appended items run to completion (integration)', () => {
     const { orch } = makeOrch(store, executor);
 
     // Submit run with item 'a'
-    orch.submitRun({ id: 'r1', queue: 'default', items: [wi('a')] });
+    await orch.submitRun({ id: 'r1', queue: 'default', items: [wi('a')] });
 
     // Drive until 'a' is done
     await driveUntilDone(orch, 32, 'r1');
@@ -100,7 +100,7 @@ describe('extendRun — appended items run to completion (integration)', () => {
     const executor = idKeyedExecutor(blobs, () => ({ status: 'done' }));
     const { orch } = makeOrch(store, executor);
 
-    orch.submitRun({ id: 'r2', queue: 'default', items: [wi('a')] });
+    await orch.submitRun({ id: 'r2', queue: 'default', items: [wi('a')] });
 
     // Extend immediately (before driving) — 'c' depends on 'a', starts pending
     orch.extendRun('r2', [wi('c', 'dispatch', ['a'])], 'human:extend');
@@ -118,13 +118,13 @@ describe('extendRun — appended items run to completion (integration)', () => {
 });
 
 describe('extendRun — merged-graph validation', () => {
-  it('rejects an append with depends_on referencing an unknown item', () => {
+  it('rejects an append with depends_on referencing an unknown item', async () => {
     const store = new SqliteRunStateStore();
     const blobs = new Map<string, Uint8Array>();
     const executor = idKeyedExecutor(blobs, () => ({ status: 'done' }));
     const { orch } = makeOrch(store, executor);
 
-    orch.submitRun({ id: 'r1', queue: 'default', items: [wi('a')] });
+    await orch.submitRun({ id: 'r1', queue: 'default', items: [wi('a')] });
 
     expect(() =>
       orch.extendRun('r1', [wi('b', 'dispatch', ['nonexistent'])], 'human:test')
@@ -135,13 +135,13 @@ describe('extendRun — merged-graph validation', () => {
     store.close();
   });
 
-  it('rejects an append introducing a duplicate id (already in run)', () => {
+  it('rejects an append introducing a duplicate id (already in run)', async () => {
     const store = new SqliteRunStateStore();
     const blobs = new Map<string, Uint8Array>();
     const executor = idKeyedExecutor(blobs, () => ({ status: 'done' }));
     const { orch } = makeOrch(store, executor);
 
-    orch.submitRun({ id: 'r1', queue: 'default', items: [wi('a'), wi('b')] });
+    await orch.submitRun({ id: 'r1', queue: 'default', items: [wi('a'), wi('b')] });
 
     // Trying to extend with a fresh item 'b' — after id-skip, 'b' is filtered
     // so the extend is a no-op (id-skip), NOT an error
@@ -151,13 +151,13 @@ describe('extendRun — merged-graph validation', () => {
     store.close();
   });
 
-  it('rejects an append where two NEW items have the same id', () => {
+  it('rejects an append where two NEW items have the same id', async () => {
     const store = new SqliteRunStateStore();
     const blobs = new Map<string, Uint8Array>();
     const executor = idKeyedExecutor(blobs, () => ({ status: 'done' }));
     const { orch } = makeOrch(store, executor);
 
-    orch.submitRun({ id: 'r1', queue: 'default', items: [wi('a')] });
+    await orch.submitRun({ id: 'r1', queue: 'default', items: [wi('a')] });
 
     // Two genuinely new items with the same id in a single extend call
     expect(() =>
@@ -177,7 +177,7 @@ describe('extendRun — needs auto-union into depends_on', () => {
     const executor = idKeyedExecutor(blobs, () => ({ status: 'done', resultRef: 'pangolin://r/x' }));
     const { orch } = makeOrch(store, executor);
 
-    orch.submitRun({ id: 'r1', queue: 'default', items: [wi('a')] });
+    await orch.submitRun({ id: 'r1', queue: 'default', items: [wi('a')] });
     await driveUntilDone(orch, 32, 'r1');
 
     // Item 'b' with needs but NO explicit depends_on — normalizeRun should union them
@@ -200,14 +200,14 @@ describe('extendRun — needs auto-union into depends_on', () => {
 });
 
 describe('extendRun — maxItemsPerRun backstop', () => {
-  it('throws when exceeding maxItemsPerRun; store unchanged', () => {
+  it('throws when exceeding maxItemsPerRun; store unchanged', async () => {
     const store = new SqliteRunStateStore();
     const blobs = new Map<string, Uint8Array>();
     const executor = idKeyedExecutor(blobs, () => ({ status: 'done' }));
     // Set maxItemsPerRun to 3 via extra options
     const { orch } = makeOrch(store, executor, { maxItemsPerRun: 3 });
 
-    orch.submitRun({ id: 'r1', queue: 'default', items: [wi('a'), wi('b')] });
+    await orch.submitRun({ id: 'r1', queue: 'default', items: [wi('a'), wi('b')] });
     // Store has 2 items; maxItemsPerRun is 3; adding 2 more would make 4
 
     expect(() =>
@@ -219,13 +219,13 @@ describe('extendRun — maxItemsPerRun backstop', () => {
     store.close();
   });
 
-  it('allows appending up to exactly maxItemsPerRun', () => {
+  it('allows appending up to exactly maxItemsPerRun', async () => {
     const store = new SqliteRunStateStore();
     const blobs = new Map<string, Uint8Array>();
     const executor = idKeyedExecutor(blobs, () => ({ status: 'done' }));
     const { orch } = makeOrch(store, executor, { maxItemsPerRun: 3 });
 
-    orch.submitRun({ id: 'r1', queue: 'default', items: [wi('a'), wi('b')] });
+    await orch.submitRun({ id: 'r1', queue: 'default', items: [wi('a'), wi('b')] });
     // Adding exactly 1 more reaches 3 (the limit) — should succeed
     const appended = orch.extendRun('r1', [wi('c')], 'human:test');
     expect(appended).toEqual(['c']);
@@ -235,13 +235,13 @@ describe('extendRun — maxItemsPerRun backstop', () => {
 });
 
 describe('extendRun — audit entry', () => {
-  it('emits exactly one run.extended entry with runId, actor, and causeItemId', () => {
+  it('emits exactly one run.extended entry with runId, actor, and causeItemId', async () => {
     const store = new SqliteRunStateStore();
     const blobs = new Map<string, Uint8Array>();
     const executor = idKeyedExecutor(blobs, () => ({ status: 'done' }));
     const { orch } = makeOrch(store, executor);
 
-    orch.submitRun({ id: 'r1', queue: 'default', items: [wi('a')] });
+    await orch.submitRun({ id: 'r1', queue: 'default', items: [wi('a')] });
 
     orch.extendRun('r1', [wi('b')], 'human:extender', 'a');
 
@@ -255,13 +255,13 @@ describe('extendRun — audit entry', () => {
     store.close();
   });
 
-  it('emits run.extended without itemId when causeItemId is not given', () => {
+  it('emits run.extended without itemId when causeItemId is not given', async () => {
     const store = new SqliteRunStateStore();
     const blobs = new Map<string, Uint8Array>();
     const executor = idKeyedExecutor(blobs, () => ({ status: 'done' }));
     const { orch } = makeOrch(store, executor);
 
-    orch.submitRun({ id: 'r1', queue: 'default', items: [wi('a')] });
+    await orch.submitRun({ id: 'r1', queue: 'default', items: [wi('a')] });
 
     orch.extendRun('r1', [wi('b')], 'human:extender');
 
@@ -275,13 +275,13 @@ describe('extendRun — audit entry', () => {
 });
 
 describe('extendRun — nsWorkItems refactor (submitRun namespacing unchanged)', () => {
-  it('existing submitRun namespacing still works after refactor', () => {
+  it('existing submitRun namespacing still works after refactor', async () => {
     const store = new SqliteRunStateStore();
     const blobs = new Map<string, Uint8Array>();
     const executor = idKeyedExecutor(blobs, () => ({ status: 'done' }));
     const { orch } = makeOrch(store, executor);
 
-    orch.submitRun({ id: 'myrun', queue: 'default', items: [wi('x'), wi('y', 'dispatch', ['x'])] });
+    await orch.submitRun({ id: 'myrun', queue: 'default', items: [wi('x'), wi('y', 'dispatch', ['x'])] });
 
     // Items stored with namespaced ids
     const items = store.getItems('myrun');
@@ -296,13 +296,13 @@ describe('extendRun — nsWorkItems refactor (submitRun namespacing unchanged)',
     store.close();
   });
 
-  it('extendRun also namespaces appended items', () => {
+  it('extendRun also namespaces appended items', async () => {
     const store = new SqliteRunStateStore();
     const blobs = new Map<string, Uint8Array>();
     const executor = idKeyedExecutor(blobs, () => ({ status: 'done' }));
     const { orch } = makeOrch(store, executor);
 
-    orch.submitRun({ id: 'myrun', queue: 'default', items: [wi('x')] });
+    await orch.submitRun({ id: 'myrun', queue: 'default', items: [wi('x')] });
     orch.extendRun('myrun', [wi('z')], 'human:test');
 
     const items = store.getItems('myrun');

@@ -93,7 +93,7 @@ describe('getAuditExport', () => {
       ],
     };
 
-    orch.submitRun(run);
+    await orch.submitRun(run);
     // fire + reconcile
     await orch.tick('default');
     await orch.tick('default');
@@ -109,7 +109,7 @@ describe('getAuditExport', () => {
     const store = new SqliteRunStateStore();
     const { orch } = makeOrchWithAudit(store);
 
-    const runId = orch.submitRun(oneItemRun, 'human:brett');
+    const runId = await orch.submitRun(oneItemRun, 'human:brett');
 
     // Drive to completion
     for (let i = 0; i < 8; i++) await orch.tick('default');
@@ -133,7 +133,7 @@ describe('getAuditExport', () => {
       ],
     };
 
-    const runId = orch.submitRun(run, 'human:brett');
+    const runId = await orch.submitRun(run, 'human:brett');
 
     // Drive to completion
     for (let i = 0; i < 8; i++) await orch.tick('default');
@@ -157,7 +157,7 @@ describe('getAuditExport', () => {
     const store = new SqliteRunStateStore();
     const { orch } = makeOrchWithAudit(store);
 
-    const runId = orch.submitRun(oneItemRun, 'human:brett');
+    const runId = await orch.submitRun(oneItemRun, 'human:brett');
 
     // Drive to completion (fire + reconcile + seal)
     for (let i = 0; i < 8; i++) await orch.tick('default');

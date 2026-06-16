@@ -1,5 +1,5 @@
 // packages/pangolin-orchestrator/src/orchestrator.ts
-import type { VerifyOutcome } from '@quarry-systems/pangolin-core';
+import type { VerifyOutcome, Authorizer } from '@quarry-systems/pangolin-core';
 import type {
   AuditEntryRow,
   AnchoredRoot,
@@ -17,6 +17,7 @@ import type { Pattern } from './contracts/pattern.js';
 import { tick } from './engine/tick.js';
 import { normalizeRun, validateRun } from './engine/run-validator.js';
 import { collectSpawns } from './patterns/scan.js';
+import { NoneAuthorizer } from './audit/authorizer.js';
 
 /** Namespace separator — U+001F UNIT SEPARATOR (not a valid item-id char in practice). */
 const NS = '\x1f';
@@ -42,6 +43,7 @@ export interface PangolinOrchestratorOptions {
   maxItemsPerRun?: number; // defaults to 1000 (spec §5 runaway fuse)
   packs?: PackRegistry;
   auditLog?: AuditLog;
+  authorizer?: Authorizer;
 }
 
 /** method -> privilege tag (mechanism for the §10.6 CLI/MCP split; surfaces land later). */
@@ -69,6 +71,7 @@ export class PangolinOrchestrator {
   private readonly maxItemsPerRun: number;
   private readonly packs: PackRegistry | undefined;
   private readonly auditLog: AuditLog | undefined;
+  private readonly authorizer: Authorizer;
   /** Per-queue pattern bindings (undefined entry = no pattern on that queue). */
   private readonly patterns: Record<string, Pattern | undefined>;
   constructor(opts: PangolinOrchestratorOptions) {
@@ -80,6 +83,7 @@ export class PangolinOrchestrator {
     this.maxItemsPerRun = opts.maxItemsPerRun ?? 1000;
     this.packs = opts.packs;
     this.auditLog = opts.auditLog;
+    this.authorizer = opts.authorizer ?? NoneAuthorizer;
     if (!opts.queues[this.defaultQueue])
       throw new Error(`PangolinOrchestrator: default queue '${this.defaultQueue}' not configured`);
     for (const [name, q] of Object.entries(opts.queues))
@@ -133,7 +137,7 @@ export class PangolinOrchestrator {
         : {}),
     };
   }
-  submitRun(run: Run, actor?: string, submittedAt?: string): string {
+  async submitRun(run: Run, actor?: string, submittedAt?: string): Promise<string> {
     if (this.store.getItems(run.id).length > 0) return run.id; // already ingested — idempotent no-op
     const trigger = this.triggers['manual'];
     if (!trigger) throw new Error("PangolinOrchestrator: no 'manual' trigger registered");
@@ -146,6 +150,24 @@ export class PangolinOrchestrator {
     // Validate: throw before touching the store so it stays clean on bad input.
     const errors = validateRun(normalized, this.packs);
     if (errors.length) throw new Error(`run '${run.id}' failed validation:\n${errors.join('\n')}`);
+    // Authorization pre-check: deny any item whose shape's effectTier is denied by policy.
+    // Runs AFTER validate (shape ids verified) but BEFORE saveRun (fail-fast, nothing queued on deny).
+    // GENERIC error only — do NOT include the rule/reason (policy-oracle hygiene).
+    const at = submittedAt ?? new Date().toISOString();
+    for (const item of normalized.items) {
+      const shape = item.subagentShape ? this.packs?.get(item.subagentShape) : undefined;
+      const effectClass = shape?.effectTier ?? 'unknown';
+      const decision = await this.authorizer.authorize({
+        phase: 'submit',
+        actor: actor ?? '',
+        shapeId: item.subagentShape ?? '',
+        effectClass,
+        onBehalfOf: (item.inputs as { onBehalfOf?: string } | undefined)?.onBehalfOf,
+        submittedAt: at,
+        at,
+      });
+      if (decision.verdict === 'deny') throw new Error('submission denied by policy');
+    }
     // Namespace item ids so two runs with a same-named item never collide in the store.
     // run ids are NOT namespaced; resourceLocks are NOT namespaced (cross-run locks are intentional).
     const nsRun: Run = {
@@ -283,6 +305,7 @@ export class PangolinOrchestrator {
       maxAttempts: this.maxAttempts,
       auditLog: this.auditLog,
       denamespace: deNs,
+      authorizer: this.authorizer,
     });
 
     // Pattern phase: BEFORE the seal block so spawned items are pending when the seal check runs.
