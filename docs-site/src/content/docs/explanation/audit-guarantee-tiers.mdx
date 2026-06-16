@@ -3,6 +3,8 @@ title: Audit & guarantee tiers
 description: How Pangolin Scale's audit trail works, and the difference between tamper-detecting and tamper-evident (external-immutable) guarantees.
 ---
 
+import ProvabilityVerifier from '../../../components/ProvabilityVerifier.tsx';
+
 When an offload run finishes, Pangolin Scale can produce a verifiable record of exactly
 what ran, with what inputs, under whose authority, and what each item produced.
 That record is the **audit bundle**. But "verifiable" is a word that earns very
@@ -118,6 +120,11 @@ Everything else is **`tamper-detecting`**.
 |---|---|---|
 | `tamper-detecting` | anchor guarantee `detect`, or any verification failure | The log is internally consistent and any modification *will be caught on verify*. |
 | `tamper-evident` | anchor guarantee ≥ `external-immutable`, verification passed, **and** a verified signature (`sigOk === true`) | The anchored root lives in a separate trust domain that resists rewriting *and* is signed, so the record stands even against an actor who controls the run database. |
+
+The rule below is not just described — it is executable. Tamper the bundle and flip the
+anchor tier; the claim moves exactly as `claimFor` dictates.
+
+<ProvabilityVerifier client:only="react" />
 
 ## The anchor tiers
 
