@@ -56,12 +56,35 @@ export function verifyBundle(
 }
 
 /** Returns true iff the manifest's recomputed content hash matches the hash embedded in the
- *  chained manifestRef URI. Comparison is on the URI's contentHash segment only — NOT a
- *  reconstructed full URI (the executor mints ns+dispatchId outside the manifest). */
+ *  chained manifestRef URI. Accepts both minting conventions used in this codebase:
+ *  - DispatchExecutor / inproc: contentHash = computeContentHash(full manifest sans signature)
+ *  - pattern-harness / idKeyedExecutor: contentHash = manifest.manifestHash (self-hash)
+ *
+ *  Two checks are performed:
+ *  (1) Body integrity: the declared self-hash must recompute from the base fields (all fields
+ *      except manifestHash and signature). A mutation in any base field that leaves manifestHash
+ *      stale is caught here.
+ *  (2) Chain binding: the trusted (chained) manifestRef must pin THIS manifest by either
+ *      minting convention. A self-consistent forgery (base + manifestHash both updated) is
+ *      caught because the chained refHash no longer matches either the new manifestHash or the
+ *      new full hash. */
 function manifestRefMatches(m: DispatchManifest, manifestRef: string): boolean {
   try {
-    const { contentHash } = parsePangolinUri(manifestRef);
-    return contentHash !== undefined && contentHash === computeContentHash(m);
+    const refHash = parsePangolinUri(manifestRef).contentHash;
+    if (refHash === undefined) return false;
+    // Reproduce the self-hash basis: all fields except manifestHash and signature.
+    const {
+      manifestHash,
+      signature: _signature,
+      ...base
+    } = m as DispatchManifest & {
+      signature?: unknown;
+    };
+    // (1) Body integrity: declared self-hash must match recomputed hash of base fields.
+    if (computeContentHash(base) !== manifestHash) return false;
+    // (2) Chain binding: the trusted refHash must match either minting convention.
+    const fullHash = computeContentHash({ ...base, manifestHash });
+    return refHash === manifestHash || refHash === fullHash;
   } catch {
     return false;
   }

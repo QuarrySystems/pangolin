@@ -58,7 +58,7 @@ const item = (id: string, status: string, deps: string[] = []) =>
     depends_on: deps,
     resourceLocks: [],
     status,
-  }) as any;
+  }) as unknown as ItemState;
 
 describe('computeSkipped', () => {
   it('cascades a pending item whose dep failed', () => {

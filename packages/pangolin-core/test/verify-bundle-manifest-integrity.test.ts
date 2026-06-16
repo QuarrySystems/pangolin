@@ -120,27 +120,30 @@ function bundleWith(m: DispatchManifest): { bundle: AuditBundle; anchor: AuditAn
   return { bundle, anchor: anchorOf(root) };
 }
 
-/** Build a minimal DispatchManifest with a 'deny' authorization block. */
+/** Build a minimal DispatchManifest with a 'deny' authorization block.
+ *  The manifestHash is computed from the base fields (all fields except manifestHash itself),
+ *  mirroring what buildManifest() does — this makes the manifest self-consistent so that
+ *  body-integrity check (1) passes for the positive test case. */
 function minimalManifest(): DispatchManifest {
-  return {
-    schemaVersion: 1,
+  const base = {
+    schemaVersion: 1 as const,
     runId: 'r1',
     itemId: 'item-a',
     parent: 'run:r1',
     executor: 'dispatch',
     executorManifest: {},
-    secretRefs: [],
+    secretRefs: [] as string[],
     actor: 'human:test',
     firedAt: '2024-01-01T00:00:00Z',
-    manifestHash: 'sha256:aabbcc',
     authorization: {
-      verdict: 'deny',
+      verdict: 'deny' as const,
       principal: 'policy:test',
       policyRef: 'sha256:0000',
       effectClass: 'dispatch.default',
       at: '2024-01-01T00:00:00Z',
     },
   };
+  return { ...base, manifestHash: computeContentHash(base) };
 }
 
 // ---------------------------------------------------------------------------
