@@ -172,4 +172,17 @@ describe('manifest integrity (Finding A)', () => {
     expect(report.intact).toBe(false);
     expect(report.failure).toBe('manifest');
   });
+
+  it('SKIPS an unpinned manifestRef (no contentHash) instead of false-failing', async () => {
+    // Simplified / non-content-addressed refs (e.g. some test fixtures: pangolin://manifests/<id>)
+    // carry no integrity commitment, so there is nothing to verify — the check must skip, not flag.
+    const m = minimalManifest();
+    const { bundle, anchor } = bundleWith(m);
+    bundle.items[0]!.manifestRef = 'pangolin://manifests/item-a'; // 2-segment, unpinned
+
+    const report = await verifyBundle(bundle, { anchor });
+
+    expect(report.intact).toBe(true);
+    expect(report.failure).not.toBe('manifest');
+  });
 });
