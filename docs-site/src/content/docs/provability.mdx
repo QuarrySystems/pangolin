@@ -5,23 +5,37 @@ description: Try to break a Pangolin audit seal — tamper a bundle, flip the an
 
 import ProvabilityVerifier from '../../components/ProvabilityVerifier.tsx';
 
-Pangolin's audit trail does not ask you to take "tamper-evident" on trust. Below is a real
-verifier over a sealed change-order bundle. Tamper a field, flip the anchor tier, and — once
-you have tampered — try to **re-seal as the attacker**. The verdict is the production
-`VerificationReport`: a tamper axis and a separate time axis, with the claim downgrading
-exactly when the real rule says it must.
+Pangolin's audit trail does not ask you to take "tamper-evident" on trust. The widget below is a
+**real verifier** over a sealed change-order bundle — the hashing is genuine SHA-256 run in your
+browser, and the verdict is the production `VerificationReport`.
+
+## What you'll see
+
+A sealed plan of five dispatches flows top to bottom — it **forks** where two steps run in parallel
+and **merges** again. Above it sits the live verdict, split into **two independent axes**:
+
+- **Tamper axis** — `tamper-detecting` vs `tamper-evident`, decided by the anchor.
+- **Time axis** — `asserted` vs `tsa-attested`, decided by whether an RFC-3161 timestamp is attached.
+
+A checklist mirrors what the real `pangolin verify` CLI prints: `chain · root · signature · anchor · time`.
+
+## What to try
+
+1. **Tamper a sealed field** — hit a preset (e.g. *Alter the agreed price*), or select a card and edit
+   its payload. That step's hash diverges and the break ripples downstream.
+2. **Flip the anchor tier** — on `LocalAnchor` the strongest honest claim is *tamper-detecting*; on
+   `S3 Object Lock` it becomes *tamper-evident*. The claim moves the instant you switch — nothing else changes.
+3. **Re-seal as the attacker** — after tampering, try to re-seal the bundle. On the local tier the attacker
+   rewrites the root and gets away with it; on WORM the frozen anchored root no longer matches, and it fails.
 
 <ProvabilityVerifier client:only="react" />
 
-## What you just saw
+## Why it behaves that way
 
-- **Tampering breaks the chain.** Each step's hash folds in its inputs; change one sealed
-  field and the break ripples downstream to the root.
-- **The tier decides the ceiling.** On `LocalAnchor` the root lives in the same store as the
-  log, so it can only ever claim **tamper-detecting**. On `S3 Object Lock` the root is external
-  and immutable, earning **tamper-evident** — see [Audit & guarantee tiers](/pangolin/explanation/audit-guarantee-tiers/).
-- **Re-sealing is the proof.** On the local tier the attacker rewrites the root and gets away
-  with it; on WORM the frozen anchored root no longer matches and verification fails with
-  `root-mismatch`. That is the whole difference.
+- **The tier decides the ceiling.** On `LocalAnchor` the root lives in the same store as the log, so it
+  can only ever claim **tamper-detecting**. On `S3 Object Lock` the root is external and immutable, earning
+  **tamper-evident** — see [Audit & guarantee tiers](/pangolin/explanation/audit-guarantee-tiers/).
+- **Re-sealing is the proof.** The local tier rewrites its own root, so a determined attacker wins; the WORM
+  tier cannot, so verification fails with `root-mismatch`. That gap *is* the difference between the two claims.
 
 To verify a real exported bundle, see [Export & verify an audit bundle](/pangolin/how-to/verify-audit-bundle/).

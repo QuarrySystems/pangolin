@@ -102,6 +102,12 @@ export default function ProvabilityVerifier() {
 
       {resealCaption && <p className={'pv-caption ' + resealCaption.cls}>{resealCaption.text}</p>}
 
+      <p className="pv-flowhint">
+        <b>The sealed plan.</b> Each card is one dispatch; a line links a step to the step it depends on,
+        and the flow widens where work runs in parallel. Select a card to edit its payload — tamper one and
+        watch the break ripple downstream.
+      </p>
+
       <Ledger items={state.sealed.items} statuses={statuses} selected={selected} onSelect={setSelected} onEdit={onEdit} />
 
       <footer className="pv-footer">

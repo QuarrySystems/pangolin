@@ -67,37 +67,38 @@
 .pv-caption.is-bad{color:var(--red); background:var(--red-dim);}
 .pv-caption.is-ok{color:var(--teal); background:var(--teal-dim);}
 
-/* status pill (reused in the ledger rows) */
+/* status pill (reused in step cards) */
 .pv-dot{font-size:9.5px; letter-spacing:.08em; text-transform:uppercase; font-weight:700; padding:2px 7px; border-radius:20px;}
 .pv-dot.is-verified{color:var(--teal); background:var(--teal-dim);}
 .pv-dot.is-tampered{color:var(--red); background:var(--red-dim);}
 .pv-dot.is-broken{color:var(--amber); background:var(--amber-dim);}
 
-/* vertical ledger */
-.pv-ledger{position:relative; display:flex; flex-direction:column; margin:18px 0 4px;}
-.pv-rail-edges{position:absolute; inset:0; width:100%; height:100%; pointer-events:none; overflow:visible;}
-.pv-rail-edge{fill:none; stroke:var(--teal-line); stroke-width:1.6; transition:stroke .2s;}
-.pv-rail-edge.is-broken{stroke:var(--red); stroke-width:2; stroke-dasharray:5 4; animation:pvDash .6s linear infinite;}
+/* flow legend */
+.pv-flowhint{display:flex; gap:8px; align-items:baseline; font-size:11.5px; color:var(--dim); margin:14px 0 0;}
+.pv-flowhint b{color:var(--muted); font-weight:600;}
+
+/* vertical level-flow */
+.pv-flow{position:relative; display:flex; flex-direction:column; gap:44px; margin:14px 0 4px;}
+.pv-flow-edges{position:absolute; inset:0; width:100%; height:100%; pointer-events:none; overflow:visible; z-index:0;}
+.pv-flow-edge{fill:none; stroke:var(--teal-line); stroke-width:1.6; transition:stroke .2s;}
+.pv-flow-edge.is-broken{stroke:var(--red); stroke-width:2; stroke-dasharray:5 4; animation:pvDash .6s linear infinite;}
 @keyframes pvDash{to{stroke-dashoffset:-18;}}
-.pv-row{display:flex; gap:2px; align-items:stretch;}
-.pv-rail{position:relative; flex:0 0 40px; width:40px; display:flex; justify-content:center;}
-.pv-rail-dot{position:relative; z-index:1; width:13px; height:13px; margin-top:19px; border-radius:50%;
-  border:2px solid var(--line2); background:var(--ink); transition:all .2s;}
-.pv-rail-dot.is-verified{border-color:var(--teal); background:var(--teal-dim);}
-.pv-rail-dot.is-tampered{border-color:var(--red); background:var(--red);}
-.pv-rail-dot.is-broken{border-color:var(--amber); background:var(--amber-dim);}
-.pv-step{flex:1; min-width:0; text-align:left; background:transparent; border:1px solid transparent; border-radius:12px;
-  padding:12px 14px; margin:6px 0; cursor:pointer; color:var(--text); font-family:var(--sans); transition:background .15s, border-color .2s;}
-.pv-step:hover{background:var(--panel);}
+.pv-band{display:flex; gap:20px; justify-content:center; align-items:stretch;}
+.pv-step{position:relative; z-index:1; flex:1 1 0; max-width:600px; min-width:0; text-align:left;
+  background:var(--panel); border:1px solid var(--line2); border-radius:13px; padding:14px 16px;
+  cursor:pointer; color:var(--text); font-family:var(--sans); transition:border-color .2s, background .2s, box-shadow .2s;}
+.pv-step:hover{background:var(--panel2);}
 .pv-step:focus-visible{outline:none; border-color:var(--bronze);}
-.pv-row.is-selected .pv-step{background:var(--panel); border-color:var(--bronze);}
-.pv-row.is-tampered .pv-step{background:var(--red-dim); border-color:var(--red-line);}
-.pv-row.is-broken .pv-step{background:var(--amber-dim); border-color:var(--amber-line);}
+.pv-step.is-verified{border-color:var(--teal-line);}
+.pv-step.is-tampered{border-color:var(--red-line); background:var(--red-dim);}
+.pv-step.is-broken{border-color:var(--amber-line); background:var(--amber-dim);}
+.pv-step.is-selected{border-color:var(--bronze); box-shadow:0 0 0 1px var(--bronze);}
 .pv-step-head{display:flex; gap:10px; align-items:baseline; flex-wrap:wrap;}
 .pv-step-action{font-size:11px; color:var(--muted);}
 .pv-step-label{font-size:14px; font-weight:600; letter-spacing:-.01em;}
-.pv-step-scope{font-size:9.5px; color:var(--dim); margin-left:auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:40%;}
-.pv-payloads{display:flex; flex-direction:column; gap:6px; margin-top:9px;}
+.pv-step-head .pv-dot{margin-left:auto;}
+.pv-step-scope{font-size:9.5px; color:var(--dim); margin-top:4px;}
+.pv-payloads{display:flex; flex-direction:column; gap:6px; margin-top:10px;}
 .pv-pl{display:flex; gap:9px; align-items:baseline; min-width:0;}
 .pv-pl-k{flex:0 0 42px; font-size:9px; letter-spacing:.1em; text-transform:uppercase; color:var(--dim);
   display:inline-flex; gap:4px; align-items:center;}
@@ -126,10 +127,9 @@
   .pv-ctl-btns{width:100%;}
   .pv-tier{flex-wrap:wrap;}
   .pv-tier button{flex:1 1 140px;}
-  .pv-rail{flex-basis:30px; width:30px;}
-  .pv-step-scope{margin-left:0; max-width:100%; flex-basis:100%;}
+  .pv-band{flex-direction:column; gap:44px;}
   .pv-pl-k{flex-basis:34px;}
 }
 @media (prefers-reduced-motion:reduce){
-  .pv-rail-edge.is-broken{animation:none;}
+  .pv-flow-edge.is-broken{animation:none;}
 }
