@@ -21,11 +21,14 @@ A checklist mirrors what the real `pangolin verify` CLI prints: `chain · root �
 
 ## What to try
 
-1. **Tamper a sealed field** — hit a preset (e.g. *Alter the agreed price*), or select a card and edit
+1. **Pick a domain** — the **Domain** row reskins the sealed plan into a denied-claim appeal, an
+   immigration filing, a reconciliation exception, a vendor-bid evaluation, or a loan-servicing action.
+   The data changes; the mechanism — and everything below — does not.
+2. **Tamper a sealed field** — hit a preset (e.g. *Alter the agreed price*), or select a card and edit
    its payload. That step's hash diverges and the break ripples downstream.
-2. **Flip the anchor tier** — on `LocalAnchor` the strongest honest claim is *tamper-detecting*; on
+3. **Flip the anchor tier** — on `LocalAnchor` the strongest honest claim is *tamper-detecting*; on
    `S3 Object Lock` it becomes *tamper-evident*. The claim moves the instant you switch — nothing else changes.
-3. **Re-seal as the attacker** — after tampering, try to re-seal the bundle. On the local tier the attacker
+4. **Re-seal as the attacker** — after tampering, try to re-seal the bundle. On the local tier the attacker
    rewrites the root and gets away with it; on WORM the frozen anchored root no longer matches, and it fails.
 
 <ProvabilityVerifier client:only="react" />
