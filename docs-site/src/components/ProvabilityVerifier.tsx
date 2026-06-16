@@ -61,7 +61,7 @@ export default function ProvabilityVerifier() {
   const resealCaption =
     tampered && report.intact && state.tier === 'local'
       ? { cls: 'is-bad', text: 'The root lives in the same store the attacker controls — rewrite the log, rewrite the root. The local tier proves consistency, not immutability. That is why it only ever claims tamper-detecting.' }
-      : tampered && report.failure === 'root-mismatch'
+      : tampered && report.failure === 'root-mismatch' && state.tier === 's3-worm'
         ? { cls: 'is-ok', text: 'The anchored root is in a separate trust domain (WORM). The attacker rewrote the bundle — but not the anchor. That is tamper-evident.' }
         : null;
 
