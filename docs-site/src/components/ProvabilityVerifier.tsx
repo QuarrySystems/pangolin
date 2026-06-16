@@ -73,9 +73,9 @@ export default function ProvabilityVerifier() {
             <div className="pv-subtitle">Sealed change-order bundle · CO-0142</div>
           </div>
         </div>
-        <Verdict report={report} />
       </header>
 
+      <Verdict report={report} />
       <Checklist report={report} />
 
       <section className="pv-controls">
@@ -91,13 +91,15 @@ export default function ProvabilityVerifier() {
 
       <section className="pv-controls">
         <span className="pv-ctl-label">Anchor</span>
-        <div className="pv-tier">
-          <button className={state.tier === 'local' ? 'is-on' : ''} onClick={() => setTier('local')}>LocalAnchor · detect</button>
-          <button className={state.tier === 's3-worm' ? 'is-on' : ''} onClick={() => setTier('s3-worm')}>S3 Object Lock · external-immutable</button>
+        <div className="pv-ctl-btns">
+          <div className="pv-tier">
+            <button className={state.tier === 'local' ? 'is-on' : ''} onClick={() => setTier('local')}>LocalAnchor · detect</button>
+            <button className={state.tier === 's3-worm' ? 'is-on' : ''} onClick={() => setTier('s3-worm')}>S3 Object Lock · external-immutable</button>
+          </div>
+          <label className="pv-ctl-label pv-ctl-check">
+            <input type="checkbox" checked={state.timeAttested} onChange={toggleTime} /> Attach RFC-3161 timestamp
+          </label>
         </div>
-        <label className="pv-ctl-label" style={{ cursor: 'pointer' }}>
-          <input type="checkbox" checked={state.timeAttested} onChange={toggleTime} /> Attach RFC-3161 timestamp
-        </label>
       </section>
 
       {resealCaption && <p className={'pv-caption ' + resealCaption.cls}>{resealCaption.text}</p>}
