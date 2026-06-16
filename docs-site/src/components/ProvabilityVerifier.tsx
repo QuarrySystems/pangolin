@@ -84,6 +84,8 @@ export default function ProvabilityVerifier() {
           {TAMPERS.map((t) => (
             <button key={t.id} className="pv-tamper" onClick={() => onPreset(t)}>{t.label}</button>
           ))}
+        </div>
+        <div className="pv-ctl-btns pv-ctl-actions">
           {tampered && <button className="pv-reseal" onClick={onReseal}>Re-seal the bundle (act as the attacker)</button>}
           <button className="pv-restore" onClick={onRestore}><RotateCcw size={13} /> Restore bundle</button>
         </div>
