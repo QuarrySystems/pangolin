@@ -6,9 +6,8 @@ import {
 } from '../lib/sealVerify';
 import type { VerificationReport } from '@quarry-systems/pangolin-core';
 import { PRISTINE_ITEMS, TAMPERS } from '../lib/demoBundle';
-import { Graph } from './Graph';
+import { Ledger } from './Ledger';
 import { Verdict, Checklist } from './Verdict';
-import { Detail } from './Detail';
 import './verifier.css';
 
 export default function ProvabilityVerifier() {
@@ -57,7 +56,6 @@ export default function ProvabilityVerifier() {
   const toggleTime = () => setState((s) => (s ? { ...s, timeAttested: !s.timeAttested } : s));
 
   if (!state || !report) return <div className="pv-root">Loading…</div>;
-  const sel = state.sealed.items.find((i) => i.id === selected)!;
   const resealCaption =
     tampered && report.intact && state.tier === 'local'
       ? { cls: 'is-bad', text: 'The root lives in the same store the attacker controls — rewrite the log, rewrite the root. The local tier proves consistency, not immutability. That is why it only ever claims tamper-detecting.' }
@@ -104,8 +102,7 @@ export default function ProvabilityVerifier() {
 
       {resealCaption && <p className={'pv-caption ' + resealCaption.cls}>{resealCaption.text}</p>}
 
-      <Graph items={state.sealed.items} statuses={statuses} selected={selected} onSelect={setSelected} />
-      <Detail item={sel} status={statuses[selected] ?? 'verified'} onEdit={onEdit} />
+      <Ledger items={state.sealed.items} statuses={statuses} selected={selected} onSelect={setSelected} onEdit={onEdit} />
 
       <footer className="pv-footer">
         Real SHA-256, computed in your browser. The anchor is simulated; the verdict is the
