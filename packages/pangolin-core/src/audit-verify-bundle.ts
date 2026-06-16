@@ -2,6 +2,7 @@ import type {
   AuditBundle,
   AuditStore,
   AuditAnchor,
+  AuthzTier,
   Signature,
   TimestampToken,
   VerificationReport,
@@ -51,7 +52,15 @@ export function verifyBundle(
           ? ('handoff' as const)
           : undefined);
     const claim = claimFor(intact, base.guarantee, base.checks.signature.ok);
-    return { ...base, intact, failure, claim, checks: { ...base.checks, handoff } };
+    const decided =
+      bundle.manifests.some(
+        (m) => m.authorization !== undefined && m.authorization.verdict !== 'not-evaluated',
+      ) ||
+      bundle.auditLog.entries.some(
+        (e) => e.kind === 'item.denied' && e.authorization?.verdict === 'deny',
+      );
+    const authzTier: AuthzTier = decided ? 'recorded' : 'none';
+    return { ...base, intact, failure, claim, authzTier, checks: { ...base.checks, handoff } };
   });
 }
 
