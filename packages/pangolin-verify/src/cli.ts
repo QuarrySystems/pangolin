@@ -17,6 +17,7 @@ import {
   makeVerifySignature,
   makeVerifySignatureFromTrustRoot,
   makeVerifyTimestamp,
+  extractVerifiedGenTime,
 } from './verify-context.js';
 import { renderVerification } from './render.js';
 
@@ -43,9 +44,12 @@ export function buildProgram(): Command {
         const anchor = buildAnchor(ctx, bundle);
         // Select the appropriate signature callback: trust-root (keyRef-resolving) path
         // when a trust root is present, single-key path otherwise.
-        // Task 11 will compute verifiedGenTime via verifyTimestampWithTime and pass it here.
+        // When a trust root is active, compute a TSA-verified genTime from the bundle's
+        // embedded anchored root timestamp token. This genTime drives the key-lifecycle
+        // gate (notBefore/notAfter/revocation) inside makeVerifySignatureFromTrustRoot.
+        // Self-asserted time is never passed here — only RFC-3161-verified time is.
         const verifySignature = ctx.trustRoot
-          ? makeVerifySignatureFromTrustRoot(ctx.trustRoot)
+          ? makeVerifySignatureFromTrustRoot(ctx.trustRoot, extractVerifiedGenTime(ctx, bundle))
           : makeVerifySignature(ctx);
         report = await verifyBundle(bundle, {
           anchor,

@@ -15,8 +15,9 @@ import type {
   TimestampToken,
   S3LockClient,
 } from '@quarry-systems/pangolin-core';
-import { verifyTimestamp } from './timestamp-authority.js';
+import { verifyTimestamp, verifyTimestampWithTime } from './timestamp-authority.js';
 import { resolveKey, parseTrustRoot, type TrustRoot } from './trust-root.js';
+import { keyUsableAt } from './revocation.js';
 
 // ── Wire shapes (base64 for all binary fields; see VERIFICATION.md §2) ───────
 
@@ -196,6 +197,29 @@ export function buildAnchor(ctx: VerifyContext, bundle: AuditBundle): AuditAncho
   };
 }
 
+// ── Verified genTime extraction (for key-lifecycle gate at the CLI call site) ──
+
+/** Extract a TSA-verified genTime from the bundle's embedded anchored root, if present and
+ *  trusted by `ctx.tsaCaCertsDer`. Returns undefined when certs are absent, the root has no
+ *  timestamp token, or verification fails. Never returns a self-asserted / operator-supplied
+ *  time — ONLY a time proven by a verified RFC-3161 token.
+ *
+ *  Call this BEFORE building the signature callback so the lifecycle gate in
+ *  makeVerifySignatureFromTrustRoot can receive a trusted genTime. */
+export function extractVerifiedGenTime(ctx: VerifyContext, bundle: AuditBundle): Date | undefined {
+  if (ctx.tsaCaCertsDer.length === 0) return undefined;
+  const embeddedRoot = bundle.auditLog.root;
+  if (!embeddedRoot) return undefined;
+  const hydratedRoot = hydrateAnchoredRoot(embeddedRoot);
+  if (!hydratedRoot.timestamp) return undefined;
+  const result = verifyTimestampWithTime(
+    hydratedRoot.root,
+    hydratedRoot.timestamp,
+    ctx.tsaCaCertsDer,
+  );
+  return result.ok ? result.genTime : undefined;
+}
+
 // ── Injected verifier callbacks (what core's verifyBundle consumes) ───────────
 
 /** The single algorithm→node-crypto-verify mapping. ed25519 = PureEdDSA (digest null);
@@ -247,13 +271,11 @@ export function makeVerifySignatureFromTrustRoot(
   verifiedGenTime?: Date,
 ): ((root: Uint8Array, sig: Signature) => boolean) | undefined {
   if (!trustRoot) return undefined;
-  // verifiedGenTime is unused here; Task 11 inserts a key-lifecycle gate using this value.
-  void verifiedGenTime;
   return (root, sig) => {
     const entry = resolveKey(trustRoot, sig.keyRef);
     if (!entry) return false; // unrecognized signer = hard fail
     if (entry.alg !== sig.alg) return false; // alg must match the published entry
-    // Task 11 inserts a key-lifecycle gate here using verifiedGenTime.
+    if (!keyUsableAt(entry, verifiedGenTime)) return false; // lifecycle gate: window + revocation
     let key: KeyObject;
     try {
       key = createPublicKey({

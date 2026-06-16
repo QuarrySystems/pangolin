@@ -87,3 +87,42 @@ describe('makeVerifySignatureFromTrustRoot', () => {
     expect(verify(root, sig)).toBe(false); // alg mismatch
   });
 });
+
+describe('makeVerifySignatureFromTrustRoot — lifecycle composition', () => {
+  it('revoked key with no verified genTime hard-fails (even with a valid signature)', () => {
+    const s = localEcdsa('k-rev');
+    const root = new Uint8Array(32).fill(4);
+    const sig = s.sign(root);
+    const tr: TrustRoot = {
+      schemaVersion: 1,
+      keys: {
+        'k-rev': {
+          alg: 'ecdsa-p256',
+          spkiDer: Buffer.from(s.publicKeySpki).toString('base64'),
+          status: 'revoked',
+          notBefore: '2026-01-01T00:00:00Z',
+          notAfter: null,
+          revokedAt: '2026-06-01T00:00:00Z',
+        },
+      },
+    };
+    expect(makeVerifySignatureFromTrustRoot(tr)!(root, sig)).toBe(false); // no genTime → hard fail
+    expect(makeVerifySignatureFromTrustRoot(tr, new Date('2026-05-01T00:00:00Z'))!(root, sig)).toBe(
+      true,
+    ); // signed before revocation
+    expect(makeVerifySignatureFromTrustRoot(tr, new Date('2026-07-01T00:00:00Z'))!(root, sig)).toBe(
+      false,
+    ); // signed after revocation
+  });
+  it('active key still verifies with a verified genTime inside its window', () => {
+    const s = localEcdsa('k-act');
+    const root = new Uint8Array(32).fill(4);
+    const sig = s.sign(root);
+    expect(
+      makeVerifySignatureFromTrustRoot(
+        activeTrustRoot('k-act', s.publicKeySpki),
+        new Date('2026-05-01T00:00:00Z'),
+      )!(root, sig),
+    ).toBe(true);
+  });
+});
