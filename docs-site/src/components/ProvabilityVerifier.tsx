@@ -115,10 +115,10 @@ export default function ProvabilityVerifier() {
         </div>
       </header>
 
-      <section className="pv-controls">
+      <section className="pv-controls pv-domain-row">
         <span className="pv-ctl-label">Domain</span>
         <div className="pv-ctl-btns">
-          <div className="pv-tier">
+          <div className="pv-tier pv-domains">
             {BUNDLES.map((b) => (
               <button
                 key={b.id}
