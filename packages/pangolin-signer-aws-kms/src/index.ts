@@ -1,7 +1,7 @@
 // @quarry-systems/pangolin-signer-aws-kms
 // AWS KMS asymmetric ECDSA-P256 signer behind the core `Signer` seam.
 // SOLE owner of @aws-sdk/client-kms; pangolin-core/pangolin-verify gain no SDK dependency.
-import { KMSClient, SignCommand } from '@aws-sdk/client-kms';
+import { KMSClient, SignCommand, GetPublicKeyCommand } from '@aws-sdk/client-kms';
 import type { Signer, Signature } from '@quarry-systems/pangolin-core';
 
 export interface KmsSignerOptions {
@@ -36,4 +36,26 @@ export function createKmsSigner(opts: KmsSignerOptions): Signer {
       return { alg: 'ecdsa-p256', bytes: new Uint8Array(der), keyRef: opts.keyRef };
     },
   };
+}
+
+export interface PublishableKey {
+  keyRef: string;
+  alg: 'ecdsa-p256';
+  /** base64 SPKI-DER, ready to drop into a trust-root manifest entry. */
+  spkiDer: string;
+}
+
+/** Fetch the KMS public key (SPKI-DER) and shape it as a trust-root manifest entry.
+ *  Operators run this to publish key material — never hand-encode it. */
+export async function publishablePublicKey(opts: {
+  keyId: string;
+  keyRef: string;
+  region?: string;
+  client?: Pick<KMSClient, 'send'>;
+}): Promise<PublishableKey> {
+  const client = opts.client ?? new KMSClient(opts.region ? { region: opts.region } : {});
+  const out = await client.send(new GetPublicKeyCommand({ KeyId: opts.keyId }) as never);
+  const spki = (out as { PublicKey?: Uint8Array }).PublicKey;
+  if (!spki) throw new Error('KMS GetPublicKey returned no PublicKey');
+  return { keyRef: opts.keyRef, alg: 'ecdsa-p256', spkiDer: Buffer.from(spki).toString('base64') };
 }
