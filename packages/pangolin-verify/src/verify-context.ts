@@ -16,6 +16,7 @@ import type {
   S3LockClient,
 } from '@quarry-systems/pangolin-core';
 import { verifyTimestamp } from './timestamp-authority.js';
+import { resolveKey, parseTrustRoot, type TrustRoot } from './trust-root.js';
 
 // ── Wire shapes (base64 for all binary fields; see VERIFICATION.md §2) ───────
 
@@ -41,6 +42,10 @@ export interface VerifyContextJson {
   anchor: AnchorSpec;
   /** Trusted TSA CA certs, each base64 DER. Omit/empty to skip the time check. */
   tsaCaCertsDer?: string[];
+  /** Out-of-band published trust root mapping keyRef → public key + lifecycle.
+   *  When present, signer verification uses makeVerifySignatureFromTrustRoot instead
+   *  of the single-key path. NEVER read from the bundle. */
+  trustRoot?: unknown;
 }
 
 /** The loaded, decoded verify-context. */
@@ -52,6 +57,10 @@ export interface VerifyContext {
    *  this leaf package carries no AWS SDK). Absent => anchor-checked falls back to a
    *  clear error at fetch time. */
   s3?: S3LockClient;
+  /** Validated trust root, decoded from the on-disk verify-context JSON.
+   *  When present, signer verification resolves the public key by sig.keyRef.
+   *  Never sourced from the bundle. */
+  trustRoot?: TrustRoot;
 }
 
 function b64(s: string): Uint8Array {
@@ -80,11 +89,17 @@ export async function loadVerifyContext(
         type: 'spki',
       })
     : undefined;
+  // If a trust root is present in the context, validate it fail-closed (disk-sourced
+  // manifest — any malformation is a fatal misconfiguration, not a soft skip).
+  const trustRoot: TrustRoot | undefined = json.trustRoot
+    ? parseTrustRoot(JSON.stringify(json.trustRoot))
+    : undefined;
   return {
     signerPublicKey,
     anchor: json.anchor,
     tsaCaCertsDer: (json.tsaCaCertsDer ?? []).map(b64),
     s3: opts.s3,
+    trustRoot,
   };
 }
 
@@ -221,4 +236,34 @@ export function makeVerifyTimestamp(
   if (ctx.tsaCaCertsDer.length === 0) return undefined;
   const certs = ctx.tsaCaCertsDer;
   return (root, token) => verifyTimestamp(root, token, certs);
+}
+
+/** Verify callback resolving the pubkey by sig.keyRef from a published trust root.
+ *  No trust root → undefined (core 'n/a'). keyRef unknown → false (hard fail). alg must
+ *  match the published entry. Crypto goes through the shared verifySignatureBytes primitive.
+ *  `verifiedGenTime` is accepted now for the key-lifecycle gate added in Task 11 (unused here). */
+export function makeVerifySignatureFromTrustRoot(
+  trustRoot: TrustRoot | undefined,
+  verifiedGenTime?: Date,
+): ((root: Uint8Array, sig: Signature) => boolean) | undefined {
+  if (!trustRoot) return undefined;
+  // verifiedGenTime is unused here; Task 11 inserts a key-lifecycle gate using this value.
+  void verifiedGenTime;
+  return (root, sig) => {
+    const entry = resolveKey(trustRoot, sig.keyRef);
+    if (!entry) return false; // unrecognized signer = hard fail
+    if (entry.alg !== sig.alg) return false; // alg must match the published entry
+    // Task 11 inserts a key-lifecycle gate here using verifiedGenTime.
+    let key: KeyObject;
+    try {
+      key = createPublicKey({
+        key: Buffer.from(entry.spkiDer, 'base64'),
+        format: 'der',
+        type: 'spki',
+      });
+    } catch {
+      return false; // malformed base64 / SPKI
+    }
+    return verifySignatureBytes(sig.alg, root, key, sig.bytes);
+  };
 }

@@ -15,6 +15,7 @@ import {
   loadVerifyContext,
   buildAnchor,
   makeVerifySignature,
+  makeVerifySignatureFromTrustRoot,
   makeVerifyTimestamp,
 } from './verify-context.js';
 import { renderVerification } from './render.js';
@@ -23,9 +24,14 @@ export function buildProgram(): Command {
   const program = new Command();
   program
     .name('pangolin-verify')
-    .description('Independently verify a Pangolin Scale audit bundle (trust the artifact, not the vendor)')
+    .description(
+      'Independently verify a Pangolin Scale audit bundle (trust the artifact, not the vendor)',
+    )
     .argument('<bundle.json>', 'path to the exported AuditBundle JSON')
-    .option('--anchor <verify-context.json>', 'verify-context: signer key, anchor source, TSA certs')
+    .option(
+      '--anchor <verify-context.json>',
+      'verify-context: signer key, anchor source, TSA certs',
+    )
     .option('--json', 'emit the raw VerificationReport as JSON')
     .option('--full', 'print every ledger row')
     .action(async (file: string, opts: { anchor?: string; json?: boolean; full?: boolean }) => {
@@ -35,9 +41,15 @@ export function buildProgram(): Command {
       if (opts.anchor) {
         const ctx = await loadVerifyContext(opts.anchor);
         const anchor = buildAnchor(ctx, bundle);
+        // Select the appropriate signature callback: trust-root (keyRef-resolving) path
+        // when a trust root is present, single-key path otherwise.
+        // Task 11 will compute verifiedGenTime via verifyTimestampWithTime and pass it here.
+        const verifySignature = ctx.trustRoot
+          ? makeVerifySignatureFromTrustRoot(ctx.trustRoot)
+          : makeVerifySignature(ctx);
         report = await verifyBundle(bundle, {
           anchor,
-          verifySignature: makeVerifySignature(ctx),
+          verifySignature,
           verifyTimestamp: makeVerifyTimestamp(ctx),
         });
       } else {
@@ -49,7 +61,10 @@ export function buildProgram(): Command {
       console.log(
         opts.json
           ? JSON.stringify(report, null, 2)
-          : renderVerification({ ...bundle, report }, { color: process.stdout.isTTY === true, full: opts.full }),
+          : renderVerification(
+              { ...bundle, report },
+              { color: process.stdout.isTTY === true, full: opts.full },
+            ),
       );
       process.exitCode = report.intact ? 0 : 1;
     });
