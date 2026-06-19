@@ -154,9 +154,12 @@ The provider picks the hash algorithm. `LocalStorageProvider` and
   store bound capabilities as hashes (for reproducibility); the worker
   uses `resolveByHash` to round-trip them back to fetchable URIs. An
   O(N) walk is acceptable for MVP scale.
-- **`listNames(prefix)` is NOT in the interface yet.** The CLI's
-  `capabilities list` etc. throw `NOT_IMPLEMENTED` because the catalog
-  layer can't enumerate. Future addition.
+- **`listNames` is an OPTIONAL contract method.** It enumerates the latest
+  registration of every name under a `(namespace, type)` prefix and powers the
+  catalog `list` surface (`pangolin capabilities|subagents|envs list`). Implement
+  it with the same `(namespace, type)` walk as `resolveByHash` (the bundled
+  local-FS and S3 providers do). A provider that omits it still works — the
+  catalog `list*` calls surface a clear "enumeration unsupported" error.
 - **Local-vs-remote scope.** `LocalStorageProvider` bind-mounts host
   paths into the worker container — works for one-host deployments, breaks
   the moment compute is on a different machine. For cross-machine, use

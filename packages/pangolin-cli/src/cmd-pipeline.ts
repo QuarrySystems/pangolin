@@ -5,15 +5,15 @@
 //
 // PRECEDENT NOTE — `list`:
 //   Both `cmd-subagent` and `cmd-capabilities` expose a `list` verb that calls
-//   `client.subagent.list()` / `client.capabilities.list()`. We follow that
-//   pattern here and call `client.pipeline.list()`. The underlying catalog
-//   layer currently throws "not yet implemented" (StorageProvider lacks a
-//   listNames extension); that error will surface to the user with the same
-//   UX as it does for the other resource types. The type assertion on
-//   `(client.pipeline as any).list` is intentional: `PangolinClientPipelineAPI`
-//   does not expose `list` yet (catalog enumeration is deferred in DAG 2).
-//   Once `PangolinClientPipelineAPI` gains a `list()` method the cast can be
-//   removed and this comment deleted.
+//   `client.subagent.list()` / `client.capabilities.list()`. Those now enumerate
+//   via `StorageProvider.listNames` (the catalog `list*` surface is implemented).
+//   We follow that pattern here and call `client.pipeline.list()`, but pipeline
+//   enumeration is STILL deferred: pipelines use a different on-store layout
+//   (`pipeline/<id>@<hash>`) than the catalog types, so the `listNames` name-walk
+//   does not apply and `client.pipeline.list` is not yet on the published
+//   `PangolinClientPipelineAPI` — hence the `as any` cast. Calling this today
+//   surfaces a "not implemented" error. Implement a pipeline-aware enumeration
+//   (or migrate pipelines to the `<name>/<hash>` layout) before removing the cast.
 //
 // VALIDATE — storage-free design:
 //   `validate` uses `registerPipeline` from `@quarry-systems/pangolin-client`
@@ -39,7 +39,10 @@ const VALIDATE_ONLY_SENTINEL = '__PIPELINE_VALIDATE_ONLY__';
  * for the validation-only path. The storage provider throws the sentinel after
  * `registerPipeline` has already run `validatePipelineSpec` successfully.
  */
-function makeValidateOnlyClient(): { namespace: string; storage: { resolveLatest: () => Promise<null>; put: () => never } } {
+function makeValidateOnlyClient(): {
+  namespace: string;
+  storage: { resolveLatest: () => Promise<null>; put: () => never };
+} {
   return {
     namespace: '__validate__',
     storage: {

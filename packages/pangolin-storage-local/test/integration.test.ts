@@ -214,6 +214,49 @@ describe('LocalStorageProvider', () => {
     });
   });
 
+  // ── listNames (distinct-name enumeration under a (ns, type) prefix) ──────
+  //
+  // Reuses the same (ns, type) directory walk as resolveByHash. Powers the
+  // catalog `list*` read-side (e.g. `pangolin capabilities list`).
+
+  describe('listNames', () => {
+    it('returns an empty array when nothing is registered under (ns, type)', async () => {
+      const sp = new LocalStorageProvider({ rootDir });
+      expect(await sp.listNames({ namespace: 'test', type: 'capability' })).toEqual([]);
+    });
+
+    it('returns one entry per distinct name with its LATEST version metadata', async () => {
+      const sp = new LocalStorageProvider({ rootDir });
+      await sp.put('pangolin://test/capability/lint', new TextEncoder().encode('lint-v1'));
+      const { contentHash: lintLatest } = await sp.put(
+        'pangolin://test/capability/lint',
+        new TextEncoder().encode('lint-v2'),
+      );
+      const { contentHash: fmtHash } = await sp.put(
+        'pangolin://test/capability/fmt',
+        new TextEncoder().encode('fmt-v1'),
+      );
+
+      const names = await sp.listNames({ namespace: 'test', type: 'capability' });
+      const byName = Object.fromEntries(names.map((n) => [n.name, n]));
+      expect(Object.keys(byName).sort()).toEqual(['fmt', 'lint']);
+      // lint collapses two versions to one entry pinned at the latest contentHash.
+      expect(byName['lint']!.contentHash).toBe(lintLatest);
+      expect(byName['fmt']!.contentHash).toBe(fmtHash);
+      expect(byName['lint']!.registeredAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    });
+
+    it('scopes to (ns, type): does not bleed across type or namespace', async () => {
+      const sp = new LocalStorageProvider({ rootDir });
+      await sp.put('pangolin://test/capability/lint', new TextEncoder().encode('x'));
+      await sp.put('pangolin://test/subagent/reviewer', new TextEncoder().encode('y'));
+      await sp.put('pangolin://other/capability/secret', new TextEncoder().encode('z'));
+
+      const caps = await sp.listNames({ namespace: 'test', type: 'capability' });
+      expect(caps.map((n) => n.name)).toEqual(['lint']);
+    });
+  });
+
   // ── Dispatch-record prefix (reserved `dispatches/`) support ─────────────
   //
   // The retention layer in pangolin-client writes dispatch records to URIs

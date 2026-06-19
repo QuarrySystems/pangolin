@@ -50,9 +50,7 @@ async function purgeBucket(): Promise<void> {
     };
     for (const obj of res.Contents ?? []) {
       if (obj.Key) {
-        await client.send(
-          new DeleteObjectCommand({ Bucket: BUCKET, Key: obj.Key }),
-        );
+        await client.send(new DeleteObjectCommand({ Bucket: BUCKET, Key: obj.Key }));
       }
     }
     continuationToken = res.NextContinuationToken;
@@ -88,13 +86,8 @@ describeIf('S3StorageProvider against LocalStack', () => {
   it('round-trips a blob through put/get', async () => {
     const sp = new S3StorageProvider({ bucket: BUCKET, client });
     const payload = new TextEncoder().encode('hello integration');
-    const { contentHash } = await sp.put(
-      'pangolin://test/capability/roundtrip',
-      payload,
-    );
-    const retrieved = await sp.get(
-      `pangolin://test/capability/roundtrip/${contentHash}`,
-    );
+    const { contentHash } = await sp.put('pangolin://test/capability/roundtrip', payload);
+    const retrieved = await sp.get(`pangolin://test/capability/roundtrip/${contentHash}`);
     expect(new TextDecoder().decode(retrieved)).toBe('hello integration');
   });
 
@@ -172,9 +165,7 @@ describeIf('S3StorageProvider against LocalStack', () => {
     expect(list[0]!.contentHash).toBe(third.contentHash);
     // And the registeredAt timestamps must be monotone non-increasing.
     for (let i = 1; i < list.length; i++) {
-      expect(
-        list[i - 1]!.registeredAt >= list[i]!.registeredAt,
-      ).toBe(true);
+      expect(list[i - 1]!.registeredAt >= list[i]!.registeredAt).toBe(true);
     }
   });
 
@@ -203,9 +194,7 @@ describeIf('S3StorageProvider against LocalStack', () => {
     // Each blob is independently retrievable and round-trips its bytes.
     const fetched = await Promise.all(
       list.map(async (e) => {
-        const bytes = await sp.get(
-          `pangolin://test/capability/parallel/${e.contentHash}`,
-        );
+        const bytes = await sp.get(`pangolin://test/capability/parallel/${e.contentHash}`);
         return new TextDecoder().decode(bytes);
       }),
     );
@@ -222,8 +211,7 @@ describeIf('S3StorageProvider against LocalStack', () => {
       const hit = await sp.resolveByHash({
         namespace: 'test',
         type: 'capability',
-        contentHash:
-          'sha256:0000000000000000000000000000000000000000000000000000000000000000',
+        contentHash: 'sha256:0000000000000000000000000000000000000000000000000000000000000000',
       });
       expect(hit).toBeNull();
     });
@@ -293,6 +281,42 @@ describeIf('S3StorageProvider against LocalStack', () => {
         contentHash,
       });
       expect(hit).toBeNull();
+    });
+  });
+
+  describe('listNames', () => {
+    it('returns an empty array when (ns, type) has no registered blobs', async () => {
+      const sp = new S3StorageProvider({
+        bucket: BUCKET,
+        client,
+        prefix: `tests/${Date.now()}-ln-empty`,
+      });
+      expect(await sp.listNames({ namespace: 'test', type: 'capability' })).toEqual([]);
+    });
+
+    it('returns one entry per distinct name with its LATEST version, scoped to (ns, type)', async () => {
+      const sp = new S3StorageProvider({
+        bucket: BUCKET,
+        client,
+        prefix: `tests/${Date.now()}-ln-multi`,
+      });
+      await sp.put('pangolin://test/capability/lint', new TextEncoder().encode('lint-v1'));
+      const { contentHash: lintLatest } = await sp.put(
+        'pangolin://test/capability/lint',
+        new TextEncoder().encode('lint-v2'),
+      );
+      const { contentHash: fmtHash } = await sp.put(
+        'pangolin://test/capability/fmt',
+        new TextEncoder().encode('fmt-v1'),
+      );
+      // A different type must not bleed into the capability listing.
+      await sp.put('pangolin://test/subagent/reviewer', new TextEncoder().encode('r'));
+
+      const names = await sp.listNames({ namespace: 'test', type: 'capability' });
+      const byName = Object.fromEntries(names.map((n) => [n.name, n]));
+      expect(Object.keys(byName).sort()).toEqual(['fmt', 'lint']);
+      expect(byName['lint']!.contentHash).toBe(lintLatest); // two versions collapse to latest
+      expect(byName['fmt']!.contentHash).toBe(fmtHash);
     });
   });
 });

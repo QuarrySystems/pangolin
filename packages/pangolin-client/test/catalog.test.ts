@@ -15,10 +15,7 @@ import type { StorageProvider } from '@quarry-systems/pangolin-core';
  * returns the most recent registration for a logical (namespace,type,name).
  */
 function makeMemoryStorage(): StorageProvider & {
-  registry: Map<
-    string,
-    Array<{ contentHash: string; registeredAt: string; pinnedUri: string }>
-  >;
+  registry: Map<string, Array<{ contentHash: string; registeredAt: string; pinnedUri: string }>>;
 } {
   const registry = new Map<
     string,
@@ -59,6 +56,19 @@ function makeMemoryStorage(): StorageProvider & {
         contentHash: e.contentHash,
         registeredAt: e.registeredAt,
       }));
+    },
+    async listNames(query: { namespace: string; type: string }) {
+      const prefix = `pangolin://${query.namespace}/${query.type}/`;
+      const out: Array<{ name: string; contentHash: string; registeredAt: string }> = [];
+      for (const [baseUri, versions] of registry) {
+        if (!baseUri.startsWith(prefix)) continue;
+        const name = baseUri.slice(prefix.length);
+        if (name.includes('/')) continue; // names are a single segment under the prefix
+        if (versions.length === 0) continue;
+        const latest = versions.reduce((a, b) => (b.registeredAt > a.registeredAt ? b : a));
+        out.push({ name, contentHash: latest.contentHash, registeredAt: latest.registeredAt });
+      }
+      return out;
     },
   };
 }
@@ -167,18 +177,42 @@ describe('catalog get*', () => {
 });
 
 describe('catalog list*', () => {
-  it('listCapabilities throws not-implemented (deferred per spec)', async () => {
-    const client = makeClient(makeMemoryStorage());
-    await expect(listCapabilities(client)).rejects.toThrow(/not yet implemented/);
+  it('listCapabilities returns the latest metadata triple for every registered name', async () => {
+    const storage = makeMemoryStorage();
+    seed(storage, 'org', 'capability', 'lint', 'sha256:old', '2026-01-01T00:00:00.000Z');
+    seed(storage, 'org', 'capability', 'lint', 'sha256:new', '2026-06-01T00:00:00.000Z'); // latest
+    seed(storage, 'org', 'capability', 'fmt', 'sha256:fff', '2026-02-02T00:00:00.000Z');
+    const refs = await listCapabilities(makeClient(storage));
+    expect([...refs].sort((a, b) => a.name.localeCompare(b.name))).toEqual([
+      { name: 'fmt', registeredAt: '2026-02-02T00:00:00.000Z', contentHash: 'sha256:fff' },
+      { name: 'lint', registeredAt: '2026-06-01T00:00:00.000Z', contentHash: 'sha256:new' },
+    ]);
   });
 
-  it('listSubagents throws not-implemented (deferred per spec)', async () => {
-    const client = makeClient(makeMemoryStorage());
-    await expect(listSubagents(client)).rejects.toThrow(/not yet implemented/);
+  it('listSubagents returns registered subagents', async () => {
+    const storage = makeMemoryStorage();
+    seed(storage, 'org', 'subagent', 'reviewer', 'sha256:bbb', '2026-02-02T00:00:00.000Z');
+    const refs = await listSubagents(makeClient(storage));
+    expect(refs).toEqual([
+      { name: 'reviewer', registeredAt: '2026-02-02T00:00:00.000Z', contentHash: 'sha256:bbb' },
+    ]);
   });
 
-  it('listEnvs throws not-implemented (deferred per spec)', async () => {
-    const client = makeClient(makeMemoryStorage());
-    await expect(listEnvs(client)).rejects.toThrow(/not yet implemented/);
+  it('listEnvs returns an empty array when nothing is registered (not an error)', async () => {
+    const refs = await listEnvs(makeClient(makeMemoryStorage()));
+    expect(refs).toEqual([]);
+  });
+
+  it('list* scopes to the client namespace', async () => {
+    const storage = makeMemoryStorage();
+    seed(storage, 'other-org', 'capability', 'lint', 'sha256:xxx', '2026-01-01T00:00:00.000Z');
+    const refs = await listCapabilities(makeClient(storage)); // namespace: 'org'
+    expect(refs).toEqual([]);
+  });
+
+  it('list* throws a clear error when the provider cannot enumerate names', async () => {
+    const storage = makeMemoryStorage();
+    delete (storage as { listNames?: unknown }).listNames; // provider without enumeration support
+    await expect(listCapabilities(makeClient(storage))).rejects.toThrow(/enumerat/i);
   });
 });

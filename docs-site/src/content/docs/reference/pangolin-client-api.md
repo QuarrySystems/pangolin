@@ -159,9 +159,10 @@ const ref = await client.pipeline.register({
 });
 ```
 
-`list()` is a deferred catalog surface — like `capabilities` / `subagent` /
-`env` enumeration, it waits on a `listNames` extension to `StorageProvider`;
-use `pangolin pipeline register`'s printed ref (or a known id) in the meantime.
+`pipeline.list()` is still deferred — pipelines use a different on-store layout
+(`pipeline/<id>@<hash>`) than the catalog types, so the `StorageProvider.listNames`
+walk that now backs `capabilities` / `subagent` / `env` enumeration does not apply
+to it. Use `pangolin pipeline register`'s printed ref (or a known id) in the meantime.
 
 ## `client.dispatch`
 

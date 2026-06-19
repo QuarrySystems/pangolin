@@ -77,10 +77,7 @@ export class LocalStorageProvider implements StorageProvider {
     return pathToFileURL(this.opts.rootDir).href;
   }
 
-  async put(
-    uri: string,
-    contents: Uint8Array,
-  ): Promise<{ contentHash: string }> {
+  async put(uri: string, contents: Uint8Array): Promise<{ contentHash: string }> {
     const parsed = this.parseSafe(uri);
     if (parsed.kind === 'dispatch-record') {
       return this.putDispatchRecord(parsed, contents);
@@ -98,9 +95,7 @@ export class LocalStorageProvider implements StorageProvider {
 
   async resolveLatest(
     uri: string,
-  ): Promise<
-    { uri: string; contentHash: string; registeredAt: string } | null
-  > {
+  ): Promise<{ uri: string; contentHash: string; registeredAt: string } | null> {
     const parsed = this.parseSafe(uri);
     if (parsed.kind === 'dispatch-record') {
       throw new Error(
@@ -125,9 +120,7 @@ export class LocalStorageProvider implements StorageProvider {
     };
   }
 
-  async resolveByHash(
-    query: { namespace: string; type: string; contentHash: string },
-  ): Promise<{
+  async resolveByHash(query: { namespace: string; type: string; contentHash: string }): Promise<{
     uri: string;
     name: string;
     contentHash: string;
@@ -141,9 +134,7 @@ export class LocalStorageProvider implements StorageProvider {
     let names: string[];
     try {
       const entries = await readdir(typeDir, { withFileTypes: true });
-      names = entries
-        .filter((e) => e.isDirectory())
-        .map((e) => e.name);
+      names = entries.filter((e) => e.isDirectory()).map((e) => e.name);
     } catch (err) {
       if (
         err &&
@@ -157,9 +148,7 @@ export class LocalStorageProvider implements StorageProvider {
     }
 
     for (const name of names) {
-      const index = await this.readIndex(
-        join(typeDir, name, '_index.json'),
-      );
+      const index = await this.readIndex(join(typeDir, name, '_index.json'));
       const entry = index.entries.find((e) => e.contentHash === query.contentHash);
       if (entry) {
         return {
@@ -178,11 +167,46 @@ export class LocalStorageProvider implements StorageProvider {
     return null;
   }
 
+  async listNames(query: {
+    namespace: string;
+    type: string;
+  }): Promise<Array<{ name: string; contentHash: string; registeredAt: string }>> {
+    this.assertSafeSegment(query.namespace, 'namespace');
+    this.assertSafeSegment(query.type, 'type');
+
+    const typeDir = join(this.opts.rootDir, query.namespace, query.type);
+    let names: string[];
+    try {
+      const entries = await readdir(typeDir, { withFileTypes: true });
+      names = entries.filter((e) => e.isDirectory()).map((e) => e.name);
+    } catch (err) {
+      if (
+        err &&
+        typeof err === 'object' &&
+        'code' in err &&
+        (err as NodeJS.ErrnoException).code === 'ENOENT'
+      ) {
+        return []; // nothing registered under this (ns, type) yet
+      }
+      throw err;
+    }
+
+    const out: Array<{ name: string; contentHash: string; registeredAt: string }> = [];
+    for (const name of names) {
+      const index = await this.readIndex(join(typeDir, name, '_index.json'));
+      if (index.entries.length === 0) continue;
+      let latest = index.entries[0]!;
+      for (const e of index.entries) {
+        if (e.registeredAt > latest.registeredAt) latest = e;
+      }
+      out.push({ name, contentHash: latest.contentHash, registeredAt: latest.registeredAt });
+    }
+    return out;
+  }
+
   async list(
     uri: string,
-  ): Promise<
-    Array<{ uri: string; contentHash: string; registeredAt: string }>
-  > {
+  ): Promise<Array<{ uri: string; contentHash: string; registeredAt: string }>> {
     const parsed = this.parseSafe(uri);
     if (parsed.kind === 'dispatch-record') {
       throw new Error(
@@ -191,11 +215,7 @@ export class LocalStorageProvider implements StorageProvider {
     }
     const index = await this.readIndex(this.indexPath(parsed));
     const sorted = [...index.entries].sort((a, b) =>
-      a.registeredAt < b.registeredAt
-        ? 1
-        : a.registeredAt > b.registeredAt
-          ? -1
-          : 0,
+      a.registeredAt < b.registeredAt ? 1 : a.registeredAt > b.registeredAt ? -1 : 0,
     );
     return sorted.map((e) => ({
       uri: buildPangolinUri({
@@ -239,14 +259,9 @@ export class LocalStorageProvider implements StorageProvider {
     return { contentHash };
   }
 
-  private async getBlob(
-    parsed: PangolinUriParts,
-    uri: string,
-  ): Promise<Uint8Array> {
+  private async getBlob(parsed: PangolinUriParts, uri: string): Promise<Uint8Array> {
     if (!parsed.contentHash) {
-      throw new Error(
-        `LocalStorageProvider.get requires a pinned URI with contentHash: ${uri}`,
-      );
+      throw new Error(`LocalStorageProvider.get requires a pinned URI with contentHash: ${uri}`);
     }
     const blobPath = this.blobPath(parsed, parsed.contentHash);
     let bytes: Buffer;
@@ -259,9 +274,7 @@ export class LocalStorageProvider implements StorageProvider {
         'code' in err &&
         (err as NodeJS.ErrnoException).code === 'ENOENT'
       ) {
-        throw new Error(
-          `LocalStorageProvider: blob not found for URI: ${uri}`,
-        );
+        throw new Error(`LocalStorageProvider: blob not found for URI: ${uri}`);
       }
       throw err;
     }
@@ -304,9 +317,7 @@ export class LocalStorageProvider implements StorageProvider {
         'code' in err &&
         (err as NodeJS.ErrnoException).code === 'ENOENT'
       ) {
-        throw new Error(
-          `LocalStorageProvider: dispatch record not found for URI: ${uri}`,
-        );
+        throw new Error(`LocalStorageProvider: dispatch record not found for URI: ${uri}`);
       }
       throw err;
     }
@@ -347,9 +358,7 @@ export class LocalStorageProvider implements StorageProvider {
 
   private assertSafeSegment(segment: string, label: string): void {
     if (segment === '.' || segment === '..' || segment.includes('..')) {
-      throw new Error(
-        `LocalStorageProvider: unsafe ${label} segment: "${segment}"`,
-      );
+      throw new Error(`LocalStorageProvider: unsafe ${label} segment: "${segment}"`);
     }
   }
 
@@ -358,10 +367,7 @@ export class LocalStorageProvider implements StorageProvider {
    * appends its work to a per-path promise tail; release flips the tail
    * forward only when `fn` settles.
    */
-  private async withIndexLock<T>(
-    indexPath: string,
-    fn: () => Promise<T>,
-  ): Promise<T> {
+  private async withIndexLock<T>(indexPath: string, fn: () => Promise<T>): Promise<T> {
     const prev = this.writeLocks.get(indexPath) ?? Promise.resolve();
     let release!: () => void;
     const next = new Promise<void>((r) => {
@@ -383,23 +389,11 @@ export class LocalStorageProvider implements StorageProvider {
     // Content hashes are of the form `sha256:<hex>` — the ":" is not a legal
     // filename character on Windows, so encode it.
     const safeHash = contentHash.replace(':', '_');
-    return join(
-      this.opts.rootDir,
-      parts.namespace,
-      parts.type,
-      parts.name,
-      `${safeHash}.blob`,
-    );
+    return join(this.opts.rootDir, parts.namespace, parts.type, parts.name, `${safeHash}.blob`);
   }
 
   private indexPath(parts: PangolinUriParts): string {
-    return join(
-      this.opts.rootDir,
-      parts.namespace,
-      parts.type,
-      parts.name,
-      '_index.json',
-    );
+    return join(this.opts.rootDir, parts.namespace, parts.type, parts.name, '_index.json');
   }
 
   /**
@@ -407,19 +401,9 @@ export class LocalStorageProvider implements StorageProvider {
    * `/`; we translate to the platform-native path separator so nested
    * suffixes land in the right subdirectory.
    */
-  private dispatchRecordPath(
-    parts: Extract<StorageUriParts, { kind: 'dispatch-record' }>,
-  ): string {
-    const tail = parts.suffix
-      ? parts.suffix.split('/').join(sep)
-      : '';
-    return join(
-      this.opts.rootDir,
-      parts.namespace,
-      'dispatches',
-      parts.dispatchId,
-      tail,
-    );
+  private dispatchRecordPath(parts: Extract<StorageUriParts, { kind: 'dispatch-record' }>): string {
+    const tail = parts.suffix ? parts.suffix.split('/').join(sep) : '';
+    return join(this.opts.rootDir, parts.namespace, 'dispatches', parts.dispatchId, tail);
   }
 
   private async readIndex(indexPath: string): Promise<IndexFile> {
