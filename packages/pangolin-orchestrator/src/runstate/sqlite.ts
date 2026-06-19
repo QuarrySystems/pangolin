@@ -41,6 +41,7 @@ interface ItemRow {
   manifest_ref: string | null;
   submitted_at: string | null;
   needs: string | null;
+  running_since: number | null;
 }
 
 const SCHEMA = `
@@ -51,14 +52,14 @@ CREATE TABLE IF NOT EXISTS items (
   status TEXT NOT NULL, dispatch_hash TEXT, subagent_shape TEXT, reason TEXT,
   actor TEXT, attempts INTEGER NOT NULL DEFAULT 0, next_attempt_at REAL,
   result_ref TEXT, verify TEXT, output_refs TEXT, manifest_ref TEXT, submitted_at TEXT,
-  needs TEXT
+  needs TEXT, running_since INTEGER
 );
 CREATE TABLE IF NOT EXISTS locks (key TEXT PRIMARY KEY, item_id TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS audit_entries (
   run_id TEXT NOT NULL, seq INTEGER NOT NULL, kind TEXT NOT NULL,
   item_id TEXT, status TEXT, actor TEXT, manifest_ref TEXT, result_ref TEXT,
   at TEXT NOT NULL, entry_hash TEXT NOT NULL, prev_hash TEXT NOT NULL,
-  authorization TEXT,
+  authorization TEXT, output_refs TEXT,
   PRIMARY KEY (run_id, seq));
 CREATE TABLE IF NOT EXISTS audit_roots (
   epoch_id TEXT PRIMARY KEY, root BLOB NOT NULL,
@@ -81,6 +82,7 @@ const MIGRATIONS: ReadonlyArray<readonly [string, string]> = [
   ['manifest_ref', 'TEXT'],
   ['submitted_at', 'TEXT'],
   ['needs', 'TEXT'],
+  ['running_since', 'INTEGER'],
 ];
 
 export class SqliteRunStateStore implements RunStateStore, AuditStore {
@@ -116,6 +118,10 @@ export class SqliteRunStateStore implements RunStateStore, AuditStore {
     );
     if (!entryCols.has('authorization'))
       this.db.exec('ALTER TABLE audit_entries ADD COLUMN authorization TEXT');
+    // audit_entries gained output_refs (JSON) so producer outputs are sealed into the chain —
+    // provenance closure derives the producer set from these (not the untrusted export rows).
+    if (!entryCols.has('output_refs'))
+      this.db.exec('ALTER TABLE audit_entries ADD COLUMN output_refs TEXT');
   }
 
   ensureQueue(name: string, concurrency: number): void {
@@ -158,10 +164,10 @@ export class SqliteRunStateStore implements RunStateStore, AuditStore {
     tx(itemIds);
   }
 
-  setRunning(itemId: string, dispatchHash: string): void {
+  setRunning(itemId: string, dispatchHash: string, runningSinceMs?: number): void {
     this.db
-      .prepare("UPDATE items SET status='running', dispatch_hash=? WHERE id=?")
-      .run(dispatchHash, itemId);
+      .prepare("UPDATE items SET status='running', dispatch_hash=?, running_since=? WHERE id=?")
+      .run(dispatchHash, runningSinceMs ?? null, itemId);
   }
 
   setStatus(itemId: string, status: TerminalStatus, reason?: string): void {
@@ -273,8 +279,8 @@ export class SqliteRunStateStore implements RunStateStore, AuditStore {
     this.db
       .prepare(
         `INSERT INTO audit_entries
-        (run_id,seq,kind,item_id,status,actor,manifest_ref,result_ref,at,entry_hash,prev_hash,authorization)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+        (run_id,seq,kind,item_id,status,actor,manifest_ref,result_ref,at,entry_hash,prev_hash,authorization,output_refs)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       )
       .run(
         r.runId,
@@ -289,6 +295,7 @@ export class SqliteRunStateStore implements RunStateStore, AuditStore {
         r.entryHash,
         r.prevHash,
         r.authorization !== undefined ? JSON.stringify(r.authorization) : null,
+        r.outputRefs !== undefined ? JSON.stringify(r.outputRefs) : null,
       );
   }
 
@@ -306,6 +313,7 @@ export class SqliteRunStateStore implements RunStateStore, AuditStore {
       entry_hash: string;
       prev_hash: string;
       authorization: string | null;
+      output_refs: string | null;
     }
     const rows = this.db
       .prepare('SELECT * FROM audit_entries WHERE run_id=? ORDER BY seq')
@@ -326,6 +334,8 @@ export class SqliteRunStateStore implements RunStateStore, AuditStore {
       if (row.result_ref !== null) entry.resultRef = row.result_ref;
       if (row.authorization !== null)
         entry.authorization = JSON.parse(row.authorization) as Authorization;
+      if (row.output_refs !== null)
+        entry.outputRefs = JSON.parse(row.output_refs) as Record<string, string>;
       return entry;
     });
   }
@@ -449,5 +459,6 @@ export class SqliteRunStateStore implements RunStateStore, AuditStore {
     manifestRef: r.manifest_ref ?? undefined,
     submittedAt: r.submitted_at ?? undefined,
     needs: r.needs ? JSON.parse(r.needs) : undefined,
+    runningSince: r.running_since ?? undefined,
   });
 }

@@ -58,6 +58,11 @@ export interface ItemState extends WorkItem {
   queue: string;
   status: RunStatus;
   dispatchHash?: string;
+  /** Epoch ms when the item was fired (entered `running`). Used by the engine to enforce a
+   *  wall-clock dispatch deadline: a hung dispatch is force-failed once it exceeds the deadline
+   *  rather than holding its concurrency slot + resource locks forever. Absent === not running
+   *  (or fired before this field existed → no deadline enforced for that item). */
+  runningSince?: number;
   /** Set when status is failed/skipped: why it failed or was cascaded. */
   reason?: string;
   /** Submitter identity (mechanism, not authz). */

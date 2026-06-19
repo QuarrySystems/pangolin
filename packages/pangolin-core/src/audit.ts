@@ -189,6 +189,11 @@ export interface AuditEntry {
   actor?: string;
   manifestRef?: string;
   resultRef?: string;
+  /** Producer-side handoff evidence sealed into the chain at reconcile (kind 'item.reconciled',
+   *  status 'done'): outputs/ deliverable refs keyed by posix path. REFERENCES only — content-
+   *  addressed. Sealed (canonEntry covers it) so provenance closure derives the producer set from
+   *  the TAMPER-ANCHORED chain, never the untrusted `bundle.items` export rows. */
+  outputRefs?: Record<string, string>;
   at: string; // ISO-8601
   authorization?: Authorization;
 }

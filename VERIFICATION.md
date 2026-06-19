@@ -47,7 +47,8 @@ token bytes) are **base64** strings in JSON; everything else is plain JSON.
         "status": "done",                 // optional
         "actor": "human:alice",           // optional
         "manifestRef": "sha256:...",      // optional, content hash
-        "resultRef": "sha256:...",        // optional, content hash
+        "resultRef": "sha256:...",        // optional, content hash (sealed producer deliverable)
+        "outputRefs": { "outputs/x": "sha256:..." }, // optional; sealed on item.reconciled(done)
         "at": "2026-06-12T10:00:00Z",     // ISO-8601
         "entryHash": "<hex>",             // chainHash(canonEntry(this), prevHash)
         "prevHash": "<hex>"               // == previous entry's entryHash; "" for seq 0
@@ -76,11 +77,11 @@ token bytes) are **base64** strings in JSON; everything else is plain JSON.
       }
     }
   },
-  "items": [                              // per-item outcome rows — references only
-    {
-      "id": "appeal-001",
-      "status": "done",
-      "attempts": 1,
+  "items": [                              // per-item outcome rows — UNTRUSTED export convenience.
+    {                                     // DISPLAY ONLY: never derive the provenance producer set
+      "id": "appeal-001",                 // from these rows (see §3 step 7). The authoritative
+      "status": "done",                   // producer evidence is the sealed item.reconciled chain
+      "attempts": 1,                      // entries; these rows are not bound to the chain.
       "actor": "agent:charmander",
       "resultRef": "sha256:...",          // the deliverable this item produced
       "manifestRef": "sha256:...",
@@ -151,7 +152,15 @@ Given a `bundle` and a built `anchor` (read-only, see §4), plus optional
    Stop at the first broken link (later links are meaningless once the chain is cut).
    `canonEntry` is a **positional JSON array** with a pinned field order — NOT key-sorted
    JSON / JCS — namely `[kind, runId, itemId, status, actor, manifestRef, resultRef, at, seq]`,
-   with absent optionals serialized as `null` (excludes `entryHash`/`prevHash`).
+   with absent optionals serialized as `null` (excludes `entryHash`/`prevHash`). **Two trailing
+   elements are appended CONDITIONALLY, each only when present on the entry, in this order:**
+   (a) the entry's `authorization` block, and (b) the entry's `outputRefs` map — each appended as
+   a *canonicalized-JSON string* (key-sorted JSON of that sub-object, then embedded as one array
+   element). An entry that carries neither (most entries) serializes byte-identically to the
+   nine-element form; an entry with only `authorization` is unchanged from the pre-`outputRefs`
+   form. **You MUST seal `outputRefs` into the hash** — provenance closure (step 7) derives the
+   producer set from these sealed `item.reconciled` entries, so an `outputRefs` left out of the
+   canonical bytes would be forgeable.
    `chainHash(canon, prev) = SHA-256(canon || prev)` (the canonical bytes, then the prev hash).
 
 2. **Merkle root.** Recompute the Merkle root over the ordered list of `entryHash`es
@@ -200,21 +209,52 @@ Given a `bundle` and a built `anchor` (read-only, see §4), plus optional
    **informational only** — it never gates `intact`, never sets `failure`, never lowers
    the tamper `claim`. (Trusted time is a *separate assurance dimension* from tamper.)
 
-7. **Handoff closure.** Every `manifests[*].inputRefs` value must equal some completed
-   (`status === "done"`) item's `resultRef` or one of its `outputRefs` values. Refs are
+7. **Handoff closure.** Build the **producer set** from the CHAIN — every `auditLog.entries`
+   entry with `kind === "item.reconciled"` AND `status === "done"`, collecting that entry's
+   `resultRef` (when present) and every value of its `outputRefs` (skipping empty strings).
+   Then every `manifests[*].inputRefs` value must be a member of that producer set. Refs are
    SHA-256 content hashes, so ref-equality **is** byte-equality (no blob fetching). A
    dangling input ref → `handoff` failure.
+   **SECURITY — do NOT derive the producer set from the top-level `items[]` rows.** Those rows
+   are an UNTRUSTED export convenience (the auditor holds the bundle, not the live run); a forged
+   `{ status:"done", resultRef|outputRefs }` row would otherwise satisfy any consumed input ref
+   and defeat the handoff guarantee. The `item.reconciled` entries are Merkle-rooted (steps 1–4
+   prove their authenticity), so the producer side must bind to them — mirroring how the consumed
+   side (`inputRefs`, a manifest base field) is bound by the manifest-integrity check (step 8).
 
-**Verdict.** `intact = chain && anchor && root!==false && signature!==false && handoff!==false`.
-`failure` is the FIRST failing check in the order: chain, anchor-missing, root-mismatch,
-signature, handoff. (There is no `time` failure variant.)
+8. **Manifest integrity (manifest ↔ chain binding).** Bind every authorization-bearing manifest
+   to the chain BIDIRECTIONALLY, purely by content hash — never via the untrusted item↔manifest
+   join in `items[*].manifestRef`. Let `pinnedChainedRefs` be the set of `manifestRef`s carried by
+   `item.fired` chain entries that are content-addressed (the ref URI carries a `contentHash`).
+   - **forward** — every `pinnedChainedRef` must be backed by some present `manifests[*]` whose
+     recomputed content hash matches it (a manifest's body hash recomputes to its declared
+     `manifestHash`, and the chained ref pins it by either minting convention: `manifestHash`
+     self-hash, or the full-manifest-sans-signature hash). A forged/rewritten/downgraded ref
+     leaves the original pinned ref un-backed → fail.
+   - **reverse** — every present manifest that carries an `authorization` block must content-
+     address to some `pinnedChainedRef`; an appended/orphaned forged manifest bearing an `allow`
+     verdict matches nothing → fail. (Relax the reverse direction only when the chain contains an
+     UNPINNED `item.fired` ref — that occurs solely in fake-executor fixtures; real seals always
+     mint pinned refs.)
+   A violation → `manifest` failure. This is what lets `authzTier` (a separate dimension, like
+   `timeTier`) honestly count a manifest-borne verdict: it is counted ONLY when this check passed.
+
+**Verdict.** `intact = chain && anchor && root!==false && signature!==false && handoff!==false
+&& manifest!==false`. `failure` is the FIRST failing check in the order: chain, anchor-missing,
+root-mismatch, signature, manifest, handoff. (There is no `time` failure variant — time is
+informational; and authorization, like time, never gates `intact`.)
 
 ---
 
 ## 4. The two modes and their claim ceilings
 
 The tamper `claim` is derived by one rule (`claimFor`): **tamper-evident** iff `intact`
-AND the anchor guarantee rank is `>= external-immutable`; otherwise **tamper-detecting**.
+AND the anchor guarantee rank is `>= external-immutable` AND the signature check passed
+(`signature === true`, NOT `n/a`); otherwise **tamper-detecting**. The signature requirement
+is load-bearing: an external-immutable WORM store records second-granular timestamps, so an
+attacker with bucket-write but no signing key could PUT an unsigned forgery that ties for the
+"earliest" version — requiring a *verified* signature for the tamper-evident claim closes that
+same-second forgery (a missing/unverifiable signature collapses the claim to tamper-detecting).
 
 | Mode | Anchor source | Anchor guarantee | Claim ceiling |
 |------|---------------|------------------|---------------|

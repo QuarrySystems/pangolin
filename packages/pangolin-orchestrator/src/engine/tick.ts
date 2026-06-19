@@ -22,6 +22,10 @@ export async function tick(
     auditLog?: AuditLog;
     denamespace?: (id: string) => string;
     authorizer?: Authorizer;
+    /** Wall-clock dispatch deadline (ms). A running item whose elapsed time since `runningSince`
+     *  exceeds this is force-failed (→ retry/skip cascade) so a hung dispatch cannot hold its
+     *  concurrency slot + resource locks forever. Undefined → no deadline (legacy behavior). */
+    maxRuntimeMs?: number;
   } = {},
 ): Promise<{ readied: number; fired: number; reconciled: number }> {
   const maxAttempts = opts.maxAttempts ?? 1; // tick is no-retry by default; the orchestrator opts into retry
@@ -29,6 +33,7 @@ export async function tick(
   const backoff = opts.backoffMs ?? ((n) => 1000 * 2 ** n);
   const deNs = opts.denamespace ?? ((x) => x);
   const authorizer = opts.authorizer ?? NoneAuthorizer;
+  const maxRuntimeMs = opts.maxRuntimeMs;
 
   /** Audit is best-effort observability — a failing append must NEVER abort a tick or corrupt run
    *  state. tryAppend swallows the store error but COUNTS the drop (AuditLog.droppedAppends). */
@@ -54,7 +59,18 @@ export async function tick(
       store.releaseLocks(it.id);
       continue;
     }
-    const res = await ex.reconcile(it.dispatchHash!);
+    // Wall-clock deadline: a dispatch that has been running longer than maxRuntimeMs is treated
+    // as a failed reconcile WITHOUT polling the executor (a hung dispatch's reconcile would return
+    // null = "still running" forever). It then flows through the SAME retry/skip-cascade path as
+    // any other failure, freeing the concurrency slot + resource locks. NOTE: the underlying
+    // dispatch is not provider-cancelled here (the Executor contract has no cancel) — a retried or
+    // failed timeout may leave an orphaned worker until a separate reaper lands; the engine no
+    // longer waits on it. (at-least-once for side-effecting executors.)
+    const overrun =
+      maxRuntimeMs !== undefined &&
+      it.runningSince !== undefined &&
+      now - it.runningSince > maxRuntimeMs;
+    const res = overrun ? { status: 'failed' as const } : await ex.reconcile(it.dispatchHash!);
     if (res) {
       if (res.status === 'failed' && store.getAttempts(it.id) + 1 < maxAttempts) {
         store.bumpAttempt(it.id);
@@ -65,7 +81,11 @@ export async function tick(
         store.setStatus(
           it.id,
           res.status,
-          res.status === 'failed' ? 'executor reported failed' : undefined,
+          res.status === 'failed'
+            ? overrun
+              ? `dispatch exceeded max runtime (${maxRuntimeMs}ms)`
+              : 'executor reported failed'
+            : undefined,
         );
         if (res.status === 'done' && res.resultRef) store.setResultRef(it.id, res.resultRef);
         if (res.status === 'done' && res.verify) store.setVerify(it.id, res.verify);
@@ -78,6 +98,9 @@ export async function tick(
             itemId: deNs(it.id),
             status: 'done',
             ...(res.resultRef ? { resultRef: res.resultRef } : {}),
+            // Seal producer outputs into the chain so provenance closure can bind the producer
+            // side to the tamper-anchored chain (not the untrusted bundle.items export rows).
+            ...(res.outputRefs ? { outputRefs: res.outputRefs } : {}),
             at: auditAt,
           });
         } else {
@@ -186,7 +209,7 @@ export async function tick(
         effectClass,
         authorization: decision,
       });
-      store.setRunning(it.id, dispatchHash);
+      store.setRunning(it.id, dispatchHash, now);
       if (manifestRef) store.setManifestRef(it.id, manifestRef);
       audit({
         kind: 'item.fired',

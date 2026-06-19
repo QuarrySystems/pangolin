@@ -40,6 +40,11 @@ export interface PangolinOrchestratorOptions {
   queues: Record<string, QueueConfig>;
   defaultQueue?: string; // defaults to 'default'
   maxAttempts?: number; // defaults to 2 (spec §4)
+  /** Wall-clock dispatch deadline in ms. A dispatch running longer than this is force-failed
+   *  (→ retry/skip cascade) so a hung worker cannot hold its concurrency slot + resource locks
+   *  forever. Defaults to 7_200_000 (2h, matching the client's default dispatch timeout). Raise
+   *  it for legitimately long runs. */
+  maxRuntimeMs?: number;
   maxItemsPerRun?: number; // defaults to 1000 (spec §5 runaway fuse)
   packs?: PackRegistry;
   auditLog?: AuditLog;
@@ -68,6 +73,7 @@ export class PangolinOrchestrator {
   private readonly triggers: Record<string, Trigger>;
   private readonly defaultQueue: string;
   private readonly maxAttempts: number;
+  private readonly maxRuntimeMs: number;
   private readonly maxItemsPerRun: number;
   private readonly packs: PackRegistry | undefined;
   private readonly auditLog: AuditLog | undefined;
@@ -80,6 +86,7 @@ export class PangolinOrchestrator {
     this.triggers = opts.triggers;
     this.defaultQueue = opts.defaultQueue ?? 'default';
     this.maxAttempts = opts.maxAttempts ?? 2;
+    this.maxRuntimeMs = opts.maxRuntimeMs ?? 7_200_000; // 2h default; bounds hung dispatches
     this.maxItemsPerRun = opts.maxItemsPerRun ?? 1000;
     this.packs = opts.packs;
     this.auditLog = opts.auditLog;
@@ -303,6 +310,7 @@ export class PangolinOrchestrator {
     const q = queue ?? this.defaultQueue;
     const result = await tick(this.store, wrappedExecutors, q, this.packs, {
       maxAttempts: this.maxAttempts,
+      maxRuntimeMs: this.maxRuntimeMs,
       auditLog: this.auditLog,
       denamespace: deNs,
       authorizer: this.authorizer,

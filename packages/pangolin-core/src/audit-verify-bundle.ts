@@ -34,7 +34,7 @@ export function verifyBundle(
     verifySignature: deps.verifySignature,
     verifyTimestamp: deps.verifyTimestamp,
   }).then((base) => {
-    const handoff = checkHandoffClosure(bundle);
+    const handoff = checkHandoffClosure(bundle, entries);
     // Manifest integrity (spec §7 / Finding A). The TRUSTED anchor for each fired item's manifest
     // is its `item.fired` audit entry's manifestRef — canonEntry seals it and the chain/root/anchor
     // checks above guarantee its authenticity. The export's bundle.items[*].manifestRef is copied
@@ -166,15 +166,25 @@ function manifestRefMatches(m: DispatchManifest, manifestRef: string): boolean {
   }
 }
 
-/** Provenance closure (spec §7): every manifests[*].inputRefs value must equal some item's
- *  resultRef or an outputRefs value. Refs are sha256 content hashes => ref-equality IS
- *  byte-equality; no blob fetching needed. */
-function checkHandoffClosure(bundle: AuditBundle): CheckResult {
+/** Provenance closure (spec §7): every manifests[*].inputRefs value must equal a product of a
+ *  completed upstream item. Refs are sha256 content hashes => ref-equality IS byte-equality; no
+ *  blob fetching needed.
+ *
+ *  SECURITY (2026-06-19 hardening): the producer set is derived from the TAMPER-ANCHORED chain —
+ *  the sealed `item.reconciled` (status 'done') entries' `resultRef`/`outputRefs` — NEVER from the
+ *  untrusted `bundle.items` export rows. bundle.items is attacker-controllable (an auditor receives
+ *  the bundle, not the live run); deriving producers from it let a forged `{status:'done', resultRef}`
+ *  row satisfy any consumed inputRef, defeating the whole handoff guarantee. The chain entries are
+ *  Merkle-rooted and the root/chain checks above guarantee their authenticity, so binding the
+ *  producer side to them (mirroring how the consumed side / inputRefs is bound via the manifest-
+ *  integrity check) closes the producer lane. Both `resultRef` (select:'patch') and `outputRefs`
+ *  (select:'output') are sealed into the reconcile entry, so both consumption lanes are covered. */
+function checkHandoffClosure(bundle: AuditBundle, entries: AuditBundle['auditLog']['entries']): CheckResult {
   const produced = new Set<string>();
-  for (const it of bundle.items) {
-    if (it.status !== 'done') continue; // only completed items are legitimate producers
-    if (it.resultRef) produced.add(it.resultRef);
-    for (const ref of Object.values(it.outputRefs ?? {})) {
+  for (const e of entries) {
+    if (e.kind !== 'item.reconciled' || e.status !== 'done') continue; // only completed producers
+    if (e.resultRef) produced.add(e.resultRef);
+    for (const ref of Object.values(e.outputRefs ?? {})) {
       if (!ref) continue; // skip empty-string / falsy refs; not a valid content hash
       produced.add(ref);
     }
