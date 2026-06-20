@@ -135,25 +135,8 @@ describe('engine-wiring audit integration', () => {
 
   it('records item.retried when an executor fails then succeeds with maxAttempts >= 2', async () => {
     // Use tick() directly so we can control `now` and jump past the exponential backoff gate
-    // without sleeping real time. The orchestrator submits the run; tick drives execution.
-    const store = new SqliteRunStateStore();
-    const auditLog = new AuditLog({ store, signer: NoneSigner, anchor: new LocalAnchor(store) });
-    const orch = new PangolinOrchestrator({
-      store,
-      executors: { flaky: flakyExec(1) },
-      triggers: { manual: new ManualTrigger() },
-      queues: { default: { concurrency: 1 } },
-      maxAttempts: 3,
-      auditLog,
-    });
-    const runId = await orch.submitRun(
-      {
-        id: 'r3',
-        queue: 'default',
-        items: [{ id: 'b', executor: 'flaky', inputs: {}, depends_on: [], resourceLocks: [] }],
-      },
-      'human:brett',
-    );
+    // without sleeping real time. We drive a standalone store with tick() rather than the
+    // orchestrator's own tick so `now` is injectable.
     // Drive ticks via tick() with advancing now to bypass backoff (backoff(1) = 2000ms; jump 5s).
     // The executor id is 'flaky'; orchestrator wraps it to denamespace, so we must pass the
     // wrapped executor directly to tick() for correct id resolution. Use orchestrator for
