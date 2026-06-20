@@ -4,7 +4,7 @@ import { it, expect, vi } from 'vitest';
 
 it('attachDispatchCmd registers run/describe/cancel subcommands', () => {
   const program = new Command();
-  attachDispatchCmd(program, { getClient: async () => ({} as any) });
+  attachDispatchCmd(program, { getClient: async () => ({}) as never });
   const d = program.commands.find((c) => c.name() === 'dispatch')!;
   expect(d.commands.map((c) => c.name()).sort()).toEqual(['cancel', 'describe', 'run']);
 });
@@ -110,15 +110,59 @@ it('dispatch run exits with code 1 if result.failure is set', async () => {
   process.exit = vi.fn((code?: number) => {
     exitCode = code;
     throw new Error('exit');
-  }) as any;
+  }) as never;
 
   try {
-    await program.parseAsync(
-      ['dispatch', 'run', '--subagent', 'my-subagent', '--target', 'prod'],
-      { from: 'user' },
-    );
-  } catch (e) {
+    await program.parseAsync(['dispatch', 'run', '--subagent', 'my-subagent', '--target', 'prod'], {
+      from: 'user',
+    });
+  } catch {
     // Expected to throw due to process.exit mock
+  } finally {
+    console.log = originalLog;
+    process.exit = originalExit;
+  }
+
+  expect(exitCode).toBe(1);
+});
+
+it('dispatch run exits 1 on a non-zero worker exitCode even without a failure block', async () => {
+  // bundled-impls intentionally leaves `failure` unset for an app-level non-zero exit
+  // (failure = provider/infra only). The CLI must STILL exit non-zero so a crashed
+  // worker is never reported as success.
+  const mockDispatchResult = {
+    dispatchId: 'test-id',
+    exitCode: 1,
+    stdout: '',
+    stderr: '',
+    durationMs: 5,
+    resolved: {
+      subagent: { name: 's', contentHash: 'h', registeredAt: 't' },
+      capabilities: [],
+      env: [],
+    },
+  };
+  const mockClient = { dispatch: vi.fn().mockResolvedValue(mockDispatchResult) };
+  const mockCtx = { getClient: vi.fn().mockResolvedValue(mockClient) };
+
+  const program = new Command();
+  attachDispatchCmd(program, mockCtx);
+
+  const originalLog = console.log;
+  const originalExit = process.exit;
+  let exitCode: number | undefined;
+  console.log = vi.fn();
+  process.exit = vi.fn((code?: number) => {
+    exitCode = code;
+    throw new Error('exit');
+  }) as never;
+
+  try {
+    await program.parseAsync(['dispatch', 'run', '--subagent', 's', '--target', 'prod'], {
+      from: 'user',
+    });
+  } catch {
+    // expected: the process.exit mock throws
   } finally {
     console.log = originalLog;
     process.exit = originalExit;
@@ -159,10 +203,7 @@ it('dispatch describe fetches and prints dispatch record as JSON', async () => {
   console.log = vi.fn((msg: string) => logs.push(msg));
 
   try {
-    await program.parseAsync(
-      ['dispatch', 'describe', 'test-id'],
-      { from: 'user' },
-    );
+    await program.parseAsync(['dispatch', 'describe', 'test-id'], { from: 'user' });
 
     expect(mockClient.dispatch.describe).toHaveBeenCalledWith('test-id');
     expect(logs.length).toBeGreaterThan(0);
@@ -222,7 +263,7 @@ it('dispatch run exits 1 and prints error message on invalid JSON input without 
   process.exit = vi.fn((code?: number) => {
     exitCode = code;
     throw new Error('exit');
-  }) as any;
+  }) as never;
 
   try {
     await program.parseAsync(
@@ -238,7 +279,7 @@ it('dispatch run exits 1 and prints error message on invalid JSON input without 
       ],
       { from: 'user' },
     );
-  } catch (e) {
+  } catch {
     // Expected to throw due to process.exit mock
   } finally {
     console.error = originalError;

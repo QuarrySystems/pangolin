@@ -93,6 +93,14 @@ export async function defaultGetOrchContext(): Promise<OrchContext> {
   throw new Error(`pangolin-cli: no pangolin.config.{ts,js,mjs} found in ${process.cwd()}`);
 }
 
+/** Render an uncaught CLI error for the user: the clean message by default (the cmd-*.ts layers
+ *  already throw actionable `Error`s), the full stack only under `PANGOLIN_DEBUG`. Non-Error throws
+ *  are stringified. Pure + exported so the top-level handler's formatting is testable. */
+export function formatCliError(err: unknown, debug: boolean = !!process.env.PANGOLIN_DEBUG): string {
+  if (err instanceof Error) return debug && err.stack ? err.stack : err.message;
+  return String(err);
+}
+
 // Direct-invocation guard. The package compiles to CommonJS (no `"type":
 // "module"` in package.json), so we use the CJS-native `require.main ===
 // module` check rather than `import.meta.url`. When this file is executed
@@ -101,7 +109,8 @@ export async function defaultGetOrchContext(): Promise<OrchContext> {
 if (typeof require !== 'undefined' && require.main === module) {
   const program = buildProgram({ getClient: defaultGetClient, getOrchContext: defaultGetOrchContext });
   program.parseAsync(process.argv).catch((err) => {
-    console.error(err);
+    // Clean message by default; full stack under PANGOLIN_DEBUG (see formatCliError).
+    console.error(formatCliError(err));
     process.exit(1);
   });
 }

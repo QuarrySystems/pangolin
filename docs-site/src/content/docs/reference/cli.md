@@ -19,6 +19,12 @@ See [The privilege boundary](/pangolin/explanation/privilege-boundary/).
 Most subcommands load the client lazily, so the `pangolin.config` resolution cost
 is only paid when a subcommand actually runs.
 
+### Errors and debugging
+
+An uncaught error prints its **message only** (the subcommands throw actionable
+`Error`s) and exits `1`. Set **`PANGOLIN_DEBUG`** (to any non-empty value) to print
+the full stack trace instead — useful when diagnosing an unexpected failure.
+
 ## `pangolin capabilities`
 
 Manage capability bundles.
@@ -62,7 +68,7 @@ Dispatch and observe workers.
 
 | Subcommand | Args / options | Behavior |
 |---|---|---|
-| `run` | `--subagent <name>` (required), `--target <name>` (required), `--env <names...>`, `--input <json>` (default `{}`), `--capability <names...>`, `--add-capability <names...>`, `--worker-image <digest>` | Parses `--input` as JSON (invalid JSON → error + exit `1`). Calls `client.dispatch`. `--worker-image` defaults to `ghcr.io/quarrysystems/pangolin-worker:latest` (the published worker image). Prints the `DispatchResult` as pretty JSON. **Exits `1` if `result.failure` is set.** |
+| `run` | `--subagent <name>` (required), `--target <name>` (required), `--env <names...>`, `--input <json>` (default `{}`), `--capability <names...>`, `--add-capability <names...>`, `--worker-image <digest>` | Parses `--input` as JSON (invalid JSON → error + exit `1`). Calls `client.dispatch`. `--worker-image` defaults to `ghcr.io/quarrysystems/pangolin-worker:latest` (the published worker image). Prints the `DispatchResult` as pretty JSON. **Exits `1` if `result.failure` is set OR the worker's `exitCode` is non-zero** — an app-level non-zero exit carries no `failure` block (that field is provider/infra failures only), so a crashed worker is never reported as success. |
 | `describe <id>` | — | Calls `client.dispatch.describe(id)`, prints the full `DispatchResult` as pretty JSON. |
 | `cancel <id>` | — | Calls `client.dispatch.cancel(id)`, prints `cancelled: <id>`. |
 
