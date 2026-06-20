@@ -21,7 +21,7 @@ This spec makes the dispatch-level telemetry seam **real and usable**, without m
 ## Goals
 
 1. Emit all six `LifecycleEvent`s through the existing `TelemetryHook`, in-process, at the dispatch lifecycle transitions.
-2. Ship one reference consumer (`StdoutTelemetryHook`) so the seam is demonstrably real and immediately usable, opt-in; default stays `Noop`.
+2. Ship one reference consumer (`ConsoleTelemetryHook`) so the seam is demonstrably real and immediately usable, opt-in; default stays `Noop`.
 3. Make emission robust: a buggy hook must never break a dispatch.
 4. Keep the change DRY/SRP — a single emission site, no per-provider work, uniform across all current and future providers.
 
@@ -49,7 +49,7 @@ Rejected alternative — **emit from each provider** (via the `ctx.telemetry` th
 
    This is the single chokepoint every emission goes through. It is a deliberate, documented change to `telemetry.ts`'s current *"runtime does not catch"* contract — observability must never take down the dispatch path (same principle as the audit-completeness loud-by-default work). Emission stays synchronous, fire-and-forget.
 
-2. **`StdoutTelemetryHook`** — reference consumer, sibling to `NoopTelemetryHook` in `src/bundled-impls.ts`. `name = 'stdout'`; `emit(event)` writes one structured JSON line per event (e.g. `console.log(JSON.stringify(event))`). Opt-in via the existing `telemetry:` config field on `PangolinClient`; default stays `Noop`. Exported from the package index.
+2. **`ConsoleTelemetryHook`** — reference consumer, sibling to `NoopTelemetryHook` in `src/bundled-impls.ts`. `name = 'console'`; `emit(event)` writes one structured JSON line per event to **stderr** (`console.error(JSON.stringify(event))`). Stderr — not stdout — so it never collides with a command's stdout data (e.g. `pangolin dispatch run` prints its `DispatchResult` JSON to stdout), and it matches the repo's operator-output-on-stderr convention (`AuditLog`, `serve`, `orchestrator` all log to `console.error`). Opt-in via the existing `telemetry:` config field on `PangolinClient`; default stays `Noop`. Exported from the package index.
 
 3. **`RecordingTelemetryHook`** — small test fake (pushes events to an array) for assertions. Inlined in the test file, matching the existing `dispatch.test.ts` fake conventions (no new exported test surface).
 
@@ -92,13 +92,13 @@ Using the existing `makeDeferredCompute` harness in `pangolin-client/test/dispat
 3. `awaitExit` rejection emits `failed` **and** rethrows (orchestrator path still observes the error).
 4. `cancel` emits `cancelled`.
 5. Guarded emit: a hook whose `emit` throws is swallowed + logged; the dispatch still completes (assert the result is unaffected).
-6. `StdoutTelemetryHook` emits one JSON-parseable line per event.
+6. `ConsoleTelemetryHook` emits one JSON-parseable line per event.
 
 All are unit tests; no new integration surface required.
 
 ## Docs
 
-- `docs-site reference/config.md` — document the `telemetry: new StdoutTelemetryHook()` opt-in.
+- `docs-site reference/config.md` — document the `telemetry: new ConsoleTelemetryHook()` opt-in.
 - `pangolin-core/src/telemetry.ts` + `lifecycle.ts` doc comments — emission is now real; note the guarded-emit contract change (runtime now catches + logs hook throws).
 - A short "dispatch lifecycle events" note in the observability/explanation docs (what the six events mean, that they are dispatch-level, that block-level lives in the audit/worker stream).
 
@@ -106,5 +106,5 @@ All are unit tests; no new integration surface required.
 
 - **Double terminal on cancel** — accepted by decision (i), documented.
 - **`accepted` move** — relocating `accepted` to before `compute.run` changes its timing slightly; the existing single emission test must move with it. Low risk.
-- **Stdout interleaving** — `StdoutTelemetryHook` writes to the same stdout an operator may use for other output; it is opt-in and emits structured JSON lines, so it is greppable/parseable. Acceptable for a reference consumer.
+- **Output channel** — `ConsoleTelemetryHook` writes JSONL to **stderr**, keeping stdout clean for any command's data output (e.g. `pangolin dispatch run`'s result JSON). Consistent with the repo's operator-diagnostics-on-stderr convention.
 - **`ctx.telemetry` retained but unused by providers** — intentional; documented as non-canonical to avoid a breaking contract change.

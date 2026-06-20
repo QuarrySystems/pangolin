@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make the dispatch-level `TelemetryHook` seam real — emit all six `LifecycleEvent`s from the client dispatch path, ship a `StdoutTelemetryHook` reference consumer, and guard emission so a buggy hook can never break a dispatch.
+**Goal:** Make the dispatch-level `TelemetryHook` seam real — emit all six `LifecycleEvent`s from the client dispatch path, ship a `ConsoleTelemetryHook` reference consumer, and guard emission so a buggy hook can never break a dispatch.
 
-**Architecture:** All emission happens at the transitions the client already owns (`pangolin-client/src/dispatch.ts` + `cancel.ts`) — a single DRY site, no per-provider work (Approach A from the spec). Every emit goes through one guarded helper. A reference `StdoutTelemetryHook` (opt-in; default stays `Noop`) makes the seam demonstrably usable. Block-level worker events are out of scope.
+**Architecture:** All emission happens at the transitions the client already owns (`pangolin-client/src/dispatch.ts` + `cancel.ts`) — a single DRY site, no per-provider work (Approach A from the spec). Every emit goes through one guarded helper. A reference `ConsoleTelemetryHook` (opt-in; default stays `Noop`) makes the seam demonstrably usable. Block-level worker events are out of scope.
 
 **Tech Stack:** TypeScript, Vitest, the existing `@quarry-systems/pangolin-core` `TelemetryHook`/`LifecycleEvent` types, the `pangolin-client` dispatch path.
 
@@ -17,42 +17,42 @@
 - **Repo patterns**: operator logs use the `[pangolin …]` prefix; loud-by-default surfacing with opt-out (mirrors `AuditLog.onDrop`); reference impls live in `bundled-impls.ts` as siblings of `NoopTelemetryHook`.
 - **Failure-vs-exitCode contract (do not violate)**: a non-zero *app* exit is `dispatch.finished` (with its `exitCode`); only a provider/infra failure (`result.failure`, derived from `providerFailureReason`) is `dispatch.failed`.
 - **Per-task gate**: `pnpm --filter @quarry-systems/pangolin-client test`. **Before declaring the whole plan done**: `pnpm -r typecheck` + `pnpm -r lint` (no `pnpm -r build` needed — no `pangolin-core` runtime/type change, only doc comments).
-- **Default consumer stays `NoopTelemetryHook`.** `StdoutTelemetryHook` is opt-in.
+- **Default consumer stays `NoopTelemetryHook`.** `ConsoleTelemetryHook` is opt-in.
 
 ## File Structure
 
 - **Create** `packages/pangolin-client/src/lifecycle-emit.ts` — the single guarded `emitLifecycleEvent` helper.
-- **Create** `packages/pangolin-client/test/lifecycle-emit.test.ts` — unit tests for the helper + `StdoutTelemetryHook`.
-- **Modify** `packages/pangolin-client/src/bundled-impls.ts` — add `StdoutTelemetryHook` (sibling of `NoopTelemetryHook`).
-- **Modify** `packages/pangolin-client/src/index.ts` — export `StdoutTelemetryHook`.
+- **Create** `packages/pangolin-client/test/lifecycle-emit.test.ts` — unit tests for the helper + `ConsoleTelemetryHook`.
+- **Modify** `packages/pangolin-client/src/bundled-impls.ts` — add `ConsoleTelemetryHook` (sibling of `NoopTelemetryHook`).
+- **Modify** `packages/pangolin-client/src/index.ts` — export `ConsoleTelemetryHook`.
 - **Modify** `packages/pangolin-client/src/dispatch.ts` — emit `accepted` (relocated), `started`, `finished`/`failed`/`needs_input`, and `failed`-on-rejection.
 - **Modify** `packages/pangolin-client/src/cancel.ts` — emit `cancelled`.
 - **Modify** `packages/pangolin-client/test/dispatch.test.ts` — lifecycle emission tests (reuses the file's existing `makeMemoryStorage`/`makeCompute` harness).
 - **Modify** `packages/pangolin-core/src/telemetry.ts` and `lifecycle.ts` — doc comments (emission is now real; guarded-emit contract).
-- **Modify** `docs-site/src/content/docs/reference/config.md` — document the `StdoutTelemetryHook` opt-in.
+- **Modify** `docs-site/src/content/docs/reference/config.md` — document the `ConsoleTelemetryHook` opt-in.
 - **Modify** `docs-site/src/content/docs/explanation/` — a short "dispatch lifecycle events" note (folded into Task 4).
 
 ---
 
-### Task 1: Guarded emit helper + `StdoutTelemetryHook`
+### Task 1: Guarded emit helper + `ConsoleTelemetryHook`
 
 **Files:**
 - Create: `packages/pangolin-client/src/lifecycle-emit.ts`
 - Create: `packages/pangolin-client/test/lifecycle-emit.test.ts`
-- Modify: `packages/pangolin-client/src/bundled-impls.ts` (add `StdoutTelemetryHook` after `NoopTelemetryHook`, ~line 191)
-- Modify: `packages/pangolin-client/src/index.ts` (add `StdoutTelemetryHook` to the existing telemetry export, near `NoopTelemetryHook` at line 99)
+- Modify: `packages/pangolin-client/src/bundled-impls.ts` (add `ConsoleTelemetryHook` after `NoopTelemetryHook`, ~line 191)
+- Modify: `packages/pangolin-client/src/index.ts` (add `ConsoleTelemetryHook` to the existing telemetry export, near `NoopTelemetryHook` at line 99)
 - Modify: `packages/pangolin-core/src/telemetry.ts` (doc comment)
 - Modify: `docs-site/src/content/docs/reference/config.md`
 
 **Interfaces:**
-- Produces: `emitLifecycleEvent(telemetry: TelemetryHook | undefined, event: LifecycleEvent): void` (exported from `lifecycle-emit.ts`); `class StdoutTelemetryHook implements TelemetryHook { readonly name = 'stdout'; emit(event: LifecycleEvent): void }`.
+- Produces: `emitLifecycleEvent(telemetry: TelemetryHook | undefined, event: LifecycleEvent): void` (exported from `lifecycle-emit.ts`); `class ConsoleTelemetryHook implements TelemetryHook { readonly name = 'console'; emit(event: LifecycleEvent): void }`.
 
 - [ ] **Step 1: Write the failing test** — `packages/pangolin-client/test/lifecycle-emit.test.ts`
 
 ```typescript
 import { it, expect, vi } from 'vitest';
 import { emitLifecycleEvent } from '../src/lifecycle-emit.js';
-import { StdoutTelemetryHook } from '../src/bundled-impls.js';
+import { ConsoleTelemetryHook } from '../src/bundled-impls.js';
 import type { LifecycleEvent, TelemetryHook } from '@quarry-systems/pangolin-core';
 
 const sample: LifecycleEvent = {
@@ -93,10 +93,10 @@ it('emitLifecycleEvent swallows a throwing hook and logs loudly (never breaks th
   }
 });
 
-it('StdoutTelemetryHook prints one JSON line per event', () => {
-  const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+it('ConsoleTelemetryHook prints one JSON line per event to stderr', () => {
+  const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
   try {
-    new StdoutTelemetryHook().emit(sample);
+    new ConsoleTelemetryHook().emit(sample);
     expect(spy).toHaveBeenCalledTimes(1);
     expect(JSON.parse(String(spy.mock.calls[0]![0]))).toEqual(sample);
   } finally {
@@ -108,7 +108,7 @@ it('StdoutTelemetryHook prints one JSON line per event', () => {
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run: `pnpm --filter @quarry-systems/pangolin-client exec vitest run test/lifecycle-emit.test.ts`
-Expected: FAIL — `emitLifecycleEvent` / `StdoutTelemetryHook` do not exist yet (import/resolution error).
+Expected: FAIL — `emitLifecycleEvent` / `ConsoleTelemetryHook` do not exist yet (import/resolution error).
 
 - [ ] **Step 3: Create the guarded helper** — `packages/pangolin-client/src/lifecycle-emit.ts`
 
@@ -138,32 +138,34 @@ export function emitLifecycleEvent(
 }
 ```
 
-- [ ] **Step 4: Add `StdoutTelemetryHook`** — `packages/pangolin-client/src/bundled-impls.ts`, immediately after the `NoopTelemetryHook` class (~line 191)
+- [ ] **Step 4: Add `ConsoleTelemetryHook`** — `packages/pangolin-client/src/bundled-impls.ts`, immediately after the `NoopTelemetryHook` class (~line 191)
 
 ```typescript
 /**
  * Reference `TelemetryHook` that prints each dispatch `LifecycleEvent` as one structured JSON line
- * to stdout. OPT-IN — the default stays `NoopTelemetryHook`; wire this via the client's `telemetry`
- * option when you want a live event stream (demos, local runs, piping into a log collector).
+ * to STDERR — not stdout, so it never collides with a command's stdout data (e.g.
+ * `pangolin dispatch run`'s result JSON), matching the repo's operator-output-on-stderr convention.
+ * OPT-IN — the default stays `NoopTelemetryHook`; wire this via the client's `telemetry` option when
+ * you want a live event stream (demos, local runs, piping into a log collector).
  */
-export class StdoutTelemetryHook implements TelemetryHook {
-  readonly name = 'stdout';
+export class ConsoleTelemetryHook implements TelemetryHook {
+  readonly name = 'console';
 
   emit(event: LifecycleEvent): void {
-    console.log(JSON.stringify(event));
+    console.error(JSON.stringify(event));
   }
 }
 ```
 
 (The `TelemetryHook` and `LifecycleEvent` types are already imported in `bundled-impls.ts` for `NoopTelemetryHook` — no new import needed. If lint reports them unused before this step, that is expected and resolves here.)
 
-- [ ] **Step 5: Export `StdoutTelemetryHook`** — `packages/pangolin-client/src/index.ts`, beside the existing `NoopTelemetryHook` export (line 99)
+- [ ] **Step 5: Export `ConsoleTelemetryHook`** — `packages/pangolin-client/src/index.ts`, beside the existing `NoopTelemetryHook` export (line 99)
 
 Change the existing export line so both are exported, e.g.:
 
 ```typescript
   NoopTelemetryHook,
-  StdoutTelemetryHook,
+  ConsoleTelemetryHook,
 ```
 
 - [ ] **Step 6: Run the test to verify it passes**
@@ -189,15 +191,15 @@ In the audit/orchestrator setup example (near the `AuditLog`/orchestrator constr
 ```javascript
 // Live dispatch lifecycle events (opt-in; default drops them). Prints one JSON
 // line per accepted/started/finished/needs_input/failed/cancelled event.
-// import { StdoutTelemetryHook } from '@quarry-systems/pangolin-client';
-// const client = new PangolinClient({ /* …, */ telemetry: new StdoutTelemetryHook() });
+// import { ConsoleTelemetryHook } from '@quarry-systems/pangolin-client';
+// const client = new PangolinClient({ /* …, */ telemetry: new ConsoleTelemetryHook() });
 ```
 
 - [ ] **Step 9: Commit**
 
 ```bash
 git add packages/pangolin-client/src/lifecycle-emit.ts packages/pangolin-client/test/lifecycle-emit.test.ts packages/pangolin-client/src/bundled-impls.ts packages/pangolin-client/src/index.ts packages/pangolin-core/src/telemetry.ts docs-site/src/content/docs/reference/config.md
-git commit -m "feat(telemetry): guarded emit helper + StdoutTelemetryHook reference consumer"
+git commit -m "feat(telemetry): guarded emit helper + ConsoleTelemetryHook reference consumer"
 ```
 
 ---
@@ -211,27 +213,47 @@ git commit -m "feat(telemetry): guarded emit helper + StdoutTelemetryHook refere
 
 **Interfaces:**
 - Consumes: `emitLifecycleEvent` (Task 1).
-- Produces: on `fireWork`, the telemetry hook receives `dispatch.accepted` (before `compute.run`) then `dispatch.started` (after, carrying `handle.providerTaskId`).
+- Produces: on `fireWork`, the telemetry hook receives `dispatch.accepted` (before `compute.run`) then `dispatch.started` (after, carrying `handle.providerTaskId`). Also produces a reusable test helper `makeTelemetryClient(...)`.
 
-- [ ] **Step 1: Write the failing test** — append to `packages/pangolin-client/test/dispatch.test.ts`
+- [ ] **Step 0: Pre-flight — check for an existing `accepted` assertion**
 
-Build a client WITH a recording telemetry hook (mirror the file's existing client construction — `makeMemoryStorage()` + `storage.seed('s','subagent','ns','sha256:s',{name:'s'})`, `makeCompute()`, a credentials provider, `targets: { prod: { compute: 'default', credentials: 'default' } }`), then drive `fireWork`:
+Run: `grep -n "dispatch.accepted\|telemetry" packages/pangolin-client/test/dispatch.test.ts`
+The pre-change emit (`dispatch.ts:302`) was untested when this plan was written, but verify. If a test already asserts the old `accepted` emit, **update it** to the relocated emit (before `run`) rather than leaving a duplicate or a stale assertion.
+
+- [ ] **Step 1: Add a shared test helper, then write the failing test** — `packages/pangolin-client/test/dispatch.test.ts`
+
+First add this helper once (DRY — reused by every lifecycle test here and in Task 3), placing it near the file's other `make*` helpers:
 
 ```typescript
-it('fireWork emits dispatch.accepted (before run) then dispatch.started (with providerTaskId)', async () => {
+import type { ResultSink } from '@quarry-systems/pangolin-core';
+
+/** Build a client wired to a recording telemetry hook; `events` is filled as events are emitted. */
+function makeTelemetryClient(
+  compute: ComputeProvider,
+  events: LifecycleEvent[],
+  resultSink?: ResultSink,
+): PangolinClient {
   const storage = makeMemoryStorage();
   storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
-  const { compute } = makeCompute();
-  const events: LifecycleEvent[] = [];
-  const telemetry: TelemetryHook = { name: 'rec', emit: (e) => events.push(e) };
-  const client = new PangolinClient({
+  return new PangolinClient({
     namespace: 'ns',
     compute: { default: compute },
     credentials: { default: { name: 'c', resolve: async () => ({ kind: 'static', token: 't' }) } },
     storage,
     targets: { prod: { compute: 'default', credentials: 'default' } },
-    telemetry,
+    ...(resultSink ? { resultSink } : {}),
+    telemetry: { name: 'rec', emit: (e) => events.push(e) },
   });
+}
+```
+
+Then the failing test (uses the helper; mirror the file's exact `ClientDispatchOpts` shape for `fireWork`'s third arg):
+
+```typescript
+it('fireWork emits dispatch.accepted (before run) then dispatch.started (with providerTaskId)', async () => {
+  const events: LifecycleEvent[] = [];
+  const { compute } = makeCompute();
+  const client = makeTelemetryClient(compute, events);
 
   await fireWork(
     client,
@@ -323,18 +345,9 @@ Use a fake `ResultSink` to drive the `failure` / `needsInput` branches (the defa
 
 ```typescript
 it('reconcile emits dispatch.finished on a clean exit (incl. a non-zero app exit)', async () => {
-  const storage = makeMemoryStorage();
-  storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
-  const { compute } = makeCompute({ exit: { exitCode: 3 } }); // non-zero APP exit, no failure block
   const events: LifecycleEvent[] = [];
-  const client = new PangolinClient({
-    namespace: 'ns',
-    compute: { default: compute },
-    credentials: { default: { name: 'c', resolve: async () => ({ kind: 'static', token: 't' }) } },
-    storage,
-    targets: { prod: { compute: 'default', credentials: 'default' } },
-    telemetry: { name: 'rec', emit: (e) => events.push(e) },
-  });
+  const { compute } = makeCompute({ exit: { exitCode: 3 } }); // non-zero APP exit, no failure block
+  const client = makeTelemetryClient(compute, events);
   const flight = await fireWork(client, { subagent: 's', target: 'prod', workerImage: 'img', input: {} }, { defaultDispatchTimeoutSeconds: 60 });
   await flight.reconcile(await flight.awaitExit());
   const terminal = events.find((e) => ['dispatch.finished', 'dispatch.failed', 'dispatch.needs_input'].includes(e.kind))!;
@@ -343,8 +356,7 @@ it('reconcile emits dispatch.finished on a clean exit (incl. a non-zero app exit
 });
 
 it('reconcile emits dispatch.failed when the result carries an infra failure', async () => {
-  const storage = makeMemoryStorage();
-  storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
+  const events: LifecycleEvent[] = [];
   const { compute } = makeCompute();
   const failingSink: ResultSink = {
     name: 'fake',
@@ -360,16 +372,7 @@ it('reconcile emits dispatch.failed when the result carries an infra failure', a
       };
     },
   };
-  const events: LifecycleEvent[] = [];
-  const client = new PangolinClient({
-    namespace: 'ns',
-    compute: { default: compute },
-    credentials: { default: { name: 'c', resolve: async () => ({ kind: 'static', token: 't' }) } },
-    storage,
-    targets: { prod: { compute: 'default', credentials: 'default' } },
-    resultSink: failingSink,
-    telemetry: { name: 'rec', emit: (e) => events.push(e) },
-  });
+  const client = makeTelemetryClient(compute, events, failingSink);
   const flight = await fireWork(client, { subagent: 's', target: 'prod', workerImage: 'img', input: {} }, { defaultDispatchTimeoutSeconds: 60 });
   await flight.reconcile(await flight.awaitExit());
   expect(events.some((e) => e.kind === 'dispatch.failed')).toBe(true);
@@ -377,8 +380,7 @@ it('reconcile emits dispatch.failed when the result carries an infra failure', a
 });
 
 it('awaitExit emits dispatch.failed and rethrows when the provider rejects', async () => {
-  const storage = makeMemoryStorage();
-  storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
+  const events: LifecycleEvent[] = [];
   const compute: ComputeProvider = {
     name: 'rejecting',
     async run() {
@@ -388,15 +390,7 @@ it('awaitExit emits dispatch.failed and rethrows when the provider rejects', asy
       throw new Error('provider exploded');
     },
   };
-  const events: LifecycleEvent[] = [];
-  const client = new PangolinClient({
-    namespace: 'ns',
-    compute: { default: compute },
-    credentials: { default: { name: 'c', resolve: async () => ({ kind: 'static', token: 't' }) } },
-    storage,
-    targets: { prod: { compute: 'default', credentials: 'default' } },
-    telemetry: { name: 'rec', emit: (e) => events.push(e) },
-  });
+  const client = makeTelemetryClient(compute, events);
   const flight = await fireWork(client, { subagent: 's', target: 'prod', workerImage: 'img', input: {} }, { defaultDispatchTimeoutSeconds: 60 });
   await expect(flight.awaitExit()).rejects.toThrow('provider exploded');
   expect(events.some((e) => e.kind === 'dispatch.failed')).toBe(true);
@@ -434,7 +428,7 @@ Replace the `awaitExit` closure (lines 317-318) with:
 
 - [ ] **Step 4: Implement terminal emission in `reconcile`** — `packages/pangolin-client/src/dispatch.ts`
 
-In the `reconcile` closure, after the `result` is built and the dispatch record is written, just before `return result;` (line 356), add:
+In the `reconcile` closure, emit the terminal event **after the `result` is built (after ~line 346) but BEFORE `writeDispatchRecord`** — observability must not depend on the retention write succeeding (SoC). Insert this between the `result` construction and the `// 10. Write the dispatch record` block:
 
 ```typescript
     // Terminal lifecycle event. Honors the failure-vs-exitCode contract: a non-zero APP exit is
