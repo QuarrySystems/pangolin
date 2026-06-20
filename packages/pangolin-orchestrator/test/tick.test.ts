@@ -348,6 +348,77 @@ describe('tick', () => {
     store.close();
   });
 
+  it('best-effort cancels the provider dispatch on deadline overrun', async () => {
+    const store = new SqliteRunStateStore();
+    store.ensureQueue('default', 5);
+    store.saveRun({
+      id: 'rd5',
+      queue: 'default',
+      items: [{ id: 'hang2', executor: 'fake', inputs: {}, depends_on: [], resourceLocks: [] }],
+    });
+    store.markReady(['hang2']);
+    store.setRunning('hang2', 'dh-hang2', 1000);
+
+    const cancelled: string[] = [];
+    const ex: Executor = {
+      id: 'fake',
+      async fire(i) {
+        return { dispatchHash: `h-${i.id}` };
+      },
+      async reconcile() {
+        return null;
+      },
+      async cancel(dh) {
+        cancelled.push(dh);
+      },
+    };
+
+    await tick(store, { fake: ex }, 'default', undefined, {
+      now: 1000 + 60_000,
+      maxRuntimeMs: 30_000,
+      maxAttempts: 1,
+    });
+
+    expect(cancelled).toEqual(['dh-hang2']); // the dispatchHash, not the item id
+    expect(store.getItems('rd5').find((i) => i.id === 'hang2')!.status).toBe('failed');
+    store.close();
+  });
+
+  it('a throwing cancel on overrun does not abort the force-fail (best-effort)', async () => {
+    const store = new SqliteRunStateStore();
+    store.ensureQueue('default', 5);
+    store.saveRun({
+      id: 'rd6',
+      queue: 'default',
+      items: [{ id: 'hang3', executor: 'fake', inputs: {}, depends_on: [], resourceLocks: [] }],
+    });
+    store.markReady(['hang3']);
+    store.setRunning('hang3', 'dh-hang3', 1000);
+
+    const ex: Executor = {
+      id: 'fake',
+      async fire(i) {
+        return { dispatchHash: `h-${i.id}` };
+      },
+      async reconcile() {
+        return null;
+      },
+      async cancel() {
+        throw new Error('provider cancel failed');
+      },
+    };
+
+    await expect(
+      tick(store, { fake: ex }, 'default', undefined, {
+        now: 1000 + 60_000,
+        maxRuntimeMs: 30_000,
+        maxAttempts: 1,
+      }),
+    ).resolves.toBeDefined();
+    expect(store.getItems('rd6').find((i) => i.id === 'hang3')!.status).toBe('failed');
+    store.close();
+  });
+
   it('no deadline enforced when maxRuntimeMs is unset (back-compat)', async () => {
     const store = new SqliteRunStateStore();
     store.ensureQueue('default', 5);

@@ -29,7 +29,13 @@ function makeMemoryStorage(): StorageProvider & {
   let monotonic = 0;
   const storage: StorageProvider & {
     blobs: Map<string, Uint8Array>;
-    seed(name: string, type: string, namespace: string, contentHash: string, payload: unknown): void;
+    seed(
+      name: string,
+      type: string,
+      namespace: string,
+      contentHash: string,
+      payload: unknown,
+    ): void;
   } = {
     name: 'memory',
     blobs,
@@ -70,7 +76,11 @@ function makeMemoryStorage(): StorageProvider & {
       const list = registry.get(uri);
       if (!list || list.length === 0) return null;
       const last = list[list.length - 1];
-      return { uri: last.pinnedUri, contentHash: last.contentHash, registeredAt: last.registeredAt };
+      return {
+        uri: last.pinnedUri,
+        contentHash: last.contentHash,
+        registeredAt: last.registeredAt,
+      };
     },
     async list(uri: string) {
       return (registry.get(uri) ?? []).map((e) => ({
@@ -203,17 +213,14 @@ function captureDispatchFire(client: PangolinClient): { work?: DispatchWork & Cl
   Object.defineProperty(client, 'dispatch', {
     configurable: true,
     enumerable: false,
-    value: Object.assign(
-      (w: DispatchWork & ClientDispatchOpts) => orig(w),
-      {
-        fire: (w: DispatchWork & ClientDispatchOpts): Promise<InFlightDispatch> => {
-          captured.work = w;
-          return orig.fire(w);
-        },
-        describe: orig.describe,
-        cancel: orig.cancel,
+    value: Object.assign((w: DispatchWork & ClientDispatchOpts) => orig(w), {
+      fire: (w: DispatchWork & ClientDispatchOpts): Promise<InFlightDispatch> => {
+        captured.work = w;
+        return orig.fire(w);
       },
-    ),
+      describe: orig.describe,
+      cancel: orig.cancel,
+    }),
   });
   return captured;
 }
@@ -285,10 +292,45 @@ describe('DispatchExecutor', () => {
     await expect(async () => {
       result = await executor.reconcile(dispatchHash);
     }).not.toThrow();
-    expect(result!?.status).toBe('failed');
+    expect(result?.status).toBe('failed');
   });
 
-  it('terminal reconcile invokes inflight.cleanup (via the injected store\'s cleanupByTag)', async () => {
+  it('cancel delegates to the client cancel path and drops the in-flight entry', async () => {
+    // SRP: the executor's job is to route to client.dispatch.cancel (the canonical record-based
+    // provider reap, tested in pangolin-client) and drop its in-flight entry. We assert the
+    // delegation + cleanup here, not the client's record→provider plumbing.
+    const { compute } = makeDeferredCompute();
+    const { client, executor } = makeSetup(compute);
+    const { dispatchHash } = await executor.fire(baseItem); // real fire
+
+    const cancelledIds: string[] = [];
+    const orig = client.dispatch;
+    Object.defineProperty(client, 'dispatch', {
+      configurable: true,
+      enumerable: false,
+      value: Object.assign((w: DispatchWork & ClientDispatchOpts) => orig(w), {
+        fire: orig.fire,
+        describe: orig.describe,
+        cancel: async (id: string): Promise<void> => {
+          cancelledIds.push(id);
+        },
+      }),
+    });
+
+    await executor.cancel(dispatchHash);
+
+    expect(cancelledIds).toEqual([dispatchHash]); // delegated to client.dispatch.cancel(id)
+    // in-flight entry dropped → reconcile now treats the hash as unknown (null)
+    expect(await executor.reconcile(dispatchHash)).toBeNull();
+  });
+
+  it('cancel of an unknown dispatch hash is a best-effort no-op (does not throw)', async () => {
+    const { compute } = makeDeferredCompute();
+    const { executor } = makeSetup(compute);
+    await expect(executor.cancel('does-not-exist')).resolves.toBeUndefined();
+  });
+
+  it("terminal reconcile invokes inflight.cleanup (via the injected store's cleanupByTag)", async () => {
     const fake = makeFakeStore();
     const { compute, resolveExit } = makeDeferredCompute();
     const { executor } = makeSetupWithStore(compute, fake);
@@ -399,7 +441,13 @@ describe('DispatchExecutor', () => {
     const { dispatchHash } = await executor.fire(itemWithSpuriousInputs);
     expect(dispatchHash).toMatch(/^[0-9a-f-]{36}$/); // fire succeeded using config target 'prod'
 
-    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+    resolveExit({
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+      startedAt: new Date(0),
+      finishedAt: new Date(1),
+    });
     await new Promise((r) => setImmediate(r));
     expect((await executor.reconcile(dispatchHash))?.status).toBe('done');
   });
@@ -440,7 +488,13 @@ describe('DispatchExecutor', () => {
     // dispatchHash still present
     expect(dispatchHash).toMatch(/^[0-9a-f-]{36}$/);
 
-    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+    resolveExit({
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+      startedAt: new Date(0),
+      finishedAt: new Date(1),
+    });
   });
 
   it('manifest does not contain secret values — only refs', async () => {
@@ -472,13 +526,20 @@ describe('DispatchExecutor', () => {
     // The manifest should contain a ref (local-secret://)
     expect(storedJson).toContain('local-secret://');
 
-    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+    resolveExit({
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+      startedAt: new Date(0),
+      finishedAt: new Date(1),
+    });
   });
 
   it('fire without ctx uses empty strings and still returns manifestRef', async () => {
     const { compute, resolveExit } = makeDeferredCompute();
     const { executor, client } = makeSetup(compute);
-    const storage = (client as PangolinClient & { storage: ReturnType<typeof makeMemoryStorage> }).storage as ReturnType<typeof makeMemoryStorage>;
+    const storage = (client as PangolinClient & { storage: ReturnType<typeof makeMemoryStorage> })
+      .storage as ReturnType<typeof makeMemoryStorage>;
 
     const { dispatchHash, manifestRef } = await executor.fire(baseItem);
     expect(typeof dispatchHash).toBe('string');
@@ -489,7 +550,13 @@ describe('DispatchExecutor', () => {
     expect(stored.actor).toBe('');
     expect(stored.submittedAt).toBeUndefined();
 
-    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+    resolveExit({
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+      startedAt: new Date(0),
+      finishedAt: new Date(1),
+    });
   });
 
   it('storage put failure during manifest write is swallowed — fire returns dispatchHash without throw', async () => {
@@ -522,7 +589,13 @@ describe('DispatchExecutor', () => {
     // manifestRef is undefined because put failed
     expect(result.manifestRef).toBeUndefined();
 
-    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+    resolveExit({
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+      startedAt: new Date(0),
+      finishedAt: new Date(1),
+    });
   });
 
   it('reconcile of a done dispatch reads patchRef from sentinel and returns it as resultRef', async () => {
@@ -543,9 +616,18 @@ describe('DispatchExecutor', () => {
     // Seed the output sentinel at the dispatch-record URI
     const sentinelUri = buildDispatchRecordUri('ns', dispatchHash, 'output.json');
     const patchRef = 'pangolin://ns/artifact/out/sha256:' + 'a'.repeat(64);
-    await storage.put(sentinelUri, new TextEncoder().encode(JSON.stringify({ schemaVersion: 1, patchRef })));
+    await storage.put(
+      sentinelUri,
+      new TextEncoder().encode(JSON.stringify({ schemaVersion: 1, patchRef })),
+    );
 
-    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+    resolveExit({
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+      startedAt: new Date(0),
+      finishedAt: new Date(1),
+    });
     await new Promise((r) => setImmediate(r));
 
     const res = await executor.reconcile(dispatchHash);
@@ -579,7 +661,13 @@ describe('DispatchExecutor', () => {
       ),
     );
 
-    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+    resolveExit({
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+      startedAt: new Date(0),
+      finishedAt: new Date(1),
+    });
     await new Promise((r) => setImmediate(r));
 
     const res = await executor.reconcile(dispatchHash);
@@ -618,7 +706,13 @@ describe('DispatchExecutor', () => {
       ),
     );
 
-    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+    resolveExit({
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+      startedAt: new Date(0),
+      finishedAt: new Date(1),
+    });
     await new Promise((r) => setImmediate(r));
 
     const res = await executor.reconcile(dispatchHash);
@@ -643,7 +737,13 @@ describe('DispatchExecutor', () => {
 
     const { dispatchHash } = await executor.fire(baseItem);
 
-    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+    resolveExit({
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+      startedAt: new Date(0),
+      finishedAt: new Date(1),
+    });
     await new Promise((r) => setImmediate(r));
 
     // reconcile should NOT throw and should return { status: 'done', resultRef: undefined }
@@ -668,17 +768,32 @@ describe('DispatchExecutor', () => {
     const { dispatchHash } = await executor.fire(baseItem);
 
     const sentinelUri = buildDispatchRecordUri('ns', dispatchHash, 'output.json');
-    await storage.put(sentinelUri, new TextEncoder().encode(JSON.stringify({
-      schemaVersion: 1,
-      outputs: [{ path: 'report.txt', ref: 'pangolin://ns/artifact/d/sha256:' + 'a'.repeat(64) }],
-    })));
+    await storage.put(
+      sentinelUri,
+      new TextEncoder().encode(
+        JSON.stringify({
+          schemaVersion: 1,
+          outputs: [
+            { path: 'report.txt', ref: 'pangolin://ns/artifact/d/sha256:' + 'a'.repeat(64) },
+          ],
+        }),
+      ),
+    );
 
-    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+    resolveExit({
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+      startedAt: new Date(0),
+      finishedAt: new Date(1),
+    });
     await new Promise((r) => setImmediate(r));
 
     const res = await executor.reconcile(dispatchHash);
     expect(res?.status).toBe('done');
-    expect(res?.outputRefs).toEqual({ 'report.txt': 'pangolin://ns/artifact/d/sha256:' + 'a'.repeat(64) });
+    expect(res?.outputRefs).toEqual({
+      'report.txt': 'pangolin://ns/artifact/d/sha256:' + 'a'.repeat(64),
+    });
   });
 
   it('reconcile sanitises outputs from the sentinel: drops malformed entries', async () => {
@@ -698,16 +813,27 @@ describe('DispatchExecutor', () => {
 
     const sentinelUri = buildDispatchRecordUri('ns', dispatchHash, 'output.json');
     const validRef = 'pangolin://ns/artifact/d/sha256:' + 'b'.repeat(64);
-    await storage.put(sentinelUri, new TextEncoder().encode(JSON.stringify({
-      schemaVersion: 1,
-      outputs: [
-        { path: 7, ref: validRef },       // path not a string → drop
-        'junk',                            // not an object → drop
-        { path: 'ok.txt', ref: validRef }, // valid → keep
-      ],
-    })));
+    await storage.put(
+      sentinelUri,
+      new TextEncoder().encode(
+        JSON.stringify({
+          schemaVersion: 1,
+          outputs: [
+            { path: 7, ref: validRef }, // path not a string → drop
+            'junk', // not an object → drop
+            { path: 'ok.txt', ref: validRef }, // valid → keep
+          ],
+        }),
+      ),
+    );
 
-    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+    resolveExit({
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+      startedAt: new Date(0),
+      finishedAt: new Date(1),
+    });
     await new Promise((r) => setImmediate(r));
 
     const res = await executor.reconcile(dispatchHash);
@@ -730,12 +856,23 @@ describe('DispatchExecutor', () => {
     const { dispatchHash } = await executor.fire(baseItem);
 
     const sentinelUri = buildDispatchRecordUri('ns', dispatchHash, 'output.json');
-    await storage.put(sentinelUri, new TextEncoder().encode(JSON.stringify({
-      schemaVersion: 1,
-      outputs: [{ path: 99, ref: 'pangolin://ns/artifact/d/sha256:cc' }, 'bad'],
-    })));
+    await storage.put(
+      sentinelUri,
+      new TextEncoder().encode(
+        JSON.stringify({
+          schemaVersion: 1,
+          outputs: [{ path: 99, ref: 'pangolin://ns/artifact/d/sha256:cc' }, 'bad'],
+        }),
+      ),
+    );
 
-    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+    resolveExit({
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+      startedAt: new Date(0),
+      finishedAt: new Date(1),
+    });
     await new Promise((r) => setImmediate(r));
 
     const res = await executor.reconcile(dispatchHash);
@@ -760,16 +897,27 @@ describe('DispatchExecutor', () => {
 
     const sentinelUri = buildDispatchRecordUri('ns', dispatchHash, 'output.json');
     const validRef = 'pangolin://ns/artifact/d/sha256:' + 'd'.repeat(64);
-    await storage.put(sentinelUri, new TextEncoder().encode(JSON.stringify({
-      schemaVersion: 1,
-      outputs: [
-        { path: '__proto__', ref: 'pangolin://ns/artifact/d/sha256:' + 'e'.repeat(64) },
-        { path: 'constructor', ref: 'pangolin://ns/artifact/d/sha256:' + 'f'.repeat(64) },
-        { path: 'ok.txt', ref: validRef },
-      ],
-    })));
+    await storage.put(
+      sentinelUri,
+      new TextEncoder().encode(
+        JSON.stringify({
+          schemaVersion: 1,
+          outputs: [
+            { path: '__proto__', ref: 'pangolin://ns/artifact/d/sha256:' + 'e'.repeat(64) },
+            { path: 'constructor', ref: 'pangolin://ns/artifact/d/sha256:' + 'f'.repeat(64) },
+            { path: 'ok.txt', ref: validRef },
+          ],
+        }),
+      ),
+    );
 
-    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+    resolveExit({
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+      startedAt: new Date(0),
+      finishedAt: new Date(1),
+    });
     await new Promise((r) => setImmediate(r));
 
     const res = await executor.reconcile(dispatchHash);
@@ -780,8 +928,8 @@ describe('DispatchExecutor', () => {
     expect(keys).toContain('ok.txt');
 
     // Nothing leaked onto Object.prototype — a fresh plain object must have no injected property
-    expect((({}) as Record<string, unknown>).__proto__).toBe(Object.prototype); // structural sanity
-    expect((({}) as Record<string, unknown>).polluted).toBeUndefined();
+    expect(({} as Record<string, unknown>).__proto__).toBe(Object.prototype); // structural sanity
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
     // The outputRefs accumulator was built with Object.create(null) — keys that look like
     // prototype slot names are stored as own data properties, not as prototype mutations
     if ('__proto__' in res!.outputRefs! || 'constructor' in res!.outputRefs!) {
@@ -842,7 +990,13 @@ describe('DispatchExecutor', () => {
     expect(inputsArr[0].key).toBe('patch');
     expect(inputsArr[0].uri).toBe(inputRefs.patch);
 
-    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+    resolveExit({
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+      startedAt: new Date(0),
+      finishedAt: new Date(1),
+    });
   });
 
   it('omits inputRefs from the dispatch work when the carrier is absent', async () => {
@@ -876,7 +1030,13 @@ describe('DispatchExecutor', () => {
     // inputs array should be empty when no inputRefs
     expect(bundleRefs.inputs).toEqual([]);
 
-    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+    resolveExit({
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+      startedAt: new Date(0),
+      finishedAt: new Date(1),
+    });
   });
 
   it('omits inputRefs from the dispatch work when the carrier is present but empty', async () => {
@@ -915,7 +1075,13 @@ describe('DispatchExecutor', () => {
     // inputs array should be empty when inputRefs is present but empty
     expect(bundleRefs.inputs).toEqual([]);
 
-    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+    resolveExit({
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+      startedAt: new Date(0),
+      finishedAt: new Date(1),
+    });
   });
 
   it('drops non-string values in inputs.inputRefs without failing the dispatch', async () => {
@@ -948,7 +1114,7 @@ describe('DispatchExecutor', () => {
         subagent: 's',
         inputRefs: {
           good: pinnedUri,
-          bad: 42 as unknown as string,  // non-string → should be dropped
+          bad: 42 as unknown as string, // non-string → should be dropped
         },
       },
     };
@@ -963,7 +1129,13 @@ describe('DispatchExecutor', () => {
     expect(inputsArr).toHaveLength(1);
     expect(inputsArr[0].key).toBe('good');
 
-    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+    resolveExit({
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+      startedAt: new Date(0),
+      finishedAt: new Date(1),
+    });
   });
 
   it('reconcile with absent outputs field yields no outputRefs field', async () => {
@@ -984,7 +1156,13 @@ describe('DispatchExecutor', () => {
     const sentinelUri = buildDispatchRecordUri('ns', dispatchHash, 'output.json');
     await storage.put(sentinelUri, new TextEncoder().encode(JSON.stringify({ schemaVersion: 1 })));
 
-    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+    resolveExit({
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+      startedAt: new Date(0),
+      finishedAt: new Date(1),
+    });
     await new Promise((r) => setImmediate(r));
 
     const res = await executor.reconcile(dispatchHash);
@@ -1022,7 +1200,13 @@ describe('DispatchExecutor', () => {
     const stored = JSON.parse(new TextDecoder().decode(await storage.get(manifestRef!)));
     expect(stored.inputRefs).toEqual(inputRefs);
 
-    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+    resolveExit({
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+      startedAt: new Date(0),
+      finishedAt: new Date(1),
+    });
   });
 
   it('fire without inputRefs (no needs) stores a manifest with NO inputRefs key', async () => {
@@ -1047,7 +1231,13 @@ describe('DispatchExecutor', () => {
     expect(stored.inputRefs).toBeUndefined();
     expect(Object.prototype.hasOwnProperty.call(stored, 'inputRefs')).toBe(false);
 
-    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+    resolveExit({
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+      startedAt: new Date(0),
+      finishedAt: new Date(1),
+    });
   });
 
   it('reconcile truncates outputs beyond MAX_SENTINEL_OUTPUTS (256)', async () => {
@@ -1071,9 +1261,18 @@ describe('DispatchExecutor', () => {
       ref: `pangolin://ns/artifact/d/sha256:${'c'.repeat(64)}`,
     }));
     const sentinelUri = buildDispatchRecordUri('ns', dispatchHash, 'output.json');
-    await storage.put(sentinelUri, new TextEncoder().encode(JSON.stringify({ schemaVersion: 1, outputs })));
+    await storage.put(
+      sentinelUri,
+      new TextEncoder().encode(JSON.stringify({ schemaVersion: 1, outputs })),
+    );
 
-    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+    resolveExit({
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+      startedAt: new Date(0),
+      finishedAt: new Date(1),
+    });
     await new Promise((r) => setImmediate(r));
 
     const res = await executor.reconcile(dispatchHash);
@@ -1100,7 +1299,13 @@ describe('DispatchExecutor', () => {
     const sentinelUri = buildDispatchRecordUri('ns', dispatchHash, 'output.json');
     await storage.put(sentinelUri, new TextEncoder().encode(JSON.stringify({ schemaVersion: 1 })));
 
-    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+    resolveExit({
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+      startedAt: new Date(0),
+      finishedAt: new Date(1),
+    });
     await new Promise((r) => setImmediate(r));
 
     const res = await executor.reconcile(dispatchHash);
@@ -1112,7 +1317,11 @@ describe('DispatchExecutor', () => {
     const { compute, resolveExit } = makeDeferredCompute();
     const storage = makeMemoryStorage();
     // Seed a subagent that has a model field
-    storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's', model: 'claude-3-5-sonnet', capabilities: [] });
+    storage.seed('s', 'subagent', 'ns', 'sha256:s', {
+      name: 's',
+      model: 'claude-3-5-sonnet',
+      capabilities: [],
+    });
     const client = new PangolinClient({
       namespace: 'ns',
       compute: { default: compute },
@@ -1128,7 +1337,13 @@ describe('DispatchExecutor', () => {
     const stored = JSON.parse(new TextDecoder().decode(await storage.get(manifestRef!)));
     expect(stored.executorManifest.model.id).toBe('claude-3-5-sonnet');
 
-    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+    resolveExit({
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+      startedAt: new Date(0),
+      finishedAt: new Date(1),
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -1171,7 +1386,13 @@ describe('DispatchExecutor', () => {
     expect(bundleRefs.pipeline).toBeDefined();
     expect(bundleRefs.pipeline.uri).toBe(pipelineUri);
 
-    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+    resolveExit({
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+      startedAt: new Date(0),
+      finishedAt: new Date(1),
+    });
   });
 
   it('does not include pipeline in bundleRefs when inputs.pipeline is absent', async () => {
@@ -1204,7 +1425,13 @@ describe('DispatchExecutor', () => {
     const bundleRefs = JSON.parse(capturedTaskSpecs[0].env.PANGOLIN_BUNDLE_REFS_JSON);
     expect(bundleRefs.pipeline).toBeUndefined();
 
-    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+    resolveExit({
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+      startedAt: new Date(0),
+      finishedAt: new Date(1),
+    });
   });
 
   it('ignores non-string inputs.pipeline (does not throw)', async () => {
@@ -1242,7 +1469,13 @@ describe('DispatchExecutor', () => {
     const bundleRefs = JSON.parse(capturedTaskSpecs[0].env.PANGOLIN_BUNDLE_REFS_JSON);
     expect(bundleRefs.pipeline).toBeUndefined();
 
-    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+    resolveExit({
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+      startedAt: new Date(0),
+      finishedAt: new Date(1),
+    });
   });
 
   it('fire with inputs.pipeline seals pipelineRef into the manifest', async () => {
@@ -1271,7 +1504,13 @@ describe('DispatchExecutor', () => {
     const stored = JSON.parse(new TextDecoder().decode(await storage.get(manifestRef!)));
     expect(stored.pipelineRef).toBe(pipelineUri);
 
-    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+    resolveExit({
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+      startedAt: new Date(0),
+      finishedAt: new Date(1),
+    });
   });
 
   it('fire without inputs.pipeline stores manifest with NO pipelineRef key', async () => {
@@ -1295,7 +1534,13 @@ describe('DispatchExecutor', () => {
     expect(stored.pipelineRef).toBeUndefined();
     expect(Object.prototype.hasOwnProperty.call(stored, 'pipelineRef')).toBe(false);
 
-    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+    resolveExit({
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+      startedAt: new Date(0),
+      finishedAt: new Date(1),
+    });
   });
 
   it('model best-effort: unreadable subagent blob yields model { id: empty string } without failing fire', async () => {
@@ -1337,7 +1582,13 @@ describe('DispatchExecutor', () => {
       expect(stored.executorManifest.model.id).toBe('');
     }
 
-    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+    resolveExit({
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+      startedAt: new Date(0),
+      finishedAt: new Date(1),
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -1348,7 +1599,11 @@ describe('DispatchExecutor', () => {
   it('def-only: subagent def model is sealed into BOTH the dispatched work and the manifest', async () => {
     const { compute, resolveExit } = makeDeferredCompute();
     const storage = makeMemoryStorage();
-    storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's', model: 'claude-3-5-sonnet', capabilities: [] });
+    storage.seed('s', 'subagent', 'ns', 'sha256:s', {
+      name: 's',
+      model: 'claude-3-5-sonnet',
+      capabilities: [],
+    });
     const client = new PangolinClient({
       namespace: 'ns',
       compute: { default: compute },
@@ -1367,7 +1622,13 @@ describe('DispatchExecutor', () => {
     expect(stored.executorManifest.model.id).toBe(captured.work?.model ?? '');
     expect(stored.executorManifest.model.id).toBe('claude-3-5-sonnet');
 
-    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+    resolveExit({
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+      startedAt: new Date(0),
+      finishedAt: new Date(1),
+    });
   });
 
   it('seals defaultModel into manifest AND dispatched work when the subagent def has no model', async () => {
@@ -1382,7 +1643,12 @@ describe('DispatchExecutor', () => {
       targets: { prod: { compute: 'default', credentials: 'default' } },
     });
     const captured = captureDispatchFire(client);
-    const executor = new DispatchExecutor({ client, target: 'prod', workerImage: 'img', defaultModel: 'standard' });
+    const executor = new DispatchExecutor({
+      client,
+      target: 'prod',
+      workerImage: 'img',
+      defaultModel: 'standard',
+    });
 
     const { manifestRef } = await executor.fire(baseItem, { runId: 'r1', actor: 'human:x' });
     expect(manifestRef).toBeDefined();
@@ -1392,7 +1658,13 @@ describe('DispatchExecutor', () => {
     expect(stored.executorManifest.model.id).toBe(captured.work?.model ?? '');
     expect(stored.executorManifest.model.id).toBe('standard');
 
-    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+    resolveExit({
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+      startedAt: new Date(0),
+      finishedAt: new Date(1),
+    });
   });
 
   it('both def model and defaultModel set: the def wins', async () => {
@@ -1407,7 +1679,12 @@ describe('DispatchExecutor', () => {
       targets: { prod: { compute: 'default', credentials: 'default' } },
     });
     const captured = captureDispatchFire(client);
-    const executor = new DispatchExecutor({ client, target: 'prod', workerImage: 'img', defaultModel: 'standard' });
+    const executor = new DispatchExecutor({
+      client,
+      target: 'prod',
+      workerImage: 'img',
+      defaultModel: 'standard',
+    });
 
     const { manifestRef } = await executor.fire(baseItem, { runId: 'r1', actor: 'human:x' });
     expect(manifestRef).toBeDefined();
@@ -1417,7 +1694,13 @@ describe('DispatchExecutor', () => {
     expect(stored.executorManifest.model.id).toBe(captured.work?.model ?? '');
     expect(stored.executorManifest.model.id).toBe('max');
 
-    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+    resolveExit({
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+      startedAt: new Date(0),
+      finishedAt: new Date(1),
+    });
   });
 
   it('neither def model nor defaultModel: work carries NO model, manifest id is empty string', async () => {
@@ -1443,7 +1726,13 @@ describe('DispatchExecutor', () => {
     expect(stored.executorManifest.model.id).toBe(captured.work?.model ?? '');
     expect(stored.executorManifest.model.id).toBe('');
 
-    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+    resolveExit({
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+      startedAt: new Date(0),
+      finishedAt: new Date(1),
+    });
   });
 
   it('unreadable def blob WITH defaultModel configured: defaultModel still applies to work and manifest', async () => {
@@ -1468,7 +1757,12 @@ describe('DispatchExecutor', () => {
       targets: { prod: { compute: 'default', credentials: 'default' } },
     });
     const captured = captureDispatchFire(client);
-    const executor = new DispatchExecutor({ client, target: 'prod', workerImage: 'img', defaultModel: 'standard' });
+    const executor = new DispatchExecutor({
+      client,
+      target: 'prod',
+      workerImage: 'img',
+      defaultModel: 'standard',
+    });
 
     // fire must NOT throw — best-effort posture preserved
     const result = await executor.fire(baseItem, { runId: 'r1', actor: 'human:x' });
@@ -1480,7 +1774,13 @@ describe('DispatchExecutor', () => {
       expect(stored.executorManifest.model.id).toBe('standard');
     }
 
-    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+    resolveExit({
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+      startedAt: new Date(0),
+      finishedAt: new Date(1),
+    });
   });
 
   it('fetches the subagent def blob exactly once from the executor — pre-fire, no post-fire duplicate', async () => {
@@ -1531,6 +1831,12 @@ describe('DispatchExecutor', () => {
     expect(postRunSubagentGets).toBe(0);
     expect(preRunSubagentGets).toBe(2);
 
-    resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
+    resolveExit({
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+      startedAt: new Date(0),
+      finishedAt: new Date(1),
+    });
   });
 });

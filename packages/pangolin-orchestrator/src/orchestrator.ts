@@ -304,6 +304,8 @@ export class PangolinOrchestrator {
           fire: (item, ctx) =>
             ex.fire({ ...item, id: deNs(item.id), depends_on: item.depends_on.map(deNs) }, ctx),
           reconcile: ex.reconcile.bind(ex),
+          // Pass through the optional deadline-cancel so the engine can reap an overrun dispatch.
+          ...(ex.cancel ? { cancel: ex.cancel.bind(ex) } : {}),
         },
       ]),
     );

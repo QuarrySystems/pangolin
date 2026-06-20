@@ -174,6 +174,25 @@ export class DispatchExecutor implements Executor {
   }
 
   /**
+   * Best-effort cancel of a fired dispatch (e.g. on an engine deadline overrun). Routes through
+   * the client's canonical record-based cancel (`dispatch.cancel` → `ComputeProvider.cancel`,
+   * §7.6 idempotent) so the underlying worker is reaped, then drops the in-flight entry. NEVER
+   * throws — a provider reject / already-stopped / missing-record all collapse to a no-op.
+   */
+  async cancel(dispatchHash: string): Promise<void> {
+    try {
+      await this.opts.client.dispatch.cancel(dispatchHash);
+    } catch {
+      /* best-effort reap — swallow (the engine force-fails the item regardless) */
+    }
+    const entry = this.inflight.get(dispatchHash);
+    if (entry) {
+      this.inflight.delete(dispatchHash);
+      entry.inflight.cleanup();
+    }
+  }
+
+  /**
    * Best-effort: read the patchRef, verify signal, and outputs from the dispatch
    * output sentinel. NEVER throws — any failure returns an empty object.
    */

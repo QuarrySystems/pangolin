@@ -70,7 +70,19 @@ export async function tick(
       maxRuntimeMs !== undefined &&
       it.runningSince !== undefined &&
       now - it.runningSince > maxRuntimeMs;
-    const res = overrun ? { status: 'failed' as const } : await ex.reconcile(it.dispatchHash!);
+    let res: Awaited<ReturnType<Executor['reconcile']>>;
+    if (overrun) {
+      // Best-effort provider cancel to reap the orphaned worker. A cancel failure must NEVER
+      // abort the tick — the dispatch is force-failed regardless (the engine stops waiting on it).
+      try {
+        await ex.cancel?.(it.dispatchHash!);
+      } catch {
+        /* swallow — best-effort reap; force-fail proceeds */
+      }
+      res = { status: 'failed' };
+    } else {
+      res = await ex.reconcile(it.dispatchHash!);
+    }
     if (res) {
       if (res.status === 'failed' && store.getAttempts(it.id) + 1 < maxAttempts) {
         store.bumpAttempt(it.id);
