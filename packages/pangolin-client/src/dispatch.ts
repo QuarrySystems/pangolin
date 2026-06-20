@@ -369,7 +369,7 @@ export async function fireWork(
       emitLifecycleEvent(client.telemetry, {
         kind: 'dispatch.failed',
         dispatchId,
-        reason: result.failure.detail ?? result.failure.reason,
+        reason: result.failure.detail,
         at,
       });
     } else if (result.needsInput) {

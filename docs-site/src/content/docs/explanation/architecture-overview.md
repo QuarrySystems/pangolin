@@ -139,8 +139,8 @@ order:
 |---|---|
 | `dispatch.accepted` | Names have been resolved; the compute provider is about to start. |
 | `dispatch.started` | The worker container has booted and the runtime adapter is running. |
-| `dispatch.finished` | The task exited cleanly (exit code 0). |
-| `dispatch.failed` | The task exited non-zero, was rejected, or hit a hard error. |
+| `dispatch.finished` | The task exited and was reconciled — including a non-zero application exit code. |
+| `dispatch.failed` | A provider/infra failure (e.g. timeout, worker crash) or a rejected `awaitExit` — NOT an ordinary non-zero app exit (that is `finished`). |
 | `dispatch.needs_input` | The worker wrote `.pangolin/needs_input.json`; awaiting a reply. |
 | `dispatch.cancelled` | A cancel was **requested** (intent) — see note below. |
 

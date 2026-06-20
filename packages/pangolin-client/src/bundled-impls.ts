@@ -1,6 +1,6 @@
 // Bundled default implementations (§5.2 / §5.6 / §5.7).
 //
-// Three lightweight defaults that ship with `pangolin-client` so callers can
+// Four lightweight defaults that ship with `pangolin-client` so callers can
 // stand up a working dispatch path without authoring their own sinks,
 // credential providers, or telemetry hooks:
 //
@@ -16,6 +16,10 @@
 //
 //   - `NoopTelemetryHook` — drops every `LifecycleEvent`. Used when no
 //     telemetry integration is wired into the runtime.
+//
+//   - `ConsoleTelemetryHook` — prints each `LifecycleEvent` as a
+//     structured JSON line to STDERR. Opt-in; wire via the client's
+//     `telemetry` option for local runs or piping into a log collector.
 
 import type {
   CredentialProvider,
