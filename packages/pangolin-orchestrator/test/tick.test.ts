@@ -12,6 +12,7 @@ import type {
 import { isSettled } from '../src/engine/dep-resolver.js';
 import { PackRegistry } from '../src/packs/registry.js';
 import { makeShape } from './support/make-shape.js';
+import { InMemoryMetricsRecorder } from '@quarry-systems/pangolin-core';
 
 // Inline fake Executor (no real executor in PR2): fires immediately, finishes on next reconcile.
 function fakeExecutor(): Executor & { fired: string[] } {
@@ -901,6 +902,87 @@ describe('tick — retry with backoff', () => {
     const items = store.getItems('rr5');
     expect(items.find((i) => i.id === 'a')!.status).toBe('ready'); // requeued
     expect(items.find((i) => i.id === 'b')!.status).toBe('pending'); // NOT skipped
+    store.close();
+  });
+});
+
+// ── Metrics instrumentation tests ────────────────────────────────────────────
+
+describe('tick — metrics', () => {
+  it('tick records queue_depth + running gauges and a retried counter', async () => {
+    const store = new SqliteRunStateStore();
+    store.ensureQueue('default', 5);
+    store.saveRun({
+      id: 'rm1',
+      queue: 'default',
+      items: [
+        { id: 'a', executor: 'fake', inputs: {}, depends_on: [], resourceLocks: [] },
+        { id: 'b', executor: 'fake', inputs: {}, depends_on: [], resourceLocks: [] },
+      ],
+    });
+    store.markReady(['a']); // a ready, b still pending
+    // 'a' is running and will be force-failed-then-retried via the deadline path:
+    store.setRunning('a', 'h-a', 1000);
+    store.acquireLocks('a', []);
+    const hung: Executor = {
+      id: 'fake',
+      async fire(i) {
+        return { dispatchHash: `h-${i.id}` };
+      },
+      async reconcile() {
+        return null;
+      },
+    };
+    const metrics = new InMemoryMetricsRecorder();
+    await tick(store, { fake: hung }, 'default', undefined, {
+      now: 1000 + 60_000,
+      maxRuntimeMs: 30_000,
+      maxAttempts: 2, // attempts remain → 'a' retries
+      backoffMs: () => 5_000,
+      metrics,
+    });
+    const s = metrics.snapshot();
+    expect(s.counters['pangolin_items_retried_total']).toBe(1);
+    expect(s.counters['pangolin_dispatch_deadline_exceeded_total']).toBe(1);
+    // gauges are recorded for the queue (exact post-tick depth depends on dep-readying + fire order,
+    // so assert the series were recorded rather than a brittle exact value):
+    expect(s.gauges).toHaveProperty('pangolin_queue_depth{queue="default"}');
+    expect(s.gauges).toHaveProperty('pangolin_running{queue="default"}');
+    store.close();
+  });
+
+  it('tick records a skipped counter when a dependency fails and cascades', async () => {
+    const store = new SqliteRunStateStore();
+    store.ensureQueue('default', 5);
+    store.saveRun({
+      id: 'rm2',
+      queue: 'default',
+      items: [
+        { id: 'p', executor: 'nonexistent', inputs: {}, depends_on: [], resourceLocks: [] },
+        { id: 'c', executor: 'fake', inputs: {}, depends_on: ['p'], resourceLocks: [] },
+      ],
+    });
+    store.markReady(['p']);
+    const metrics = new InMemoryMetricsRecorder();
+    // 'p' fails (no executor) → 'c' is skipped by the cascade.
+    await tick(
+      store,
+      {
+        fake: {
+          id: 'fake',
+          async fire() {
+            return { dispatchHash: 'x' };
+          },
+          async reconcile() {
+            return null;
+          },
+        },
+      },
+      'default',
+      undefined,
+      { metrics },
+    );
+    expect(metrics.snapshot().counters['pangolin_items_skipped_total']).toBe(1);
     store.close();
   });
 });
