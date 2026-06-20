@@ -252,7 +252,9 @@ import type { MetricsRecorder, MetricsSnapshot } from './metrics.js';
 
 const DEFAULT_BUCKETS = [0.5, 1, 5, 10, 30, 60, 300, 900, 1800, 3600, 7200];
 
-/** Prometheus-style series id: `name` alone, or `name{k="v",…}` with labels sorted by key. */
+/** Prometheus-style series id: `name` alone, or `name{k="v",…}` with labels sorted by key. Label
+ *  VALUES are assumed simple identifiers (the metric set uses only bounded `outcome`/`queue`); no
+ *  escaping is performed, so callers must not pass values containing `"`, `,`, or `}`. */
 function seriesKey(name: string, labels?: Record<string, string>): string {
   if (!labels || Object.keys(labels).length === 0) return name;
   const parts = Object.keys(labels)
@@ -509,6 +511,7 @@ git commit -m "feat(metrics): MetricsTelemetryHook dispatch bridge + combineTele
 **Interfaces:**
 - Consumes: `MetricsRecorder`, `NoopMetricsRecorder`, `recordMetric`, `InMemoryMetricsRecorder` (core).
 - Produces: `PangolinOrchestratorOptions.metrics?: MetricsRecorder`; `tick`'s opts gains `metrics?: MetricsRecorder`. Metrics emitted: `pangolin_queue_depth{queue}`, `pangolin_running{queue}` (gauges), `pangolin_items_retried_total`, `pangolin_items_skipped_total`, `pangolin_dispatch_deadline_exceeded_total`, `pangolin_runs_completed_total` (counters), `pangolin_audit_dropped_appends` (gauge).
+- **Limitation (document in the config.md note, Step 7):** `pangolin_runs_completed_total` and `pangolin_audit_dropped_appends` are recorded in the orchestrator's seal block, which only runs when an `AuditLog` is configured — so those two metrics require `auditLog`. The other (tick-level) metrics do not. This is an accepted consequence of detecting run-completion at the seal point; real audited-compute deployments always configure `auditLog`.
 
 - [ ] **Step 1: Write the failing tests** — append to `packages/pangolin-orchestrator/test/tick.test.ts`
 
@@ -548,9 +551,10 @@ it('tick records queue_depth + running gauges and a retried counter', async () =
   const s = metrics.snapshot();
   expect(s.counters['pangolin_items_retried_total']).toBe(1);
   expect(s.counters['pangolin_dispatch_deadline_exceeded_total']).toBe(1);
-  // gauges recorded for the queue (exact depth depends on post-tick state; assert they exist):
-  expect(s.gauges['pangolin_queue_depth{queue="default"}']).toBeGreaterThanOrEqual(0);
-  expect(typeof s.gauges['pangolin_running{queue="default"}']).toBe('number');
+  // gauges are recorded for the queue (exact post-tick depth depends on dep-readying + fire order,
+  // so assert the series were recorded rather than a brittle exact value):
+  expect(s.gauges).toHaveProperty('pangolin_queue_depth{queue="default"}');
+  expect(s.gauges).toHaveProperty('pangolin_running{queue="default"}');
   store.close();
 });
 
@@ -677,6 +681,8 @@ Near the telemetry opt-in comment added earlier (the `ConsoleTelemetryHook` bloc
 //     telemetry: combineTelemetryHooks(new ConsoleTelemetryHook(), new MetricsTelemetryHook(metrics)) });
 //   const orchestrator = new PangolinOrchestrator({ /* …, */ metrics });  // SAME recorder
 //   // read metrics.snapshot() (a /metrics endpoint / Prometheus|OTel adapter is future work)
+//   // Note: runs_completed_total + audit_dropped_appends are recorded at the audit seal, so they
+//   // require an AuditLog; the dispatch + queue/retry/deadline metrics do not.
 ```
 
 - [ ] **Step 8: Run the orchestrator suite + build core**
