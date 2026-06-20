@@ -4,7 +4,7 @@
 // down in `afterEach`, so the suite has zero shared state between cases.
 // Anchors the storage contract that downstream packages will rely on.
 
-import { beforeEach, afterEach, describe, it, expect } from 'vitest';
+import { beforeEach, afterEach, describe, it, expect, vi } from 'vitest';
 import { mkdtemp, rm, writeFile, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -254,6 +254,32 @@ describe('LocalStorageProvider', () => {
 
       const caps = await sp.listNames({ namespace: 'test', type: 'capability' });
       expect(caps.map((n) => n.name)).toEqual(['lint']);
+    });
+
+    it('picks the most-recently-written version on a same-timestamp tie (listNames + resolveLatest)', async () => {
+      // Freeze the clock so both puts register the IDENTICAL `registeredAt` — the
+      // real-world race a fast CI runner hits when two versions land in the same
+      // millisecond. "Latest" must still be the LAST-written version (write order),
+      // never whichever happens to sit at entries[0]. Regression for the flaky
+      // listNames "LATEST version metadata" CI failure.
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+      try {
+        const sp = new LocalStorageProvider({ rootDir });
+        await sp.put('pangolin://test/capability/lint', new TextEncoder().encode('lint-v1'));
+        const { contentHash: latest } = await sp.put(
+          'pangolin://test/capability/lint',
+          new TextEncoder().encode('lint-v2'),
+        );
+
+        const names = await sp.listNames({ namespace: 'test', type: 'capability' });
+        expect(names.find((n) => n.name === 'lint')!.contentHash).toBe(latest);
+
+        const resolved = await sp.resolveLatest('pangolin://test/capability/lint');
+        expect(resolved!.contentHash).toBe(latest);
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 

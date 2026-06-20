@@ -93,6 +93,21 @@ export class LocalStorageProvider implements StorageProvider {
     return this.getBlob(parsed, uri);
   }
 
+  /**
+   * Pick the most-recently-registered entry from an index. Entries are appended
+   * in write order, so on a `registeredAt` tie — two versions written in the same
+   * millisecond, which a fast host hits routinely — the LATER-appended entry wins,
+   * i.e. the true latest. The `>=` (not `>`) is load-bearing: it advances `latest`
+   * across an equal-timestamp run so the last writer wins instead of `entries[0]`.
+   */
+  private pickLatest<T extends { registeredAt: string }>(entries: readonly T[]): T {
+    let latest = entries[0]!;
+    for (const e of entries) {
+      if (e.registeredAt >= latest.registeredAt) latest = e;
+    }
+    return latest;
+  }
+
   async resolveLatest(
     uri: string,
   ): Promise<{ uri: string; contentHash: string; registeredAt: string } | null> {
@@ -104,10 +119,7 @@ export class LocalStorageProvider implements StorageProvider {
     }
     const index = await this.readIndex(this.indexPath(parsed));
     if (index.entries.length === 0) return null;
-    let latest = index.entries[0]!;
-    for (const e of index.entries) {
-      if (e.registeredAt > latest.registeredAt) latest = e;
-    }
+    const latest = this.pickLatest(index.entries);
     return {
       uri: buildPangolinUri({
         namespace: parsed.namespace,
@@ -195,10 +207,7 @@ export class LocalStorageProvider implements StorageProvider {
     for (const name of names) {
       const index = await this.readIndex(join(typeDir, name, '_index.json'));
       if (index.entries.length === 0) continue;
-      let latest = index.entries[0]!;
-      for (const e of index.entries) {
-        if (e.registeredAt > latest.registeredAt) latest = e;
-      }
+      const latest = this.pickLatest(index.entries);
       out.push({ name, contentHash: latest.contentHash, registeredAt: latest.registeredAt });
     }
     return out;
