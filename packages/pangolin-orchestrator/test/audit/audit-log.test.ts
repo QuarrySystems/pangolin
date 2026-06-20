@@ -1,5 +1,5 @@
 // Unit-isolate with INLINE fakes for Signer + AuditAnchor (real impls covered elsewhere).
-import { it, expect } from 'vitest';
+import { it, expect, vi } from 'vitest';
 import { SqliteRunStateStore } from '../../src/runstate/sqlite.js';
 import { AuditLog } from '../../src/audit/audit-log.js';
 import type {
@@ -105,12 +105,57 @@ it('tryAppend counts dropped appends and invokes onDrop; healthy appends keep th
   expect(healthy.droppedAppends).toBe(0);
 });
 
+// Compliance posture: a dropped append (incomplete audit chain) must NEVER be silent. With no
+// onDrop wired, the AuditLog logs a loud completeness warning by default — an operator who forgets
+// to configure surfacing still cannot miss a SOC2 CC7 / EU AI Act Art 12 violation.
+it('tryAppend with no onDrop logs a loud completeness warning by default (never silent)', () => {
+  const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+  try {
+    const log = new AuditLog({ store: failingStore(), signer: fakeSigner, anchor: fakeAnchor() });
+    log.tryAppend({ runId: 'r', kind: 'run.submitted', at: 't0' });
+    expect(log.droppedAppends).toBe(1);
+    expect(spy).toHaveBeenCalledTimes(1);
+    const msg = String(spy.mock.calls[0]![0]);
+    expect(msg).toMatch(/incomplete/i); // names the integrity failure
+    expect(msg).toContain('run.submitted'); // includes the dropped entry kind
+  } finally {
+    spy.mockRestore();
+  }
+});
+
+it('an explicit onDrop overrides the default loud warning (no duplicate logging)', () => {
+  const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+  try {
+    const dropped: string[] = [];
+    const log = new AuditLog({
+      store: failingStore(),
+      signer: fakeSigner,
+      anchor: fakeAnchor(),
+      onDrop: (e: Omit<AuditEntry, 'seq'>) => dropped.push(e.kind),
+    });
+    log.tryAppend({ runId: 'r', kind: 'run.submitted', at: 't0' });
+    expect(dropped).toEqual(['run.submitted']);
+    expect(spy).not.toHaveBeenCalled(); // explicit handler suppresses the default
+  } finally {
+    spy.mockRestore();
+  }
+});
+
 // Trusted-time wiring: a configured timestamper stamps the sealed root; its absence/failure
 // must never abort the seal (best-effort posture mirroring tryAppend).
 it('sealEpoch stores a trusted-time token when a timestamper is configured', async () => {
   const store = new SqliteRunStateStore();
-  const token: TimestampToken = { alg: 'rfc3161', token: new Uint8Array([1, 2, 3]), at: '2026-01-01T00:00:00Z' };
-  const timestamper: TimestampAuthority = { id: 'tsa-fake', async timestamp() { return token; } };
+  const token: TimestampToken = {
+    alg: 'rfc3161',
+    token: new Uint8Array([1, 2, 3]),
+    at: '2026-01-01T00:00:00Z',
+  };
+  const timestamper: TimestampAuthority = {
+    id: 'tsa-fake',
+    async timestamp() {
+      return token;
+    },
+  };
   const log = new AuditLog({ store, signer: fakeSigner, anchor: fakeAnchor(), timestamper });
   log.append({ runId: 'r', kind: 'run.submitted', at: 't0' });
   await log.sealEpoch('r');
@@ -122,17 +167,22 @@ it('sealEpoch survives a throwing timestamper: seal succeeds, timestamp undefine
   const tsaErrors: Error[] = [];
   const timestamper: TimestampAuthority = {
     id: 'tsa-down',
-    async timestamp() { throw new Error('TSA unreachable'); },
+    async timestamp() {
+      throw new Error('TSA unreachable');
+    },
   };
   const log = new AuditLog({
-    store, signer: fakeSigner, anchor: fakeAnchor(), timestamper,
+    store,
+    signer: fakeSigner,
+    anchor: fakeAnchor(),
+    timestamper,
     onTimestampFailure: (err: Error) => tsaErrors.push(err),
   });
   log.append({ runId: 'r', kind: 'run.submitted', at: 't0' });
   const receipt = await log.sealEpoch('r'); // does NOT throw
   expect(receipt.epochId).toBe('r');
-  expect(store.getAuditRoot('r')).toBeDefined();        // seal still durable
+  expect(store.getAuditRoot('r')).toBeDefined(); // seal still durable
   expect(store.getAuditRoot('r')!.timestamp).toBeUndefined();
-  expect(tsaErrors.length).toBe(1);                     // TSA outage surfaced via onTimestampFailure
+  expect(tsaErrors.length).toBe(1); // TSA outage surfaced via onTimestampFailure
   expect(tsaErrors[0]!.message).toBe('TSA unreachable');
 });

@@ -10,6 +10,23 @@ import type {
 import { canonEntry } from './canon.js';
 import { chainHash, merkleRoot, leavesFromEntryHashes } from './merkle.js';
 
+/** Default surfacing when no `onDrop` is wired: a dropped append means the sealed record is
+ *  INCOMPLETE (SOC2 CC7 / EU AI Act Art 12), so it must never be silent. Operators override by
+ *  passing their own `onDrop` (e.g. a metrics counter). */
+function defaultOnDrop(entry: Omit<AuditEntry, 'seq'>, err: Error): void {
+  console.error(
+    `[pangolin audit] DROPPED append — audit chain is INCOMPLETE (SOC2 CC7 / EU AI Act Art 12): ` +
+      `run=${entry.runId} kind=${entry.kind}` +
+      `${entry.itemId ? ` item=${entry.itemId}` : ''}: ${err.message}`,
+  );
+}
+
+/** Default surfacing when no `onTimestampFailure` is wired. A TSA outage is INFORMATIONAL (it only
+ *  forces timeTier='asserted', never a dropped append) but should not pass unnoticed. */
+function defaultOnTimestampFailure(err: Error): void {
+  console.warn(`[pangolin audit] trusted-time (TSA) failed — sealed root is timeTier='asserted': ${err.message}`);
+}
+
 export class AuditLog {
   private _droppedAppends = 0;
 
@@ -53,7 +70,7 @@ export class AuditLog {
       this.append(entry);
     } catch (err) {
       this._droppedAppends++;
-      this.deps.onDrop?.(entry, err as Error);
+      (this.deps.onDrop ?? defaultOnDrop)(entry, err as Error);
     }
   }
 
@@ -69,7 +86,7 @@ export class AuditLog {
       try {
         timestamp = await this.deps.timestamper.timestamp(root);
       } catch (err) {
-        this.deps.onTimestampFailure?.(err as Error);
+        (this.deps.onTimestampFailure ?? defaultOnTimestampFailure)(err as Error);
       }
     }
     const receipt = await this.deps.anchor.anchor({ epochId: runId, root, signature });

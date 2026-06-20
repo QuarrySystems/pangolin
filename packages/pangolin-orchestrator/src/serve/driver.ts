@@ -28,9 +28,16 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
+/** Default surfacing when no `onError` is wired: the serve loop's errors (poison submissions,
+ *  control/publish/scheduler failures) must not vanish silently. Operators override via `onError`. */
+function defaultServeOnError(err: unknown): void {
+  console.error(`[pangolin serve] loop error: ${err instanceof Error ? err.message : String(err)}`);
+}
+
 export async function serve(opts: ServeOptions): Promise<void> {
   const queue = opts.queue ?? 'default';
   const interval = opts.tickIntervalMs ?? 2000;
+  const onError = opts.onError ?? defaultServeOnError;
 
   // Crash recovery: re-ready items left `running` by a crashed process
   opts.orchestrator.recoverStranded(opts.now?.() ?? Date.now());
@@ -49,7 +56,7 @@ export async function serve(opts: ServeOptions): Promise<void> {
           await opts.orchestrator.submitRun(env.run, env.actor, env.submittedAt);
           await opts.transport.ack(env.run.id);      // consume it
         } catch (err) {
-          opts.onError?.(err);
+          onError(err);
           await opts.transport.deadLetter(env.run.id);   // poison -> dead-letter, NOT infinite re-poll
         }
       }
@@ -57,15 +64,15 @@ export async function serve(opts: ServeOptions): Promise<void> {
         try {
           if (ctl.kind === 'cancel') opts.orchestrator.cancelRun(ctl.target, ctl.actor);
           await opts.transport.ackControl?.(ctl.target);
-        } catch (err) { opts.onError?.(err); }
+        } catch (err) { onError(err); }
       }
       if (opts.scheduler) {
         try {
           for (const env of opts.scheduler.dueSubmissions()) {
             try { await opts.transport.submit(env); }
-            catch (err) { opts.onError?.(err); }
+            catch (err) { onError(err); }
           }
-        } catch (err) { opts.onError?.(err); }
+        } catch (err) { onError(err); }
       }
       await opts.orchestrator.tick(queue);
 
@@ -95,7 +102,7 @@ export async function serve(opts: ServeOptions): Promise<void> {
         publishedAudit.add(runId);
       }
     } catch (err) {
-      opts.onError?.(err);
+      onError(err);
     }
 
     await sleep(interval, opts.signal);
