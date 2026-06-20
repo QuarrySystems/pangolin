@@ -129,6 +129,35 @@ flowchart TD
   (log-redacted). Manifests and audit entries record **references only** — so the
   manifest and the evidence bundle are safe to hand an auditor.
 
+## Dispatch lifecycle events
+
+Six events are emitted **in-process by the client** over the course of a single
+dispatch. They are dispatch-level signals — not block-level detail. The six, in
+order:
+
+| Event | When |
+|---|---|
+| `dispatch.accepted` | Names have been resolved; the compute provider is about to start. |
+| `dispatch.started` | The worker container has booted and the runtime adapter is running. |
+| `dispatch.finished` | The task exited cleanly (exit code 0). |
+| `dispatch.failed` | The task exited non-zero, was rejected, or hit a hard error. |
+| `dispatch.needs_input` | The worker wrote `.pangolin/needs_input.json`; awaiting a reply. |
+| `dispatch.cancelled` | A cancel was **requested** (intent) — see note below. |
+
+Events flow to the `TelemetryHook` registered on the client. A missing hook is a
+silent no-op; a throwing hook is caught and logged rather than allowed to break
+the dispatch path.
+
+**Block-level detail** (individual step timings, capability overlay, secret
+resolution, patch upload) lives in the worker's structured stdout stream and in
+the `blocks[]` array inside the sealed audit bundle — not in these events.
+
+**Cancelled-then-terminal nuance.** `dispatch.cancelled` is emitted at cancel
+*intent* — the moment `cancelDispatch` is called — unconditionally and before the
+best-effort provider reap. The actual worker may still settle and emit its own
+real terminal (`dispatch.finished` or `dispatch.failed`) after the SIGTERM grace
+period. Consumers must not assume cancel intent is the last event they will see.
+
 ## See also
 
 - [First offload run](/pangolin/tutorials/first-offload-run/) — operator walkthrough for the orchestrated path.

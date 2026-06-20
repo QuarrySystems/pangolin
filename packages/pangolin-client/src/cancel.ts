@@ -11,6 +11,7 @@
 // are the provider's responsibility — this layer only routes the call.
 
 import type { PangolinClient } from './client.js';
+import { emitLifecycleEvent } from './lifecycle-emit.js';
 import { readDispatchRecord } from './retention.js';
 
 /**
@@ -18,10 +19,15 @@ import { readDispatchRecord } from './retention.js';
  * unconditionally; failures of any participant (storage, credentials,
  * provider) collapse to a silent no-op per §7.6's idempotency contract.
  */
-export async function cancelDispatch(
-  client: PangolinClient,
-  dispatchId: string,
-): Promise<void> {
+export async function cancelDispatch(client: PangolinClient, dispatchId: string): Promise<void> {
+  // `cancelled` reflects the cancel REQUEST (intent), so emit it unconditionally up front — before
+  // the best-effort, possibly-no-op provider reap below. Per the spec's decision (i), the eventual
+  // real terminal (finished/failed) may still fire later when the killed task settles.
+  emitLifecycleEvent(client.telemetry, {
+    kind: 'dispatch.cancelled',
+    dispatchId,
+    at: new Date().toISOString(),
+  });
   const record = await readDispatchRecord(client, dispatchId);
   if (!record) return; // already purged or never existed — no-op
   const targetCfg = client.targets[record.target];
