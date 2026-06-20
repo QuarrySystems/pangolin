@@ -76,7 +76,11 @@ export {
   NoopCredentialProvider,
   NoopTelemetryHook,
   ConsoleTelemetryHook,
+  MetricsTelemetryHook,
 } from './bundled-impls.js';
+
+// ── Telemetry utilities ────────────────────────────────────────────────────
+export { combineTelemetryHooks } from './lifecycle-emit.js';
 
 // ─────────────────────────────────────────────────────────────────────────
 // Namespaced sub-API — wired onto PangolinClient via prototype extension.
