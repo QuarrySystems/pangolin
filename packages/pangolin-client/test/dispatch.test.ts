@@ -1223,3 +1223,99 @@ describe('fireWork — lifecycle telemetry', () => {
     expect(started.providerTaskId).toBe('prov-1');
   });
 });
+
+describe('reconcile / awaitExit — terminal lifecycle events', () => {
+  it('reconcile emits dispatch.finished on a clean exit (incl. a non-zero app exit)', async () => {
+    const events: LifecycleEvent[] = [];
+    const { compute } = makeCompute({ exit: { exitCode: 3 } }); // non-zero APP exit, no failure block
+    const client = makeTelemetryClient(compute, events);
+    const flight = await fireWork(
+      client,
+      { subagent: 's', target: 'prod', workerImage: 'img', input: {} },
+      { defaultDispatchTimeoutSeconds: 60 },
+    );
+    await flight.reconcile(await flight.awaitExit());
+    const terminal = events.find((e) =>
+      ['dispatch.finished', 'dispatch.failed', 'dispatch.needs_input'].includes(e.kind),
+    )!;
+    expect(terminal.kind).toBe('dispatch.finished');
+    expect((terminal as Extract<LifecycleEvent, { kind: 'dispatch.finished' }>).exitCode).toBe(3);
+  });
+
+  it('reconcile emits dispatch.failed when the result carries an infra failure', async () => {
+    const events: LifecycleEvent[] = [];
+    const { compute } = makeCompute();
+    const failingSink: ResultSink = {
+      name: 'fake',
+      async collect(_handle, exit, ctx): Promise<DispatchResult> {
+        return {
+          dispatchId: ctx.dispatchId,
+          exitCode: exit.exitCode,
+          stdout: '',
+          stderr: '',
+          durationMs: 0,
+          resolved: ctx.resolved,
+          failure: { reason: 'timeout', detail: 'provider timed out' },
+        };
+      },
+    };
+    const client = makeTelemetryClient(compute, events, failingSink);
+    const flight = await fireWork(
+      client,
+      { subagent: 's', target: 'prod', workerImage: 'img', input: {} },
+      { defaultDispatchTimeoutSeconds: 60 },
+    );
+    await flight.reconcile(await flight.awaitExit());
+    expect(events.some((e) => e.kind === 'dispatch.failed')).toBe(true);
+    expect(events.some((e) => e.kind === 'dispatch.finished')).toBe(false);
+  });
+
+  it('reconcile emits dispatch.needs_input when the result carries a needsInput sentinel', async () => {
+    const events: LifecycleEvent[] = [];
+    const { compute } = makeCompute();
+    const needsInputSink: ResultSink = {
+      name: 'fake-needs-input',
+      async collect(_handle, exit, ctx): Promise<DispatchResult> {
+        return {
+          dispatchId: ctx.dispatchId,
+          exitCode: exit.exitCode,
+          stdout: '',
+          stderr: '',
+          durationMs: 0,
+          resolved: ctx.resolved,
+          needsInput: { question: 'Which region?', options: ['us-east-1', 'eu-west-1'] },
+        };
+      },
+    };
+    const client = makeTelemetryClient(compute, events, needsInputSink);
+    const flight = await fireWork(
+      client,
+      { subagent: 's', target: 'prod', workerImage: 'img', input: {} },
+      { defaultDispatchTimeoutSeconds: 60 },
+    );
+    await flight.reconcile(await flight.awaitExit());
+    expect(events.some((e) => e.kind === 'dispatch.needs_input')).toBe(true);
+    expect(events.some((e) => e.kind === 'dispatch.finished')).toBe(false);
+  });
+
+  it('awaitExit emits dispatch.failed and rethrows when the provider rejects', async () => {
+    const events: LifecycleEvent[] = [];
+    const compute: ComputeProvider = {
+      name: 'rejecting',
+      async run() {
+        return { providerTaskId: 'prov-x' };
+      },
+      async awaitExit(): Promise<TaskExit> {
+        throw new Error('provider exploded');
+      },
+    };
+    const client = makeTelemetryClient(compute, events);
+    const flight = await fireWork(
+      client,
+      { subagent: 's', target: 'prod', workerImage: 'img', input: {} },
+      { defaultDispatchTimeoutSeconds: 60 },
+    );
+    await expect(flight.awaitExit()).rejects.toThrow('provider exploded');
+    expect(events.some((e) => e.kind === 'dispatch.failed')).toBe(true);
+  });
+});

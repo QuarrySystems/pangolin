@@ -318,8 +318,21 @@ export async function fireWork(
   // ── fire complete: container is running. Bundle the reconcile/cleanup
   //    closures so the caller (blocking dispatchWork, or the orchestrator)
   //    can collect the result whenever the task exits. ────────────────────
-  const awaitExit = (): Promise<TaskExit> =>
-    compute.awaitExit(handle, { credentials, telemetry: client.telemetry });
+  const awaitExit = async (): Promise<TaskExit> => {
+    try {
+      return await compute.awaitExit(handle, { credentials, telemetry: client.telemetry });
+    } catch (err) {
+      // Infra rejection: the orchestrator path never calls our reconcile here, so this is the
+      // only place `failed` can be emitted for a hard provider throw.
+      emitLifecycleEvent(client.telemetry, {
+        kind: 'dispatch.failed',
+        dispatchId,
+        reason: err instanceof Error ? err.message : String(err),
+        at: new Date().toISOString(),
+      });
+      throw err;
+    }
+  };
 
   const reconcile = async (exit: TaskExit): Promise<DispatchResult> => {
     const durationMs = Date.now() - startTime;
@@ -348,6 +361,33 @@ export async function fireWork(
             env: resolvedEnv,
           },
         };
+
+    // Terminal lifecycle event. Honors the failure-vs-exitCode contract: a non-zero APP exit is
+    // `finished` (with its code); only a provider/infra `failure` is `failed`.
+    const at = new Date().toISOString();
+    if (result.failure) {
+      emitLifecycleEvent(client.telemetry, {
+        kind: 'dispatch.failed',
+        dispatchId,
+        reason: result.failure.detail ?? result.failure.reason,
+        at,
+      });
+    } else if (result.needsInput) {
+      emitLifecycleEvent(client.telemetry, {
+        kind: 'dispatch.needs_input',
+        dispatchId,
+        durationMs,
+        at,
+      });
+    } else {
+      emitLifecycleEvent(client.telemetry, {
+        kind: 'dispatch.finished',
+        dispatchId,
+        exitCode: result.exitCode,
+        durationMs,
+        at,
+      });
+    }
 
     // 10. Write the dispatch record (storage-side retention enforcement).
     await writeDispatchRecord(
