@@ -50,11 +50,7 @@ const FAILURE_REASONS = [
 export class StdoutResultSink implements ResultSink {
   readonly name = 'stdout';
 
-  async collect(
-    _handle: TaskHandle,
-    exit: TaskExit,
-    ctx: SinkContext,
-  ): Promise<DispatchResult> {
+  async collect(_handle: TaskHandle, exit: TaskExit, ctx: SinkContext): Promise<DispatchResult> {
     const result: DispatchResult = {
       dispatchId: ctx.dispatchId,
       exitCode: exit.exitCode,
@@ -187,5 +183,20 @@ export class NoopTelemetryHook implements TelemetryHook {
 
   emit(_event: LifecycleEvent): void {
     /* drop */
+  }
+}
+
+/**
+ * Reference `TelemetryHook` that prints each dispatch `LifecycleEvent` as one structured JSON line
+ * to STDERR — not stdout, so it never collides with a command's stdout data (e.g.
+ * `pangolin dispatch run`'s result JSON), matching the repo's operator-output-on-stderr convention.
+ * OPT-IN — the default stays `NoopTelemetryHook`; wire this via the client's `telemetry` option when
+ * you want a live event stream (demos, local runs, piping into a log collector).
+ */
+export class ConsoleTelemetryHook implements TelemetryHook {
+  readonly name = 'console';
+
+  emit(event: LifecycleEvent): void {
+    console.error(JSON.stringify(event));
   }
 }

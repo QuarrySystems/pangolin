@@ -123,6 +123,11 @@ export const client = new PangolinClient({
 
 export default client;
 
+// Live dispatch lifecycle events (opt-in; default drops them). Prints one JSON
+// line per accepted/started/finished/needs_input/failed/cancelled event.
+// import { ConsoleTelemetryHook } from '@quarry-systems/pangolin-client';
+// const client = new PangolinClient({ /* …, */ telemetry: new ConsoleTelemetryHook() });
+
 // Audit + orchestrator setup (import-safe: constructors are lazy / in-memory).
 const store = new SqliteRunStateStore(dbPath);
 process.on('exit', () => { try { store.close(); } catch {} });

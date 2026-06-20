@@ -29,34 +29,19 @@ export { computeInlineSecretTtl } from './secret-ttl.js';
 export { SecretStoreMismatchError } from './errors.js';
 
 // ── Callback HMAC ──────────────────────────────────────────────────────────
-export {
-  mintCallbackHmac,
-  signCallback,
-} from './callback-hmac.js';
+export { mintCallbackHmac, signCallback } from './callback-hmac.js';
 
 // ── Capabilities registration ──────────────────────────────────────────────
-export {
-  registerCapability,
-  type RegisterCapabilityOpts,
-} from './capabilities-register.js';
+export { registerCapability, type RegisterCapabilityOpts } from './capabilities-register.js';
 
 // ── Subagent registration ──────────────────────────────────────────────────
-export {
-  registerSubagent,
-  type RegisterSubagentOpts,
-} from './subagent-register.js';
+export { registerSubagent, type RegisterSubagentOpts } from './subagent-register.js';
 
 // ── Pipeline registration ──────────────────────────────────────────────────
-export {
-  registerPipeline,
-  type PipelineRef,
-} from './pipeline-register.js';
+export { registerPipeline, type PipelineRef } from './pipeline-register.js';
 
 // ── Env registration ───────────────────────────────────────────────────────
-export {
-  registerEnv,
-  type RegisterEnvOpts,
-} from './env-register.js';
+export { registerEnv, type RegisterEnvOpts } from './env-register.js';
 
 // ── Catalog (list / get) ───────────────────────────────────────────────────
 export {
@@ -77,26 +62,20 @@ export {
 } from './dispatch.js';
 
 // ── Describe ──────────────────────────────────────────────────────────────
-export {
-  describeDispatch,
-  DispatchRecordExpiredError,
-} from './describe.js';
+export { describeDispatch, DispatchRecordExpiredError } from './describe.js';
 
 // ── Cancel ────────────────────────────────────────────────────────────────
 export { cancelDispatch } from './cancel.js';
 
 // ── Retention ─────────────────────────────────────────────────────────────
-export {
-  writeDispatchRecord,
-  readDispatchRecord,
-  type DispatchRecord,
-} from './retention.js';
+export { writeDispatchRecord, readDispatchRecord, type DispatchRecord } from './retention.js';
 
 // ── Bundled default implementations ───────────────────────────────────────
 export {
   StdoutResultSink,
   NoopCredentialProvider,
   NoopTelemetryHook,
+  ConsoleTelemetryHook,
 } from './bundled-impls.js';
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -111,14 +90,32 @@ export {
 //   client.dispatch.cancel(id)           — method on the callable
 // ─────────────────────────────────────────────────────────────────────────
 
-import type { CapabilityRef, DispatchResult, SubagentRef, SubagentHandle, PipelineSpec } from '@quarry-systems/pangolin-core';
+import type {
+  CapabilityRef,
+  DispatchResult,
+  SubagentRef,
+  SubagentHandle,
+  PipelineSpec,
+} from '@quarry-systems/pangolin-core';
 import { PangolinClient } from './client.js';
 import { registerCapability, type RegisterCapabilityOpts } from './capabilities-register.js';
-import { listCapabilities, getCapability, listSubagents, getSubagent, listEnvs, getEnv } from './catalog.js';
+import {
+  listCapabilities,
+  getCapability,
+  listSubagents,
+  getSubagent,
+  listEnvs,
+  getEnv,
+} from './catalog.js';
 import { registerSubagent, type RegisterSubagentOpts } from './subagent-register.js';
 import { registerPipeline, type PipelineRef } from './pipeline-register.js';
 import { registerEnv, type RegisterEnvOpts } from './env-register.js';
-import { dispatchWork, fireWork, type ClientDispatchOpts, type InFlightDispatch } from './dispatch.js';
+import {
+  dispatchWork,
+  fireWork,
+  type ClientDispatchOpts,
+  type InFlightDispatch,
+} from './dispatch.js';
 import { describeDispatch } from './describe.js';
 import { cancelDispatch } from './cancel.js';
 import type { DispatchWork } from '@quarry-systems/pangolin-core';

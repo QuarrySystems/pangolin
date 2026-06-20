@@ -5,9 +5,10 @@
 // exposes; they are intentionally synchronous and fire-and-forget so the
 // dispatch path cannot be blocked by a slow observer.
 //
-// Implementations are expected to be cheap and non-throwing. Errors raised
-// inside `emit` are the implementation's responsibility to handle; the
-// runtime does not catch them.
+// Implementations are expected to be cheap and non-throwing. As a safety net the
+// runtime routes every emit through a guarded helper (pangolin-client
+// `emitLifecycleEvent`) that catches and loudly logs a throwing hook rather than
+// letting it break the dispatch path.
 
 import type { LifecycleEvent } from './lifecycle.js';
 
