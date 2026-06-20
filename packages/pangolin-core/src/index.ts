@@ -10,6 +10,7 @@ export * from './content-hash.js';
 export * from './refs.js';
 export * from './lifecycle.js';
 export * from './telemetry.js';
+export * from './metrics.js';
 export * from './channel.js';
 export * from './providers.js';
 export * from './storage.js';
