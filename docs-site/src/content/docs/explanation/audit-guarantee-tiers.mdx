@@ -85,9 +85,18 @@ compares. In order, it:
    **required** for the `tamper-evident` claim: a missing signature or absent
    verifier yields `sigOk: 'n/a'`, which does not fail the structural checks but
    does collapse the claim to `tamper-detecting`.
+6. Checks **provenance closure** of the typed-product handoff — every
+   `manifests[*].inputRefs` value must be a product (`resultRef` or an `outputRefs`
+   value) of a **completed** producer, derived from the *tamper-anchored chain*
+   (the sealed `item.reconciled` entries), never the untrusted `items[]` export
+   rows. A dangling or forged-producer ref fails as `handoff`.
+7. Checks **manifest integrity** — binds every authorization-bearing manifest to a
+   chained `item.fired` ref bidirectionally, purely by content hash, so a
+   rewritten, downgraded, or appended-orphan manifest fails as `manifest`. (This
+   also gates the orthogonal `authzTier` dimension.)
 
-Any of the structural failures (1–4) makes the report `intact: false`, and — this
-is the crux — the report's `claim` collapses to `tamper-detecting` regardless of
+Any of the structural failures (1–4, 6, 7) makes the report `intact: false`, and —
+this is the crux — the report's `claim` collapses to `tamper-detecting` regardless of
 which anchor was configured. A signature that is missing or invalid leaves the
 structure `intact` but still denies the `tamper-evident` claim. Either way, you do
 not get to advertise a strong guarantee for a run that did not fully verify.

@@ -147,6 +147,12 @@ a specific sealed upstream task in the same bundle. A reference to anything
 outside the run — a manually staged file, a leftover from a previous run, a
 ref the orchestrator could not produce — fails closure and fails verify.
 
+The producer side of this check is derived from the **tamper-anchored chain** —
+the sealed `item.reconciled` entries whose `resultRef`/`outputRefs` are covered by
+the Merkle root — never from the bundle's untrusted top-level `items[]` export
+rows. That is what stops a forged export row (`{ status: "done", resultRef: … }`)
+from satisfying a consumed `inputRef`.
+
 In the `pangolin verify` output the new check appears as a fifth row alongside
 the existing four:
 
