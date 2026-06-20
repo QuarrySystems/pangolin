@@ -3,7 +3,9 @@
 // A dispatch is the unit of work submitted to a provider. As it moves
 // through the system, the runtime emits a discriminated-union event for
 // each state transition. Telemetry hooks (see `./telemetry.ts`) consume
-// this stream.
+// this stream. These events are emitted by the client dispatch path (pangolin-client
+// `dispatch.ts` / `cancel.ts`) at each transition, through the guarded
+// `emitLifecycleEvent` helper.
 //
 // The six kinds form a closed taxonomy:
 //   - `dispatch.accepted`     — request validated, capability refs resolved

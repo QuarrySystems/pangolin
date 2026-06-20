@@ -50,6 +50,7 @@ import { computeInlineSecretTtl } from './secret-ttl.js';
 import { mintCallbackHmac } from './callback-hmac.js';
 import { writeDispatchRecord } from './retention.js';
 import { SecretStoreMismatchError } from './errors.js';
+import { emitLifecycleEvent } from './lifecycle-emit.js';
 
 export interface ClientDispatchOpts {
   /** Worker image (digest-pinned) the provider should run. */
@@ -296,18 +297,21 @@ export async function fireWork(
     dispatchId,
   };
 
-  // 8. Run (fire). awaitExit is deferred to the returned InFlightDispatch.
-  const handle = await compute.run(taskSpec, { credentials, telemetry: client.telemetry });
-  const startTime = Date.now();
-  client.telemetry?.emit({
+  // 8. Run (fire). Emit `accepted` (refs resolved, container not yet started) BEFORE run,
+  //    then `started` once the provider returns a handle.
+  emitLifecycleEvent(client.telemetry, {
     kind: 'dispatch.accepted',
     dispatchId,
     target: work.target,
-    // ResolvedRefs is currently typed as CapabilityRef[] (see lifecycle.ts —
-    // the type alias is a forward-reference placeholder). We echo the
-    // capability bundle here; richer shape lands when the placeholder is
-    // refined.
     resolved: resolvedCapabilities,
+    at: new Date().toISOString(),
+  });
+  const handle = await compute.run(taskSpec, { credentials, telemetry: client.telemetry });
+  const startTime = Date.now();
+  emitLifecycleEvent(client.telemetry, {
+    kind: 'dispatch.started',
+    dispatchId,
+    providerTaskId: handle.providerTaskId,
     at: new Date().toISOString(),
   });
 
@@ -513,7 +517,7 @@ async function resolveCapabilityRefs(
   client: PangolinClient,
   refs: Array<string | CapabilityRef>,
 ): Promise<CapabilityRef[]> {
-  const out: CapabilityRef[]= [];
+  const out: CapabilityRef[] = [];
   for (const r of refs) {
     if (typeof r === 'string') {
       const baseUri = buildPangolinUri({
@@ -581,9 +585,7 @@ async function readSubagentCapabilities(
   // no longer resolve (e.g. capability was GC'd) are silently dropped —
   // the dispatch proceeds with the remaining capabilities rather than
   // failing the whole call.
-  const wantedHashes: string[] = def.capabilities.filter(
-    (h): h is string => typeof h === 'string',
-  );
+  const wantedHashes: string[] = def.capabilities.filter((h): h is string => typeof h === 'string');
   if (wantedHashes.length === 0) return [];
   const hits = await Promise.all(
     wantedHashes.map((contentHash) =>
