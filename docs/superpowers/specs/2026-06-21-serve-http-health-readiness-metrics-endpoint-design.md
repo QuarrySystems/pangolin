@@ -20,7 +20,7 @@ Both the telemetry and metrics specs explicitly deferred the HTTP `/metrics` end
 
 1. An **opt-in HTTP server** on `serve()` exposing three routes — `/healthz` (liveness), `/readyz` (readiness), `/metrics` (Prometheus text) — using only Node's built-in `http` (zero new dependencies).
 2. **Heartbeat liveness** that detects a *wedged* loop, not just a dead process: `serve()` records a last-completed-tick timestamp; `/healthz` goes stale (503) when the loop stops progressing.
-3. **Readiness that reflects dependency health** without per-backend probe interfaces: `serve()` also records the last *error-free* tick; `/readyz` degrades (503) when ticks are still running but failing (e.g. S3/SQLite down).
+3. **Readiness that reflects the ability to complete a control tick** without per-backend probe interfaces: `serve()` also records the last *error-free* tick; `/readyz` degrades (503) when ticks are still running but the iteration's dependency-touching work is failing — specifically a SQLite read/write (via `orchestrator.tick`) or a mailbox `publish` throwing. (Note: this is the *control-loop* signal, not a full backend health board — a transient failure inside an individual dispatch is reconciled into item state, not thrown, so it does not by itself flip readiness. See the readiness-nuance note in the Design.)
 4. A pure, dependency-free **Prometheus-text renderer** for `MetricsSnapshot` in `pangolin-core`, reusable by any future exporter.
 5. Wire the endpoint into `deploy/serve-stack` as the first consumer (Dockerfile `EXPOSE` + `HEALTHCHECK`, compose), making the existing container production-grade.
 
@@ -65,7 +65,9 @@ Threading (minimal change to the existing loop):
 - In the loop body, the existing structure is `try { …poll/submit/control/scheduler/tick/publish… } catch (err) { onError(err) }`. Set `health.lastTickOkAt = now()` as the **last statement inside the `try`** (reached only when the iteration's core work — including `orchestrator.tick` and the status `publish` — did not throw). Set `health.lastTickAt = now()` **after** the catch (every completed iteration, success or handled error).
 - The existing **inner** per-envelope / per-control / per-scheduler `catch`es (poison submissions → dead-letter, etc.) are unchanged and do **not** flip `lastTickOkAt`: a poison run must not make the instance "not ready". Only an outer-level failure (a throwing `tick` or `publish` — the dependency-touching operations) degrades readiness.
 
-This reuses the loop's existing error boundary as the dependency-health signal (DRY) — no new probe surface.
+This reuses the loop's existing error boundary as the dependency-health signal (DRY) — no new probe surface. The signal is therefore "can the control loop reach SQLite + the mailbox and finish a tick", not a per-backend health board (a failure *inside* a dispatch is reconciled, not thrown — it does not degrade readiness); the RUNBOOK must state this so `/readyz` is not misread.
+
+**Concurrency:** the `health` record is written by the loop and read by HTTP handlers, but no lock is needed — Node runs JS single-threaded, and both the loop's field writes and a handler's reads are synchronous with no `await` interleaved between them. To keep that invariant robust against future edits, a handler MUST snapshot the three fields into locals at entry (before any branching) rather than re-reading `health.*` across an `await`.
 
 ### The HTTP server (`pangolin-orchestrator/src/serve/http.ts`)
 
@@ -93,6 +95,23 @@ export interface HealthServerHandle {
 export function startHealthServer(opts: HealthServerOptions): Promise<HealthServerHandle>;
 ```
 
+The liveness/readiness **decision** is a pure function, separated from the HTTP plumbing (SRP — mirrors the repo's pure-logic/IO split, e.g. `audit-canon.ts` and `renderPrometheus`), so the load-bearing live-but-not-ready case is testable as a table of inputs without sockets:
+
+```ts
+export interface HealthVerdict {
+  live: boolean;   // false when !started or lastTickAt stale
+  ready: boolean;  // false when !started or lastTickOkAt stale
+  reason: 'starting' | 'stale' | 'not-ready' | 'ok';
+}
+export function evaluateHealth(
+  health: ServeHealth,
+  now: number,
+  t: { livenessTimeoutMs: number; readinessTimeoutMs: number },
+): HealthVerdict;
+```
+
+The HTTP handlers call `evaluateHealth` and map its verdict to status codes/bodies below; the listener tests then only cover HTTP plumbing (codes, methods, content-type, `/metrics`).
+
 Routes (all GET; any other method → `405`; unknown path → `404`):
 
 | Route | Condition | Status | Body (JSON unless noted) |
@@ -107,7 +126,7 @@ Routes (all GET; any other method → `405`; unknown path → `404`):
 | | provider throws | `500` | `{status:'error'}` (logged to stderr) |
 | | otherwise | `200` | Prometheus text, `Content-Type: text/plain; version=0.0.4` |
 
-- Every handler is wrapped so it **never throws out of the server**; an unexpected internal error returns `500` and is logged `[pangolin serve-http] handler error: <msg>` to stderr (repo's operator-output-on-stderr convention).
+- Every handler is wrapped so it **never throws out of the server**; an unexpected internal error returns `500` and is logged `[pangolin serve] http handler error: <msg>` to stderr (reusing the existing `[pangolin serve]` prefix — the HTTP server is part of the serve seam, not a new namespace — matching the repo's one-prefix-per-seam convention alongside `[pangolin metrics]` / `[pangolin telemetry]`).
 - `startHealthServer` **rejects** on a bind failure (e.g. `EADDRINUSE`) so a misconfigured deploy fails fast and visibly — a serve container whose health port cannot bind is broken (its `HEALTHCHECK` would never pass).
 
 ### Integration in `serve()`
@@ -128,6 +147,12 @@ When `opts.http` is set, `serve()` starts the HTTP server **immediately after in
 
 The `metricsSnapshot` provider is supplied by the integrator as `() => recorder.snapshot()`, using the **same** shared `InMemoryMetricsRecorder` already wired to client telemetry and the orchestrator (the established "one shared recorder" pattern from the metrics spec). The HTTP server depends only on the snapshot shape, not on any concrete recorder.
 
+### The series-key format contract (`pangolin-core`) — single-sourced
+
+The recorder builds a series key with the private `seriesKey(name, labels)` helper (`metrics-in-memory.ts`) as `name` or `name{k="v",…}` (labels sorted, **no escaping** — documented assumption: label values are simple identifiers, only `outcome`/`queue`). The renderer must do the *inverse* — recover bare-name + labels to emit one `# TYPE` line per family and to inject `le` into histogram buckets. Two functions encoding/decoding one wire format is a DRY/coupling risk (if escaping is ever added to the builder, a naïve split-on-`{` parser silently corrupts output).
+
+**Resolution:** promote the format to a single-sourced, tested contract. Export `seriesKey(name, labels)` and add its inverse `parseSeriesKey(key): { name: string; labels: Record<string,string> }` **beside it** (same module, or a small shared `metrics-series-key.ts`); `renderPrometheus` consumes `parseSeriesKey`. A round-trip unit test asserts `parseSeriesKey(seriesKey(n, l))` deep-equals `{ name: n, labels: l }`, so the inverse can never drift from the builder. The "no-escaping / simple-identifier label values" invariant is documented on both functions.
+
 ### The Prometheus renderer (`pangolin-core/src/metrics-prometheus.ts`)
 
 A pure function, dependency-free, exported from the core index:
@@ -138,39 +163,42 @@ export function renderPrometheus(snapshot: MetricsSnapshot): string;
 
 Rules (Prometheus text exposition format, version 0.0.4):
 
-- A `# TYPE <bare-name> <counter|gauge|histogram>` line is emitted **once per metric family**, keyed by the *bare* metric name. The snapshot's series keys are either `name` or `name{k="v",…}`; the bare name is the substring before `{`. Counters, gauges, and histograms are grouped so each family's TYPE line appears exactly once even across multiple label-series.
+- A `# TYPE <bare-name> <counter|gauge|histogram>` line is emitted **once per metric family**, keyed by the *bare* metric name (obtained via `parseSeriesKey`, not an ad-hoc split). Counters, gauges, and histograms are grouped so each family's TYPE line appears exactly once even across multiple label-series. (Bare names are unique per type in the current metric set; the renderer does not attempt to reconcile a name colliding across two type maps — not a real case, and forcing it would mask a naming bug.)
 - **Counters / gauges:** one line per series — `<seriesKey> <value>` (the seriesKey already carries any labels).
-- **Histograms:** for each histogram series `{count, sum, buckets}` (where `buckets` maps an `le`-bound string → cumulative count):
-  - one `<name>_bucket{<labels>,le="<bound>"} <cumulativeCount>` line per bound, in ascending bound order, **plus** a `<name>_bucket{<labels>,le="+Inf"} <count>` line;
+- **Histograms:** for each histogram series `{count, sum, buckets}` (where `buckets` maps an `le`-bound string → cumulative count, e.g. `"0.5"`, `"1"`, `"10"` — verbatim from the recorder's `String(bound)`):
+  - one `<name>_bucket{<labels>,le="<bound>"} <cumulativeCount>` line per bound, in ascending **numeric** bound order, **plus** a `<name>_bucket{<labels>,le="+Inf"} <count>` line;
   - a `<name>_sum{<labels>} <sum>` line and a `<name>_count{<labels>} <count>` line.
-  - Label injection: given a series key `name{a="1"}` and an extra `le="0.5"`, the bucket line is `name_bucket{a="1",le="0.5"}`; for an unlabeled series `name`, it is `name_bucket{le="0.5"}`. `_sum`/`_count` carry the series' original labels (no `le`).
+  - Label injection via `parseSeriesKey`: given a series key `name{a="1"}` and an extra `le="0.5"`, the bucket line is `name_bucket{a="1",le="0.5"}`; for an unlabeled series `name`, it is `name_bucket{le="0.5"}`. `_sum`/`_count` carry the series' original labels (no `le`).
+- **Non-finite values:** any numeric value (a gauge, a histogram `_sum`, etc.) that is non-finite renders as the Prometheus literals `+Inf` / `-Inf` / `NaN` — **never** JS `String(Infinity)` (`"Infinity"`), which is invalid exposition format and would cause a scraper to reject the entire scrape.
 - Deterministic output: families in insertion order of the snapshot maps; histogram bounds in ascending numeric order with `+Inf` last. An empty snapshot renders to an empty string.
 
 Rationale for core placement: the renderer depends only on `MetricsSnapshot` (already core) and produces a string — no new dependency — keeping the snapshot and its canonical text rendering together and unit-testable in core, reusable by a future standalone exporter. Heavier OTel/`prom-client` adapters stay out of core.
 
 ### `deploy/serve-stack` wiring (first consumer)
 
-- **`serve-entrypoint.mjs`** — read `PANGOLIN_HTTP_PORT` (default `9464`), and pass `http: { port, metricsSnapshot: () => recorder.snapshot() }` into `serve()`, using the config's shared metrics recorder. (The metrics recorder is added to the deploy config alongside the existing client/orchestrator wiring.)
-- **`Dockerfile`** — add `EXPOSE 9464` and a `HEALTHCHECK` that probes `/healthz` using Node itself (no `curl`/`wget` in `node:20-slim`):
+- **`serve-entrypoint.mjs` + `pangolin.config.mjs`** — the deploy config does **not** construct a metrics recorder today (no `metrics:`/telemetry wiring exists in `deploy/serve-stack/pangolin.config.mjs`). This change **adds** a shared `InMemoryMetricsRecorder`, wires it to the orchestrator (`metrics:`) and — to populate dispatch metrics — to the client telemetry (`telemetry: combineTelemetryHooks(new MetricsTelemetryHook(recorder), …)`), then the entrypoint reads `PANGOLIN_HTTP_PORT` (default `9464`) and passes `http: { port, metricsSnapshot: () => recorder.snapshot() }` into `serve()` — the same recorder feeding all three.
+- **`Dockerfile`** — add `EXPOSE 9464` and a `HEALTHCHECK` that probes `/healthz` using Node itself (no `curl`/`wget` in `node:20-slim`). **Also update the file's existing header comment** "No EXPOSE — the serve container opens no inbound port" (and the matching `docker-compose.yml` "No `ports:` — serve exposes no inbound port" comment) — these now contradict the change; leaving them is exactly the stale-comment drift the repo's audit history repeatedly flags:
   ```dockerfile
   HEALTHCHECK --interval=15s --timeout=3s --start-period=30s --retries=3 \
     CMD node -e "fetch('http://127.0.0.1:'+(process.env.PANGOLIN_HTTP_PORT||9464)+'/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
   ```
   (`start-period` covers startup before the first tick, when `/healthz` returns `503 starting`.)
-- **`docker-compose.yml`** — the `serve` service relies on the image `HEALTHCHECK` (or an equivalent compose `healthcheck:` block). The metrics port is **not published to the host** — within the compose network a Prometheus scraper reaches `serve:9464` by service name. Document the trusted-interface expectation: do not expose `/metrics` to the public internet; for laptop access use the existing SSH tunnel rather than a host port.
+- **`docker-compose.yml`** — the `serve` service relies on the image `HEALTHCHECK` (or an equivalent compose `healthcheck:` block). The container `HEALTHCHECK` **intentionally probes only `/healthz`**, never `/readyz`: driving container restarts off readiness would reintroduce the dependency-outage restart storm this design exists to avoid. `/readyz` is for a load-balancer/scraper to pull the instance from rotation, not for Docker to restart it. The metrics port is **not published to the host** — within the compose network a Prometheus scraper reaches `serve:9464` by service name. Document the trusted-interface expectation: do not expose `/metrics` to the public internet; for laptop access use the existing SSH tunnel rather than a host port.
 - **`RUNBOOK.md`** — document the three routes, the liveness-vs-readiness distinction (a red `/readyz` with green `/healthz` means "deps unreachable, not a wedged loop — do not restart, investigate S3/SQLite"), the port, and the no-auth/trusted-interface posture.
 
 ## Error handling
 
 - Handlers never throw out of the server (wrapped → `500` + stderr log). A throwing `metricsSnapshot` provider yields `500` on `/metrics` only; the server stays up.
 - `startHealthServer` rejects on bind failure → `serve()` propagates it (fail fast at startup; an unbindable health port is a misconfiguration the operator must see).
-- The HTTP server is closed on serve shutdown (signal abort) via `finally`.
+- The HTTP server is closed on serve shutdown (signal abort) via `finally`. `close()` must stay prompt under SIGTERM: `http.Server.close()` only resolves once existing (keep-alive) connections drain, so `close()` also calls `server.closeIdleConnections()` (present on `node:20`) — a lingering scraper keep-alive must not stall shutdown.
 - Liveness keys off `lastTickAt`, readiness off `lastTickOkAt` — never swapped — to avoid dependency-outage restart storms.
 
 ## Testing plan
 
-- **`renderPrometheus` (core):** counters and gauges (with and without labels); a histogram renders `_bucket` lines (cumulative, ascending, `+Inf` = count) + `_sum` + `_count`; `# TYPE` appears exactly once per family even with multiple label-series; label injection puts `le` last; an empty snapshot → empty string; output is deterministic.
-- **`startHealthServer` (orchestrator):** drive a hand-built `ServeHealth` + injected `now`. Assert `/healthz` = `200` when `lastTickAt` fresh, `503 stale` when old, `503 starting` when `!started`; `/readyz` keyed off `lastTickOkAt` **independently** of `lastTickAt` — the load-bearing case: `lastTickAt` fresh but `lastTickOkAt` stale → `/healthz 200` **and** `/readyz 503` (live but not ready); `/metrics` renders a provided snapshot, `404` with no provider, `500` when the provider throws; unknown path → `404`; non-GET → `405`. Use a real listener on port `0` (ephemeral) + global `fetch`.
+- **`parseSeriesKey` round-trip (core):** `parseSeriesKey(seriesKey(n, l))` deep-equals `{ name: n, labels: l }` across no-label and multi-label cases — locks the inverse to the builder so the format can't drift.
+- **`evaluateHealth` (core/orchestrator, pure):** table of inputs — `!started` → `{live:false, ready:false, reason:'starting'}`; fresh both → `ok`; `lastTickAt` stale → `live:false reason:'stale'`; **`lastTickAt` fresh but `lastTickOkAt` stale → `{live:true, ready:false, reason:'not-ready'}`** (the load-bearing live-but-not-ready case, tested without a socket).
+- **`renderPrometheus` (core):** counters and gauges (with and without labels); a histogram renders `_bucket` lines (cumulative, ascending, `+Inf` = count) + `_sum` + `_count`; `# TYPE` appears exactly once per family even with multiple label-series; label injection puts `le` last; **non-finite values render as `+Inf`/`-Inf`/`NaN`, never `"Infinity"`**; an empty snapshot → empty string; output is deterministic.
+- **`startHealthServer` (orchestrator):** HTTP plumbing over a real listener on port `0` (ephemeral) + global `fetch` — `/healthz` maps `evaluateHealth` verdicts to `200`/`503 stale`/`503 starting`; `/readyz` maps to `200`/`503 not-ready`/`503 starting`; `/metrics` renders a provided snapshot, `404` with no provider, `500` when the provider throws; unknown path → `404`; non-GET → `405`. (The verdict *logic* is covered by the `evaluateHealth` table above; these tests assert the HTTP mapping only.)
 - **`serve()` integration:** with the `http` option, a fake transport, and an injected clock, assert `started` flips after the first tick and `lastTickAt`/`lastTickOkAt` advance per iteration; an iteration whose `tick` throws advances `lastTickAt` but **not** `lastTickOkAt` (readiness degrades while liveness holds — the core semantic); the server closes when the signal aborts.
 
 ## Risks / edge cases
