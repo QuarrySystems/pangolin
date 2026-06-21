@@ -359,18 +359,18 @@ The liveness/readiness decision is a pure function of the heartbeat record, sepa
 
 **Files:**
 - Create: `packages/pangolin-orchestrator/src/serve/http.ts`
-- Create: `packages/pangolin-orchestrator/test/serve/health-eval.test.ts`
+- Create: `packages/pangolin-orchestrator/test/serve-health-eval.test.ts`
 - Modify: `packages/pangolin-orchestrator/src/index.ts:18-19` (export the new types + function alongside `serve`)
 
 **Interfaces:**
 - Consumes: nothing new.
 - Produces: `interface ServeHealth { started: boolean; lastTickAt: number; lastTickOkAt: number }`; `interface HealthVerdict { live: boolean; ready: boolean; reason: 'starting'|'stale'|'not-ready'|'ok' }`; `function evaluateHealth(health: ServeHealth, now: number, t: { livenessTimeoutMs: number; readinessTimeoutMs: number }): HealthVerdict`.
 
-- [ ] **Step 1: Write the failing test** — `packages/pangolin-orchestrator/test/serve/health-eval.test.ts`
+- [ ] **Step 1: Write the failing test** — `packages/pangolin-orchestrator/test/serve-health-eval.test.ts`
 
 ```typescript
 import { describe, it, expect } from 'vitest';
-import { evaluateHealth, type ServeHealth } from '../../src/serve/http.js';
+import { evaluateHealth, type ServeHealth } from '../src/serve/http.js';
 
 const T = { livenessTimeoutMs: 100, readinessTimeoutMs: 100 };
 
@@ -400,7 +400,7 @@ describe('evaluateHealth', () => {
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `pnpm --filter @quarry-systems/pangolin-orchestrator exec vitest run test/serve/health-eval.test.ts`
+Run: `pnpm --filter @quarry-systems/pangolin-orchestrator exec vitest run test/serve-health-eval.test.ts`
 Expected: FAIL — `serve/http.js` does not exist.
 
 - [ ] **Step 3: Create `serve/http.ts` with the types + predicate**
@@ -447,7 +447,7 @@ export function evaluateHealth(
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `pnpm --filter @quarry-systems/pangolin-orchestrator exec vitest run test/serve/health-eval.test.ts`
+Run: `pnpm --filter @quarry-systems/pangolin-orchestrator exec vitest run test/serve-health-eval.test.ts`
 Expected: PASS (4 tests).
 
 - [ ] **Step 5: Export from the orchestrator barrel** — `packages/pangolin-orchestrator/src/index.ts`
@@ -462,7 +462,7 @@ export type { ServeHealth, HealthVerdict } from './serve/http.js';
 - [ ] **Step 6: Commit**
 
 ```bash
-git add packages/pangolin-orchestrator/src/serve/http.ts packages/pangolin-orchestrator/test/serve/health-eval.test.ts packages/pangolin-orchestrator/src/index.ts
+git add packages/pangolin-orchestrator/src/serve/http.ts packages/pangolin-orchestrator/test/serve-health-eval.test.ts packages/pangolin-orchestrator/src/index.ts
 git commit -m "feat(serve): ServeHealth + pure evaluateHealth liveness/readiness predicate"
 ```
 
@@ -474,14 +474,14 @@ Add the Node-`http` server to `serve/http.ts`. It maps `evaluateHealth` verdicts
 
 **Files:**
 - Modify: `packages/pangolin-orchestrator/src/serve/http.ts` (append the server below the predicate)
-- Create: `packages/pangolin-orchestrator/test/serve/http-server.test.ts`
+- Create: `packages/pangolin-orchestrator/test/serve-http-server.test.ts`
 - Modify: `packages/pangolin-orchestrator/src/index.ts` (export `startHealthServer` + its option/handle types)
 
 **Interfaces:**
 - Consumes: `ServeHealth`, `evaluateHealth` (Task 3); `MetricsSnapshot`, `renderPrometheus` (Task 2, from `@quarry-systems/pangolin-core`).
 - Produces: `interface HealthServerOptions { port: number; host?: string; health: ServeHealth; livenessTimeoutMs: number; readinessTimeoutMs: number; now: () => number; metricsSnapshot?: () => MetricsSnapshot }`; `interface HealthServerHandle { close(): Promise<void>; readonly port: number }`; `function startHealthServer(opts: HealthServerOptions): Promise<HealthServerHandle>`.
 
-- [ ] **Step 1: Write the failing test** — `packages/pangolin-orchestrator/test/serve/http-server.test.ts`
+- [ ] **Step 1: Write the failing test** — `packages/pangolin-orchestrator/test/serve-http-server.test.ts`
 
 ```typescript
 import { describe, it, expect, afterEach } from 'vitest';
@@ -489,7 +489,7 @@ import {
   startHealthServer,
   type HealthServerHandle,
   type ServeHealth,
-} from '../../src/serve/http.js';
+} from '../src/serve/http.js';
 import type { MetricsSnapshot } from '@quarry-systems/pangolin-core';
 
 let handle: HealthServerHandle | undefined;
@@ -565,7 +565,7 @@ describe('startHealthServer', () => {
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `pnpm --filter @quarry-systems/pangolin-orchestrator exec vitest run test/serve/http-server.test.ts`
+Run: `pnpm --filter @quarry-systems/pangolin-orchestrator exec vitest run test/serve-http-server.test.ts`
 Expected: FAIL — `startHealthServer` is not exported.
 
 - [ ] **Step 3: Append the server to `serve/http.ts`**
@@ -689,7 +689,7 @@ export function startHealthServer(opts: HealthServerOptions): Promise<HealthServ
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `pnpm --filter @quarry-systems/pangolin-orchestrator exec vitest run test/serve/http-server.test.ts`
+Run: `pnpm --filter @quarry-systems/pangolin-orchestrator exec vitest run test/serve-http-server.test.ts`
 Expected: PASS (4 tests).
 
 - [ ] **Step 5: Export from the orchestrator barrel** — `packages/pangolin-orchestrator/src/index.ts`
@@ -704,7 +704,7 @@ export type { HealthServerOptions, HealthServerHandle } from './serve/http.js';
 - [ ] **Step 6: Commit**
 
 ```bash
-git add packages/pangolin-orchestrator/src/serve/http.ts packages/pangolin-orchestrator/test/serve/http-server.test.ts packages/pangolin-orchestrator/src/index.ts
+git add packages/pangolin-orchestrator/src/serve/http.ts packages/pangolin-orchestrator/test/serve-http-server.test.ts packages/pangolin-orchestrator/src/index.ts
 git commit -m "feat(serve): startHealthServer — /healthz /readyz /metrics over node:http"
 ```
 
@@ -716,18 +716,18 @@ Add the opt-in `http` option to `ServeOptions`, record the heartbeat each iterat
 
 **Files:**
 - Modify: `packages/pangolin-orchestrator/src/serve/driver.ts`
-- Create: `packages/pangolin-orchestrator/test/serve/driver-http.test.ts`
+- Create: `packages/pangolin-orchestrator/test/serve-driver-http.test.ts`
 
 **Interfaces:**
 - Consumes: `startHealthServer`, `ServeHealth`, `HealthServerHandle` (Task 4, from `./http.js`); `MetricsSnapshot` (core).
 - Produces: `ServeOptions.http?: { port: number; host?: string; livenessTimeoutMs?: number; readinessTimeoutMs?: number; metricsSnapshot?: () => MetricsSnapshot }`.
 
-- [ ] **Step 1: Write the failing test** — `packages/pangolin-orchestrator/test/serve/driver-http.test.ts`
+- [ ] **Step 1: Write the failing test** — `packages/pangolin-orchestrator/test/serve-driver-http.test.ts`
 
 ```typescript
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { createServer } from 'node:http';
-import { serve } from '../../src/serve/driver.js';
+import { serve } from '../src/serve/driver.js';
 
 /** Find a free TCP port by binding :0, reading it, and releasing it. */
 function freePort(): Promise<number> {
@@ -837,7 +837,7 @@ describe('serve() HTTP integration', () => {
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `pnpm --filter @quarry-systems/pangolin-orchestrator exec vitest run test/serve/driver-http.test.ts`
+Run: `pnpm --filter @quarry-systems/pangolin-orchestrator exec vitest run test/serve-driver-http.test.ts`
 Expected: FAIL — `ServeOptions` has no `http` field / no server is started (the first two tests' fetches never reach 200).
 
 - [ ] **Step 3: Add the `http` option to `ServeOptions`** — `packages/pangolin-orchestrator/src/serve/driver.ts`
@@ -982,11 +982,11 @@ Replace the whole function body (the current lines 38-110, from `const queue = �
   }
 ```
 
-> Note: this preserves the existing loop logic verbatim; the only additions are the `now()` helper (replacing the two inline `opts.now?.() ?? Date.now()` uses at the old lines 43 and 79), the `health` record + its three assignments, the `startHealthServer` call, and the `try/finally` wrapping that closes the server on exit or startup throw.
+> Note: this preserves the existing loop logic verbatim; the only additions are the `now()` helper (replacing the two inline `opts.now?.() ?? Date.now()` uses at the old lines 43 and 79), the `health` record + its three assignments, the `startHealthServer` call, and the `try/finally` wrapping. The server is started **before** the `try`, so the `finally` closes it when the loop exits or when `recoverStranded`/the reconcile-first tick throws — but a `startHealthServer` **bind failure** rejects before the server is ever tracked, so it correctly propagates (fail-fast) without a dangling listener.
 
 - [ ] **Step 5: Run the integration test to verify it passes**
 
-Run: `pnpm --filter @quarry-systems/pangolin-orchestrator exec vitest run test/serve/driver-http.test.ts`
+Run: `pnpm --filter @quarry-systems/pangolin-orchestrator exec vitest run test/serve-driver-http.test.ts`
 Expected: PASS (3 tests).
 
 - [ ] **Step 6: Run the full orchestrator suite (no regressions in the existing serve tests)**
@@ -997,7 +997,7 @@ Expected: PASS (existing serve/driver tests plus the new health/http tests).
 - [ ] **Step 7: Commit**
 
 ```bash
-git add packages/pangolin-orchestrator/src/serve/driver.ts packages/pangolin-orchestrator/test/serve/driver-http.test.ts
+git add packages/pangolin-orchestrator/src/serve/driver.ts packages/pangolin-orchestrator/test/serve-driver-http.test.ts
 git commit -m "feat(serve): thread heartbeat + opt-in HTTP endpoint through serve()"
 ```
 
@@ -1016,7 +1016,7 @@ Make the existing serve container the first consumer: a shared metrics recorder 
 - Modify: `deploy/serve-stack/RUNBOOK.md` (document the three routes + posture)
 
 **Interfaces:**
-- Consumes: `InMemoryMetricsRecorder` (core), `MetricsTelemetryHook` (client), `serve` + the `http` option (Task 5).
+- Consumes: `InMemoryMetricsRecorder` (core), `MetricsTelemetryHook` + `combineTelemetryHooks` (client), `serve` + the `http` option (Task 5).
 - Produces: `orch.metrics` — the shared `InMemoryMetricsRecorder` instance (so the entrypoint can build `() => orch.metrics.snapshot()`).
 
 - [ ] **Step 1: Write the failing verification check** — `deploy/serve-stack/check-metrics-wiring.mjs`
@@ -1047,12 +1047,18 @@ console.log('ok: orch.metrics.snapshot() shape verified');
 Run: `node deploy/serve-stack/check-metrics-wiring.mjs`
 Expected: FAIL — `orch.metrics` is `undefined` (`Cannot read properties of undefined (reading 'snapshot')`).
 
-- [ ] **Step 3: Add the core dependency** — `deploy/serve-stack/package.json`
+- [ ] **Step 3: Add the core dependency + the wiring-check script** — `deploy/serve-stack/package.json`
 
 In `dependencies`, add (keep alphabetical-ish with the other `@quarry-systems/*` entries):
 
 ```json
     "@quarry-systems/pangolin-core": "workspace:*",
+```
+
+And in `scripts`, add the wiring check beside `smoke` so it is discoverable/runnable (not an orphan file):
+
+```json
+    "check:metrics-wiring": "node check-metrics-wiring.mjs"
 ```
 
 Then refresh the workspace link:
@@ -1068,10 +1074,10 @@ Expected: exits 0 (adds the workspace link; no lockfile churn beyond the new dep
 import { InMemoryMetricsRecorder } from '@quarry-systems/pangolin-core';
 ```
 
-(b) Extend the client import (line 25) to also bring in the metrics hook:
+(b) Extend the client import (line 25) to also bring in the metrics hook + the combinator:
 
 ```javascript
-import { PangolinClient, NoopCredentialProvider, StdoutResultSink, MetricsTelemetryHook } from '@quarry-systems/pangolin-client';
+import { PangolinClient, NoopCredentialProvider, StdoutResultSink, MetricsTelemetryHook, combineTelemetryHooks } from '@quarry-systems/pangolin-client';
 ```
 
 (c) Construct the shared recorder at module level — add immediately after the `workerImage` const (line 62):
@@ -1085,8 +1091,10 @@ const metrics = new InMemoryMetricsRecorder();
 (d) Add `telemetry` to the `PangolinClient` config — inside `new PangolinClient({ … })`, after the `resultSink:` line:
 
 ```javascript
-  // Dispatch-lifecycle metrics: the lifecycle stream → the shared recorder.
-  telemetry: new MetricsTelemetryHook(metrics),
+  // Dispatch-lifecycle metrics: the lifecycle stream → the shared recorder. Wrapped in
+  // combineTelemetryHooks (per spec) so adding a second hook (e.g. ConsoleTelemetryHook) later
+  // never silently overwrites this one — a single-slot telemetry field otherwise would.
+  telemetry: combineTelemetryHooks(new MetricsTelemetryHook(metrics)),
 ```
 
 (e) Pass `metrics` to the orchestrator — in `createOrchestrator()`, in the `new PangolinOrchestrator({ … })` call, after `auditLog,`:
@@ -1179,6 +1187,8 @@ Replace the stale comment at line 161 (`# No `ports:` — serve exposes no inbou
 
 Run: `pnpm -r build && node deploy/serve-stack/check-metrics-wiring.mjs`
 Expected: build exits 0; check prints `ok: orch.metrics.snapshot() shape verified`.
+
+> Note: this check verifies the recorder is *exposed* on `orch.metrics`. The orchestrator actually *consuming* it (Step 4e's `metrics,` in `new PangolinOrchestrator({…})`) is verified by `pnpm -r typecheck` + manual review + the final e2e (which exercises the dispatch path) — `createOrchestrator()` opens SQLite, so the check script intentionally does not call it.
 
 - [ ] **Step 10: Document the endpoint** — `deploy/serve-stack/RUNBOOK.md`
 
