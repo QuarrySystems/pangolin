@@ -1783,6 +1783,40 @@ describe('DispatchExecutor', () => {
     });
   });
 
+  // -------------------------------------------------------------------------
+  // Task 5: trace delegation — orchestrator passes trace from runId/itemId
+  // -------------------------------------------------------------------------
+
+  it('passes trace { traceId: runId, runId, itemId } into client.dispatch.fire when a runId is present', async () => {
+    const { compute, resolveExit } = makeDeferredCompute();
+    const { client, executor } = makeSetup(compute);
+    const captured = captureDispatchFire(client);
+    await executor.fire(baseItem, { runId: 'run-3', actor: 'human:t' });
+    expect(captured.work?.trace).toEqual({ traceId: 'run-3', runId: 'run-3', itemId: 'a' });
+    resolveExit({
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+      startedAt: new Date(0),
+      finishedAt: new Date(1),
+    });
+  });
+
+  it('omits trace entirely when there is no runId (client then defaults traceId = dispatchId)', async () => {
+    const { compute, resolveExit } = makeDeferredCompute();
+    const { client, executor } = makeSetup(compute);
+    const captured = captureDispatchFire(client);
+    await executor.fire(baseItem);
+    expect(captured.work?.trace).toBeUndefined();
+    resolveExit({
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+      startedAt: new Date(0),
+      finishedAt: new Date(1),
+    });
+  });
+
   it('fetches the subagent def blob exactly once from the executor — pre-fire, no post-fire duplicate', async () => {
     const capturedTaskSpecs: import('@quarry-systems/pangolin-core').TaskSpec[] = [];
     const { compute: baseCompute, resolveExit } = makeDeferredCompute();

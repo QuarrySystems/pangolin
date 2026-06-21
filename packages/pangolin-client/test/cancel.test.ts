@@ -334,7 +334,12 @@ describe('cancelDispatch', () => {
     });
     await cancelDispatch(client, 'd-123'); // unknown id → no-op reap, but intent is observable
     expect(events).toEqual([
-      { kind: 'dispatch.cancelled', dispatchId: 'd-123', at: expect.any(String) },
+      {
+        kind: 'dispatch.cancelled',
+        dispatchId: 'd-123',
+        at: expect.any(String),
+        trace: { traceId: 'd-123' },
+      },
     ]);
   });
 });

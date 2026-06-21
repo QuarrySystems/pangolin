@@ -203,6 +203,16 @@ The worker emits a `verify.ran` event:
 The vocabulary is intentionally closed. Future kinds would require an ADR
 amendment (see [ADR-0004 — lifecycle vocabulary closed at six](/pangolin/explanation/decisions/0004-lifecycle-vocabulary-closed-at-six/)).
 
+### Correlation: the optional `trace` field
+
+Every lifecycle event also carries an optional `trace` object — `{ traceId, runId?, itemId? }` —
+so a consumer can follow one logical unit of work across the layers without joining against the
+dispatch record. `traceId` is always present: for a dispatch fired as part of an orchestrated run it
+is the `runId` (with `runId`/`itemId` also set); for a standalone `client.dispatch` it defaults to the
+`dispatchId` (a single-dispatch trace). The same `trace` is stamped into the dispatch record. These ids
+live only on the telemetry/audit streams — they are deliberately kept out of metric labels
+(bounded-cardinality). This is correlation only — not OpenTelemetry span export.
+
 Ordered across the worker's steps, the six events and the four
 `dispatch.failed` reason branch points look like this:
 

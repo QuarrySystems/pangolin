@@ -15,14 +15,9 @@
 // env bytes ran — `name`-only identity is not enough once a registry
 // allows mutable updates.
 
-import type {
-  CapabilityRef,
-  SubagentRef,
-  EnvRef,
-  InlineSecret,
-  SecretRef,
-} from './refs.js';
+import type { CapabilityRef, SubagentRef, EnvRef, InlineSecret, SecretRef } from './refs.js';
 import type { LifecycleEvent } from './lifecycle.js';
+import type { TraceContext } from './trace.js';
 
 /**
  * Webhook subscription for a slice of the lifecycle event stream. The
@@ -61,6 +56,9 @@ export interface DispatchWork {
   /** Authorized model level or provider-native id. See interface doc for grammar. */
   model?: string;
   dispatchId?: string;
+  /** Correlation context for the telemetry stream. The orchestrator sets `{ traceId: runId, runId,
+   *  itemId }`; a standalone caller may omit it (the client defaults `{ traceId: dispatchId }`). */
+  trace?: TraceContext;
   callback?: { url: string; signatureAlgorithm?: 'sha256' };
   notifications?: NotificationConfig[];
   secrets?: Record<string, SecretRef | InlineSecret>;
