@@ -179,10 +179,18 @@ client.dispatch.cancel(dispatchId: string): Promise<void>
 `defaultDispatchTimeoutSeconds?: number`; the remaining fields (`subagent`,
 `target`, `env`, `input`, `capabilities`, `addCapabilities`, `secrets`,
 `callback`, `timeoutSeconds`, `retentionDays`, `resources`, `dispatchId`,
-`model`) come from `DispatchWork`. `capabilities` REPLACES the subagent's
+`model`, `trace`) come from `DispatchWork`. `capabilities` REPLACES the subagent's
 assigned set; `addCapabilities` APPENDS to it; combining both throws. See the
 [Dispatch lifecycle](/pangolin/reference/dispatch-lifecycle/) for what happens
 after the call.
+
+`trace?: TraceContext` (`{ traceId: string; runId?: string; itemId?: string }`) is an
+optional correlation context stamped onto every `LifecycleEvent` this dispatch emits and
+into its dispatch record. Omit it for a standalone dispatch and the client defaults
+`{ traceId: dispatchId }` (a single-dispatch trace); the orchestrator sets
+`{ traceId: runId, runId, itemId }` for items it fires. It is correlation only (not OTel
+spans) and is kept out of metric labels — see
+[Correlation: the optional `trace` field](/pangolin/reference/dispatch-lifecycle/#correlation-the-optional-trace-field).
 
 ### `model` field and level vocabulary
 

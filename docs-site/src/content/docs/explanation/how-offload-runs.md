@@ -336,6 +336,33 @@ operational counters only: bounded-cardinality, no secrets, no audit material).
 Liveness and readiness are split deliberately so a dependency outage pulls the
 instance from rotation **without** triggering a restart storm.
 
+### The metric set
+
+`/metrics` renders whatever a shared `InMemoryMetricsRecorder` has collected. Wire one
+recorder into the client telemetry **and** the orchestrator, then hand it to `serve()` as
+`metricsSnapshot` (worked example in the [config reference](/pangolin/reference/config/)).
+The ten series, all `pangolin_`-prefixed and bounded-cardinality (no `dispatchId`/`runId`
+in labels):
+
+| Metric | Type | Labels | Meaning |
+|---|---|---|---|
+| `pangolin_dispatch_started_total` | counter | — | Dispatches started. |
+| `pangolin_dispatch_completed_total` | counter | `outcome` ∈ `finished` / `failed` / `needs_input` / `cancelled` | Terminal dispatch outcomes. |
+| `pangolin_dispatch_duration_seconds` | histogram | — | Wall-clock dispatch duration (observed on `finished` + `needs_input`). |
+| `pangolin_queue_depth` | gauge | `queue` | Ready + pending items in the queue (sampled per tick). |
+| `pangolin_running` | gauge | `queue` | Running items in the queue (sampled per tick). |
+| `pangolin_items_retried_total` | counter | — | Items requeued after a failed attempt. |
+| `pangolin_items_skipped_total` | counter | — | Items skipped by the dependency-failure cascade. |
+| `pangolin_dispatch_deadline_exceeded_total` | counter | — | Dispatches force-failed on the wall-clock deadline. |
+| `pangolin_runs_completed_total` | counter | — | Runs sealed at the audit epoch. **Requires an `auditLog`.** |
+| `pangolin_audit_dropped_appends` | gauge | — | Running total of dropped audit appends (a completeness signal). **Requires an `auditLog`.** |
+
+A deadline force-fail intentionally increments **both** `pangolin_dispatch_completed_total{outcome="failed"}`
+(the lifecycle outcome) **and** `pangolin_dispatch_deadline_exceeded_total` (the engine's specific
+signal) — total failures vs. specifically-deadline failures. `runs_completed_total` and
+`audit_dropped_appends` are recorded at the audit seal, so they only appear when an `auditLog`
+is configured; the dispatch/queue/retry/deadline metrics do not require one.
+
 ## Performance & scaling characteristics
 
 This design is optimized for **unattended, auditable batch offload**, and it makes

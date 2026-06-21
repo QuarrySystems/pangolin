@@ -61,8 +61,11 @@ audit bundle.
 - **`serve` driver** — long-running process; sole writer of the SQLite run-state,
   polls the submission inbox, runs the reconcile tick loop, exits cleanly on signal.
 - **Submission transport** — clients write a Run spec to a storage prefix; `serve`
-  ingests and publishes status/completion records. **No inbound networking** to the
-  container; identical on local FS and S3.
+  ingests and publishes status/completion records. **No inbound networking on the
+  run-submission path** — runs arrive solely over the mailbox; identical on local FS
+  and S3. (The serve container separately exposes an *opt-in* HTTP observability
+  endpoint — `/healthz`, `/readyz`, `/metrics` — which carries no submission path; see
+  Observability below.)
 - **Sandbox escape** — the worker captures the workspace diff, uploads it as a
   content-addressed artifact, and surfaces it as `result_ref`.
 - **Retry / backoff** — per-item attempt counter, configurable `maxAttempts`,
@@ -119,6 +122,37 @@ now built:
   with **zero orchestrator dependency** (depends only on `pangolin-core`), lets an
   auditor run `npx @quarry-systems/pangolin-verify <bundle.json>` without the engine.
   Repo-root `VERIFICATION.md` is the auditor reimplementation spec.
+
+### Observability — shipped
+
+A full dispatch-observability stack, all opt-in and dependency-light:
+
+- **Telemetry lifecycle seam** — the client dispatch path emits all six
+  `LifecycleEvent`s (`accepted` / `started` / `finished` / `needs_input` / `failed` /
+  `cancelled`) through one guarded `emitLifecycleEvent` chokepoint; opt-in via the
+  `telemetry` option on `PangolinClient` (`ConsoleTelemetryHook` writes one JSON line
+  per event to stderr; default `NoopTelemetryHook` drops them). See
+  [Dispatch lifecycle](/pangolin/reference/dispatch-lifecycle/#the-6-lifecycle-events-closed-vocabulary).
+- **Metrics layer** — a dependency-light `MetricsRecorder` seam + `InMemoryMetricsRecorder`
+  (`snapshot()`); a `MetricsTelemetryHook` + `combineTelemetryHooks` bridge dispatch
+  metrics, and the orchestrator's `metrics?` option instruments the engine + seal. Ten
+  Prometheus-shaped series (dispatch started / completed`{outcome}` / duration, queue
+  depth, running, retried, skipped, deadline-exceeded, runs-completed,
+  audit-dropped-appends) — catalogued in
+  [Observing the serve container](/pangolin/explanation/how-offload-runs/#observing-the-serve-container).
+- **HTTP health/readiness/metrics endpoint** — `serve()` takes an opt-in
+  `http: { port, metricsSnapshot }` option exposing `GET /healthz` (heartbeat liveness —
+  detects a wedged tick loop), `/readyz` (readiness — red when a tick can't reach
+  SQLite/the mailbox), and `/metrics` (Prometheus text) on `PANGOLIN_HTTP_PORT`
+  (default 9464). Unauthenticated by design — bind to a trusted/internal interface;
+  `deploy/serve-stack` wires the Docker `HEALTHCHECK`.
+- **Trace correlation** — every lifecycle event and the dispatch record carry an
+  optional `trace { traceId, runId?, itemId? }` so one logical unit of work
+  (run → item → dispatch) is followable on the live stream; orchestrated →
+  `traceId = runId`, standalone → `traceId = dispatchId`. Correlation only, not OTel spans.
+
+Out of scope (deferred): worker-side trace propagation, W3C `traceparent` hex, and
+Prometheus/OTel **push** adapters (the current posture is scrape-pull of `/metrics`).
 
 ### Cleared (2026-06-13): the external-immutable tamper-evident tier is proven
 
