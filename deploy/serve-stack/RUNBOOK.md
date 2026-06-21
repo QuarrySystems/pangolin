@@ -446,6 +446,22 @@ docker compose -f deploy/serve-stack/docker-compose.yml down -v
 
 ---
 
+## HTTP observability endpoint
+
+The serve container exposes an HTTP port (`PANGOLIN_HTTP_PORT`, default `9464`):
+
+| Route | Meaning |
+|---|---|
+| `GET /healthz` | **Liveness.** `200` while the tick loop is progressing; `503 stale` if the loop has wedged (no completed tick within the staleness window); `503 starting` before the first tick. The Docker `HEALTHCHECK` probes this route. |
+| `GET /readyz` | **Readiness.** `200` when the most recent tick completed without error; `503 not-ready` when ticks are still running but failing (SQLite/S3 mailbox unreachable). |
+| `GET /metrics` | Prometheus text exposition of the run/dispatch metrics (counters, gauges, histograms). |
+
+**Liveness vs readiness — operator rule:** a **red `/readyz` with a green `/healthz`** means "the loop is alive but a dependency (SQLite / S3) is unreachable — do NOT restart the container; investigate the backend." The container `HEALTHCHECK` deliberately drives restarts off `/healthz` only, never `/readyz`, to avoid restart storms during a dependency outage.
+
+**Security posture (v1):** the endpoint is **unauthenticated**. It is not published to the host and must stay on a trusted/internal interface — a Prometheus scraper reaches `serve:9464` over the compose network; for laptop access use the existing SSH tunnel. Never expose `/metrics` to the public internet. The payload carries operational counters only (bounded-cardinality labels, no secrets, no audit material).
+
+---
+
 ## Acceptance checklist (spec §5)
 
 - [ ] Fresh Windows boot, no terminal opened → `serve` is running (`wsl -l -v` shows Ubuntu Running; `docker ps` shows `pangolin-serve` up).

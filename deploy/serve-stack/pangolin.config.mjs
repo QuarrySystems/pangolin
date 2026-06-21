@@ -22,7 +22,8 @@ import { randomBytes, createPrivateKey, createPublicKey, sign as edSign } from '
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
-import { PangolinClient, NoopCredentialProvider, StdoutResultSink } from '@quarry-systems/pangolin-client';
+import { PangolinClient, NoopCredentialProvider, StdoutResultSink, MetricsTelemetryHook, combineTelemetryHooks } from '@quarry-systems/pangolin-client';
+import { InMemoryMetricsRecorder } from '@quarry-systems/pangolin-core';
 import { LocalDockerProvider } from '@quarry-systems/pangolin-providers-local-docker';
 import { AwsSecretStore } from '@quarry-systems/pangolin-secret-store';
 import {
@@ -60,6 +61,10 @@ const s3 = new S3Client({
 // Pinned GHCR tag — explicitly NOT ':latest' (spec audit #1; ':main' is mutable,
 // true digest pinning is the deferred imageDigest item).
 const workerImage = 'ghcr.io/quarrysystems/pangolin-worker:main';
+
+// One shared in-memory recorder feeds three places: the client telemetry (dispatch metrics),
+// the orchestrator (engine/seal metrics), and the serve /metrics endpoint (orch.metrics.snapshot()).
+const metrics = new InMemoryMetricsRecorder();
 
 // ---------------------------------------------------------------------------
 // Storage, transport, and anchor — safe at module level (constructors only).
@@ -190,6 +195,10 @@ export const client = new PangolinClient({
   credentials: { none: new NoopCredentialProvider() },
   targets: { local: { compute: 'local-docker', credentials: 'none', secretStore: 'aws' } },
   resultSink: new StdoutResultSink(),
+  // Dispatch-lifecycle metrics: the lifecycle stream → the shared recorder. Wrapped in
+  // combineTelemetryHooks (per spec) so adding a second hook (e.g. ConsoleTelemetryHook) later
+  // never silently overwrites this one — a single-slot telemetry field otherwise would.
+  telemetry: combineTelemetryHooks(new MetricsTelemetryHook(metrics)),
 });
 
 export default client;
@@ -254,6 +263,7 @@ function createOrchestrator() {
     triggers,
     queues,
     auditLog,
+    metrics,
   });
 }
 
@@ -263,4 +273,5 @@ export const orch = {
   storage,
   verifySignature,
   createOrchestrator,
+  metrics,
 };

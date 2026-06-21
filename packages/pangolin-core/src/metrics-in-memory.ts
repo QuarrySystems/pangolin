@@ -1,17 +1,7 @@
 import type { MetricsRecorder, MetricsSnapshot } from './metrics.js';
+import { seriesKey } from './metrics-series-key.js';
 
 const DEFAULT_BUCKETS = [0.5, 1, 5, 10, 30, 60, 300, 900, 1800, 3600, 7200];
-
-/** Prometheus-style series id: `name` alone, or `name{k="v",…}` with labels sorted by key. Label
- *  VALUES are assumed simple identifiers (the metric set uses only bounded `outcome`/`queue`); no
- *  escaping is performed, so callers must not pass values containing `"`, `,`, or `}`. */
-function seriesKey(name: string, labels?: Record<string, string>): string {
-  if (!labels || Object.keys(labels).length === 0) return name;
-  const parts = Object.keys(labels)
-    .sort()
-    .map((k) => `${k}="${labels[k]}"`);
-  return `${name}{${parts.join(',')}}`;
-}
 
 interface Hist {
   count: number;

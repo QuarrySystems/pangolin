@@ -3,9 +3,10 @@
 // Serve-container entrypoint.  Runs the orchestrator tick+inbox loop.
 // This file is the CMD target for deploy/serve-stack/Dockerfile.
 //
-// No inbound port is opened — the serve container is the sole SQLite writer and
-// the only caller of orchestrator.tick(); workers are launched as Docker siblings
-// via the mounted socket (wired in docker-compose, not here).
+// An HTTP observability port (PANGOLIN_HTTP_PORT, default 9464) serves /healthz, /readyz,
+// and /metrics. The serve container remains the sole SQLite writer and the only caller of
+// orchestrator.tick(); workers are launched as Docker siblings via the mounted socket
+// (wired in docker-compose, not here).
 //
 // Cross-task interface contract (fulfilled by the sibling task-deploy-config):
 //   pangolin.config.mjs (sibling file, NOT created here) MUST export:
@@ -23,6 +24,12 @@ process.on('SIGINT',  () => ac.abort());
 
 const orchestrator = orch.createOrchestrator();
 
-console.log('[serve] starting tick+inbox loop (no inbound port)…');
-await serve({ orchestrator, transport: orch.transport, signal: ac.signal });
+const httpPort = Number(process.env.PANGOLIN_HTTP_PORT ?? 9464);
+console.log(`[serve] starting tick+inbox loop; health/metrics on :${httpPort}…`);
+await serve({
+  orchestrator,
+  transport: orch.transport,
+  signal: ac.signal,
+  http: { port: httpPort, metricsSnapshot: () => orch.metrics.snapshot() },
+});
 console.log('[serve] stopped cleanly');

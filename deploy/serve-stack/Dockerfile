@@ -16,7 +16,9 @@
 #                 is plain node (no tsx needed — deploy config is pure .mjs
 #                 importing built dist, unlike the example which uses TS sources).
 #
-# No EXPOSE — the serve container opens no inbound port.
+# EXPOSE/HEALTHCHECK below: the serve container opens ONE inbound port — the HTTP
+# observability endpoint (/healthz, /readyz, /metrics). All run-submission traffic
+# still flows over the S3 mailbox, not this port.
 
 ARG NODE_VERSION=20
 ARG PNPM_VERSION=9.15.4
@@ -81,4 +83,13 @@ USER pangolin:pangolin
 # Plain node — the deploy entrypoint imports only built .mjs/dist outputs,
 # no TypeScript sources (unlike the example which requires tsx for TS-source
 # config imports). No tsx dependency in this package.
+# HTTP observability port (overridable via PANGOLIN_HTTP_PORT; default 9464).
+EXPOSE 9464
+
+# Liveness probe: hit /healthz with Node's global fetch (no curl/wget in node:20-slim).
+# Probes /healthz ONLY — never /readyz: restarting on readiness would storm-restart on a
+# dependency outage. start-period covers startup before the first tick (/healthz 503 starting).
+HEALTHCHECK --interval=15s --timeout=3s --start-period=30s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PANGOLIN_HTTP_PORT||9464)+'/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
 CMD ["node", "deploy/serve-stack/serve-entrypoint.mjs"]

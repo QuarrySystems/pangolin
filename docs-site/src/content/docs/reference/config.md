@@ -128,14 +128,21 @@ export default client;
 // import { ConsoleTelemetryHook } from '@quarry-systems/pangolin-client';
 // const client = new PangolinClient({ /* …, */ telemetry: new ConsoleTelemetryHook() });
 
-// Metrics (opt-in; default records nothing). One shared recorder feeds two sources:
+// Metrics (opt-in; default records nothing). One shared recorder feeds three sinks:
+// the dispatch lifecycle, the orchestrator engine, AND the serve /metrics endpoint:
 //   import { InMemoryMetricsRecorder } from '@quarry-systems/pangolin-core';
 //   import { MetricsTelemetryHook, combineTelemetryHooks, ConsoleTelemetryHook } from '@quarry-systems/pangolin-client';
 //   const metrics = new InMemoryMetricsRecorder();
 //   const client = new PangolinClient({ /* …, */
 //     telemetry: combineTelemetryHooks(new ConsoleTelemetryHook(), new MetricsTelemetryHook(metrics)) });
 //   const orchestrator = new PangolinOrchestrator({ /* …, */ metrics });  // SAME recorder
-//   // read metrics.snapshot() (a /metrics endpoint / Prometheus|OTel adapter is future work)
+//   // Expose it: serve() opens an OPT-IN HTTP endpoint (default off) with /healthz
+//   // (heartbeat liveness — detects a wedged tick loop), /readyz (readiness — red when
+//   // a tick can't reach SQLite/the mailbox), and /metrics (Prometheus text):
+//   //   serve({ orchestrator, transport, signal,
+//   //           http: { port: 9464, metricsSnapshot: () => metrics.snapshot() } });
+//   // Unauthenticated by design — bind to a trusted/internal interface; do NOT publish
+//   // /metrics to the public internet. A Prometheus/OTel PUSH adapter is future work.
 //   // Note: runs_completed_total + audit_dropped_appends are recorded at the audit seal, so they
 //   // require an AuditLog; the dispatch + queue/retry/deadline metrics do not.
 
