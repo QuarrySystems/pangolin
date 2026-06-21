@@ -64,10 +64,12 @@ describe('TraceContext', () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [ ] **Step 2: Run typecheck to verify it fails**
 
-Run: `pnpm --filter @quarry-systems/pangolin-core exec vitest run test/trace.test.ts`
-Expected: FAIL — `TraceContext` is not exported (and `trace` is not assignable on `DispatchWork`/`LifecycleEvent`).
+This is a type-only surface, so the RED is a **typecheck** failure, not a `vitest run` failure (vitest transpiles types away, so the runtime body would otherwise pass vacuously).
+
+Run: `pnpm --filter @quarry-systems/pangolin-core typecheck`
+Expected: FAIL — `Module '"../src/index.js"' has no exported member 'TraceContext'`, and `trace` is not assignable on the `DispatchWork`/`LifecycleEvent` literals in the test.
 
 - [ ] **Step 3: Create the type** — `packages/pangolin-core/src/trace.ts`
 
@@ -138,10 +140,13 @@ Add after line 11 (`export * from './lifecycle.js';`):
 export * from './trace.js';
 ```
 
-- [ ] **Step 7: Run the test to verify it passes**
+- [ ] **Step 7: Run typecheck + the test to verify GREEN**
+
+Run: `pnpm --filter @quarry-systems/pangolin-core typecheck`
+Expected: exits 0 (the type surface now resolves).
 
 Run: `pnpm --filter @quarry-systems/pangolin-core exec vitest run test/trace.test.ts`
-Expected: PASS.
+Expected: PASS (the runtime assertions).
 
 - [ ] **Step 8: Build core**
 
@@ -171,7 +176,8 @@ git commit -m "feat(trace): TraceContext + optional trace on DispatchWork and Li
 
 ```typescript
 it('round-trips a trace on the dispatch record', async () => {
-  const client = makeClient(); // existing helper in this test file
+  const storage = makeMemoryStorage(); // existing helper (retention.test.ts:15)
+  const client = makeClient(storage, 30); // existing helper (retention.test.ts:40) — (storage, maxDays)
   await writeDispatchRecord(
     client,
     'd-trace',
@@ -193,7 +199,7 @@ it('round-trips a trace on the dispatch record', async () => {
 });
 ```
 
-> Note: reuse this test file's existing `makeClient` helper and the existing `writeDispatchRecord`/`readDispatchRecord` imports. If the resolved-subagent shape in the existing tests differs, copy theirs — the trace field is the only thing under test here.
+> Note: `makeClient` in this file takes `(storage, maxDays = 30)` — call `makeMemoryStorage()` first, as every existing retention test does. If the `resolved` literal's shape differs from the file's `baseResult`, copy that — the `trace` field is the only thing under test here.
 
 - [ ] **Step 2: Run the test to verify it fails**
 
@@ -282,14 +288,11 @@ git commit -m "feat(trace): DispatchRecord carries optional trace"
 
 ```typescript
 it('attaches a supplied trace to every lifecycle event', async () => {
-  const { telemetry, events } = makeTelemetry();
-  const client = makeClient({ telemetry }); // existing helper; pass telemetry through
+  const events: LifecycleEvent[] = [];
+  const { compute } = makeCompute();                  // existing helper (dispatch.test.ts:107)
+  const client = makeTelemetryClient(compute, events); // existing helper (155) — seeds subagent 's', target 'prod', records events
   const trace = { traceId: 'run-7', runId: 'run-7', itemId: 'a' };
-  await dispatchWork(
-    client,
-    { subagent: 'rev', target: 'local', trace },
-    { workerImage: 'img:1' },
-  );
+  await dispatchWork(client, { subagent: 's', target: 'prod', trace }, { workerImage: WORKER_IMAGE });
   // accepted + started + finished (clean exit) all carry the same trace:
   for (const e of events) expect(e.trace).toEqual(trace);
   expect(events.map((e) => e.kind)).toContain('dispatch.accepted');
@@ -297,13 +300,10 @@ it('attaches a supplied trace to every lifecycle event', async () => {
 });
 
 it('defaults trace.traceId to the dispatchId when none is supplied', async () => {
-  const { telemetry, events } = makeTelemetry();
-  const client = makeClient({ telemetry });
-  const result = await dispatchWork(
-    client,
-    { subagent: 'rev', target: 'local' },
-    { workerImage: 'img:1' },
-  );
+  const events: LifecycleEvent[] = [];
+  const { compute } = makeCompute();
+  const client = makeTelemetryClient(compute, events);
+  const result = await dispatchWork(client, { subagent: 's', target: 'prod' }, { workerImage: WORKER_IMAGE });
   for (const e of events) {
     expect(e.trace?.traceId).toBe(result.dispatchId);
     expect(e.trace?.runId).toBeUndefined();
@@ -311,7 +311,7 @@ it('defaults trace.traceId to the dispatchId when none is supplied', async () =>
 });
 ```
 
-> Note: match the existing `dispatch.test.ts` harness exactly — it uses `makeClient(...)` + a deferred/fake compute so `dispatchWork` runs to a clean exit. If `makeClient` does not already accept a `telemetry` option, pass the telemetry the same way the file's existing telemetry tests do (the `makeTelemetry()` helper at line ~143 and its existing call sites show the pattern). Reuse, don't reinvent.
+> Note: use the file's existing `makeTelemetryClient(compute, events)` (dispatch.test.ts:155 — it seeds subagent `'s'`, target `'prod'`, and pushes every event into `events`) + `makeCompute()` (107, a clean-exit fake so `dispatchWork` runs through accepted→started→finished) + the `WORKER_IMAGE` const (236). Do NOT use `makeClient(...)` here — it returns a `{ client, storage, … }` wrapper and seeds no subagent. The edits in Steps 3–4 land inside **`fireWork`** (the dispatchId mint, the six emit sites, `reconcile`/`awaitExit`, the record write, the returned object); `dispatchWork` just composes `fireWork`.
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
@@ -404,18 +404,21 @@ git commit -m "feat(trace): carry trace on every dispatch lifecycle event + the 
 
 - [ ] **Step 1: Update the failing test** — `packages/pangolin-client/test/cancel.test.ts`
 
-Find the existing assertion on the emitted `dispatch.cancelled` event (the test "emits dispatch.cancelled … even when there is no provider to reap", which asserts the event via `toEqual`). Add the `trace` field to its expected object. The expected cancelled event becomes:
+The existing assertion (cancel.test.ts:336-338) is the **array form** with `expect.any(String)` for `at`:
 
 ```typescript
-  expect(events[0]).toEqual({
-    kind: 'dispatch.cancelled',
-    dispatchId: 'd-123',
-    at: expect.any(String),
-    trace: { traceId: 'd-123' },
-  });
+  expect(events).toEqual([
+    { kind: 'dispatch.cancelled', dispatchId: 'd-123', at: expect.any(String) },
+  ]);
 ```
 
-> Match the existing assertion's exact shape (it may use `expect.any(String)` for `at` or a fixed value) — change only by adding the `trace` line. If the test currently asserts the event with a looser matcher, instead add an explicit `expect(events[0].trace).toEqual({ traceId: 'd-123' })`.
+Edit that array element in place — add only the `trace` field:
+
+```typescript
+  expect(events).toEqual([
+    { kind: 'dispatch.cancelled', dispatchId: 'd-123', at: expect.any(String), trace: { traceId: 'd-123' } },
+  ]);
+```
 
 - [ ] **Step 2: Run the test to verify it fails**
 
@@ -463,50 +466,29 @@ git commit -m "feat(trace): cancelled event carries { traceId: dispatchId }"
 
 - [ ] **Step 1: Write the failing test** — append to `packages/pangolin-orchestrator/test/executors/dispatch.test.ts`
 
-Assert **delegation** — that the executor passes the right `trace` into `client.dispatch.fire`. This is the executor's actual responsibility (SRP); the client putting `trace` onto the emitted events is tested in `pangolin-client` (Task 3), and a fake `client.dispatch.fire` does not faithfully re-run that emit path. Spy on the fire input:
+Assert **delegation** — that the executor passes the right `trace` into `client.dispatch.fire`. This is the executor's actual responsibility (SRP); the client putting `trace` onto the emitted events is tested in `pangolin-client` (Task 3). This file already has the exact harness: `captureDispatchFire(client)` (line 210) wraps the REAL `fire` and records the `work` object into `captured.work` — the same idiom the existing `model`/`inputRefs` delegation tests use. The real `fire` runs (deferred compute), so no mock literal is needed.
 
 ```typescript
 it('passes trace { traceId: runId, runId, itemId } into client.dispatch.fire when a runId is present', async () => {
-  const fire = vi.fn().mockResolvedValue({
-    dispatchId: 'd-1',
-    trace: { traceId: 'run-3' },
-    resolved: { subagent: { name: 's', contentHash: 'sha256:x' }, capabilities: [], env: [], secretRefs: {}, workerImage: 'img:1', inputRefs: {} },
-    awaitExit: () => new Promise(() => {}), // never settles; we only assert the fire arg
-    reconcile: async () => ({}),
-    cleanup: () => {},
-  });
-  const client = makeFakeClient({ fire }); // reuse this file's client builder; inject the fire spy
-  const exec = new DispatchExecutor({ client, target: 'local', workerImage: 'img:1' });
-  await exec.fire(
-    { id: 'item-a', executor: 'dispatch', inputs: { subagent: 's' }, depends_on: [], resourceLocks: [] },
-    { runId: 'run-3', actor: 'human:t' },
-  );
-  expect(fire).toHaveBeenCalledWith(
-    expect.objectContaining({ trace: { traceId: 'run-3', runId: 'run-3', itemId: 'item-a' } }),
-  );
+  const { compute, resolveExit } = makeDeferredCompute();   // existing helper (117)
+  const { client, executor } = makeSetup(compute);          // existing helper (162) — seeds 's', target 'prod'
+  const captured = captureDispatchFire(client);             // existing helper (210)
+  await executor.fire(baseItem, { runId: 'run-3', actor: 'human:t' });  // baseItem.id === 'a' (228)
+  expect(captured.work?.trace).toEqual({ traceId: 'run-3', runId: 'run-3', itemId: 'a' });
+  resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
 });
 
 it('omits trace entirely when there is no runId (client then defaults traceId = dispatchId)', async () => {
-  const fire = vi.fn().mockResolvedValue({
-    dispatchId: 'd-2',
-    trace: { traceId: 'd-2' },
-    resolved: { subagent: { name: 's', contentHash: 'sha256:x' }, capabilities: [], env: [], secretRefs: {}, workerImage: 'img:1', inputRefs: {} },
-    awaitExit: () => new Promise(() => {}),
-    reconcile: async () => ({}),
-    cleanup: () => {},
-  });
-  const client = makeFakeClient({ fire });
-  const exec = new DispatchExecutor({ client, target: 'local', workerImage: 'img:1' });
-  await exec.fire(
-    { id: 'item-b', executor: 'dispatch', inputs: { subagent: 's' }, depends_on: [], resourceLocks: [] },
-    undefined, // no ctx -> no runId
-  );
-  const arg = fire.mock.calls[0]![0] as { trace?: unknown };
-  expect(arg.trace).toBeUndefined();
+  const { compute, resolveExit } = makeDeferredCompute();
+  const { client, executor } = makeSetup(compute);
+  const captured = captureDispatchFire(client);
+  await executor.fire(baseItem);  // no ctx -> no runId
+  expect(captured.work?.trace).toBeUndefined();
+  resolveExit({ exitCode: 0, stdout: '', stderr: '', startedAt: new Date(0), finishedAt: new Date(1) });
 });
 ```
 
-> Note: match this test file's EXISTING client/fire-spy harness exactly — it already constructs a fake `client` whose `dispatch.fire` is observable (the suite tests manifest-building, model resolution, etc., all of which spy/stub `fire`). Reuse that `makeFakeClient`/stub shape and its `WorkItem`/`FireContext` fixtures rather than the illustrative literals above; the contract under test is the two `toHaveBeenCalledWith`/`toBeUndefined` assertions on the `trace` argument. The mocked `fire` resolve value must include the fields `DispatchExecutor.fire` reads afterward (`dispatchId`, `resolved.{subagent,capabilities,env,secretRefs,workerImage,pipelineRef?}`, `awaitExit`, `reconcile`) so the manifest-build block doesn't throw — copy the suite's existing successful-fire stub.
+> Note: this is the file's established delegation pattern — `makeDeferredCompute()` (117) + `makeSetup(compute)` (162, returns `{ client, executor }`, seeds subagent `'s'` + target `'prod'`) + `captureDispatchFire(client)` (210, records the fired `work` into `captured.work`) + the shared `baseItem` (228, id `'a'`, inputs.subagent `'s'`). There is NO `vi`/`makeFakeClient` in this file (its `vitest` import is `{ describe, it, expect }` only) — do not introduce them. The real `fire` runs, so call `resolveExit(...)` at the end to let the detached `awaitExit` settle cleanly (mirror the surrounding tests' exit literal). The contract under test is the two assertions on `captured.work?.trace`.
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
