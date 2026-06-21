@@ -1,5 +1,10 @@
 // packages/pangolin-orchestrator/src/orchestrator.ts
 import type { VerifyOutcome, Authorizer } from '@quarry-systems/pangolin-core';
+import {
+  NoopMetricsRecorder,
+  recordMetric,
+  type MetricsRecorder,
+} from '@quarry-systems/pangolin-core';
 import type {
   AuditEntryRow,
   AnchoredRoot,
@@ -49,6 +54,10 @@ export interface PangolinOrchestratorOptions {
   packs?: PackRegistry;
   auditLog?: AuditLog;
   authorizer?: Authorizer;
+  /** Optional metrics recorder. When provided, the orchestrator and the tick engine both write
+   *  to this recorder. Pass the SAME instance to PangolinClient's MetricsTelemetryHook so a
+   *  single snapshot covers client dispatch + orchestrator engine signals. Default: no-op. */
+  metrics?: MetricsRecorder;
 }
 
 /** method -> privilege tag (mechanism for the §10.6 CLI/MCP split; surfaces land later). */
@@ -78,6 +87,7 @@ export class PangolinOrchestrator {
   private readonly packs: PackRegistry | undefined;
   private readonly auditLog: AuditLog | undefined;
   private readonly authorizer: Authorizer;
+  private readonly metrics: MetricsRecorder;
   /** Per-queue pattern bindings (undefined entry = no pattern on that queue). */
   private readonly patterns: Record<string, Pattern | undefined>;
   constructor(opts: PangolinOrchestratorOptions) {
@@ -91,6 +101,7 @@ export class PangolinOrchestrator {
     this.packs = opts.packs;
     this.auditLog = opts.auditLog;
     this.authorizer = opts.authorizer ?? NoneAuthorizer;
+    this.metrics = opts.metrics ?? new NoopMetricsRecorder();
     if (!opts.queues[this.defaultQueue])
       throw new Error(`PangolinOrchestrator: default queue '${this.defaultQueue}' not configured`);
     for (const [name, q] of Object.entries(opts.queues))
@@ -316,6 +327,7 @@ export class PangolinOrchestrator {
       auditLog: this.auditLog,
       denamespace: deNs,
       authorizer: this.authorizer,
+      metrics: this.metrics,
     });
 
     // Pattern phase: BEFORE the seal block so spawned items are pending when the seal check runs.
@@ -341,11 +353,15 @@ export class PangolinOrchestrator {
             this.auditLog.tryAppend({ kind: 'run.completed', runId, at });
             try {
               await this.auditLog.sealEpoch(runId);
+              recordMetric(this.metrics, (m) => m.counter('pangolin_runs_completed_total'));
             } catch {
               /* best-effort: seal failure surfaces as anchor-missing at verify */
             }
           }
         }
+        recordMetric(this.metrics, (m) =>
+          m.gauge('pangolin_audit_dropped_appends', this.auditLog!.droppedAppends),
+        );
       } catch {
         /* outer guard: seal block must never throw out of tick() */
       }

@@ -21,3 +21,15 @@ export function emitLifecycleEvent(
     );
   }
 }
+
+/** Fan a single telemetry slot out to several hooks. Reuses the existing per-emit guard
+ *  (`emitLifecycleEvent`) for EACH sub-hook, so a throwing hook is caught + logged and does not
+ *  stop the others. Lets an operator run e.g. ConsoleTelemetryHook + MetricsTelemetryHook together. */
+export function combineTelemetryHooks(...hooks: TelemetryHook[]): TelemetryHook {
+  return {
+    name: 'combined',
+    emit(event): void {
+      for (const h of hooks) emitLifecycleEvent(h, event);
+    },
+  };
+}

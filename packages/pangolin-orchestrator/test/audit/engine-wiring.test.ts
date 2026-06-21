@@ -7,13 +7,19 @@ import { AuditLog } from '../../src/audit/audit-log.js';
 import { NoneSigner } from '../../src/audit/signer.js';
 import { LocalAnchor } from '../../src/audit/anchor.js';
 import type { Executor, AuditStore } from '../../src/contracts/index.js';
+import { InMemoryMetricsRecorder } from '@quarry-systems/pangolin-core';
 
 function fakeExec(): Executor & { fired: boolean } {
   let fired = false;
   return {
     id: 'x',
-    async fire() { fired = true; return { dispatchHash: 'd' }; },
-    async reconcile() { return fired ? { status: 'done' as const } : null; },
+    async fire() {
+      fired = true;
+      return { dispatchHash: 'd' };
+    },
+    async reconcile() {
+      return fired ? { status: 'done' as const } : null;
+    },
   };
 }
 
@@ -23,7 +29,10 @@ function flakyExec(failCount: number): Executor {
   let reconcileCount = 0;
   return {
     id: 'flaky',
-    async fire() { fired = true; return { dispatchHash: 'dh-flaky' }; },
+    async fire() {
+      fired = true;
+      return { dispatchHash: 'dh-flaky' };
+    },
     async reconcile() {
       if (!fired) return null;
       reconcileCount++;
@@ -38,7 +47,10 @@ function alwaysFailExec(): Executor {
   let fired = false;
   return {
     id: 'doomed',
-    async fire() { fired = true; return { dispatchHash: 'dh-doomed' }; },
+    async fire() {
+      fired = true;
+      return { dispatchHash: 'dh-doomed' };
+    },
     async reconcile() {
       if (!fired) return null;
       return { status: 'failed' as const };
@@ -53,11 +65,17 @@ function throwingAuditLog(): AuditLog {
   const failingStore: AuditStore = {
     getAuditEntries: () => [],
     getAuditChainHead: () => '',
-    appendAuditEntry: () => { throw new Error('audit append exploded!'); },
+    appendAuditEntry: () => {
+      throw new Error('audit append exploded!');
+    },
     putAuditRoot: () => {},
     getAuditRoot: () => undefined,
   };
-  return new AuditLog({ store: failingStore, signer: NoneSigner, anchor: new LocalAnchor(failingStore) });
+  return new AuditLog({
+    store: failingStore,
+    signer: NoneSigner,
+    anchor: new LocalAnchor(failingStore),
+  });
 }
 
 describe('engine-wiring audit integration', () => {
@@ -72,7 +90,11 @@ describe('engine-wiring audit integration', () => {
       auditLog,
     });
     const runId = await orch.submitRun(
-      { id: 'r', queue: 'default', items: [{ id: 'a', executor: 'x', inputs: {}, depends_on: [], resourceLocks: [] }] },
+      {
+        id: 'r',
+        queue: 'default',
+        items: [{ id: 'a', executor: 'x', inputs: {}, depends_on: [], resourceLocks: [] }],
+      },
       'human:brett',
     );
     for (let i = 0; i < 6; i++) await orch.tick('default');
@@ -113,44 +135,63 @@ describe('engine-wiring audit integration', () => {
 
   it('records item.retried when an executor fails then succeeds with maxAttempts >= 2', async () => {
     // Use tick() directly so we can control `now` and jump past the exponential backoff gate
-    // without sleeping real time. The orchestrator submits the run; tick drives execution.
-    const store = new SqliteRunStateStore();
-    const auditLog = new AuditLog({ store, signer: NoneSigner, anchor: new LocalAnchor(store) });
-    const orch = new PangolinOrchestrator({
-      store,
-      executors: { flaky: flakyExec(1) },
-      triggers: { manual: new ManualTrigger() },
-      queues: { default: { concurrency: 1 } },
-      maxAttempts: 3,
-      auditLog,
-    });
-    const runId = await orch.submitRun(
-      { id: 'r3', queue: 'default', items: [{ id: 'b', executor: 'flaky', inputs: {}, depends_on: [], resourceLocks: [] }] },
-      'human:brett',
-    );
+    // without sleeping real time. We drive a standalone store with tick() rather than the
+    // orchestrator's own tick so `now` is injectable.
     // Drive ticks via tick() with advancing now to bypass backoff (backoff(1) = 2000ms; jump 5s).
     // The executor id is 'flaky'; orchestrator wraps it to denamespace, so we must pass the
     // wrapped executor directly to tick() for correct id resolution. Use orchestrator for
     // submitRun but low-level tick() for time-controlled driving.
     const flakyEx = flakyExec(1);
     const store2 = new SqliteRunStateStore();
-    const auditLog2 = new AuditLog({ store: store2, signer: NoneSigner, anchor: new LocalAnchor(store2) });
+    const auditLog2 = new AuditLog({
+      store: store2,
+      signer: NoneSigner,
+      anchor: new LocalAnchor(store2),
+    });
     // Standalone store — submit the run directly so we can drive with tick() + controlled now.
     store2.ensureQueue('default', 1);
     const trigger2 = new ManualTrigger();
-    const run2 = { id: 'r3b', queue: 'default', items: [{ id: 'b', executor: 'flaky', inputs: {}, depends_on: [] as string[], resourceLocks: [] as string[] }] };
+    const run2 = {
+      id: 'r3b',
+      queue: 'default',
+      items: [
+        {
+          id: 'b',
+          executor: 'flaky',
+          inputs: {},
+          depends_on: [] as string[],
+          resourceLocks: [] as string[],
+        },
+      ],
+    };
     store2.saveRun(run2);
     store2.markReady(trigger2.initialReady(run2));
     const executors2 = { flaky: flakyEx };
     const t0 = Date.now();
     // Tick 1: fire (now = t0)
-    await tick(store2, executors2, 'default', undefined, { maxAttempts: 3, auditLog: auditLog2, now: t0 });
+    await tick(store2, executors2, 'default', undefined, {
+      maxAttempts: 3,
+      auditLog: auditLog2,
+      now: t0,
+    });
     // Tick 2: reconcile -> fails first time -> item.retried emitted; item requeued with nextAttemptAt = t0 + 2000
-    await tick(store2, executors2, 'default', undefined, { maxAttempts: 3, auditLog: auditLog2, now: t0 + 1 });
+    await tick(store2, executors2, 'default', undefined, {
+      maxAttempts: 3,
+      auditLog: auditLog2,
+      now: t0 + 1,
+    });
     // Tick 3: now = t0 + 5000 — past the backoff gate -> re-fire
-    await tick(store2, executors2, 'default', undefined, { maxAttempts: 3, auditLog: auditLog2, now: t0 + 5000 });
+    await tick(store2, executors2, 'default', undefined, {
+      maxAttempts: 3,
+      auditLog: auditLog2,
+      now: t0 + 5000,
+    });
     // Tick 4: reconcile -> succeeds (second call) -> item.reconciled done
-    await tick(store2, executors2, 'default', undefined, { maxAttempts: 3, auditLog: auditLog2, now: t0 + 5001 });
+    await tick(store2, executors2, 'default', undefined, {
+      maxAttempts: 3,
+      auditLog: auditLog2,
+      now: t0 + 5001,
+    });
     // Tick 5: skip-cascade + seal (via a final orchestrator tick won't seal since we're using raw tick;
     // just verify the audit entries are correct — sealEpoch is tested separately)
     const kinds = store2.getAuditEntries('r3b').map((e) => e.kind);
@@ -158,13 +199,15 @@ describe('engine-wiring audit integration', () => {
     expect(kinds).toContain('item.reconciled');
 
     // The final item.reconciled should be for status=done
-    const reconciledDone = store2.getAuditEntries('r3b').find((e) => e.kind === 'item.reconciled' && e.status === 'done');
+    const reconciledDone = store2
+      .getAuditEntries('r3b')
+      .find((e) => e.kind === 'item.reconciled' && e.status === 'done');
     expect(reconciledDone).toBeDefined();
     // itemId should be the logical id (no namespacing at this level since we're using tick() directly)
     expect(store2.getAuditEntries('r3b').find((e) => e.kind === 'item.retried')?.itemId).toBe('b');
   });
 
-  it('records item.skipped when a dependent item\'s dependency fails terminally', async () => {
+  it("records item.skipped when a dependent item's dependency fails terminally", async () => {
     const store = new SqliteRunStateStore();
     const auditLog = new AuditLog({ store, signer: NoneSigner, anchor: new LocalAnchor(store) });
     const orch = new PangolinOrchestrator({
@@ -206,7 +249,19 @@ describe('engine-wiring audit integration', () => {
     const throwLog = throwingAuditLog();
     const exec = fakeExec();
     const trigger = new ManualTrigger();
-    const run = { id: 'r5', queue: 'default', items: [{ id: 'c', executor: 'x', inputs: {}, depends_on: [] as string[], resourceLocks: [] as string[] }] };
+    const run = {
+      id: 'r5',
+      queue: 'default',
+      items: [
+        {
+          id: 'c',
+          executor: 'x',
+          inputs: {},
+          depends_on: [] as string[],
+          resourceLocks: [] as string[],
+        },
+      ],
+    };
     store.saveRun(run);
     store.markReady(trigger.initialReady(run));
     const executors = { x: exec };
@@ -251,12 +306,53 @@ describe('engine-wiring audit integration', () => {
       anchor: new LocalAnchor(new SqliteRunStateStore()),
     });
 
-    expect(() => new PangolinOrchestrator({
-      store: bareStore,
+    expect(
+      () =>
+        new PangolinOrchestrator({
+          store: bareStore,
+          executors: { x: fakeExec() },
+          triggers: { manual: new ManualTrigger() },
+          queues: { default: { concurrency: 1 } },
+          auditLog: fakeAudit,
+        }),
+    ).toThrow(
+      'PangolinOrchestrator: auditLog requires a store implementing AuditStore (getAuditRoot)',
+    );
+  });
+
+  it('orchestrator records runs_completed + audit_dropped_appends after a run seals', async () => {
+    // Mirror the "accrues audit entries through a run and seals once on completion" test above:
+    // same PangolinOrchestrator + AuditLog construction, same tick-driving loop.
+    // Add metrics: new InMemoryMetricsRecorder() and assert the two seal-path metrics afterwards.
+    const store = new SqliteRunStateStore();
+    const auditLog = new AuditLog({ store, signer: NoneSigner, anchor: new LocalAnchor(store) });
+    const metrics = new InMemoryMetricsRecorder();
+    const orch = new PangolinOrchestrator({
+      store,
       executors: { x: fakeExec() },
       triggers: { manual: new ManualTrigger() },
       queues: { default: { concurrency: 1 } },
-      auditLog: fakeAudit,
-    })).toThrow('PangolinOrchestrator: auditLog requires a store implementing AuditStore (getAuditRoot)');
+      auditLog,
+      metrics,
+    });
+    await orch.submitRun(
+      {
+        id: 'rs-seal',
+        queue: 'default',
+        items: [{ id: 'a', executor: 'x', inputs: {}, depends_on: [], resourceLocks: [] }],
+      },
+      'human:brett',
+    );
+    // Drive until the single item seals (fire tick + reconcile tick + seal tick; 6 iterations is safe).
+    for (let i = 0; i < 6; i++) await orch.tick('default');
+
+    // Verify the run sealed (guard against a future regression where the seal never triggers).
+    expect(store.getAuditRoot('rs-seal')).toBeDefined();
+
+    const s = metrics.snapshot();
+    // runs_completed_total is recorded on successful sealEpoch inside the audit block.
+    expect(s.counters['pangolin_runs_completed_total']).toBeGreaterThanOrEqual(1);
+    // audit_dropped_appends gauge is recorded each tick that has an auditLog configured.
+    expect(typeof s.gauges['pangolin_audit_dropped_appends']).toBe('number');
   });
 });

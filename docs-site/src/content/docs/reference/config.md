@@ -128,6 +128,17 @@ export default client;
 // import { ConsoleTelemetryHook } from '@quarry-systems/pangolin-client';
 // const client = new PangolinClient({ /* …, */ telemetry: new ConsoleTelemetryHook() });
 
+// Metrics (opt-in; default records nothing). One shared recorder feeds two sources:
+//   import { InMemoryMetricsRecorder } from '@quarry-systems/pangolin-core';
+//   import { MetricsTelemetryHook, combineTelemetryHooks, ConsoleTelemetryHook } from '@quarry-systems/pangolin-client';
+//   const metrics = new InMemoryMetricsRecorder();
+//   const client = new PangolinClient({ /* …, */
+//     telemetry: combineTelemetryHooks(new ConsoleTelemetryHook(), new MetricsTelemetryHook(metrics)) });
+//   const orchestrator = new PangolinOrchestrator({ /* …, */ metrics });  // SAME recorder
+//   // read metrics.snapshot() (a /metrics endpoint / Prometheus|OTel adapter is future work)
+//   // Note: runs_completed_total + audit_dropped_appends are recorded at the audit seal, so they
+//   // require an AuditLog; the dispatch + queue/retry/deadline metrics do not.
+
 // Audit + orchestrator setup (import-safe: constructors are lazy / in-memory).
 const store = new SqliteRunStateStore(dbPath);
 process.on('exit', () => { try { store.close(); } catch {} });

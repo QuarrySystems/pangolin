@@ -1,5 +1,6 @@
 // packages/pangolin-orchestrator/src/engine/tick.ts
 import type { Authorizer } from '@quarry-systems/pangolin-core';
+import { recordMetric, type MetricsRecorder } from '@quarry-systems/pangolin-core';
 import type { Executor, RunStateStore } from '../contracts/index.js';
 import { effectTierPolicy } from '../contracts/effect-policy.js';
 import type { PackRegistry } from '../packs/registry.js';
@@ -26,6 +27,9 @@ export async function tick(
      *  exceeds this is force-failed (→ retry/skip cascade) so a hung dispatch cannot hold its
      *  concurrency slot + resource locks forever. Undefined → no deadline (legacy behavior). */
     maxRuntimeMs?: number;
+    /** Optional metrics recorder — all metric calls are routed through recordMetric so a missing
+     *  recorder is a safe no-op (no conditional callsites needed). */
+    metrics?: MetricsRecorder;
   } = {},
 ): Promise<{ readied: number; fired: number; reconciled: number }> {
   const maxAttempts = opts.maxAttempts ?? 1; // tick is no-retry by default; the orchestrator opts into retry
@@ -34,6 +38,7 @@ export async function tick(
   const deNs = opts.denamespace ?? ((x) => x);
   const authorizer = opts.authorizer ?? NoneAuthorizer;
   const maxRuntimeMs = opts.maxRuntimeMs;
+  const metrics = opts.metrics;
 
   /** Audit is best-effort observability — a failing append must NEVER abort a tick or corrupt run
    *  state. tryAppend swallows the store error but COUNTS the drop (AuditLog.droppedAppends). */
@@ -79,6 +84,7 @@ export async function tick(
       } catch {
         /* swallow — best-effort reap; force-fail proceeds */
       }
+      recordMetric(metrics, (m) => m.counter('pangolin_dispatch_deadline_exceeded_total'));
       res = { status: 'failed' };
     } else {
       res = await ex.reconcile(it.dispatchHash!);
@@ -89,6 +95,7 @@ export async function tick(
         store.releaseLocks(it.id);
         store.requeue(it.id, now + backoff(store.getAttempts(it.id)));
         audit({ kind: 'item.retried', runId: it.runId, itemId: deNs(it.id), at: auditAt });
+        recordMetric(metrics, (m) => m.counter('pangolin_items_retried_total'));
       } else {
         store.setStatus(
           it.id,
@@ -243,7 +250,15 @@ export async function tick(
   for (const id of computeSkipped(currentItems)) {
     store.setStatus(id, 'skipped', 'dependency failed or skipped');
     audit({ kind: 'item.skipped', runId: itemRunId.get(id) ?? '', itemId: deNs(id), at: auditAt });
+    recordMetric(metrics, (m) => m.counter('pangolin_items_skipped_total'));
   }
+
+  recordMetric(metrics, (m) => {
+    const inQueue = store.getItems().filter((i) => i.queue === queue);
+    const depth = inQueue.filter((i) => i.status === 'ready' || i.status === 'pending').length;
+    m.gauge('pangolin_queue_depth', depth, { queue });
+    m.gauge('pangolin_running', store.runningCount(queue), { queue });
+  });
 
   return { readied: newlyReady.length + moreReady.length, fired, reconciled };
 }

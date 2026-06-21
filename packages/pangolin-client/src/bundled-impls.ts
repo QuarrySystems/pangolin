@@ -25,6 +25,7 @@ import type {
   CredentialProvider,
   DispatchResult,
   LifecycleEvent,
+  MetricsRecorder,
   ResolvedCredentials,
   ResultSink,
   SinkContext,
@@ -32,6 +33,7 @@ import type {
   TaskHandle,
   TelemetryHook,
 } from '@quarry-systems/pangolin-core';
+import { recordMetric } from '@quarry-systems/pangolin-core';
 
 const STDOUT_CAP_BYTES = 4 * 1024 * 1024; // 4 MiB
 const STDERR_CAP_BYTES = 256 * 1024; // 256 KiB
@@ -202,5 +204,48 @@ export class ConsoleTelemetryHook implements TelemetryHook {
 
   emit(event: LifecycleEvent): void {
     console.error(JSON.stringify(event));
+  }
+}
+
+/**
+ * `TelemetryHook` that records dispatch-lifecycle metrics into a `MetricsRecorder`. Dispatch-outcome
+ * classification lives here (one place), derived from the lifecycle stream — not re-derived in the
+ * engine. Wire as the client's telemetry hook (with `combineTelemetryHooks` if you also want
+ * `ConsoleTelemetryHook`).
+ */
+export class MetricsTelemetryHook implements TelemetryHook {
+  readonly name = 'metrics';
+
+  constructor(private readonly recorder: MetricsRecorder) {}
+
+  emit(event: LifecycleEvent): void {
+    switch (event.kind) {
+      case 'dispatch.started':
+        recordMetric(this.recorder, (m) => m.counter('pangolin_dispatch_started_total'));
+        break;
+      case 'dispatch.finished':
+        recordMetric(this.recorder, (m) => {
+          m.counter('pangolin_dispatch_completed_total', 1, { outcome: 'finished' });
+          m.histogram('pangolin_dispatch_duration_seconds', event.durationMs / 1000);
+        });
+        break;
+      case 'dispatch.needs_input':
+        recordMetric(this.recorder, (m) => {
+          m.counter('pangolin_dispatch_completed_total', 1, { outcome: 'needs_input' });
+          m.histogram('pangolin_dispatch_duration_seconds', event.durationMs / 1000);
+        });
+        break;
+      case 'dispatch.failed':
+        recordMetric(this.recorder, (m) =>
+          m.counter('pangolin_dispatch_completed_total', 1, { outcome: 'failed' }),
+        );
+        break;
+      case 'dispatch.cancelled':
+        recordMetric(this.recorder, (m) =>
+          m.counter('pangolin_dispatch_completed_total', 1, { outcome: 'cancelled' }),
+        );
+        break;
+      // 'dispatch.accepted' produces no metric (the set tracks started, not accepted).
+    }
   }
 }
