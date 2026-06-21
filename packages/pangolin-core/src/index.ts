@@ -12,6 +12,7 @@ export * from './lifecycle.js';
 export * from './telemetry.js';
 export * from './metrics.js';
 export * from './metrics-in-memory.js';
+export * from './metrics-series-key.js';
 export * from './channel.js';
 export * from './providers.js';
 export * from './storage.js';
