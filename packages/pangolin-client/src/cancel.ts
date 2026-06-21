@@ -27,6 +27,7 @@ export async function cancelDispatch(client: PangolinClient, dispatchId: string)
     kind: 'dispatch.cancelled',
     dispatchId,
     at: new Date().toISOString(),
+    trace: { traceId: dispatchId },
   });
   const record = await readDispatchRecord(client, dispatchId);
   if (!record) return; // already purged or never existed — no-op
