@@ -312,6 +312,30 @@ agree on the signer's public key. A fresh per-process `createLocalSigner()`
 generates a new keypair each time, so verification fails across the process
 boundary — share a deterministic/published key (or use KMS) so signatures verify.
 
+## Observing the serve container
+
+`serve()` exposes an **opt-in** HTTP endpoint (off by default — pass
+`http: { port, metricsSnapshot }`) so an operator, a Docker `HEALTHCHECK`, or a
+container orchestrator can tell whether the loop is healthy and scrape its metrics.
+It is the *only* inbound surface `serve` opens, and it carries **no submission path** —
+runs still arrive solely over the mailbox, so the "no inbound networking" property of
+the dispatch path is unchanged.
+
+| Route | Purpose |
+|---|---|
+| `GET /healthz` | **Liveness** — `200` while the tick loop is progressing; `503` if it has *wedged* (a hung tick, not just a dead process). A Docker `HEALTHCHECK` / k8s liveness probe drives restarts off this route. |
+| `GET /readyz` | **Readiness** — `200` when the last tick completed without error; `503` when ticks are still running but a dependency (SQLite or the S3 mailbox) is unreachable. On red, pull the instance from rotation — do **not** restart it. |
+| `GET /metrics` | Prometheus text exposition of the run/dispatch metrics (wire the shared recorder as shown in the [config reference](/pangolin/reference/config/)). |
+
+The [`deploy/serve-stack/`](https://github.com/quarrysystems/pangolin/tree/main/deploy/serve-stack/)
+container wires this up: a `HEALTHCHECK` probing `/healthz` (via Node's built-in
+`fetch`, so the image needs no `curl`), with the port kept on the internal network.
+The endpoint is **unauthenticated by design** — bind it to a trusted/internal
+interface and never publish `/metrics` to the public internet (the payload is
+operational counters only: bounded-cardinality, no secrets, no audit material).
+Liveness and readiness are split deliberately so a dependency outage pulls the
+instance from rotation **without** triggering a restart storm.
+
 ## Performance & scaling characteristics
 
 This design is optimized for **unattended, auditable batch offload**, and it makes
