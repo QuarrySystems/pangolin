@@ -142,7 +142,8 @@ export default client;
 //   //   serve({ orchestrator, transport, signal,
 //   //           http: { port: 9464, metricsSnapshot: () => metrics.snapshot() } });
 //   // Unauthenticated by design — bind to a trusted/internal interface; do NOT publish
-//   // /metrics to the public internet. A Prometheus/OTel PUSH adapter is future work.
+//   // /metrics to the public internet. (The endpoint is live; the current posture is
+//   // Prometheus scrape-pull — a push/OTel adapter is the only deferred piece.)
 //   // Note: runs_completed_total + audit_dropped_appends are recorded at the audit seal, so they
 //   // require an AuditLog; the dispatch + queue/retry/deadline metrics do not.
 
