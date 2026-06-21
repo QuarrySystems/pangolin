@@ -4,7 +4,17 @@ import type { SubmissionEnvelope, SubmissionTransport, OutboxRecord } from '../s
 import { serve } from '../src/serve/driver.js';
 import { immediateExecutor } from './fixtures/executors.js';
 
-function makeFakeTransport(envelopes: SubmissionEnvelope[]): SubmissionTransport & { published: OutboxRecord[]; ackedIds: string[]; deadLettered: string[] } {
+// Budget for the "poll until the serve loop reaches a condition" loops below. These tests
+// drive a real-timer serve loop (tickIntervalMs ~5ms) and poll for an end-state; on a loaded
+// box the event loop is starved, so a tight budget flakes with assertions like
+// "expected 0 to be greater than 0". 15s is generous headroom (the loops exit early on
+// success — typical completion is <300ms) while staying under vitest's 30s testTimeout, and
+// it is the single knob to tune if this ever needs revisiting.
+const DONE_POLL_BUDGET_MS = 15_000;
+
+function makeFakeTransport(
+  envelopes: SubmissionEnvelope[],
+): SubmissionTransport & { published: OutboxRecord[]; ackedIds: string[]; deadLettered: string[] } {
   let called = false;
   const published: OutboxRecord[] = [];
   const ackedIds: string[] = [];
@@ -13,7 +23,9 @@ function makeFakeTransport(envelopes: SubmissionEnvelope[]): SubmissionTransport
     published,
     ackedIds,
     deadLettered,
-    async submit() { return ''; },
+    async submit() {
+      return '';
+    },
     async pollInbox() {
       if (!called) {
         called = true;
@@ -21,23 +33,42 @@ function makeFakeTransport(envelopes: SubmissionEnvelope[]): SubmissionTransport
       }
       return [];
     },
-    async ack(runId) { ackedIds.push(runId); },
-    async deadLetter(runId) { deadLettered.push(runId); },
-    async publish(rec) { published.push(rec); },
-    async readOutbox() { return []; },
+    async ack(runId) {
+      ackedIds.push(runId);
+    },
+    async deadLetter(runId) {
+      deadLettered.push(runId);
+    },
+    async publish(rec) {
+      published.push(rec);
+    },
+    async readOutbox() {
+      return [];
+    },
   };
 }
 
-function makeThrowingTransport(): SubmissionTransport & { published: OutboxRecord[]; publishCallCount: number } {
+function makeThrowingTransport(): SubmissionTransport & {
+  published: OutboxRecord[];
+  publishCallCount: number;
+} {
   const published: OutboxRecord[] = [];
   let publishCallCount = 0;
   return {
     published,
     publishCallCount: 0,
-    async submit() { return ''; },
-    async pollInbox() { return []; },
-    async ack(_runId) { /* no-op stub */ },
-    async deadLetter(_runId) { /* no-op stub */ },
+    async submit() {
+      return '';
+    },
+    async pollInbox() {
+      return [];
+    },
+    async ack(_runId) {
+      /* no-op stub */
+    },
+    async deadLetter(_runId) {
+      /* no-op stub */
+    },
     async publish(rec) {
       publishCallCount++;
       // Access via closure so the outer ref stays in sync
@@ -47,19 +78,25 @@ function makeThrowingTransport(): SubmissionTransport & { published: OutboxRecor
       }
       published.push(rec);
     },
-    async readOutbox() { return []; },
+    async readOutbox() {
+      return [];
+    },
   };
 }
 
 /** Transport that returns one poisoned envelope then never again, records dead-letter calls. */
-function makePoisonTransport(env: SubmissionEnvelope): SubmissionTransport & { deadLettered: string[]; ackedIds: string[] } {
+function makePoisonTransport(
+  env: SubmissionEnvelope,
+): SubmissionTransport & { deadLettered: string[]; ackedIds: string[] } {
   let called = false;
   const deadLettered: string[] = [];
   const ackedIds: string[] = [];
   return {
     deadLettered,
     ackedIds,
-    async submit() { return ''; },
+    async submit() {
+      return '';
+    },
     async pollInbox() {
       if (!called) {
         called = true;
@@ -67,10 +104,18 @@ function makePoisonTransport(env: SubmissionEnvelope): SubmissionTransport & { d
       }
       return [];
     },
-    async ack(runId) { ackedIds.push(runId); },
-    async deadLetter(runId) { deadLettered.push(runId); },
-    async publish() { /* no-op */ },
-    async readOutbox() { return []; },
+    async ack(runId) {
+      ackedIds.push(runId);
+    },
+    async deadLetter(runId) {
+      deadLettered.push(runId);
+    },
+    async publish() {
+      /* no-op */
+    },
+    async readOutbox() {
+      return [];
+    },
   };
 }
 
@@ -90,7 +135,11 @@ describe('serve driver', () => {
       items: [{ id: 'a', executor: 'x', inputs: {}, depends_on: [], resourceLocks: [] }],
     };
 
-    const env: SubmissionEnvelope = { run, actor: 'human:test', submittedAt: new Date().toISOString() };
+    const env: SubmissionEnvelope = {
+      run,
+      actor: 'human:test',
+      submittedAt: new Date().toISOString(),
+    };
     const transport = makeFakeTransport([env]);
 
     const ac = new AbortController();
@@ -104,10 +153,10 @@ describe('serve driver', () => {
       signal: ac.signal,
     });
 
-    // Poll until item 'a' is done (bounded ~2s)
+    // Poll until item 'a' is done (bounded by DONE_POLL_BUDGET_MS)
     const start = Date.now();
     let isDone = false;
-    while (Date.now() - start < 2000) {
+    while (Date.now() - start < DONE_POLL_BUDGET_MS) {
       const statuses = orch.getStatus('run-1');
       const itemA = statuses.find((s) => s.id === 'a');
       if (itemA?.status === 'done') {
@@ -180,12 +229,17 @@ describe('serve driver', () => {
     const transport = makeFakeTransport([]);
     const ac = new AbortController();
 
-    const servePromise = serve({ orchestrator: orch, transport, tickIntervalMs: 5, signal: ac.signal });
+    const servePromise = serve({
+      orchestrator: orch,
+      transport,
+      tickIntervalMs: 5,
+      signal: ac.signal,
+    });
 
     // Poll until item 'b' is done (reconcile-first fires it, first loop tick reconciles it)
     const start = Date.now();
     let isDone = false;
-    while (Date.now() - start < 2000) {
+    while (Date.now() - start < DONE_POLL_BUDGET_MS) {
       const statuses = orch.getStatus('run-2');
       const itemB = statuses.find((s) => s.id === 'b');
       if (itemB?.status === 'done') {
@@ -222,14 +276,26 @@ describe('serve driver', () => {
     const originalAdd = ac.signal.addEventListener.bind(ac.signal);
     const originalRemove = ac.signal.removeEventListener.bind(ac.signal);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (ac.signal as any).addEventListener = (type: string, listener: EventListenerOrEventListenerObject, options?: unknown) => {
+    (ac.signal as any).addEventListener = (
+      type: string,
+      listener: EventListenerOrEventListenerObject,
+      options?: unknown,
+    ) => {
       if (type === 'abort') activeAbortListeners.add(listener);
-      return (originalAdd as Function)(type, listener, options);
+      return (
+        originalAdd as (t: string, l: EventListenerOrEventListenerObject, o?: unknown) => unknown
+      )(type, listener, options);
     };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (ac.signal as any).removeEventListener = (type: string, listener: EventListenerOrEventListenerObject, options?: unknown) => {
+    (ac.signal as any).removeEventListener = (
+      type: string,
+      listener: EventListenerOrEventListenerObject,
+      options?: unknown,
+    ) => {
       if (type === 'abort') activeAbortListeners.delete(listener);
-      return (originalRemove as Function)(type, listener, options);
+      return (
+        originalRemove as (t: string, l: EventListenerOrEventListenerObject, o?: unknown) => unknown
+      )(type, listener, options);
     };
 
     // Run a few loop iterations with a short interval, then abort
@@ -263,12 +329,20 @@ describe('serve driver', () => {
     });
 
     const run1: SubmissionEnvelope = {
-      run: { id: 'run-a', queue: 'default', items: [{ id: 'x1', executor: 'x', inputs: {}, depends_on: [], resourceLocks: [] }] },
+      run: {
+        id: 'run-a',
+        queue: 'default',
+        items: [{ id: 'x1', executor: 'x', inputs: {}, depends_on: [], resourceLocks: [] }],
+      },
       actor: 'human:test',
       submittedAt: new Date().toISOString(),
     };
     const run2: SubmissionEnvelope = {
-      run: { id: 'run-b', queue: 'default', items: [{ id: 'x2', executor: 'x', inputs: {}, depends_on: [], resourceLocks: [] }] },
+      run: {
+        id: 'run-b',
+        queue: 'default',
+        items: [{ id: 'x2', executor: 'x', inputs: {}, depends_on: [], resourceLocks: [] }],
+      },
       actor: 'human:test',
       submittedAt: new Date().toISOString(),
     };
@@ -276,11 +350,16 @@ describe('serve driver', () => {
     const transport = makeFakeTransport([run1, run2]);
     const ac = new AbortController();
 
-    const servePromise = serve({ orchestrator: orch, transport, tickIntervalMs: 5, signal: ac.signal });
+    const servePromise = serve({
+      orchestrator: orch,
+      transport,
+      tickIntervalMs: 5,
+      signal: ac.signal,
+    });
 
     // Wait until both are done
     const start = Date.now();
-    while (Date.now() - start < 2000) {
+    while (Date.now() - start < DONE_POLL_BUDGET_MS) {
       const statuses = orch.getStatus();
       const x1 = statuses.find((s) => s.id === 'x1');
       const x2 = statuses.find((s) => s.id === 'x2');
@@ -343,7 +422,7 @@ describe('serve driver', () => {
     // Poll until the stranded item reaches done
     const start = Date.now();
     let isDone = false;
-    while (Date.now() - start < 2000) {
+    while (Date.now() - start < DONE_POLL_BUDGET_MS) {
       const statuses = orch.getStatus('run-stranded');
       const item = statuses.find((s) => s.id === 'stranded-a');
       if (item?.status === 'done') {
@@ -375,7 +454,11 @@ describe('serve driver', () => {
       queue: 'default',
       items: [{ id: 'ack-a', executor: 'x', inputs: {}, depends_on: [], resourceLocks: [] }],
     };
-    const env: SubmissionEnvelope = { run, actor: 'human:test', submittedAt: new Date().toISOString() };
+    const env: SubmissionEnvelope = {
+      run,
+      actor: 'human:test',
+      submittedAt: new Date().toISOString(),
+    };
     const transport = makeFakeTransport([env]);
 
     const ac = new AbortController();
@@ -389,7 +472,7 @@ describe('serve driver', () => {
 
     // Wait until the item is done
     const start = Date.now();
-    while (Date.now() - start < 2000) {
+    while (Date.now() - start < DONE_POLL_BUDGET_MS) {
       const statuses = orch.getStatus('run-ack');
       if (statuses.find((s) => s.id === 'ack-a')?.status === 'done') break;
       await new Promise((r) => setTimeout(r, 10));
@@ -429,7 +512,11 @@ describe('serve driver', () => {
       queue: 'default',
       items: [{ id: 'p1', executor: 'x', inputs: {}, depends_on: [], resourceLocks: [] }],
     };
-    const poisonEnv: SubmissionEnvelope = { run: poisonRun, actor: 'human:test', submittedAt: new Date().toISOString() };
+    const poisonEnv: SubmissionEnvelope = {
+      run: poisonRun,
+      actor: 'human:test',
+      submittedAt: new Date().toISOString(),
+    };
     const transport = makePoisonTransport(poisonEnv);
 
     const errors: unknown[] = [];
@@ -473,7 +560,11 @@ describe('serve driver', () => {
       queue: 'default',
       items: [{ id: 'g1', executor: 'x', inputs: {}, depends_on: [], resourceLocks: [] }],
     };
-    const goodEnv: SubmissionEnvelope = { run: goodRun, actor: 'human:test', submittedAt: new Date().toISOString() };
+    const goodEnv: SubmissionEnvelope = {
+      run: goodRun,
+      actor: 'human:test',
+      submittedAt: new Date().toISOString(),
+    };
     const transport = makeFakeTransport([goodEnv]);
 
     const ac = new AbortController();
@@ -487,7 +578,7 @@ describe('serve driver', () => {
 
     // Wait until item is done
     const start = Date.now();
-    while (Date.now() - start < 2000) {
+    while (Date.now() - start < DONE_POLL_BUDGET_MS) {
       const statuses = orch.getStatus('run-good');
       if (statuses.find((s) => s.id === 'g1')?.status === 'done') break;
       await new Promise((r) => setTimeout(r, 10));
@@ -536,7 +627,7 @@ describe('serve driver', () => {
     // Poll until the run reaches done (the loop must survive the throw)
     const start = Date.now();
     let isDone = false;
-    while (Date.now() - start < 2000) {
+    while (Date.now() - start < DONE_POLL_BUDGET_MS) {
       const statuses = orch.getStatus('run-resilience');
       const item = statuses.find((s) => s.id === 'res-a');
       if (item?.status === 'done') {
