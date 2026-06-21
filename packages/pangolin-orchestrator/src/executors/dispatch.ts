@@ -98,6 +98,7 @@ export class DispatchExecutor implements Executor {
       ...(requestedModel !== undefined ? { model: requestedModel } : {}),
       ...(inputRefs && Object.keys(inputRefs).length ? { inputRefs } : {}),
       ...(pipelineRef !== undefined ? { pipelineRef } : {}),
+      ...(ctx?.runId ? { trace: { traceId: ctx.runId, runId: ctx.runId, itemId: item.id } } : {}),
     });
     const entry: InFlightEntry = { inflight: flight, settled: null };
     // Detached background await — never throws out; records terminal state for reconcile().
@@ -196,9 +197,7 @@ export class DispatchExecutor implements Executor {
    * Best-effort: read the patchRef, verify signal, and outputs from the dispatch
    * output sentinel. NEVER throws — any failure returns an empty object.
    */
-  private async readSentinel(
-    dispatchId: string,
-  ): Promise<{
+  private async readSentinel(dispatchId: string): Promise<{
     patchRef?: string;
     verify?: ExecutionResult['verify'];
     outputRefs?: ExecutionResult['outputRefs'];
