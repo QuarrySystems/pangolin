@@ -44,6 +44,7 @@ import {
   type TaskHandle,
   type TaskExit,
   type SecretStore,
+  type TraceContext,
 } from '@quarry-systems/pangolin-core';
 import type { PangolinClient } from './client.js';
 import { computeInlineSecretTtl } from './secret-ttl.js';
@@ -72,6 +73,7 @@ export interface ClientDispatchOpts {
  */
 export interface InFlightDispatch {
   readonly dispatchId: string;
+  readonly trace: TraceContext;
   readonly handle: TaskHandle;
   /** Resolved inputs + environment for this dispatch — content-addressed refs
    *  and secret REFERENCES only (no values). Used to build the audit manifest. */
@@ -109,6 +111,9 @@ export async function fireWork(
   }
 
   const dispatchId = work.dispatchId ?? randomUUID();
+  // Correlation context for the telemetry stream + dispatch record. A standalone dispatch (no
+  // supplied trace) is a single-dispatch trace keyed by its own dispatchId.
+  const trace: TraceContext = work.trace ?? { traceId: dispatchId };
   const effectiveTimeoutSeconds = work.timeoutSeconds ?? opts.defaultDispatchTimeoutSeconds;
 
   // 1. Resolve refs.
@@ -305,6 +310,7 @@ export async function fireWork(
     target: work.target,
     resolved: resolvedCapabilities,
     at: new Date().toISOString(),
+    trace,
   });
   const handle = await compute.run(taskSpec, { credentials, telemetry: client.telemetry });
   const startTime = Date.now();
@@ -313,6 +319,7 @@ export async function fireWork(
     dispatchId,
     providerTaskId: handle.providerTaskId,
     at: new Date().toISOString(),
+    trace,
   });
 
   // ── fire complete: container is running. Bundle the reconcile/cleanup
@@ -329,6 +336,7 @@ export async function fireWork(
         dispatchId,
         reason: err instanceof Error ? err.message : String(err),
         at: new Date().toISOString(),
+        trace,
       });
       throw err;
     }
@@ -371,6 +379,7 @@ export async function fireWork(
         dispatchId,
         reason: result.failure.detail,
         at,
+        trace,
       });
     } else if (result.needsInput) {
       emitLifecycleEvent(client.telemetry, {
@@ -378,6 +387,7 @@ export async function fireWork(
         dispatchId,
         durationMs,
         at,
+        trace,
       });
     } else {
       emitLifecycleEvent(client.telemetry, {
@@ -386,6 +396,7 @@ export async function fireWork(
         exitCode: result.exitCode,
         durationMs,
         at,
+        trace,
       });
     }
 
@@ -393,7 +404,7 @@ export async function fireWork(
     await writeDispatchRecord(
       client,
       dispatchId,
-      { ...result, providerTaskId: handle.providerTaskId, target: work.target },
+      { ...result, providerTaskId: handle.providerTaskId, target: work.target, trace },
       work.retentionDays ?? client.retention.defaultDays,
     );
 
@@ -413,6 +424,7 @@ export async function fireWork(
 
   return {
     dispatchId,
+    trace,
     handle,
     resolved: {
       subagent: resolvedSubagent,

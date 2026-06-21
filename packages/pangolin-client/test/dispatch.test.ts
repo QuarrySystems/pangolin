@@ -1206,6 +1206,39 @@ describe('dispatchWork — store kind mismatch', () => {
   });
 });
 
+describe('dispatch trace correlation', () => {
+  it('attaches a supplied trace to every lifecycle event', async () => {
+    const events: LifecycleEvent[] = [];
+    const { compute } = makeCompute(); // existing helper (dispatch.test.ts:107)
+    const client = makeTelemetryClient(compute, events); // existing helper (155) — seeds subagent 's', target 'prod', records events
+    const trace = { traceId: 'run-7', runId: 'run-7', itemId: 'a' };
+    await dispatchWork(
+      client,
+      { subagent: 's', target: 'prod', trace },
+      { workerImage: WORKER_IMAGE },
+    );
+    // accepted + started + finished (clean exit) all carry the same trace:
+    for (const e of events) expect(e.trace).toEqual(trace);
+    expect(events.map((e) => e.kind)).toContain('dispatch.accepted');
+    expect(events.map((e) => e.kind)).toContain('dispatch.finished');
+  });
+
+  it('defaults trace.traceId to the dispatchId when none is supplied', async () => {
+    const events: LifecycleEvent[] = [];
+    const { compute } = makeCompute();
+    const client = makeTelemetryClient(compute, events);
+    const result = await dispatchWork(
+      client,
+      { subagent: 's', target: 'prod' },
+      { workerImage: WORKER_IMAGE },
+    );
+    for (const e of events) {
+      expect(e.trace?.traceId).toBe(result.dispatchId);
+      expect(e.trace?.runId).toBeUndefined();
+    }
+  });
+});
+
 describe('fireWork — lifecycle telemetry', () => {
   it('fireWork emits dispatch.accepted (before run) then dispatch.started (with providerTaskId)', async () => {
     const events: LifecycleEvent[] = [];
