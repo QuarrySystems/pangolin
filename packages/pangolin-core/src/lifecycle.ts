@@ -20,6 +20,7 @@
 // `dispatch.started`) to the event in question.
 
 import type { CapabilityRef } from './refs.js';
+import type { TraceContext } from './trace.js';
 
 /**
  * Forward-reference placeholder for the resolved capability bundle that
@@ -36,12 +37,14 @@ export type LifecycleEvent =
       target: string;
       resolved: ResolvedRefs;
       at: string;
+      trace?: TraceContext;
     }
   | {
       kind: 'dispatch.started';
       dispatchId: string;
       providerTaskId: string;
       at: string;
+      trace?: TraceContext;
     }
   | {
       kind: 'dispatch.finished';
@@ -49,21 +52,25 @@ export type LifecycleEvent =
       exitCode: number;
       durationMs: number;
       at: string;
+      trace?: TraceContext;
     }
   | {
       kind: 'dispatch.needs_input';
       dispatchId: string;
       durationMs: number;
       at: string;
+      trace?: TraceContext;
     }
   | {
       kind: 'dispatch.failed';
       dispatchId: string;
       reason: string;
       at: string;
+      trace?: TraceContext;
     }
   | {
       kind: 'dispatch.cancelled';
       dispatchId: string;
       at: string;
+      trace?: TraceContext;
     };
