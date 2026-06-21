@@ -158,8 +158,12 @@ services:
     # Resolve host.docker.internal on Linux (no-op on Docker Desktop / macOS).
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    # No `ports:` — serve exposes no inbound port.  It communicates exclusively
-    # via the MinIO mailbox (S3 object put/get).
+    # The serve container exposes ONE inbound port — the HTTP observability endpoint
+    # (/healthz, /readyz, /metrics, default 9464). It is intentionally NOT published to
+    # the host: a Prometheus scraper on this compose network reaches it at `serve:9464`
+    # by service name. Do not add a host `ports:` mapping for it — keep /metrics on a
+    # trusted interface (use the existing SSH tunnel for laptop access). Run submissions
+    # still flow exclusively over the MinIO mailbox (S3 object put/get).
     env_file:
       - .env
 
