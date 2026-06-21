@@ -62,25 +62,26 @@ export interface TraceContext {
 Changes:
 - `DispatchWork` gains an optional `trace?: TraceContext` (the caller-supplied correlation context).
 - Each of the six `LifecycleEvent` variants gains an optional `trace?: TraceContext`. (Additive optional field — no existing consumer breaks.)
-- `TraceContext` is exported from the core barrel.
+- `TraceContext` is exported from the core barrel (`export * from './trace.js';` in `src/index.ts`, matching the one-concern-per-file + re-export pattern; `trace.ts` is a sibling imported by both `lifecycle.ts` and `dispatch.ts`, avoiding a sideways import between them).
+- **`DispatchResult` is left UNCHANGED.** The caller-facing result needs no trace; widening it is unnecessary blast radius (YAGNI). The record carries trace instead (next section).
 
 ### Client threading + default (`pangolin-client`)
 
 - `fireWork` resolves the effective trace **once**, next to where it mints the dispatchId: `const trace = work.trace ?? { traceId: dispatchId }`. So a standalone dispatch (no `trace` supplied) always gets `traceId = dispatchId`.
 - The resolved `trace` is carried on the returned `InFlightDispatch` (a new `readonly trace: TraceContext`), so `reconcile()` (which emits `finished`/`failed`/`needs_input`) and the `awaitExit` rejection path (`failed`) have it without re-deriving.
 - Every `emitLifecycleEvent(...)` call in the dispatch path attaches `trace`: `accepted` + `started` (in `fireWork`), `finished`/`failed`/`needs_input` (in `reconcile`), and the `awaitExit`-rejection `failed`.
-- The dispatch record (`writeDispatchRecord`) stamps `trace` so an after-the-fact join by `dispatchId → trace` is possible without replaying the stream.
-- **Cancellation (`cancel.ts`):** `cancelDispatch` is record-based (it reaps from the persisted dispatch record). It reads `trace` from that record and attaches it to the `cancelled` event; if a record predates this change and has no `trace`, it defaults to `{ traceId: dispatchId }`. (Consistent with the existing record-driven cancel path — no new shared state between fire and cancel.)
+- **The dispatch record carries `trace`.** `DispatchRecord` (`pangolin-client/src/retention.ts`, which `extends DispatchResult` and adds `providerTaskId`/`target`/`retentionDays`/`recordedAt`) gains an optional `trace?: TraceContext`; `reconcile` (a closure inside `fireWork`, where the resolved `const trace` is already in lexical scope) passes it into `writeDispatchRecord` as a sibling of `providerTaskId`/`target`. This is what makes an after-the-fact `dispatchId → trace` join possible (and is the recovery path for a cancelled dispatch's `runId`/`itemId`, per the cancellation note below). Since `DispatchResult` is unchanged, `DispatchRecord` is the single carrier — no duplicate field.
+- **Cancellation (`cancel.ts`):** `cancelDispatch` emits `dispatch.cancelled` **unconditionally at entry** — the event reflects the cancel *intent*, and it fires *before* the best-effort, possibly-no-op record read + provider reap (the existing test "emits `dispatch.cancelled` even when there is no provider to reap / no record" pins this ordering). So the `cancelled` event carries `{ traceId: dispatchId }` — the standalone default — and the emit is **not** reordered or gated on the record. This is sound because cancel is keyed by `dispatchId`, and the orchestrator-side `runId`/`itemId` correlation for a cancelled dispatch remains recoverable from the dispatch record's stamped `trace` (below) after the fact. (Deliberately no new shared state between `fire` and `cancel`.)
 
 ### Orchestrator population (`pangolin-orchestrator`)
 
-`DispatchExecutor.fire` already has the run/item context (`ctx?.runId`, `item.id`). It passes a `trace` into `client.dispatch.fire` **only when a `runId` is present**:
+`DispatchExecutor.fire` already has the run/item context (`ctx?.runId`, `item.id`) — it already writes `runId: ctx?.runId ?? ''` + `itemId: item.id` into the audit manifest. It passes a `trace` into `client.dispatch.fire` **only when a `runId` is present**, using the conditional-spread idiom the file already uses elsewhere (rather than an explicit `: undefined`):
 
 ```ts
-trace: ctx?.runId ? { traceId: ctx.runId, runId: ctx.runId, itemId: item.id } : undefined,
+...(ctx?.runId ? { trace: { traceId: ctx.runId, runId: ctx.runId, itemId: item.id } } : {}),
 ```
 
-When `runId` is absent (the defensive `ctx?.runId ?? ''` path), `trace` is left unset and the client defaults `traceId = dispatchId` — never an empty `traceId`. Both consumption paths get correct correlation because they share the one client fire path: the blocking `client.dispatch()` (standalone → `traceId = dispatchId`) and the orchestrator's `DispatchExecutor` (→ `traceId = runId`, with `runId`/`itemId`).
+When `runId` is absent (the defensive `ctx?.runId ?? ''` path), `trace` is simply omitted and the client defaults `traceId = dispatchId` — never an empty `traceId`. (`client.dispatch.fire` is the same `fireWork` path — it spreads `...work`, so `trace` lands on the events.) Both consumption paths get correct correlation because they share the one client fire path: the blocking `client.dispatch()` (standalone → `traceId = dispatchId`) and the orchestrator's `DispatchExecutor` (→ `traceId = runId`, with `runId`/`itemId`).
 
 ### Why this is the whole change
 
@@ -92,7 +93,7 @@ No new failure modes. `trace` is pure data on an already-guarded, fire-and-forge
 
 ## Testing plan (TDD, unit-level)
 
-- **`pangolin-client`:** a supplied `work.trace` appears on every emitted event (`accepted`/`started`/`finished`/`failed`/`needs_input`) via a `RecordingTelemetryHook`; an unsupplied `trace` defaults `traceId = dispatchId` on every event; the `cancelled` event carries the trace read from the record (and defaults when the record lacks one); the dispatch record contains `trace`.
+- **`pangolin-client`:** a supplied `work.trace` appears on every emitted event (`accepted`/`started`/`finished`/`failed`/`needs_input`) via a `RecordingTelemetryHook`; an unsupplied `trace` defaults `traceId = dispatchId` on every event; the `cancelled` event carries `{ traceId: dispatchId }` (emitted unconditionally at entry — independent of the record); the dispatch record (`DispatchRecord`) contains `trace`. NOTE: the existing exact-`toEqual` assertion on the cancelled event in `test/cancel.test.ts` must be updated to include the `trace` field (an expected, additive change).
 - **`pangolin-orchestrator`:** a dispatch driven through `DispatchExecutor` with a run context emits events carrying `{ traceId: runId, runId, itemId }`; a fire with no `runId` yields events with `traceId = dispatchId` and no `runId`/`itemId`.
 - **Backward-compat:** an existing telemetry consumer (e.g. the metrics hook) still receives and processes events unchanged when `trace` is present (it ignores the field).
 
@@ -103,4 +104,6 @@ No new integration surface required.
 - **An item that retries** produces multiple dispatches sharing `itemId` (and `runId`/`traceId`) with distinct `dispatchId`s — correct and intended (the retries are part of the same logical item).
 - **Older dispatch records** (pre-change) have no `trace`; the cancel path defaults `{ traceId: dispatchId }`, so correlation degrades gracefully to dispatch-only rather than erroring.
 - **`traceId` never empty** — guaranteed by the client default; the orchestrator omits `trace` rather than passing an empty `runId`.
-- **Cardinality** — these ids are deliberately confined to the telemetry/audit streams; they must never leak into metric labels (the metrics layer's bounded-cardinality rule stands).
+- **Cardinality** — these ids are deliberately confined to the telemetry/audit streams; they must never leak into metric labels (the metrics layer's bounded-cardinality rule stands — `MetricsTelemetryHook` reads only `kind`/`durationMs`, so the boundary is structural, not just documentary).
+- **`ConsoleTelemetryHook` output** — it `JSON.stringify(event)`s, so its JSONL lines will now include the `trace` field when present. Benign and arguably desirable (the reference consumer becomes correlatable too); noted as an observable output change.
+- **Existing event/record literals** — the worker entrypoint and various tests construct `LifecycleEvent`s without `trace`; an optional field keeps them valid (no forced update), except the one exact-`toEqual` cancel-event assertion noted in the testing plan.
