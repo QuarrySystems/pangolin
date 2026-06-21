@@ -4,7 +4,7 @@
 // down in `afterEach`, so the suite has zero shared state between cases.
 // Anchors the storage contract that downstream packages will rely on.
 
-import { beforeEach, afterEach, describe, it, expect } from 'vitest';
+import { beforeEach, afterEach, describe, it, expect, vi } from 'vitest';
 import { mkdtemp, rm, writeFile, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -211,6 +211,75 @@ describe('LocalStorageProvider', () => {
         contentHash: 'sha256:1111111111111111111111111111111111111111111111111111111111111111',
       });
       expect(hit).toBeNull();
+    });
+  });
+
+  // ── listNames (distinct-name enumeration under a (ns, type) prefix) ──────
+  //
+  // Reuses the same (ns, type) directory walk as resolveByHash. Powers the
+  // catalog `list*` read-side (e.g. `pangolin capabilities list`).
+
+  describe('listNames', () => {
+    it('returns an empty array when nothing is registered under (ns, type)', async () => {
+      const sp = new LocalStorageProvider({ rootDir });
+      expect(await sp.listNames({ namespace: 'test', type: 'capability' })).toEqual([]);
+    });
+
+    it('returns one entry per distinct name with its LATEST version metadata', async () => {
+      const sp = new LocalStorageProvider({ rootDir });
+      await sp.put('pangolin://test/capability/lint', new TextEncoder().encode('lint-v1'));
+      const { contentHash: lintLatest } = await sp.put(
+        'pangolin://test/capability/lint',
+        new TextEncoder().encode('lint-v2'),
+      );
+      const { contentHash: fmtHash } = await sp.put(
+        'pangolin://test/capability/fmt',
+        new TextEncoder().encode('fmt-v1'),
+      );
+
+      const names = await sp.listNames({ namespace: 'test', type: 'capability' });
+      const byName = Object.fromEntries(names.map((n) => [n.name, n]));
+      expect(Object.keys(byName).sort()).toEqual(['fmt', 'lint']);
+      // lint collapses two versions to one entry pinned at the latest contentHash.
+      expect(byName['lint']!.contentHash).toBe(lintLatest);
+      expect(byName['fmt']!.contentHash).toBe(fmtHash);
+      expect(byName['lint']!.registeredAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    });
+
+    it('scopes to (ns, type): does not bleed across type or namespace', async () => {
+      const sp = new LocalStorageProvider({ rootDir });
+      await sp.put('pangolin://test/capability/lint', new TextEncoder().encode('x'));
+      await sp.put('pangolin://test/subagent/reviewer', new TextEncoder().encode('y'));
+      await sp.put('pangolin://other/capability/secret', new TextEncoder().encode('z'));
+
+      const caps = await sp.listNames({ namespace: 'test', type: 'capability' });
+      expect(caps.map((n) => n.name)).toEqual(['lint']);
+    });
+
+    it('picks the most-recently-written version on a same-timestamp tie (listNames + resolveLatest)', async () => {
+      // Freeze the clock so both puts register the IDENTICAL `registeredAt` — the
+      // real-world race a fast CI runner hits when two versions land in the same
+      // millisecond. "Latest" must still be the LAST-written version (write order),
+      // never whichever happens to sit at entries[0]. Regression for the flaky
+      // listNames "LATEST version metadata" CI failure.
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+      try {
+        const sp = new LocalStorageProvider({ rootDir });
+        await sp.put('pangolin://test/capability/lint', new TextEncoder().encode('lint-v1'));
+        const { contentHash: latest } = await sp.put(
+          'pangolin://test/capability/lint',
+          new TextEncoder().encode('lint-v2'),
+        );
+
+        const names = await sp.listNames({ namespace: 'test', type: 'capability' });
+        expect(names.find((n) => n.name === 'lint')!.contentHash).toBe(latest);
+
+        const resolved = await sp.resolveLatest('pangolin://test/capability/lint');
+        expect(resolved!.contentHash).toBe(latest);
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 

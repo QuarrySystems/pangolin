@@ -5,15 +5,13 @@
 // returned by this surface. The MCP layer in DAG 3 wraps these read-only
 // operations behind the six-tool surface.
 //
-// The `list*` operations are deferred per the DAG 2 plan: the
-// `StorageProvider` contract exposes `list(uri)` for the version history
-// of one logical name, but no `listNames(prefix)` for distinct-name
-// discovery under a `<namespace>/<type>/` prefix. Rather than ship a
-// half-baked implementation that scans the local filesystem (and fails
-// on S3 / other providers), this module throws a clear "not yet
-// implemented" error and documents the limitation. Adding distinct-name
-// enumeration is a follow-up that should extend the `StorageProvider`
-// contract and land in every provider in lockstep.
+// The `list*` operations enumerate distinct names under a
+// `<namespace>/<type>/` prefix via the OPTIONAL `StorageProvider.listNames`
+// extension (the bundled local-FS and S3 providers implement it by reusing
+// the same `(namespace, type)` directory walk as `resolveByHash`). They
+// return metadata triples only — never blob bodies — and scope to the
+// client's namespace. A provider that does not implement `listNames` yields
+// a clear "enumeration unsupported" error rather than a silent empty list.
 
 import {
   buildPangolinUri,
@@ -22,10 +20,6 @@ import {
   type EnvRef,
 } from '@quarry-systems/pangolin-core';
 import type { PangolinClient } from './client.js';
-
-const NOT_IMPLEMENTED_MSG =
-  'listing all names is not yet implemented — use get(name) with a known name. ' +
-  'Tracking issue: StorageProvider needs a listNames(prefix) extension before catalog enumeration can land.';
 
 async function getRef<T extends { name: string; registeredAt: string; contentHash: string }>(
   client: PangolinClient,
@@ -42,13 +36,28 @@ async function getRef<T extends { name: string; registeredAt: string; contentHas
   } as T;
 }
 
+async function listRefs<T extends { name: string; registeredAt: string; contentHash: string }>(
+  client: PangolinClient,
+  type: 'capability' | 'subagent' | 'env',
+): Promise<T[]> {
+  if (!client.storage.listNames) {
+    throw new Error(
+      `cannot list ${type}s: this storage provider (${client.storage.name}) does not support name ` +
+        'enumeration (StorageProvider.listNames). Use get(name) with a known name instead.',
+    );
+  }
+  const names = await client.storage.listNames({ namespace: client.namespace, type });
+  return names.map(
+    (n) => ({ name: n.name, registeredAt: n.registeredAt, contentHash: n.contentHash }) as T,
+  );
+}
+
 /**
- * List all registered capabilities under the client's namespace.
- *
- * Deferred per the DAG 2 plan; see the file header for the rationale.
+ * List the latest registration metadata for every capability under the client's
+ * namespace. Metadata triples only — NEVER capability payloads.
  */
-export async function listCapabilities(_client: PangolinClient): Promise<CapabilityRef[]> {
-  throw new Error(NOT_IMPLEMENTED_MSG);
+export async function listCapabilities(client: PangolinClient): Promise<CapabilityRef[]> {
+  return listRefs<CapabilityRef>(client, 'capability');
 }
 
 /**
@@ -64,12 +73,11 @@ export async function getCapability(
 }
 
 /**
- * List all registered subagents under the client's namespace.
- *
- * Deferred per the DAG 2 plan; see the file header for the rationale.
+ * List the latest registration metadata for every subagent under the client's
+ * namespace. Metadata triples only — NEVER system-prompt / template bodies.
  */
-export async function listSubagents(_client: PangolinClient): Promise<SubagentRef[]> {
-  throw new Error(NOT_IMPLEMENTED_MSG);
+export async function listSubagents(client: PangolinClient): Promise<SubagentRef[]> {
+  return listRefs<SubagentRef>(client, 'subagent');
 }
 
 /**
@@ -85,12 +93,11 @@ export async function getSubagent(
 }
 
 /**
- * List all registered env blobs under the client's namespace.
- *
- * Deferred per the DAG 2 plan; see the file header for the rationale.
+ * List the latest registration metadata for every env blob under the client's
+ * namespace. Metadata triples only — NEVER secret values.
  */
-export async function listEnvs(_client: PangolinClient): Promise<EnvRef[]> {
-  throw new Error(NOT_IMPLEMENTED_MSG);
+export async function listEnvs(client: PangolinClient): Promise<EnvRef[]> {
+  return listRefs<EnvRef>(client, 'env');
 }
 
 /**
@@ -98,9 +105,6 @@ export async function listEnvs(_client: PangolinClient): Promise<EnvRef[]> {
  * client's namespace, or `null` if no env is registered under that name.
  * NEVER returns secret values.
  */
-export async function getEnv(
-  client: PangolinClient,
-  name: string,
-): Promise<EnvRef | null> {
+export async function getEnv(client: PangolinClient, name: string): Promise<EnvRef | null> {
   return getRef<EnvRef>(client, 'env', name);
 }

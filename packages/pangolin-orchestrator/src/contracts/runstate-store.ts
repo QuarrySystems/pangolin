@@ -9,7 +9,10 @@ export interface RunStateStore {
   ensureQueue(name: string, concurrency: number): void;
   saveRun(run: Run, actor?: string, submittedAt?: string): void;
   markReady(itemIds: string[]): void;
-  setRunning(itemId: string, dispatchHash: string): void;
+  /** Mark an item running. `runningSinceMs` (epoch ms, the fire instant) is persisted so the
+   *  engine can enforce a wall-clock dispatch deadline; omit it to leave the item without a
+   *  deadline (back-compat for direct callers/fakes). */
+  setRunning(itemId: string, dispatchHash: string, runningSinceMs?: number): void;
   setStatus(itemId: string, status: TerminalStatus, reason?: string): void;
   getItems(runId?: string): ItemState[];
   runningCount(queue: string): number;
@@ -19,12 +22,12 @@ export interface RunStateStore {
   acquireLocks(itemId: string, keys: string[]): boolean;
   releaseLocks(itemId: string): void;
   getActor(itemId: string): string | undefined;
-  getAttempts(itemId: string): number;      // absent reads as 0
-  bumpAttempt(itemId: string): void;        // attempts += 1
+  getAttempts(itemId: string): number; // absent reads as 0
+  bumpAttempt(itemId: string): void; // attempts += 1
   requeue(itemId: string, notBeforeMs: number): void; // status -> 'ready', nextAttemptAt = notBeforeMs
-  setResultRef(itemId: string, ref: string): void;    // persist opaque result artifact ref
+  setResultRef(itemId: string, ref: string): void; // persist opaque result artifact ref
   setVerify(itemId: string, verify: VerifyOutcome): void; // persist self-verify signal
   setOutputRefs(itemId: string, outputRefs: Record<string, string>): void; // persist deliverable refs
-  setManifestRef(itemId: string, ref: string): void;  // persist opaque dispatch-manifest ref
+  setManifestRef(itemId: string, ref: string): void; // persist opaque dispatch-manifest ref
   close(): void;
 }

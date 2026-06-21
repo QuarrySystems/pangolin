@@ -50,6 +50,7 @@ import { computeInlineSecretTtl } from './secret-ttl.js';
 import { mintCallbackHmac } from './callback-hmac.js';
 import { writeDispatchRecord } from './retention.js';
 import { SecretStoreMismatchError } from './errors.js';
+import { emitLifecycleEvent } from './lifecycle-emit.js';
 
 export interface ClientDispatchOpts {
   /** Worker image (digest-pinned) the provider should run. */
@@ -296,26 +297,42 @@ export async function fireWork(
     dispatchId,
   };
 
-  // 8. Run (fire). awaitExit is deferred to the returned InFlightDispatch.
-  const handle = await compute.run(taskSpec, { credentials, telemetry: client.telemetry });
-  const startTime = Date.now();
-  client.telemetry?.emit({
+  // 8. Run (fire). Emit `accepted` (refs resolved, container not yet started) BEFORE run,
+  //    then `started` once the provider returns a handle.
+  emitLifecycleEvent(client.telemetry, {
     kind: 'dispatch.accepted',
     dispatchId,
     target: work.target,
-    // ResolvedRefs is currently typed as CapabilityRef[] (see lifecycle.ts —
-    // the type alias is a forward-reference placeholder). We echo the
-    // capability bundle here; richer shape lands when the placeholder is
-    // refined.
     resolved: resolvedCapabilities,
+    at: new Date().toISOString(),
+  });
+  const handle = await compute.run(taskSpec, { credentials, telemetry: client.telemetry });
+  const startTime = Date.now();
+  emitLifecycleEvent(client.telemetry, {
+    kind: 'dispatch.started',
+    dispatchId,
+    providerTaskId: handle.providerTaskId,
     at: new Date().toISOString(),
   });
 
   // ── fire complete: container is running. Bundle the reconcile/cleanup
   //    closures so the caller (blocking dispatchWork, or the orchestrator)
   //    can collect the result whenever the task exits. ────────────────────
-  const awaitExit = (): Promise<TaskExit> =>
-    compute.awaitExit(handle, { credentials, telemetry: client.telemetry });
+  const awaitExit = async (): Promise<TaskExit> => {
+    try {
+      return await compute.awaitExit(handle, { credentials, telemetry: client.telemetry });
+    } catch (err) {
+      // Infra rejection: the orchestrator path never calls our reconcile here, so this is the
+      // only place `failed` can be emitted for a hard provider throw.
+      emitLifecycleEvent(client.telemetry, {
+        kind: 'dispatch.failed',
+        dispatchId,
+        reason: err instanceof Error ? err.message : String(err),
+        at: new Date().toISOString(),
+      });
+      throw err;
+    }
+  };
 
   const reconcile = async (exit: TaskExit): Promise<DispatchResult> => {
     const durationMs = Date.now() - startTime;
@@ -344,6 +361,33 @@ export async function fireWork(
             env: resolvedEnv,
           },
         };
+
+    // Terminal lifecycle event. Honors the failure-vs-exitCode contract: a non-zero APP exit is
+    // `finished` (with its code); only a provider/infra `failure` is `failed`.
+    const at = new Date().toISOString();
+    if (result.failure) {
+      emitLifecycleEvent(client.telemetry, {
+        kind: 'dispatch.failed',
+        dispatchId,
+        reason: result.failure.detail,
+        at,
+      });
+    } else if (result.needsInput) {
+      emitLifecycleEvent(client.telemetry, {
+        kind: 'dispatch.needs_input',
+        dispatchId,
+        durationMs,
+        at,
+      });
+    } else {
+      emitLifecycleEvent(client.telemetry, {
+        kind: 'dispatch.finished',
+        dispatchId,
+        exitCode: result.exitCode,
+        durationMs,
+        at,
+      });
+    }
 
     // 10. Write the dispatch record (storage-side retention enforcement).
     await writeDispatchRecord(
@@ -513,7 +557,7 @@ async function resolveCapabilityRefs(
   client: PangolinClient,
   refs: Array<string | CapabilityRef>,
 ): Promise<CapabilityRef[]> {
-  const out: CapabilityRef[]= [];
+  const out: CapabilityRef[] = [];
   for (const r of refs) {
     if (typeof r === 'string') {
       const baseUri = buildPangolinUri({
@@ -581,9 +625,7 @@ async function readSubagentCapabilities(
   // no longer resolve (e.g. capability was GC'd) are silently dropped —
   // the dispatch proceeds with the remaining capabilities rather than
   // failing the whole call.
-  const wantedHashes: string[] = def.capabilities.filter(
-    (h): h is string => typeof h === 'string',
-  );
+  const wantedHashes: string[] = def.capabilities.filter((h): h is string => typeof h === 'string');
   if (wantedHashes.length === 0) return [];
   const hits = await Promise.all(
     wantedHashes.map((contentHash) =>

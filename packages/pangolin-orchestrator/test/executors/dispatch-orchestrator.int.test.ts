@@ -175,7 +175,7 @@ describe('PangolinOrchestrator + DispatchExecutor', () => {
       ],
     };
 
-    orch.submitRun(run);
+    await orch.submitRun(run);
 
     // Tick 1: item should fire (status → running)
     const t1 = await orch.tick();
@@ -240,7 +240,7 @@ describe('PangolinOrchestrator + DispatchExecutor', () => {
       ],
     };
 
-    orch.submitRun(run);
+    await orch.submitRun(run);
 
     await orch.tick(); // fires
 
@@ -335,7 +335,7 @@ describe('PangolinOrchestrator + DispatchExecutor', () => {
       ],
     };
 
-    orch.submitRun(run, 'human:brett', '2026-05-31T00:00:00.000Z');
+    await orch.submitRun(run, 'human:brett', '2026-05-31T00:00:00.000Z');
 
     // Tick 1: fire — item goes running.
     const t1 = await orch.tick();
@@ -430,7 +430,7 @@ describe('PangolinOrchestrator + DispatchExecutor', () => {
       ],
     };
 
-    orch.submitRun(run);
+    await orch.submitRun(run);
 
     // Fire
     await orch.tick();

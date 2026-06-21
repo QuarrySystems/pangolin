@@ -19,9 +19,7 @@ export interface StorageProvider {
   resolveLatest(
     uri: string,
   ): Promise<{ uri: string; contentHash: string; registeredAt: string } | null>;
-  list(
-    uri: string,
-  ): Promise<Array<{ uri: string; contentHash: string; registeredAt: string }>>;
+  list(uri: string): Promise<Array<{ uri: string; contentHash: string; registeredAt: string }>>;
   /**
    * Reverse-lookup: find the registered blob in `(namespace, type)` whose
    * content hash matches `contentHash`, returning its logical `name` plus the
@@ -34,12 +32,24 @@ export interface StorageProvider {
    * permitted to do an O(N) walk of the (ns, type) directory; v0.2 may add
    * a sidecar hash→name index for large registries.
    */
-  resolveByHash(
-    query: { namespace: string; type: string; contentHash: string },
-  ): Promise<{
+  resolveByHash(query: { namespace: string; type: string; contentHash: string }): Promise<{
     uri: string;
     name: string;
     contentHash: string;
     registeredAt: string;
   } | null>;
+  /**
+   * Distinct-name discovery: enumerate the latest registration of every logical `name`
+   * under a `(namespace, type)` prefix (e.g. all capabilities in a namespace). Returns one
+   * entry per name (the latest version), metadata only — never blob bodies.
+   *
+   * OPTIONAL: providers that cannot enumerate names omit it; the catalog read-side throws a
+   * clear "enumeration unsupported" error in that case. The bundled local-FS and S3 providers
+   * implement it by reusing the same `(namespace, type)` directory walk as `resolveByHash`
+   * (local `readdir`; S3 `ListObjectsV2` with `Delimiter: '/'` over `CommonPrefixes`).
+   */
+  listNames?(query: {
+    namespace: string;
+    type: string;
+  }): Promise<Array<{ name: string; contentHash: string; registeredAt: string }>>;
 }

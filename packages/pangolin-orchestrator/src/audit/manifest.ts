@@ -1,5 +1,5 @@
 import { canonicalJsonString, computeContentHash } from '@quarry-systems/pangolin-core';
-import type { DispatchManifest } from '../contracts/manifest.js';
+import type { Authorization, DispatchManifest } from '@quarry-systems/pangolin-core';
 
 export interface BuildManifestInput {
   runId: string;
@@ -12,6 +12,7 @@ export interface BuildManifestInput {
   submittedAt?: string;
   inputRefs?: Record<string, string>;
   pipelineRef?: string;
+  authorization?: Authorization;
 }
 
 /** Build a manifest and compute its self-hash. The hash is taken over the
@@ -38,6 +39,7 @@ export function buildManifest(input: BuildManifestInput): {
     firedAt: input.firedAt,
     inputRefs: input.inputRefs,
     pipelineRef: input.pipelineRef,
+    authorization: input.authorization,
   };
   // computeContentHash canonicalizes objects internally (sorted keys, drops
   // undefined — so an absent submittedAt does not perturb the hash).

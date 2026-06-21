@@ -37,6 +37,8 @@ export {
   createLocalEcdsaSigner,
   verifyEcdsaP256,
 } from './audit/signer.js';
+export { NoneAuthorizer, createConfigAuthorizer } from './audit/authorizer.js';
+export type { ConfigRule, ConfigAuthorizerOpts } from './audit/authorizer.js';
 export { verify } from './audit/verify.js';
 export { renderVerification } from './audit/render.js';
 export { verifyBundle } from './audit/verify-bundle.js';

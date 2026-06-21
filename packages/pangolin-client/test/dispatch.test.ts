@@ -35,7 +35,13 @@ function makeMemoryStorage(): StorageProvider & {
   let monotonic = 0;
   const storage: StorageProvider & {
     blobs: Map<string, Uint8Array>;
-    seed(name: string, type: string, namespace: string, contentHash: string, payload: unknown): void;
+    seed(
+      name: string,
+      type: string,
+      namespace: string,
+      contentHash: string,
+      payload: unknown,
+    ): void;
   } = {
     name: 'memory',
     blobs,
@@ -76,7 +82,11 @@ function makeMemoryStorage(): StorageProvider & {
       const list = registry.get(uri);
       if (!list || list.length === 0) return null;
       const last = list[list.length - 1];
-      return { uri: last.pinnedUri, contentHash: last.contentHash, registeredAt: last.registeredAt };
+      return {
+        uri: last.pinnedUri,
+        contentHash: last.contentHash,
+        registeredAt: last.registeredAt,
+      };
     },
     async list(uri: string) {
       return (registry.get(uri) ?? []).map((e) => ({
@@ -141,6 +151,25 @@ function makeTelemetry(): { telemetry: TelemetryHook; events: LifecycleEvent[] }
   return { telemetry, events };
 }
 
+/** Build a client wired to a recording telemetry hook; `events` is filled as events are emitted. */
+function makeTelemetryClient(
+  compute: ComputeProvider,
+  events: LifecycleEvent[],
+  resultSink?: ResultSink,
+): PangolinClient {
+  const storage = makeMemoryStorage();
+  storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
+  return new PangolinClient({
+    namespace: 'ns',
+    compute: { default: compute },
+    credentials: { default: { name: 'c', resolve: async () => ({ kind: 'static', token: 't' }) } },
+    storage,
+    targets: { prod: { compute: 'default', credentials: 'default' } },
+    ...(resultSink ? { resultSink } : {}),
+    telemetry: { name: 'rec', emit: (e) => events.push(e) },
+  });
+}
+
 /**
  * Build a minimal in-memory SecretStore stub. `staged` records every call
  * to `stage` for assertion; `cleanupCalls` records every `cleanupByTag` call.
@@ -150,13 +179,23 @@ function makeStore(opts: { name?: string; dir?: string } = {}): {
   staged: Array<{ name: string; value: string; ttlSeconds: number; tags?: Record<string, string> }>;
   cleanupCalls: Array<{ tagKey: string; tagValue: string }>;
 } {
-  const staged: Array<{ name: string; value: string; ttlSeconds: number; tags?: Record<string, string> }> = [];
+  const staged: Array<{
+    name: string;
+    value: string;
+    ttlSeconds: number;
+    tags?: Record<string, string>;
+  }> = [];
   const cleanupCalls: Array<{ tagKey: string; tagValue: string }> = [];
   const store: SecretStore = {
     name: opts.name ?? 'test-store',
     dir: opts.dir,
     async stage(args) {
-      staged.push({ name: args.name, value: args.value, ttlSeconds: args.ttlSeconds, tags: args.tags });
+      staged.push({
+        name: args.name,
+        value: args.value,
+        ttlSeconds: args.ttlSeconds,
+        tags: args.tags,
+      });
       return { ref: `store-ref://${args.name}`, ttlSeconds: args.ttlSeconds };
     },
     async resolve(ref: string) {
@@ -318,7 +357,11 @@ describe('dispatchWork — ref resolution', () => {
     await dispatchWork(
       client,
       {
-        subagent: { name: 'sub-y', registeredAt: '2026-01-01T00:00:00Z', contentHash: 'sha256:yhash' },
+        subagent: {
+          name: 'sub-y',
+          registeredAt: '2026-01-01T00:00:00Z',
+          contentHash: 'sha256:yhash',
+        },
         target: 'prod',
       },
       { workerImage: WORKER_IMAGE },
@@ -340,7 +383,11 @@ describe('dispatchWork — ref resolution', () => {
     });
 
     await expect(
-      dispatchWork(client, { subagent: 'no-such-sub', target: 'prod' }, { workerImage: WORKER_IMAGE }),
+      dispatchWork(
+        client,
+        { subagent: 'no-such-sub', target: 'prod' },
+        { workerImage: WORKER_IMAGE },
+      ),
     ).rejects.toThrow(/subagent.*no-such-sub/);
   });
 
@@ -551,8 +598,8 @@ describe('dispatchWork — secrets + callback', () => {
         env: 'shared',
         target: 'prod',
         secrets: {
-          GH_TOKEN: { inline: 'override-me' },           // collides → per-dispatch wins
-          API_KEY: { ref: 'store-ref://per-dispatch:api-key' },  // pre-resolved ref form
+          GH_TOKEN: { inline: 'override-me' }, // collides → per-dispatch wins
+          API_KEY: { ref: 'store-ref://per-dispatch:api-key' }, // pre-resolved ref form
         },
       },
       { workerImage: WORKER_IMAGE },
@@ -935,7 +982,13 @@ describe('fireWork / reconcile split (D9)', () => {
       },
       async awaitExit(): Promise<TaskExit> {
         awaitExitCalls += 1;
-        return { exitCode: 0, startedAt: new Date(0), finishedAt: new Date(1000), stdout: 'x', stderr: '' };
+        return {
+          exitCode: 0,
+          startedAt: new Date(0),
+          finishedAt: new Date(1000),
+          stdout: 'x',
+          stderr: '',
+        };
       },
     };
     const client = new PangolinClient({
@@ -946,7 +999,11 @@ describe('fireWork / reconcile split (D9)', () => {
       targets: { prod: { compute: 'default', credentials: 'default' } },
     });
 
-    const inflight = await fireWork(client, { subagent: 's', target: 'prod' }, { workerImage: WORKER_IMAGE });
+    const inflight = await fireWork(
+      client,
+      { subagent: 's', target: 'prod' },
+      { workerImage: WORKER_IMAGE },
+    );
 
     expect(runs).toHaveLength(1);
     expect(awaitExitCalls).toBe(0); // fire fires; it does NOT await exit
@@ -966,7 +1023,11 @@ describe('fireWork / reconcile split (D9)', () => {
       targets: { prod: { compute: 'default', credentials: 'default' } },
     });
 
-    const inflight = await fireWork(client, { subagent: 's', target: 'prod' }, { workerImage: WORKER_IMAGE });
+    const inflight = await fireWork(
+      client,
+      { subagent: 's', target: 'prod' },
+      { workerImage: WORKER_IMAGE },
+    );
     const syntheticExit: TaskExit = {
       exitCode: 3,
       startedAt: new Date(0),
@@ -1015,7 +1076,7 @@ describe('fireWork / reconcile split (D9)', () => {
 });
 
 describe('dispatchWork — store kind mismatch', () => {
-  it('throws SecretStoreMismatchError when a bundle\'s store kind != the target store kind', async () => {
+  it("throws SecretStoreMismatchError when a bundle's store kind != the target store kind", async () => {
     const storage = makeMemoryStorage();
     storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
     // Bundle was staged with store kind "local-file"
@@ -1038,7 +1099,11 @@ describe('dispatchWork — store kind mismatch', () => {
     });
 
     await expect(
-      fireWork(client, { target: 'awsTarget', subagent: 's', env: 'localBundle' }, { workerImage: WORKER_IMAGE }),
+      fireWork(
+        client,
+        { target: 'awsTarget', subagent: 's', env: 'localBundle' },
+        { workerImage: WORKER_IMAGE },
+      ),
     ).rejects.toThrow(/staged for store kind "local-file"/);
   });
 
@@ -1064,7 +1129,11 @@ describe('dispatchWork — store kind mismatch', () => {
 
     let caughtError: unknown;
     try {
-      await fireWork(client, { target: 'awsTarget', subagent: 's', env: 'myBundle' }, { workerImage: WORKER_IMAGE });
+      await fireWork(
+        client,
+        { target: 'awsTarget', subagent: 's', env: 'myBundle' },
+        { workerImage: WORKER_IMAGE },
+      );
     } catch (e) {
       caughtError = e;
     }
@@ -1097,11 +1166,15 @@ describe('dispatchWork — store kind mismatch', () => {
 
     // Should NOT throw even though target uses aws-secrets-manager
     await expect(
-      fireWork(client, { target: 'awsTarget', subagent: 's', env: 'legacyBundle' }, { workerImage: WORKER_IMAGE }),
+      fireWork(
+        client,
+        { target: 'awsTarget', subagent: 's', env: 'legacyBundle' },
+        { workerImage: WORKER_IMAGE },
+      ),
     ).resolves.toBeDefined();
   });
 
-  it('dispatches normally when a bundle\'s store kind matches the target store kind', async () => {
+  it("dispatches normally when a bundle's store kind matches the target store kind", async () => {
     const storage = makeMemoryStorage();
     storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
     // Bundle recorded with same store kind as the target
@@ -1124,7 +1197,125 @@ describe('dispatchWork — store kind mismatch', () => {
 
     // Should NOT throw — kinds match
     await expect(
-      fireWork(client, { target: 'awsTarget', subagent: 's', env: 'awsBundle' }, { workerImage: WORKER_IMAGE }),
+      fireWork(
+        client,
+        { target: 'awsTarget', subagent: 's', env: 'awsBundle' },
+        { workerImage: WORKER_IMAGE },
+      ),
     ).resolves.toBeDefined();
+  });
+});
+
+describe('fireWork — lifecycle telemetry', () => {
+  it('fireWork emits dispatch.accepted (before run) then dispatch.started (with providerTaskId)', async () => {
+    const events: LifecycleEvent[] = [];
+    const { compute } = makeCompute();
+    const client = makeTelemetryClient(compute, events);
+
+    await fireWork(
+      client,
+      { subagent: 's', target: 'prod', workerImage: 'img', input: {} },
+      { defaultDispatchTimeoutSeconds: 60 },
+    );
+
+    expect(events.map((e) => e.kind)).toEqual(['dispatch.accepted', 'dispatch.started']);
+    const started = events[1] as Extract<LifecycleEvent, { kind: 'dispatch.started' }>;
+    expect(started.providerTaskId).toBe('prov-1');
+  });
+});
+
+describe('reconcile / awaitExit — terminal lifecycle events', () => {
+  it('reconcile emits dispatch.finished on a clean exit (incl. a non-zero app exit)', async () => {
+    const events: LifecycleEvent[] = [];
+    const { compute } = makeCompute({ exit: { exitCode: 3 } }); // non-zero APP exit, no failure block
+    const client = makeTelemetryClient(compute, events);
+    const flight = await fireWork(
+      client,
+      { subagent: 's', target: 'prod', workerImage: 'img', input: {} },
+      { defaultDispatchTimeoutSeconds: 60 },
+    );
+    await flight.reconcile(await flight.awaitExit());
+    const terminal = events.find((e) =>
+      ['dispatch.finished', 'dispatch.failed', 'dispatch.needs_input'].includes(e.kind),
+    )!;
+    expect(terminal.kind).toBe('dispatch.finished');
+    expect((terminal as Extract<LifecycleEvent, { kind: 'dispatch.finished' }>).exitCode).toBe(3);
+  });
+
+  it('reconcile emits dispatch.failed when the result carries an infra failure', async () => {
+    const events: LifecycleEvent[] = [];
+    const { compute } = makeCompute();
+    const failingSink: ResultSink = {
+      name: 'fake',
+      async collect(_handle, exit, ctx): Promise<DispatchResult> {
+        return {
+          dispatchId: ctx.dispatchId,
+          exitCode: exit.exitCode,
+          stdout: '',
+          stderr: '',
+          durationMs: 0,
+          resolved: ctx.resolved,
+          failure: { reason: 'timeout', detail: 'provider timed out' },
+        };
+      },
+    };
+    const client = makeTelemetryClient(compute, events, failingSink);
+    const flight = await fireWork(
+      client,
+      { subagent: 's', target: 'prod', workerImage: 'img', input: {} },
+      { defaultDispatchTimeoutSeconds: 60 },
+    );
+    await flight.reconcile(await flight.awaitExit());
+    expect(events.some((e) => e.kind === 'dispatch.failed')).toBe(true);
+    expect(events.some((e) => e.kind === 'dispatch.finished')).toBe(false);
+  });
+
+  it('reconcile emits dispatch.needs_input when the result carries a needsInput sentinel', async () => {
+    const events: LifecycleEvent[] = [];
+    const { compute } = makeCompute();
+    const needsInputSink: ResultSink = {
+      name: 'fake-needs-input',
+      async collect(_handle, exit, ctx): Promise<DispatchResult> {
+        return {
+          dispatchId: ctx.dispatchId,
+          exitCode: exit.exitCode,
+          stdout: '',
+          stderr: '',
+          durationMs: 0,
+          resolved: ctx.resolved,
+          needsInput: { question: 'Which region?', options: ['us-east-1', 'eu-west-1'] },
+        };
+      },
+    };
+    const client = makeTelemetryClient(compute, events, needsInputSink);
+    const flight = await fireWork(
+      client,
+      { subagent: 's', target: 'prod', workerImage: 'img', input: {} },
+      { defaultDispatchTimeoutSeconds: 60 },
+    );
+    await flight.reconcile(await flight.awaitExit());
+    expect(events.some((e) => e.kind === 'dispatch.needs_input')).toBe(true);
+    expect(events.some((e) => e.kind === 'dispatch.finished')).toBe(false);
+  });
+
+  it('awaitExit emits dispatch.failed and rethrows when the provider rejects', async () => {
+    const events: LifecycleEvent[] = [];
+    const compute: ComputeProvider = {
+      name: 'rejecting',
+      async run() {
+        return { providerTaskId: 'prov-x' };
+      },
+      async awaitExit(): Promise<TaskExit> {
+        throw new Error('provider exploded');
+      },
+    };
+    const client = makeTelemetryClient(compute, events);
+    const flight = await fireWork(
+      client,
+      { subagent: 's', target: 'prod', workerImage: 'img', input: {} },
+      { defaultDispatchTimeoutSeconds: 60 },
+    );
+    await expect(flight.awaitExit()).rejects.toThrow('provider exploded');
+    expect(events.some((e) => e.kind === 'dispatch.failed')).toBe(true);
   });
 });

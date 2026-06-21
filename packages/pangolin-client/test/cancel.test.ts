@@ -5,6 +5,7 @@ import { writeDispatchRecord } from '../src/retention.js';
 import type {
   ComputeProvider,
   CredentialProvider,
+  LifecycleEvent,
   StorageProvider,
   ProviderContext,
   TaskHandle,
@@ -60,9 +61,7 @@ function makeEnoentStorage(): StorageProvider {
   };
 }
 
-function makeCredentialProvider(
-  kind = 'static-bearer',
-): CredentialProvider {
+function makeCredentialProvider(kind = 'static-bearer'): CredentialProvider {
   return {
     name: 'creds',
     async resolve() {
@@ -246,9 +245,7 @@ describe('cancelDispatch', () => {
       storage,
       targets: {}, // 'prod' is gone
     });
-    await expect(
-      cancelDispatch(reconfiguredClient, 'd1'),
-    ).resolves.toBeUndefined();
+    await expect(cancelDispatch(reconfiguredClient, 'd1')).resolves.toBeUndefined();
     expect(compute.cancelCalls).toHaveLength(0);
   });
 
@@ -322,5 +319,22 @@ describe('cancelDispatch', () => {
 
     await expect(cancelDispatch(client, 'd1')).resolves.toBeUndefined();
     expect(compute.cancelCalls).toHaveLength(1);
+  });
+
+  it('cancelDispatch emits dispatch.cancelled (intent) even when there is no provider to reap', async () => {
+    const storage = makeMemoryStorage();
+    const events: LifecycleEvent[] = [];
+    const client = new PangolinClient({
+      namespace: 'ns',
+      compute: {},
+      credentials: {},
+      storage,
+      targets: {},
+      telemetry: { name: 'rec', emit: (e) => events.push(e) },
+    });
+    await cancelDispatch(client, 'd-123'); // unknown id → no-op reap, but intent is observable
+    expect(events).toEqual([
+      { kind: 'dispatch.cancelled', dispatchId: 'd-123', at: expect.any(String) },
+    ]);
   });
 });

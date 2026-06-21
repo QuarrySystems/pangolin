@@ -1,4 +1,4 @@
-// packages/pangolin-orchestrator/test/pattern-phase.test.ts
+﻿// packages/pangolin-orchestrator/test/pattern-phase.test.ts
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { SqliteRunStateStore } from '../src/runstate/sqlite.js';
 import { idKeyedExecutor, makeOrch, driveUntilDone, storageFromBlobs } from './fixtures/pattern-harness.js';
@@ -105,7 +105,7 @@ describe('pattern-phase: QueueConfig pattern binding', () => {
     const { orch } = makeOrch(store, executor);
 
     // No pattern bound — standard 2-item run
-    orch.submitRun({ id: 'r-nopat', queue: 'default', items: [wi('x'), wi('y', ['x'])] });
+    await orch.submitRun({ id: 'r-nopat', queue: 'default', items: [wi('x'), wi('y', ['x'])] });
     await driveUntilDone(orch, 32, 'r-nopat');
 
     const statuses = orch.getStatus('r-nopat').map((s) => ({ id: s.id, status: s.status }));
@@ -118,7 +118,7 @@ describe('pattern-phase: QueueConfig pattern binding', () => {
 });
 
 describe('pattern-phase: plan() runs before validateRun in submitRun', () => {
-  it('a throwing plan rejects submission; store stays clean (getItems empty)', () => {
+  it('a throwing plan rejects submission; store stays clean (getItems empty)', async () => {
     const store = new SqliteRunStateStore();
     const blobs = new Map<string, Uint8Array>();
     const executor = idKeyedExecutor(blobs, () => ({ status: 'done' }));
@@ -126,9 +126,8 @@ describe('pattern-phase: plan() runs before validateRun in submitRun', () => {
       queues: { default: { concurrency: 5, pattern: throwingPlanPattern } },
     });
 
-    expect(() =>
-      orch.submitRun({ id: 'r-throw', queue: 'default', items: [wi('a')] }),
-    ).toThrow(/plan rejected/);
+    await expect(orch.submitRun({ id: 'r-throw', queue: 'default', items: [wi('a')] }))
+      .rejects.toThrow(/plan rejected/);
 
     // Store must remain clean
     expect(store.getItems('r-throw')).toHaveLength(0);
@@ -144,7 +143,7 @@ describe('pattern-phase: plan() runs before validateRun in submitRun', () => {
     });
 
     // submit with 1 item — plan will inject 'prologue' and make 'a' depend on it
-    orch.submitRun({ id: 'r-transform', queue: 'default', items: [wi('a')] });
+    await orch.submitRun({ id: 'r-transform', queue: 'default', items: [wi('a')] });
 
     // Store should have BOTH prologue and a
     const items = store.getItems('r-transform');
@@ -169,7 +168,7 @@ describe('pattern-phase: seal ordering (spawning in tick N delays seal to tick N
       queues: { default: { concurrency: 5, pattern: fakePattern } },
     });
 
-    orch.submitRun({ id: 'r-seal', queue: 'default', items: [wi('a')] });
+    await orch.submitRun({ id: 'r-seal', queue: 'default', items: [wi('a')] });
 
     // Drive until item 'a' is done
     let ticksUntilADone = 0;
@@ -276,7 +275,7 @@ describe('pattern-phase: without auditLog', () => {
       // no auditLog
     });
 
-    orch.submitRun({ id: 'r-noaudit', queue: 'default', items: [wi('a')] });
+    await orch.submitRun({ id: 'r-noaudit', queue: 'default', items: [wi('a')] });
     await driveUntilDone(orch, 32, 'r-noaudit');
 
     // Both 'a' and 'b' should be done (pattern still fires even without audit)
@@ -316,8 +315,8 @@ describe('pattern-phase: bad spawn does not abort tick; other runs advance', () 
 
     try {
       // Two runs: run-bad has the bad spawn pattern trigger; run-good is a simple run
-      orch.submitRun({ id: 'run-bad', queue: 'default', items: [wi('a')] });
-      orch.submitRun({ id: 'run-good', queue: 'default', items: [wi('x'), wi('y', ['x'])] });
+      await orch.submitRun({ id: 'run-bad', queue: 'default', items: [wi('a')] });
+      await orch.submitRun({ id: 'run-good', queue: 'default', items: [wi('x'), wi('y', ['x'])] });
 
       // Drive until done — run-good should complete even if run-bad's spawn fails
       await driveUntilDone(orch, 32, 'run-good');
@@ -346,7 +345,7 @@ describe('pattern-phase: spawned item actor is pattern:default in audit export',
       queues: { default: { concurrency: 5, pattern: fakePattern } },
     });
 
-    orch.submitRun({ id: 'r-actor', queue: 'default', items: [wi('a')] });
+    await orch.submitRun({ id: 'r-actor', queue: 'default', items: [wi('a')] });
     await driveUntilDone(orch, 32, 'r-actor');
 
     const exportData = orch.getAuditExport('r-actor');
@@ -424,7 +423,7 @@ describe('pattern-phase: §7 done-but-red gate → same-tick skip + spawn includ
       queues: { default: { concurrency: 5, pattern: pipeline } },
     });
 
-    const runId = orch.submitRun(
+    const runId = await orch.submitRun(
       { id: 'dbr-happy', queue: 'default', items: DONE_BUT_RED_ITEMS },
       'human:test',
     );
@@ -511,7 +510,7 @@ describe('pattern-phase: §7 data-edge exemption — done-but-red gate with outp
       queues: { default: { concurrency: 5, pattern: pipeline } },
     });
 
-    const runId = orch.submitRun(
+    const runId = await orch.submitRun(
       { id: 'dbr-findings', queue: 'default', items: DONE_BUT_RED_ITEMS },
       'human:test',
     );
@@ -587,7 +586,7 @@ describe('pattern-phase: §7 attempt-bound termination (done-but-red gate~2 at m
       queues: { default: { concurrency: 5, pattern: pipeline } },
     });
 
-    const runId = orch.submitRun(
+    const runId = await orch.submitRun(
       { id: 'dbr-exhaust', queue: 'default', items: DONE_BUT_RED_ITEMS },
       'human:test',
     );

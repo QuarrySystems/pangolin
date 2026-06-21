@@ -139,7 +139,11 @@ function makeIdKeyedExecutor(blobs: Map<string, Uint8Array>): Executor {
 // Drive loop — tick until all items terminal (or tick limit)
 // ---------------------------------------------------------------------------
 
-async function driveUntilDone(orch: PangolinOrchestrator, runId: string, maxTicks = 64): Promise<void> {
+async function driveUntilDone(
+  orch: PangolinOrchestrator,
+  runId: string,
+  maxTicks = 64,
+): Promise<void> {
   for (let i = 0; i < maxTicks; i++) {
     await orch.tick('default');
     const statuses = orch.getStatus(runId).map((s) => s.status);
@@ -181,7 +185,7 @@ async function main(): Promise<void> {
     console.log('=== BEFORE: submitted run ===');
     console.log(`  items: ${plan.items.map((i) => i.id).join(', ')}`);
 
-    const runId = orch.submitRun(plan, 'human:demo');
+    const runId = await orch.submitRun(plan, 'human:demo');
 
     // Drive until all terminal.
     await driveUntilDone(orch, runId);
@@ -204,7 +208,9 @@ async function main(): Promise<void> {
     const extendedEntries = exp.entries.filter((e) => e.kind === 'run.extended');
     console.log('\n=== run.extended entries ===');
     for (const e of extendedEntries) {
-      console.log(`  kind=${e.kind}  causeItemId=${e.itemId ?? '(none)'}  actor=${e.actor ?? '(none)'}`);
+      console.log(
+        `  kind=${e.kind}  causeItemId=${e.itemId ?? '(none)'}  actor=${e.actor ?? '(none)'}`,
+      );
     }
 
     // ---------------------------------------------------------------------------
@@ -258,7 +264,9 @@ async function main(): Promise<void> {
     if (reviewStatus?.status !== 'done')
       errors.push(`expected review status=done, got ${reviewStatus?.status}`);
     if (reviewStatus?.verify?.passed !== false)
-      errors.push(`expected review verify.passed=false, got ${JSON.stringify(reviewStatus?.verify)}`);
+      errors.push(
+        `expected review verify.passed=false, got ${JSON.stringify(reviewStatus?.verify)}`,
+      );
 
     // package should be skipped (engine red-gate cascade)
     if (statusById.get('package')?.status !== 'skipped')
@@ -269,20 +277,17 @@ async function main(): Promise<void> {
       errors.push(`expected package~2 done, got ${statusById.get('package~2')?.status}`);
 
     // review-fix-1 manifest must have both work AND findings
-    if (!fixManifest)
-      errors.push('review-fix-1 manifest not found in bundle');
+    if (!fixManifest) errors.push('review-fix-1 manifest not found in bundle');
     if (!fixManifest?.inputRefs?.['work'])
       errors.push('review-fix-1 manifest missing inputRefs.work');
     if (!fixManifest?.inputRefs?.['findings'])
       errors.push('review-fix-1 manifest missing inputRefs.findings');
 
     // package~2 must have inputRefs.work === REF_FIX
-    if (!pkg2Manifest)
-      errors.push(`package~2 manifest not found with inputRefs.work = REF_FIX`);
+    if (!pkg2Manifest) errors.push(`package~2 manifest not found with inputRefs.work = REF_FIX`);
 
     // verifyBundle: intact + handoff ok
-    if (!report.intact)
-      errors.push('verifyBundle: intact=false');
+    if (!report.intact) errors.push('verifyBundle: intact=false');
     if (report.checks.handoff.ok === false)
       errors.push(`verifyBundle: handoff not ok — ${report.failure ?? '(no detail)'}`);
 
@@ -291,7 +296,9 @@ async function main(): Promise<void> {
       for (const e of errors) console.error(`  ${e}`);
       process.exitCode = 1;
     } else {
-      console.log('\n=== pattern-dogfood OK — circle-back spawned; sealed history preserved; provenance intact ===');
+      console.log(
+        '\n=== pattern-dogfood OK — circle-back spawned; sealed history preserved; provenance intact ===',
+      );
     }
   } finally {
     store.close();

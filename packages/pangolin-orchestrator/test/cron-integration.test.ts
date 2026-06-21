@@ -1,4 +1,4 @@
-// End-to-end integration tests for V1.1 cron scheduling: the real CronScheduler +
+﻿// End-to-end integration tests for V1.1 cron scheduling: the real CronScheduler +
 // SqliteScheduleStore + serve loop + PangolinOrchestrator wired together. Complements the
 // per-unit tests (cron-scheduler / sqlite-schedule-store / serve-scheduler) by exercising
 // the full cron → serve → submit → pipeline loop and the cross-component correctness claims
@@ -69,7 +69,7 @@ describe('cron scheduling — end-to-end integration', () => {
     expect(new Set(transport.submitted)).toEqual(new Set(['nightly@2026-06-03T04:00:00.000Z']));
   });
 
-  it('coalesces a long downtime backlog into exactly one catch-up run and advances past now', () => {
+  it('coalesces a long downtime backlog into exactly one catch-up run and advances past now', async () => {
     const store = new SqliteScheduleStore();
     store.upsert(mkSched({ cronExpr: '0 * * * *', nextDueAt: '2026-06-03T00:00:00.000Z' })); // hourly
     const now = Date.parse('2026-06-03T09:30:00Z'); // 9+ missed slots
@@ -80,7 +80,7 @@ describe('cron scheduling — end-to-end integration', () => {
     expect(store.list()[0].nextDueAt).toBe('2026-06-03T10:00:00.000Z');
   });
 
-  it('deduplicates a re-emitted slot via the deterministic runId (crash before markFired persisted)', () => {
+  it('deduplicates a re-emitted slot via the deterministic runId (crash before markFired persisted)', async () => {
     const store = new SqliteScheduleStore();
     store.upsert(mkSched({ nextDueAt: '2026-06-03T02:00:00.000Z' }));
     const now = Date.parse('2026-06-03T02:30:00Z');
@@ -91,12 +91,12 @@ describe('cron scheduling — end-to-end integration', () => {
     expect(first[0].run.id).toBe(second[0].run.id);
 
     const orchestrator = mkOrch();
-    orchestrator.submitRun(first[0].run, first[0].actor);
-    orchestrator.submitRun(second[0].run, second[0].actor); // idempotent no-op
+    await orchestrator.submitRun(first[0].run, first[0].actor);
+    await orchestrator.submitRun(second[0].run, second[0].actor); // idempotent no-op
     expect(new Set(orchestrator.getStatus().map((s) => s.runId)).size).toBe(1);
   });
 
-  it('persists schedule bookkeeping across a store restart (file-backed, WAL)', () => {
+  it('persists schedule bookkeeping across a store restart (file-backed, WAL)', async () => {
     const path = tmpFile();
     const s1 = new SqliteScheduleStore(path);
     s1.upsert(mkSched({ nextDueAt: '2026-06-03T02:00:00.000Z' }));
@@ -111,7 +111,7 @@ describe('cron scheduling — end-to-end integration', () => {
     rmSync(path, { force: true });
   });
 
-  it('fires one distinct run per due schedule, leaving not-yet-due schedules alone', () => {
+  it('fires one distinct run per due schedule, leaving not-yet-due schedules alone', async () => {
     const store = new SqliteScheduleStore();
     store.upsert(mkSched({ id: 'a', cronExpr: '0 * * * *', run: runTemplate('a'), nextDueAt: '2026-06-03T01:00:00.000Z' }));
     store.upsert(mkSched({ id: 'b', cronExpr: '0 * * * *', run: runTemplate('b'), nextDueAt: '2026-06-03T01:00:00.000Z' }));
@@ -121,14 +121,14 @@ describe('cron scheduling — end-to-end integration', () => {
     expect(ids).toEqual(['a@2026-06-03T02:00:00.000Z', 'b@2026-06-03T02:00:00.000Z']);
   });
 
-  it('propagates an invalid stored cron expression out of dueSubmissions (serve contains it via onError)', () => {
+  it('propagates an invalid stored cron expression out of dueSubmissions (serve contains it via onError)', async () => {
     const store = new SqliteScheduleStore();
     store.upsert(mkSched({ cronExpr: 'not-a-cron', nextDueAt: '2026-06-03T02:00:00.000Z' }));
     const now = Date.parse('2026-06-03T03:00:00Z');
     expect(() => new CronScheduler(store, () => now).dueSubmissions()).toThrow();
   });
 
-  it('computes UTC slot boundaries correctly for representative cron expressions', () => {
+  it('computes UTC slot boundaries correctly for representative cron expressions', async () => {
     expect(nextDueAfter('0 2 * * *', Date.parse('2026-06-03T02:00:00Z'))).toBe('2026-06-04T02:00:00.000Z'); // exact boundary → strictly next
     expect(nextDueAfter('*/15 * * * *', Date.parse('2026-06-03T10:07:00Z'))).toBe('2026-06-03T10:15:00.000Z'); // step
     expect(nextDueAfter('0 0 29 2 *', Date.parse('2026-06-03T00:00:00Z'))).toBe('2028-02-29T00:00:00.000Z'); // Feb 29 leap-only

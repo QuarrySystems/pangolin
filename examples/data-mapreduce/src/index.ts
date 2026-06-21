@@ -43,7 +43,11 @@ import {
   verifyBundle,
 } from '@quarry-systems/pangolin-orchestrator';
 import type { Run, ItemState } from '@quarry-systems/pangolin-orchestrator';
-import { PangolinClient, registerSubagent, registerPipeline } from '@quarry-systems/pangolin-client';
+import {
+  PangolinClient,
+  registerSubagent,
+  registerPipeline,
+} from '@quarry-systems/pangolin-client';
 import type { PipelineRef } from '@quarry-systems/pangolin-client';
 import { LocalStorageProvider } from '@quarry-systems/pangolin-storage-local';
 
@@ -62,7 +66,12 @@ const NAMESPACE = 'data-mapreduce-demo';
 // ---------------------------------------------------------------------------
 
 /** Builds a pinned pangolin:// URI: pangolin://<ns>/<type>/<name>/<contentHash> */
-function buildPinnedUri(namespace: string, type: string, name: string, contentHash: string): string {
+function buildPinnedUri(
+  namespace: string,
+  type: string,
+  name: string,
+  contentHash: string,
+): string {
   return `pangolin://${namespace}/${type}/${name}/${contentHash}`;
 }
 
@@ -101,10 +110,11 @@ const seedPipelineSpec: LocalPipelineSpec = {
     {
       kind: 'script',
       command: [
-        'node', '-e',
+        'node',
+        '-e',
         `"const fs=require('fs');` +
-        `fs.mkdirSync('outputs',{recursive:true});` +
-        `fs.writeFileSync('outputs/data.csv','group,value\\na,10\\na,20\\nb,30\\nb,40\\n');"`,
+          `fs.mkdirSync('outputs',{recursive:true});` +
+          `fs.writeFileSync('outputs/data.csv','group,value\\na,10\\na,20\\nb,30\\nb,40\\n');"`,
       ].join(' '),
       timeoutSeconds: 30,
     },
@@ -120,16 +130,17 @@ const splitPipelineSpec: LocalPipelineSpec = {
     {
       kind: 'script',
       command: [
-        'node', '-e',
+        'node',
+        '-e',
         `"const fs=require('fs');` +
-        `const csv=fs.readFileSync('inputs/input','utf8');` +
-        `const lines=csv.trim().split('\\n').slice(1);` +
-        `const groups={};` +
-        `for(const l of lines){const[g,v]=l.split(',');groups[g]=groups[g]||[];groups[g].push(l);}` +
-        `fs.mkdirSync('outputs',{recursive:true});` +
-        `for(const[g,ls]of Object.entries(groups)){` +
-        `fs.writeFileSync('outputs/'+g+'.csv','group,value\\n'+ls.join('\\n')+'\\n');` +
-        `}"`,
+          `const csv=fs.readFileSync('inputs/input','utf8');` +
+          `const lines=csv.trim().split('\\n').slice(1);` +
+          `const groups={};` +
+          `for(const l of lines){const[g,v]=l.split(',');groups[g]=groups[g]||[];groups[g].push(l);}` +
+          `fs.mkdirSync('outputs',{recursive:true});` +
+          `for(const[g,ls]of Object.entries(groups)){` +
+          `fs.writeFileSync('outputs/'+g+'.csv','group,value\\n'+ls.join('\\n')+'\\n');` +
+          `}"`,
       ].join(' '),
       timeoutSeconds: 30,
     },
@@ -145,13 +156,14 @@ const transformPipelineSpec: LocalPipelineSpec = {
     {
       kind: 'script',
       command: [
-        'node', '-e',
+        'node',
+        '-e',
         `"const fs=require('fs');` +
-        `const csv=fs.readFileSync('inputs/input','utf8');` +
-        `const lines=csv.trim().split('\\n').slice(1);` +
-        `const sum=lines.reduce((s,l)=>s+Number(l.split(',')[1]),0);` +
-        `fs.mkdirSync('outputs',{recursive:true});` +
-        `fs.writeFileSync('outputs/result',String(sum));"`,
+          `const csv=fs.readFileSync('inputs/input','utf8');` +
+          `const lines=csv.trim().split('\\n').slice(1);` +
+          `const sum=lines.reduce((s,l)=>s+Number(l.split(',')[1]),0);` +
+          `fs.mkdirSync('outputs',{recursive:true});` +
+          `fs.writeFileSync('outputs/result',String(sum));"`,
       ].join(' '),
       timeoutSeconds: 30,
     },
@@ -167,15 +179,16 @@ const aggregatePipelineSpec: LocalPipelineSpec = {
     {
       kind: 'script',
       command: [
-        'node', '-e',
+        'node',
+        '-e',
         `"const fs=require('fs');` +
-        `let total=0;` +
-        `try{` +
-        `const files=fs.readdirSync('inputs');` +
-        `for(const f of files){total+=Number(fs.readFileSync('inputs/'+f,'utf8').trim());}` +
-        `}catch(e){}` +
-        `fs.mkdirSync('outputs',{recursive:true});` +
-        `fs.writeFileSync('outputs/result',String(total));"`,
+          `let total=0;` +
+          `try{` +
+          `const files=fs.readdirSync('inputs');` +
+          `for(const f of files){total+=Number(fs.readFileSync('inputs/'+f,'utf8').trim());}` +
+          `}catch(e){}` +
+          `fs.mkdirSync('outputs',{recursive:true});` +
+          `fs.writeFileSync('outputs/result',String(total));"`,
       ].join(' '),
       timeoutSeconds: 30,
     },
@@ -187,9 +200,7 @@ const aggregatePipelineSpec: LocalPipelineSpec = {
 // Registration: build pinned URIs for all four pipelines + one shared subagent
 // ---------------------------------------------------------------------------
 
-async function registerAll(
-  client: PangolinClient,
-): Promise<{
+async function registerAll(client: PangolinClient): Promise<{
   subagentUri: string;
   seedPipelineUri: string;
   splitPipelineUri: string;
@@ -201,11 +212,19 @@ async function registerAll(
     name: 'data-stub',
     promptTemplate: 'unused',
   });
-  const subagentUri = buildPinnedUri(NAMESPACE, 'subagent', subagentHandle.name, subagentHandle.contentHash);
+  const subagentUri = buildPinnedUri(
+    NAMESPACE,
+    'subagent',
+    subagentHandle.name,
+    subagentHandle.contentHash,
+  );
 
   const reg = async (spec: LocalPipelineSpec): Promise<string> => {
     // Cast to the type registerPipeline expects — structurally compatible.
-    const ref: PipelineRef = await registerPipeline(client, spec as Parameters<typeof registerPipeline>[1]);
+    const ref: PipelineRef = await registerPipeline(
+      client,
+      spec as Parameters<typeof registerPipeline>[1],
+    );
     return buildPinnedUri(NAMESPACE, 'pipeline', spec.id, ref.contentHash);
   };
 
@@ -217,7 +236,13 @@ async function registerAll(
       reg(aggregatePipelineSpec),
     ]);
 
-  return { subagentUri, seedPipelineUri, splitPipelineUri, transformPipelineUri, aggregatePipelineUri };
+  return {
+    subagentUri,
+    seedPipelineUri,
+    splitPipelineUri,
+    transformPipelineUri,
+    aggregatePipelineUri,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -252,7 +277,11 @@ function fillPlaceholders(
 // Drive loop
 // ---------------------------------------------------------------------------
 
-async function driveUntilDone(orch: PangolinOrchestrator, runId: string, maxTicks = 100): Promise<void> {
+async function driveUntilDone(
+  orch: PangolinOrchestrator,
+  runId: string,
+  maxTicks = 100,
+): Promise<void> {
   for (let i = 0; i < maxTicks; i++) {
     await orch.tick('default');
     const statuses = orch.getStatus(runId).map((s) => s.status);
@@ -349,7 +378,7 @@ async function main(): Promise<void> {
     console.log('\n=== Submitting run ===');
     console.log(`  items: ${plan.items.map((i) => i.id).join(', ')}`);
 
-    const runId = orch.submitRun(plan, 'human:demo');
+    const runId = await orch.submitRun(plan, 'human:demo');
 
     // Drive until all items terminal.
     await driveUntilDone(orch, runId);
@@ -418,7 +447,9 @@ async function main(): Promise<void> {
             console.log(`    [${b.ordinal}] kind=${b.kind} status=${b.status}`);
           }
         } else {
-          console.log('  sentinel.blocks: (empty or missing — script pipelines write blocks only when declared)');
+          console.log(
+            '  sentinel.blocks: (empty or missing — script pipelines write blocks only when declared)',
+          );
         }
       } catch (e) {
         console.log(`  sentinel read error: ${(e as Error).message}`);
@@ -431,7 +462,9 @@ async function main(): Promise<void> {
     // (4) Sealed pipelineRefs per spawned item (from their manifest blobs)
     // ---------------------------------------------------------------------------
     console.log('\n=== Sealed pipelineRefs per item ===');
-    for (const [id, item] of Array.from(itemById.entries()).sort(([a], [b]) => a.localeCompare(b))) {
+    for (const [id, item] of Array.from(itemById.entries()).sort(([a], [b]) =>
+      a.localeCompare(b),
+    )) {
       if (item.manifestRef) {
         try {
           const manifestBytes = await storage.get(item.manifestRef);
@@ -484,13 +517,14 @@ async function main(): Promise<void> {
     if (!handoffOk || !sumOk || !reduceDone) {
       console.error('\n=== data-mapreduce FAILED ===');
       if (!reduceDone) console.error('  reduce item is not done');
-      if (!sumOk) console.error(`  aggregate result ${aggregateResult} !== expected ${EXPECTED_SUM}`);
+      if (!sumOk)
+        console.error(`  aggregate result ${aggregateResult} !== expected ${EXPECTED_SUM}`);
       if (!handoffOk) console.error('  bundle verification failed');
       process.exitCode = 1;
     } else {
       console.log(
         `\n=== data-mapreduce OK — graph grew at runtime (${statuses.length} items); ` +
-        `aggregate sum=${aggregateResult}; provenance intact ===`,
+          `aggregate sum=${aggregateResult}; provenance intact ===`,
       );
     }
   } finally {

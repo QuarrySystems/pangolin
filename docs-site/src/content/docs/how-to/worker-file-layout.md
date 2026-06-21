@@ -154,10 +154,6 @@ Worker workspace will have `<workspace>/fixtures/sample-input.json` etc.
 
 - **Per-capability install scripts that compose.** See the single-slot
   constraint above. There's no `pangolin-setup-<name>.sh` mechanism today.
-- **Skill enumeration from the AI surface.** `pangolin_capabilities_list` /
-  `pangolin_subagents_list` MCP tools throw `NOT_IMPLEMENTED` — until the
-  storage layer grows `listNames(prefix)`, the AI has to be told skill names
-  out-of-band.
 - **Auto-rebind subagents after a cap sync.** Subagent capability bindings
   freeze the capability `contentHash` at register time. If you re-sync caps
   (new content → new hash), you must also re-register the subagent to pick

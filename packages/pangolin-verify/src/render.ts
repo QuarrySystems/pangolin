@@ -92,10 +92,35 @@ export function renderVerification(bundle: AuditBundle, opts: RenderOpts = {}): 
   const handoffDetail = handoff.detail ?? (handoff.ok === 'n/a' ? 'n/a' : String(handoff.ok));
   lines.push(`  ${mark(handoff, color)} handoff      ${handoffDetail}`);
 
+  // Manifest-integrity binding (bidirectional manifest↔chain content binding). The report does not
+  // carry a dedicated checks.manifest result — the verdict surfaces it only via failure==='manifest'
+  // — so render it from there: a ✗ when it failed, otherwise ✓ (it ran and bound the manifests).
+  // Without this line a manifest forgery shows '✗ TAMPERED' in the header but every listed check ✓,
+  // leaving an auditor unable to see WHY the bundle is tampered.
+  const manifest: CheckResult =
+    r.failure === 'manifest'
+      ? { ok: false, detail: 'a manifest is not bound to a chained item.fired ref (forgery)' }
+      : { ok: true, detail: 'manifests bound to the chain' };
+  lines.push(`  ${mark(manifest, color)} manifest     ${manifest.detail}`);
+
   // Trusted time is a SEPARATE dimension from the tamper claim — show the tier.
   const time = r.checks.time ?? { ok: 'n/a' as const };
   const timeDetail = time.detail ?? `time tier: ${r.timeTier}`;
   lines.push(`  ${mark(time, color)} time         ${timeDetail}`);
+
+  // Authorization is a SEPARATE dimension from the tamper claim — show the tier when present.
+  // Legacy reports (no authzTier field) render unchanged: nothing is printed.
+  if (r.authzTier !== undefined) {
+    let authzDetail: string;
+    if (r.authzTier === 'recorded') {
+      authzDetail = 'recorded (dispatch-level, operator-self-asserted — not third-party attested)';
+    } else if (r.authzTier === 'none') {
+      authzDetail = 'not attested';
+    } else {
+      authzDetail = 'authority-attested';
+    }
+    lines.push(`  ─ authorization  ${authzDetail}`);
+  }
 
   lines.push('  ' + sep);
   lines.push(`  ${'seq'.padStart(4)}  ${'hash'.padEnd(6)}  kind`);

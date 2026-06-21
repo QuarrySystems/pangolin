@@ -123,6 +123,11 @@ export const client = new PangolinClient({
 
 export default client;
 
+// Live dispatch lifecycle events (opt-in; default drops them). Prints one JSON
+// line per accepted/started/finished/needs_input/failed/cancelled event.
+// import { ConsoleTelemetryHook } from '@quarry-systems/pangolin-client';
+// const client = new PangolinClient({ /* …, */ telemetry: new ConsoleTelemetryHook() });
+
 // Audit + orchestrator setup (import-safe: constructors are lazy / in-memory).
 const store = new SqliteRunStateStore(dbPath);
 process.on('exit', () => { try { store.close(); } catch {} });
@@ -133,9 +138,11 @@ const auditLog = new AuditLog({
   signer,
   anchor,
   // timestamper: new Rfc3161TimestampAuthority({ url: 'https://freetsa.org/tsr' }),  // optional RFC 3161 trusted time
-  // A dropped audit append means the sealed record is incomplete — surface it
-  // (completeness is a SOC2 / EU AI Act Art 12 control). `auditLog.droppedAppends`
-  // holds the running total.
+  // A dropped audit append means the sealed record is incomplete — it is logged
+  // loudly by DEFAULT (a SOC2 / EU AI Act Art 12 completeness control; the same
+  // applies to a TSA failure via onTimestampFailure). Wire onDrop only to OVERRIDE
+  // the default (e.g. route to a metrics counter). `auditLog.droppedAppends` holds
+  // the running total.
   onDrop: (entry, err) =>
     console.error(`[pangolin] AUDIT DROP kind=${entry.kind} run=${entry.runId}:`, err),
 });
@@ -154,6 +161,10 @@ const orchestrator = new PangolinOrchestrator({
   },
   triggers: { manual: new ManualTrigger() },
   queues: { default: { concurrency: 2 } },
+  // Wall-clock dispatch deadline: a dispatch running longer than this is force-failed
+  // (and best-effort cancelled to reap the worker), freeing its concurrency slot +
+  // resource locks. Defaults to 7_200_000 (2h); raise it for legitimately long runs.
+  maxRuntimeMs: 7_200_000,
   auditLog,
 });
 

@@ -32,7 +32,10 @@ export function attachDispatchCmd(program: Command, ctx: CliContext): void {
         workerImage: opts.workerImage || 'ghcr.io/quarrysystems/pangolin-worker:latest',
       });
       console.log(JSON.stringify(result, null, 2));
-      if (result.failure) process.exit(1);
+      // Exit non-zero on EITHER an infrastructural failure (`failure`, derived from a provider
+      // failure reason) OR a non-zero worker exit code (an app-level failure carries no `failure`
+      // block by design — see bundled-impls). Otherwise a crashed worker reads as success.
+      if (result.failure || result.exitCode !== 0) process.exit(1);
     });
 
   d.command('describe <id>')

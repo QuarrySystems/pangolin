@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+﻿import { describe, it, expect } from 'vitest';
 import { PangolinOrchestrator } from '../src/orchestrator.js';
 import { ManualTrigger } from '../src/triggers/manual.js';
 import { SqliteRunStateStore } from '../src/runstate/sqlite.js';
@@ -164,7 +164,7 @@ describe('handoff-dag integration (spec §8)', () => {
 
     const { orch } = makeOrch(store, makeHandoffExecutor(blobs));
 
-    const runId = orch.submitRun({ ...RUN, id: 'handoff-dag-happy' }, 'human:test');
+    const runId = await orch.submitRun({ ...RUN, id: 'handoff-dag-happy' }, 'human:test');
     await driveUntilDone(orch);
 
     // Confirm both items are done
@@ -213,7 +213,7 @@ describe('handoff-dag integration (spec §8)', () => {
     // B's manifest seals REF_FORGED instead of the real REF_A resolved by the engine
     const { orch } = makeOrch(store, makeHandoffExecutor(blobs, REF_FORGED));
 
-    const runId = orch.submitRun({ ...RUN, id: 'handoff-dag-tamper' }, 'human:test');
+    const runId = await orch.submitRun({ ...RUN, id: 'handoff-dag-tamper' }, 'human:test');
     await driveUntilDone(orch);
 
     // Run still completes (the engine doesn't check manifest content — that's verifyBundle's job)

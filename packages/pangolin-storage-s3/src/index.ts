@@ -70,9 +70,7 @@ export interface S3StorageProviderOpts {
    *  Omit to inherit the bucket's default encryption (SSE-S3 has been on by
    *  default for all S3 buckets since Jan 2023). Set to enforce an explicit
    *  mode — e.g. customer-managed KMS (BYOK). */
-  encryption?:
-    | { mode: 'AES256' }
-    | { mode: 'aws:kms'; kmsKeyId?: string };
+  encryption?: { mode: 'AES256' } | { mode: 'aws:kms'; kmsKeyId?: string };
 }
 
 /** Subset of PutObject SSE fields derived from {@link S3StorageProviderOpts.encryption}. */
@@ -99,9 +97,7 @@ function emptyIndex(): IndexFile {
  * the PutObject SSE fields. Returns an empty object when encryption is
  * omitted so callers spread nothing (the no-downgrade rule).
  */
-function deriveSseParams(
-  encryption: S3StorageProviderOpts['encryption'],
-): SseParams {
+function deriveSseParams(encryption: S3StorageProviderOpts['encryption']): SseParams {
   if (!encryption) return {};
   if (encryption.mode === 'AES256') {
     return { ServerSideEncryption: 'AES256' };
@@ -118,8 +114,7 @@ function isNotFound(err: unknown): boolean {
   if (err && typeof err === 'object') {
     const name = (err as { name?: string }).name;
     if (name === 'NoSuchKey' || name === 'NotFound') return true;
-    const status = (err as { $metadata?: { httpStatusCode?: number } })
-      .$metadata?.httpStatusCode;
+    const status = (err as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
     if (status === 404) return true;
   }
   return false;
@@ -128,8 +123,7 @@ function isNotFound(err: unknown): boolean {
 /** True if the SDK error indicates a precondition failure (412). */
 function isPreconditionFailed(err: unknown): boolean {
   if (err && typeof err === 'object') {
-    const status = (err as { $metadata?: { httpStatusCode?: number } })
-      .$metadata?.httpStatusCode;
+    const status = (err as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
     if (status === 412) return true;
     const name = (err as { name?: string }).name;
     if (name === 'PreconditionFailed') return true;
@@ -186,11 +180,17 @@ export class S3StorageProvider implements StorageProvider {
   private readonly sseParams: SseParams;
 
   constructor(private opts: S3StorageProviderOpts) {
-    this.s3 = opts.client ?? new S3Client(
-      opts.endpoint
-        ? { endpoint: opts.endpoint, forcePathStyle: opts.forcePathStyle, region: opts.region ?? 'us-east-1' }
-        : {},
-    );
+    this.s3 =
+      opts.client ??
+      new S3Client(
+        opts.endpoint
+          ? {
+              endpoint: opts.endpoint,
+              forcePathStyle: opts.forcePathStyle,
+              region: opts.region ?? 'us-east-1',
+            }
+          : {},
+      );
     // Normalize prefix to "" or "foo/" form.
     const raw = (opts.prefix ?? '').replace(/^\/+|\/+$/g, '');
     this.prefix = raw.length === 0 ? '' : `${raw}/`;
@@ -208,18 +208,13 @@ export class S3StorageProvider implements StorageProvider {
   get rootUri(): string {
     // `this.prefix` already has a trailing slash (or is empty); strip it so
     // the canonical URI does not end on `/`.
-    const trimmed = this.prefix.endsWith('/')
-      ? this.prefix.slice(0, -1)
-      : this.prefix;
+    const trimmed = this.prefix.endsWith('/') ? this.prefix.slice(0, -1) : this.prefix;
     return trimmed.length === 0
       ? `s3://${this.opts.bucket}`
       : `s3://${this.opts.bucket}/${trimmed}`;
   }
 
-  async put(
-    uri: string,
-    contents: Uint8Array,
-  ): Promise<{ contentHash: string }> {
+  async put(uri: string, contents: Uint8Array): Promise<{ contentHash: string }> {
     const parsed = parseStorageUri(uri);
     if (parsed.kind === 'dispatch-record') {
       return this.putDispatchRecord(parsed, contents);
@@ -233,9 +228,7 @@ export class S3StorageProvider implements StorageProvider {
       return this.getDispatchRecord(parsed);
     }
     if (!parsed.contentHash) {
-      throw new Error(
-        `S3StorageProvider.get requires a pinned URI with contentHash: ${uri}`,
-      );
+      throw new Error(`S3StorageProvider.get requires a pinned URI with contentHash: ${uri}`);
     }
     const blobKey = this.blobKey(parsed, parsed.contentHash);
     const resp = await this.s3.send(
@@ -251,9 +244,7 @@ export class S3StorageProvider implements StorageProvider {
 
   async resolveLatest(
     uri: string,
-  ): Promise<
-    { uri: string; contentHash: string; registeredAt: string } | null
-  > {
+  ): Promise<{ uri: string; contentHash: string; registeredAt: string } | null> {
     const parsed = parseStorageUri(uri);
     if (parsed.kind === 'dispatch-record') {
       throw new Error(
@@ -278,9 +269,7 @@ export class S3StorageProvider implements StorageProvider {
     };
   }
 
-  async resolveByHash(
-    query: { namespace: string; type: string; contentHash: string },
-  ): Promise<{
+  async resolveByHash(query: { namespace: string; type: string; contentHash: string }): Promise<{
     uri: string;
     name: string;
     contentHash: string;
@@ -291,31 +280,7 @@ export class S3StorageProvider implements StorageProvider {
     // `CommonPrefixes`. For each candidate name read its `_index.json` and
     // check for a matching contentHash. O(names) GET requests; acceptable
     // for v0.1, a sidecar hash→name index lands in v0.2 if registries grow.
-    const namePrefix = `${this.prefix}${query.namespace}/${query.type}/`;
-    let continuationToken: string | undefined;
-    const names: string[] = [];
-    do {
-      const resp = (await this.s3.send(
-        new ListObjectsV2Command({
-          Bucket: this.opts.bucket,
-          Prefix: namePrefix,
-          Delimiter: '/',
-          ContinuationToken: continuationToken,
-        }),
-      )) as {
-        CommonPrefixes?: Array<{ Prefix?: string }>;
-        NextContinuationToken?: string;
-        IsTruncated?: boolean;
-      };
-      for (const cp of resp.CommonPrefixes ?? []) {
-        if (!cp.Prefix) continue;
-        // CommonPrefixes look like `<namePrefix><name>/` — strip both ends.
-        const tail = cp.Prefix.slice(namePrefix.length);
-        const name = tail.endsWith('/') ? tail.slice(0, -1) : tail;
-        if (name.length > 0) names.push(name);
-      }
-      continuationToken = resp.IsTruncated ? resp.NextContinuationToken : undefined;
-    } while (continuationToken);
+    const names = await this.enumerateNames(query.namespace, query.type);
 
     for (const name of names) {
       const index = await this.readIndex({
@@ -342,24 +307,71 @@ export class S3StorageProvider implements StorageProvider {
     return null;
   }
 
+  /** Enumerate the distinct logical names registered under `<prefix><ns>/<type>/` via
+   *  ListObjectsV2 + `Delimiter: '/'` (each name surfaces as a CommonPrefix). Paginated.
+   *  Shared by `resolveByHash` and `listNames`. */
+  private async enumerateNames(namespace: string, type: string): Promise<string[]> {
+    const namePrefix = `${this.prefix}${namespace}/${type}/`;
+    let continuationToken: string | undefined;
+    const names: string[] = [];
+    do {
+      const resp = (await this.s3.send(
+        new ListObjectsV2Command({
+          Bucket: this.opts.bucket,
+          Prefix: namePrefix,
+          Delimiter: '/',
+          ContinuationToken: continuationToken,
+        }),
+      )) as {
+        CommonPrefixes?: Array<{ Prefix?: string }>;
+        NextContinuationToken?: string;
+        IsTruncated?: boolean;
+      };
+      for (const cp of resp.CommonPrefixes ?? []) {
+        if (!cp.Prefix) continue;
+        // CommonPrefixes look like `<namePrefix><name>/` — strip both ends.
+        const tail = cp.Prefix.slice(namePrefix.length);
+        const name = tail.endsWith('/') ? tail.slice(0, -1) : tail;
+        if (name.length > 0) names.push(name);
+      }
+      continuationToken = resp.IsTruncated ? resp.NextContinuationToken : undefined;
+    } while (continuationToken);
+    return names;
+  }
+
+  async listNames(query: {
+    namespace: string;
+    type: string;
+  }): Promise<Array<{ name: string; contentHash: string; registeredAt: string }>> {
+    const names = await this.enumerateNames(query.namespace, query.type);
+    const out: Array<{ name: string; contentHash: string; registeredAt: string }> = [];
+    for (const name of names) {
+      const index = await this.readIndex({
+        kind: 'blob',
+        namespace: query.namespace,
+        type: query.type,
+        name,
+      } as PangolinUriParts);
+      if (index.entries.length === 0) continue;
+      let latest = index.entries[0]!;
+      for (const e of index.entries) {
+        if (e.registeredAt > latest.registeredAt) latest = e;
+      }
+      out.push({ name, contentHash: latest.contentHash, registeredAt: latest.registeredAt });
+    }
+    return out;
+  }
+
   async list(
     uri: string,
-  ): Promise<
-    Array<{ uri: string; contentHash: string; registeredAt: string }>
-  > {
+  ): Promise<Array<{ uri: string; contentHash: string; registeredAt: string }>> {
     const parsed = parseStorageUri(uri);
     if (parsed.kind === 'dispatch-record') {
-      throw new Error(
-        `S3StorageProvider.list is not supported for dispatch-record URIs: ${uri}`,
-      );
+      throw new Error(`S3StorageProvider.list is not supported for dispatch-record URIs: ${uri}`);
     }
     const index = await this.readIndex(parsed);
     const sorted = [...index.entries].sort((a, b) =>
-      a.registeredAt < b.registeredAt
-        ? 1
-        : a.registeredAt > b.registeredAt
-          ? -1
-          : 0,
+      a.registeredAt < b.registeredAt ? 1 : a.registeredAt > b.registeredAt ? -1 : 0,
     );
     return sorted.map((e) => ({
       uri: buildPangolinUri({
@@ -432,25 +444,16 @@ export class S3StorageProvider implements StorageProvider {
     parsed: Extract<StorageUriParts, { kind: 'dispatch-record' }>,
   ): Promise<Uint8Array> {
     const key = this.dispatchRecordKey(parsed);
-    const resp = await this.s3.send(
-      new GetObjectCommand({ Bucket: this.opts.bucket, Key: key }),
-    );
+    const resp = await this.s3.send(new GetObjectCommand({ Bucket: this.opts.bucket, Key: key }));
     return await streamToUint8Array(resp.Body);
   }
 
-  private dispatchRecordKey(
-    parts: Extract<StorageUriParts, { kind: 'dispatch-record' }>,
-  ): string {
+  private dispatchRecordKey(parts: Extract<StorageUriParts, { kind: 'dispatch-record' }>): string {
     const tail = parts.suffix ? `/${parts.suffix}` : '';
     return `${this.prefix}${parts.namespace}/dispatches/${parts.dispatchId}${tail}`;
   }
 
-  private keyFor(
-    namespace: string,
-    type: string,
-    name: string,
-    leaf: string,
-  ): string {
+  private keyFor(namespace: string, type: string, name: string, leaf: string): string {
     return `${this.prefix}${namespace}/${type}/${name}/${leaf}`;
   }
 
@@ -527,10 +530,7 @@ export class S3StorageProvider implements StorageProvider {
    * behavior — not silently broken, just unguarded. LocalStack honors it
    * and the smoke test covers the happy path.
    */
-  private async updateIndex(
-    parts: PangolinUriParts,
-    contentHash: string,
-  ): Promise<void> {
+  private async updateIndex(parts: PangolinUriParts, contentHash: string): Promise<void> {
     for (let attempt = 0; attempt < MAX_INDEX_UPDATE_ATTEMPTS; attempt++) {
       const { index, etag } = await this.readIndexWithEtag(parts);
       if (index.entries.some((e) => e.contentHash === contentHash)) {

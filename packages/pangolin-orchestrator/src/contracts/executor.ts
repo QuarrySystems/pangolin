@@ -26,6 +26,8 @@ export interface FireContext {
   runId?: string;
   actor?: string;
   submittedAt?: string;
+  effectClass?: string;
+  authorization?: import('@quarry-systems/pangolin-core').Authorization;
 }
 
 /**
@@ -39,4 +41,9 @@ export interface Executor {
   fire(item: WorkItem, ctx?: FireContext): Promise<{ dispatchHash: string; manifestRef?: string }>;
   /** Poll a fired dispatch; return its terminal result, or null if still running. */
   reconcile(dispatchHash: string): Promise<ExecutionResult | null>;
+  /** OPTIONAL best-effort cancel of a fired dispatch (e.g. on a wall-clock deadline overrun) so
+   *  the underlying worker is reaped rather than orphaned. Must NOT throw — a cancel failure is
+   *  swallowed by the engine (the dispatch is force-failed regardless). Executors that cannot
+   *  cancel omit it. */
+  cancel?(dispatchHash: string): Promise<void>;
 }

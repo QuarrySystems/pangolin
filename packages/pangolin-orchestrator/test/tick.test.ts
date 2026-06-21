@@ -2,7 +2,13 @@ import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
 import { tick } from '../src/engine/tick.js';
 import { SqliteRunStateStore } from '../src/runstate/sqlite.js';
-import type { Executor, ItemState, Run, RunStateStore, TerminalStatus } from '../src/contracts/index.js';
+import type {
+  Executor,
+  ItemState,
+  Run,
+  RunStateStore,
+  TerminalStatus,
+} from '../src/contracts/index.js';
 import { isSettled } from '../src/engine/dep-resolver.js';
 import { PackRegistry } from '../src/packs/registry.js';
 import { makeShape } from './support/make-shape.js';
@@ -11,9 +17,15 @@ import { makeShape } from './support/make-shape.js';
 function fakeExecutor(): Executor & { fired: string[] } {
   const fired: string[] = [];
   return {
-    id: 'fake', fired,
-    async fire(item) { fired.push(item.id); return { dispatchHash: `h-${item.id}` }; },
-    async reconcile() { return { status: 'done' as const }; },
+    id: 'fake',
+    fired,
+    async fire(item) {
+      fired.push(item.id);
+      return { dispatchHash: `h-${item.id}` };
+    },
+    async reconcile() {
+      return { status: 'done' as const };
+    },
   };
 }
 
@@ -22,18 +34,25 @@ function fakeExecutor(): Executor & { fired: string[] } {
  * Unlike the SQLite store, this properly round-trips all WorkItem fields (including subagentShape).
  * Used only in the subagentShape tests where field persistence matters for tick logic.
  */
-function makeMemStore(concurrency = 5): RunStateStore & { items: Map<string, ItemState> } {
+function makeMemStore(_concurrency = 5): RunStateStore & { items: Map<string, ItemState> } {
   const items = new Map<string, ItemState>();
   const queues = new Map<string, number>();
   const locks = new Map<string, string>(); // key → item_id
   return {
     items,
-    ensureQueue(name, c) { queues.set(name, c); },
+    ensureQueue(name, c) {
+      queues.set(name, c);
+    },
     saveRun(run: Run, _actor?: string, submittedAt?: string) {
       for (const it of run.items) {
-        items.set(it.id, { ...it, runId: run.id, queue: run.queue, status: 'pending',
+        items.set(it.id, {
+          ...it,
+          runId: run.id,
+          queue: run.queue,
+          status: 'pending',
           ...(_actor !== undefined ? { actor: _actor } : {}),
-          ...(submittedAt !== undefined ? { submittedAt } : {}) });
+          ...(submittedAt !== undefined ? { submittedAt } : {}),
+        });
       }
     },
     markReady(ids: string[]) {
@@ -57,8 +76,12 @@ function makeMemStore(concurrency = 5): RunStateStore & { items: Map<string, Ite
     runningCount(queue: string): number {
       return [...items.values()].filter((i) => i.queue === queue && i.status === 'running').length;
     },
-    queueConcurrency(queue: string): number { return queues.get(queue) ?? 0; },
-    heldLockKeys(): string[] { return [...locks.keys()]; },
+    queueConcurrency(queue: string): number {
+      return queues.get(queue) ?? 0;
+    },
+    heldLockKeys(): string[] {
+      return [...locks.keys()];
+    },
     acquireLocks(itemId: string, keys: string[]): boolean {
       if (keys.length === 0) return true;
       if (keys.some((k) => locks.has(k))) return false;
@@ -66,10 +89,16 @@ function makeMemStore(concurrency = 5): RunStateStore & { items: Map<string, Ite
       return true;
     },
     releaseLocks(itemId: string): void {
-      for (const [k, v] of locks) { if (v === itemId) locks.delete(k); }
+      for (const [k, v] of locks) {
+        if (v === itemId) locks.delete(k);
+      }
     },
-    getActor(id: string): string | undefined { return items.get(id)?.actor; },
-    getAttempts(id: string): number { return items.get(id)?.attempts ?? 0; },
+    getActor(id: string): string | undefined {
+      return items.get(id)?.actor;
+    },
+    getAttempts(id: string): number {
+      return items.get(id)?.attempts ?? 0;
+    },
     bumpAttempt(id: string): void {
       const it = items.get(id);
       if (it) items.set(id, { ...it, attempts: (it.attempts ?? 0) + 1 });
@@ -86,14 +115,20 @@ function makeMemStore(concurrency = 5): RunStateStore & { items: Map<string, Ite
       const it = items.get(id);
       if (it) items.set(id, { ...it, manifestRef: ref });
     },
-    close() { /* no-op */ },
+    close() {
+      /* no-op */
+    },
   };
 }
 
-const run: Run = { id: 'r', queue: 'default', items: [
-  { id: 'a', executor: 'fake', inputs: {}, depends_on: [], resourceLocks: [] },
-  { id: 'b', executor: 'fake', inputs: {}, depends_on: ['a'], resourceLocks: [] },
-] };
+const run: Run = {
+  id: 'r',
+  queue: 'default',
+  items: [
+    { id: 'a', executor: 'fake', inputs: {}, depends_on: [], resourceLocks: [] },
+    { id: 'b', executor: 'fake', inputs: {}, depends_on: ['a'], resourceLocks: [] },
+  ],
+};
 
 describe('tick', () => {
   it('readies + fires roots, then readies + fires dependents after reconcile, respecting deps', async () => {
@@ -104,27 +139,39 @@ describe('tick', () => {
 
     const ex = fakeExecutor();
     const t1 = await tick(store, { fake: ex }, 'default');
-    expect(t1.fired).toBe(1);                       // a fired
+    expect(t1.fired).toBe(1); // a fired
     expect(ex.fired).toEqual(['a']);
     expect(store.getItems('r').find((i) => i.id === 'b')!.status).toBe('pending'); // b still blocked
 
     const t2 = await tick(store, { fake: ex }, 'default');
-    expect(t2.reconciled).toBe(1);                  // a -> done
+    expect(t2.reconciled).toBe(1); // a -> done
     expect(store.getItems('r').find((i) => i.id === 'a')!.status).toBe('done');
-    expect(ex.fired).toContain('b');                // b readied + fired now that a is done
+    expect(ex.fired).toContain('b'); // b readied + fired now that a is done
     store.close();
   });
 
   it('honors the queue concurrency cap', async () => {
     const store = new SqliteRunStateStore();
     store.ensureQueue('default', 1);
-    store.saveRun({ id: 'r2', queue: 'default', items: [
-      { id: 'x', executor: 'fake', inputs: {}, depends_on: [], resourceLocks: [] },
-      { id: 'y', executor: 'fake', inputs: {}, depends_on: [], resourceLocks: [] },
-    ] });
+    store.saveRun({
+      id: 'r2',
+      queue: 'default',
+      items: [
+        { id: 'x', executor: 'fake', inputs: {}, depends_on: [], resourceLocks: [] },
+        { id: 'y', executor: 'fake', inputs: {}, depends_on: [], resourceLocks: [] },
+      ],
+    });
     store.markReady(['x', 'y']);
     // reconcile returns null (never finishes) so running items stay running
-    const ex: Executor = { id: 'fake', async fire(i) { return { dispatchHash: `h-${i.id}` }; }, async reconcile() { return null; } };
+    const ex: Executor = {
+      id: 'fake',
+      async fire(i) {
+        return { dispatchHash: `h-${i.id}` };
+      },
+      async reconcile() {
+        return null;
+      },
+    };
     const t = await tick(store, { fake: ex }, 'default');
     expect(t.fired).toBe(1); // cap=1 → only one of x,y fires this pass
     store.close();
@@ -133,13 +180,37 @@ describe('tick', () => {
   it('resource-lock serialization: two ready items sharing a lock key, only one fires per tick', async () => {
     const store = new SqliteRunStateStore();
     store.ensureQueue('default', 10); // high concurrency — lock is the bottleneck
-    store.saveRun({ id: 'r3', queue: 'default', items: [
-      { id: 'p', executor: 'fake', inputs: {}, depends_on: [], resourceLocks: ['shared-file.ts'] },
-      { id: 'q', executor: 'fake', inputs: {}, depends_on: [], resourceLocks: ['shared-file.ts'] },
-    ] });
+    store.saveRun({
+      id: 'r3',
+      queue: 'default',
+      items: [
+        {
+          id: 'p',
+          executor: 'fake',
+          inputs: {},
+          depends_on: [],
+          resourceLocks: ['shared-file.ts'],
+        },
+        {
+          id: 'q',
+          executor: 'fake',
+          inputs: {},
+          depends_on: [],
+          resourceLocks: ['shared-file.ts'],
+        },
+      ],
+    });
     store.markReady(['p', 'q']);
     // reconcile returns null so neither item completes — both stay running on second tick
-    const ex: Executor = { id: 'fake', async fire(i) { return { dispatchHash: `h-${i.id}` }; }, async reconcile() { return null; } };
+    const ex: Executor = {
+      id: 'fake',
+      async fire(i) {
+        return { dispatchHash: `h-${i.id}` };
+      },
+      async reconcile() {
+        return null;
+      },
+    };
     const t = await tick(store, { fake: ex }, 'default');
     // Even though concurrency allows 10, the shared lock means only one can fire
     expect(t.fired).toBe(1);
@@ -149,10 +220,14 @@ describe('tick', () => {
   it('unregistered executor during fire: item fails with reason, tick does not throw, sibling still fires', async () => {
     const store = new SqliteRunStateStore();
     store.ensureQueue('default', 5);
-    store.saveRun({ id: 'r4', queue: 'default', items: [
-      { id: 'z', executor: 'nonexistent', inputs: {}, depends_on: [], resourceLocks: [] },
-      { id: 'zsibling', executor: 'fake', inputs: {}, depends_on: [], resourceLocks: [] },
-    ] });
+    store.saveRun({
+      id: 'r4',
+      queue: 'default',
+      items: [
+        { id: 'z', executor: 'nonexistent', inputs: {}, depends_on: [], resourceLocks: [] },
+        { id: 'zsibling', executor: 'fake', inputs: {}, depends_on: [], resourceLocks: [] },
+      ],
+    });
     store.markReady(['z', 'zsibling']);
     const ex = fakeExecutor();
     // tick should NOT throw
@@ -170,9 +245,11 @@ describe('tick', () => {
     const store = new SqliteRunStateStore();
     store.ensureQueue('default', 5);
     // Manually put an item into running state with an unknown executor
-    store.saveRun({ id: 'r5', queue: 'default', items: [
-      { id: 'w', executor: 'ghost', inputs: {}, depends_on: [], resourceLocks: [] },
-    ] });
+    store.saveRun({
+      id: 'r5',
+      queue: 'default',
+      items: [{ id: 'w', executor: 'ghost', inputs: {}, depends_on: [], resourceLocks: [] }],
+    });
     store.markReady(['w']);
     store.setRunning('w', 'h-w');
     // tick should NOT throw
@@ -184,21 +261,203 @@ describe('tick', () => {
     store.close();
   });
 
+  // ── Dispatch deadline (wall-clock max runtime) ──────────────────────────────
+  // A hung dispatch (reconcile forever returns null) must not hold its concurrency
+  // slot + resource locks forever — the engine force-fails it once it exceeds the
+  // configured maxRuntimeMs, routing through the normal retry/skip-cascade path.
+
+  /** An executor whose dispatch never finishes (reconcile always reports "still running"). */
+  const hungExecutor: Executor = {
+    id: 'fake',
+    async fire(i) {
+      return { dispatchHash: `h-${i.id}` };
+    },
+    async reconcile() {
+      return null; // never settles
+    },
+  };
+
+  it('force-fails a dispatch that exceeds maxRuntimeMs and releases its locks', async () => {
+    const store = new SqliteRunStateStore();
+    store.ensureQueue('default', 5);
+    store.saveRun({
+      id: 'rd1',
+      queue: 'default',
+      items: [{ id: 'hang', executor: 'fake', inputs: {}, depends_on: [], resourceLocks: ['gpu'] }],
+    });
+    store.markReady(['hang']);
+    // Simulate a live, in-flight dispatch fired long ago that holds a lock.
+    store.acquireLocks('hang', ['gpu']);
+    store.setRunning('hang', 'h-hang', 1000); // runningSince = 1000ms
+
+    await tick(store, { fake: hungExecutor }, 'default', undefined, {
+      now: 1000 + 60_000, // 60s elapsed
+      maxRuntimeMs: 30_000, // deadline 30s
+      maxAttempts: 1, // no retry → terminal failed
+    });
+
+    const item = store.getItems('rd1').find((i) => i.id === 'hang')!;
+    expect(item.status).toBe('failed');
+    expect(item.reason).toMatch(/max runtime|exceeded/i);
+    expect(store.heldLockKeys()).not.toContain('gpu'); // slot + lock freed
+    store.close();
+  });
+
+  it('does not kill a dispatch still within maxRuntimeMs', async () => {
+    const store = new SqliteRunStateStore();
+    store.ensureQueue('default', 5);
+    store.saveRun({
+      id: 'rd2',
+      queue: 'default',
+      items: [{ id: 'ok', executor: 'fake', inputs: {}, depends_on: [], resourceLocks: [] }],
+    });
+    store.markReady(['ok']);
+    store.setRunning('ok', 'h-ok', 1000);
+
+    await tick(store, { fake: hungExecutor }, 'default', undefined, {
+      now: 1000 + 10_000, // 10s elapsed — within the 30s deadline
+      maxRuntimeMs: 30_000,
+      maxAttempts: 1,
+    });
+
+    expect(store.getItems('rd2').find((i) => i.id === 'ok')!.status).toBe('running');
+    store.close();
+  });
+
+  it('an overrun dispatch with attempts remaining is retried (not terminal-failed)', async () => {
+    const store = new SqliteRunStateStore();
+    store.ensureQueue('default', 5);
+    store.saveRun({
+      id: 'rd3',
+      queue: 'default',
+      items: [{ id: 'retryme', executor: 'fake', inputs: {}, depends_on: [], resourceLocks: [] }],
+    });
+    store.markReady(['retryme']);
+    store.setRunning('retryme', 'h-retryme', 1000);
+
+    await tick(store, { fake: hungExecutor }, 'default', undefined, {
+      now: 1000 + 60_000,
+      maxRuntimeMs: 30_000,
+      maxAttempts: 2, // attempts remaining → retry
+      backoffMs: () => 5_000,
+    });
+
+    const item = store.getItems('rd3').find((i) => i.id === 'retryme')!;
+    expect(item.status).toBe('ready'); // requeued for another attempt
+    expect(item.attempts).toBe(1);
+    store.close();
+  });
+
+  it('best-effort cancels the provider dispatch on deadline overrun', async () => {
+    const store = new SqliteRunStateStore();
+    store.ensureQueue('default', 5);
+    store.saveRun({
+      id: 'rd5',
+      queue: 'default',
+      items: [{ id: 'hang2', executor: 'fake', inputs: {}, depends_on: [], resourceLocks: [] }],
+    });
+    store.markReady(['hang2']);
+    store.setRunning('hang2', 'dh-hang2', 1000);
+
+    const cancelled: string[] = [];
+    const ex: Executor = {
+      id: 'fake',
+      async fire(i) {
+        return { dispatchHash: `h-${i.id}` };
+      },
+      async reconcile() {
+        return null;
+      },
+      async cancel(dh) {
+        cancelled.push(dh);
+      },
+    };
+
+    await tick(store, { fake: ex }, 'default', undefined, {
+      now: 1000 + 60_000,
+      maxRuntimeMs: 30_000,
+      maxAttempts: 1,
+    });
+
+    expect(cancelled).toEqual(['dh-hang2']); // the dispatchHash, not the item id
+    expect(store.getItems('rd5').find((i) => i.id === 'hang2')!.status).toBe('failed');
+    store.close();
+  });
+
+  it('a throwing cancel on overrun does not abort the force-fail (best-effort)', async () => {
+    const store = new SqliteRunStateStore();
+    store.ensureQueue('default', 5);
+    store.saveRun({
+      id: 'rd6',
+      queue: 'default',
+      items: [{ id: 'hang3', executor: 'fake', inputs: {}, depends_on: [], resourceLocks: [] }],
+    });
+    store.markReady(['hang3']);
+    store.setRunning('hang3', 'dh-hang3', 1000);
+
+    const ex: Executor = {
+      id: 'fake',
+      async fire(i) {
+        return { dispatchHash: `h-${i.id}` };
+      },
+      async reconcile() {
+        return null;
+      },
+      async cancel() {
+        throw new Error('provider cancel failed');
+      },
+    };
+
+    await expect(
+      tick(store, { fake: ex }, 'default', undefined, {
+        now: 1000 + 60_000,
+        maxRuntimeMs: 30_000,
+        maxAttempts: 1,
+      }),
+    ).resolves.toBeDefined();
+    expect(store.getItems('rd6').find((i) => i.id === 'hang3')!.status).toBe('failed');
+    store.close();
+  });
+
+  it('no deadline enforced when maxRuntimeMs is unset (back-compat)', async () => {
+    const store = new SqliteRunStateStore();
+    store.ensureQueue('default', 5);
+    store.saveRun({
+      id: 'rd4',
+      queue: 'default',
+      items: [{ id: 'forever', executor: 'fake', inputs: {}, depends_on: [], resourceLocks: [] }],
+    });
+    store.markReady(['forever']);
+    store.setRunning('forever', 'h-forever', 1000);
+
+    await tick(store, { fake: hungExecutor }, 'default', undefined, {
+      now: 1000 + 10_000_000, // ages later
+      // maxRuntimeMs omitted → no deadline
+    });
+
+    expect(store.getItems('rd4').find((i) => i.id === 'forever')!.status).toBe('running');
+    store.close();
+  });
+
   it('reconcile: released locks allow next item to acquire on next tick', async () => {
     const store = new SqliteRunStateStore();
     store.ensureQueue('default', 10);
-    store.saveRun({ id: 'r6', queue: 'default', items: [
-      { id: 'm', executor: 'fake', inputs: {}, depends_on: [], resourceLocks: ['mutex'] },
-      { id: 'n', executor: 'fake', inputs: {}, depends_on: [], resourceLocks: ['mutex'] },
-    ] });
+    store.saveRun({
+      id: 'r6',
+      queue: 'default',
+      items: [
+        { id: 'm', executor: 'fake', inputs: {}, depends_on: [], resourceLocks: ['mutex'] },
+        { id: 'n', executor: 'fake', inputs: {}, depends_on: [], resourceLocks: ['mutex'] },
+      ],
+    });
     store.markReady(['m', 'n']);
 
-    let reconcileCount = 0;
     const ex: Executor = {
       id: 'fake',
-      async fire(i) { return { dispatchHash: `h-${i.id}` }; },
+      async fire(i) {
+        return { dispatchHash: `h-${i.id}` };
+      },
       async reconcile() {
-        reconcileCount++;
         return { status: 'done' as const };
       },
     };
@@ -221,14 +480,27 @@ describe('tick', () => {
     // sqlite round-trip of subagentShape is covered in runstate-sqlite.test.ts.
     const store = makeMemStore();
     store.ensureQueue('default', 5);
-    store.saveRun({ id: 'rs1', queue: 'default', items: [
-      { id: 'bad', executor: 'fake', inputs: { n: 1 }, depends_on: [], resourceLocks: [], subagentShape: 'unknown.shape' },
-      { id: 'good', executor: 'fake', inputs: {}, depends_on: [], resourceLocks: [] },
-    ] });
+    store.saveRun({
+      id: 'rs1',
+      queue: 'default',
+      items: [
+        {
+          id: 'bad',
+          executor: 'fake',
+          inputs: { n: 1 },
+          depends_on: [],
+          resourceLocks: [],
+          subagentShape: 'unknown.shape',
+        },
+        { id: 'good', executor: 'fake', inputs: {}, depends_on: [], resourceLocks: [] },
+      ],
+    });
     store.markReady(['bad', 'good']);
 
     const ex = fakeExecutor();
-    const packs = new PackRegistry([makeShape({ id: 'dev.x', inputSchema: z.object({ n: z.number() }) })]);
+    const packs = new PackRegistry([
+      makeShape({ id: 'dev.x', inputSchema: z.object({ n: z.number() }) }),
+    ]);
 
     // Should not throw even though 'unknown.shape' isn't in packs
     const result = await tick(store, { fake: ex }, 'default', packs);
@@ -243,13 +515,26 @@ describe('tick', () => {
   it('subagentShape: input failing inputSchema marks item failed, tick does not throw', async () => {
     const store = makeMemStore();
     store.ensureQueue('default', 5);
-    store.saveRun({ id: 'rs2', queue: 'default', items: [
-      { id: 'badinputs', executor: 'fake', inputs: { n: 'not-a-number' }, depends_on: [], resourceLocks: [], subagentShape: 'dev.x' },
-    ] });
+    store.saveRun({
+      id: 'rs2',
+      queue: 'default',
+      items: [
+        {
+          id: 'badinputs',
+          executor: 'fake',
+          inputs: { n: 'not-a-number' },
+          depends_on: [],
+          resourceLocks: [],
+          subagentShape: 'dev.x',
+        },
+      ],
+    });
     store.markReady(['badinputs']);
 
     const ex = fakeExecutor();
-    const packs = new PackRegistry([makeShape({ id: 'dev.x', inputSchema: z.object({ n: z.number() }) })]);
+    const packs = new PackRegistry([
+      makeShape({ id: 'dev.x', inputSchema: z.object({ n: z.number() }) }),
+    ]);
 
     await expect(tick(store, { fake: ex }, 'default', packs)).resolves.not.toThrow();
     expect(store.getItems('rs2').find((i) => i.id === 'badinputs')!.status).toBe('failed');
@@ -259,13 +544,26 @@ describe('tick', () => {
   it('subagentShape: valid inputs fires normally', async () => {
     const store = makeMemStore();
     store.ensureQueue('default', 5);
-    store.saveRun({ id: 'rs3', queue: 'default', items: [
-      { id: 'valid', executor: 'fake', inputs: { n: 42 }, depends_on: [], resourceLocks: [], subagentShape: 'dev.x' },
-    ] });
+    store.saveRun({
+      id: 'rs3',
+      queue: 'default',
+      items: [
+        {
+          id: 'valid',
+          executor: 'fake',
+          inputs: { n: 42 },
+          depends_on: [],
+          resourceLocks: [],
+          subagentShape: 'dev.x',
+        },
+      ],
+    });
     store.markReady(['valid']);
 
     const ex = fakeExecutor();
-    const packs = new PackRegistry([makeShape({ id: 'dev.x', inputSchema: z.object({ n: z.number() }) })]);
+    const packs = new PackRegistry([
+      makeShape({ id: 'dev.x', inputSchema: z.object({ n: z.number() }) }),
+    ]);
 
     const result = await tick(store, { fake: ex }, 'default', packs);
 
@@ -276,9 +574,20 @@ describe('tick', () => {
   it('subagentShape: no packs passed and item has subagentShape marks item failed (registry unavailable)', async () => {
     const store = makeMemStore();
     store.ensureQueue('default', 5);
-    store.saveRun({ id: 'rs4', queue: 'default', items: [
-      { id: 'nopacks', executor: 'fake', inputs: {}, depends_on: [], resourceLocks: [], subagentShape: 'dev.x' },
-    ] });
+    store.saveRun({
+      id: 'rs4',
+      queue: 'default',
+      items: [
+        {
+          id: 'nopacks',
+          executor: 'fake',
+          inputs: {},
+          depends_on: [],
+          resourceLocks: [],
+          subagentShape: 'dev.x',
+        },
+      ],
+    });
     store.markReady(['nopacks']);
 
     const ex = fakeExecutor();
@@ -295,14 +604,33 @@ describe('tick', () => {
     // (and its lock is released/never held), the next tick should allow 'waits-for-lock' to fire.
     const store = makeMemStore();
     store.ensureQueue('default', 5);
-    store.saveRun({ id: 'rs5', queue: 'default', items: [
-      { id: 'fail-with-lock', executor: 'fake', inputs: { n: 'bad' }, depends_on: [], resourceLocks: ['res-a'], subagentShape: 'dev.x' },
-      { id: 'waits-for-lock', executor: 'fake', inputs: {}, depends_on: [], resourceLocks: ['res-a'] },
-    ] });
+    store.saveRun({
+      id: 'rs5',
+      queue: 'default',
+      items: [
+        {
+          id: 'fail-with-lock',
+          executor: 'fake',
+          inputs: { n: 'bad' },
+          depends_on: [],
+          resourceLocks: ['res-a'],
+          subagentShape: 'dev.x',
+        },
+        {
+          id: 'waits-for-lock',
+          executor: 'fake',
+          inputs: {},
+          depends_on: [],
+          resourceLocks: ['res-a'],
+        },
+      ],
+    });
     store.markReady(['fail-with-lock', 'waits-for-lock']);
 
     const ex = fakeExecutor();
-    const packs = new PackRegistry([makeShape({ id: 'dev.x', inputSchema: z.object({ n: z.number() }) })]);
+    const packs = new PackRegistry([
+      makeShape({ id: 'dev.x', inputSchema: z.object({ n: z.number() }) }),
+    ]);
 
     // Tick 1: fail-with-lock is selected; validation fails → status=failed, no lock acquired
     await tick(store, { fake: ex }, 'default', packs);
@@ -318,17 +646,26 @@ describe('tick', () => {
   it('reconcile: failed status releases locks so the next item can fire', async () => {
     const store = new SqliteRunStateStore();
     store.ensureQueue('default', 10); // high concurrency — lock is the bottleneck
-    store.saveRun({ id: 'r7', queue: 'default', items: [
-      { id: 'm', executor: 'fake', inputs: {}, depends_on: [], resourceLocks: ['shared'] },
-      { id: 'n', executor: 'fake', inputs: {}, depends_on: [], resourceLocks: ['shared'] },
-    ] });
+    store.saveRun({
+      id: 'r7',
+      queue: 'default',
+      items: [
+        { id: 'm', executor: 'fake', inputs: {}, depends_on: [], resourceLocks: ['shared'] },
+        { id: 'n', executor: 'fake', inputs: {}, depends_on: [], resourceLocks: ['shared'] },
+      ],
+    });
     store.markReady(['m', 'n']);
 
     const firedItems: string[] = [];
     const ex: Executor = {
       id: 'fake',
-      async fire(i) { firedItems.push(i.id); return { dispatchHash: `h-${i.id}` }; },
-      async reconcile() { return { status: 'failed' as const }; },
+      async fire(i) {
+        firedItems.push(i.id);
+        return { dispatchHash: `h-${i.id}` };
+      },
+      async reconcile() {
+        return { status: 'failed' as const };
+      },
     };
 
     // Tick 1: m fires (acquires 'shared'), n is held by the lock
@@ -352,16 +689,30 @@ describe('tick', () => {
   it('fire() rejecting executor: item fails with "fire failed" reason, lock is released, contender fires next tick', async () => {
     const store = makeMemStore(10);
     store.ensureQueue('default', 10);
-    store.saveRun({ id: 'rh1', queue: 'default', items: [
-      { id: 'bang', executor: 'bang-ex', inputs: {}, depends_on: [], resourceLocks: ['res-bang'] },
-      { id: 'waiter', executor: 'fake', inputs: {}, depends_on: [], resourceLocks: ['res-bang'] },
-    ] });
+    store.saveRun({
+      id: 'rh1',
+      queue: 'default',
+      items: [
+        {
+          id: 'bang',
+          executor: 'bang-ex',
+          inputs: {},
+          depends_on: [],
+          resourceLocks: ['res-bang'],
+        },
+        { id: 'waiter', executor: 'fake', inputs: {}, depends_on: [], resourceLocks: ['res-bang'] },
+      ],
+    });
     store.markReady(['bang', 'waiter']);
 
     const bangEx: Executor = {
       id: 'bang-ex',
-      async fire() { throw new Error('boom from fire'); },
-      async reconcile() { return null; },
+      async fire() {
+        throw new Error('boom from fire');
+      },
+      async reconcile() {
+        return null;
+      },
     };
     const ex = fakeExecutor();
 
@@ -384,10 +735,14 @@ describe('tick', () => {
   it('cascade skip: pending dependent of a failed item is skipped, queue settles', async () => {
     const store = makeMemStore(10);
     store.ensureQueue('default', 10);
-    store.saveRun({ id: 'rh2', queue: 'default', items: [
-      { id: 'parent', executor: 'nonexistent', inputs: {}, depends_on: [], resourceLocks: [] },
-      { id: 'child', executor: 'fake', inputs: {}, depends_on: ['parent'], resourceLocks: [] },
-    ] });
+    store.saveRun({
+      id: 'rh2',
+      queue: 'default',
+      items: [
+        { id: 'parent', executor: 'nonexistent', inputs: {}, depends_on: [], resourceLocks: [] },
+        { id: 'child', executor: 'fake', inputs: {}, depends_on: ['parent'], resourceLocks: [] },
+      ],
+    });
     store.markReady(['parent']);
 
     const ex = fakeExecutor();
@@ -406,14 +761,34 @@ describe('tick', () => {
   it('shape-validation failures record a reason', async () => {
     const store = makeMemStore(5);
     store.ensureQueue('default', 5);
-    store.saveRun({ id: 'rh3', queue: 'default', items: [
-      { id: 'bad-shape', executor: 'fake', inputs: { n: 1 }, depends_on: [], resourceLocks: [], subagentShape: 'unknown.shape' },
-      { id: 'bad-input', executor: 'fake', inputs: { n: 'not-a-number' }, depends_on: [], resourceLocks: [], subagentShape: 'dev.x' },
-    ] });
+    store.saveRun({
+      id: 'rh3',
+      queue: 'default',
+      items: [
+        {
+          id: 'bad-shape',
+          executor: 'fake',
+          inputs: { n: 1 },
+          depends_on: [],
+          resourceLocks: [],
+          subagentShape: 'unknown.shape',
+        },
+        {
+          id: 'bad-input',
+          executor: 'fake',
+          inputs: { n: 'not-a-number' },
+          depends_on: [],
+          resourceLocks: [],
+          subagentShape: 'dev.x',
+        },
+      ],
+    });
     store.markReady(['bad-shape', 'bad-input']);
 
     const ex = fakeExecutor();
-    const packs = new PackRegistry([makeShape({ id: 'dev.x', inputSchema: z.object({ n: z.number() }) })]);
+    const packs = new PackRegistry([
+      makeShape({ id: 'dev.x', inputSchema: z.object({ n: z.number() }) }),
+    ]);
 
     await tick(store, { fake: ex }, 'default', packs);
 
@@ -431,8 +806,12 @@ describe('tick', () => {
 function failingExecutor(): Executor {
   return {
     id: 'fail',
-    async fire(item) { return { dispatchHash: `h-${item.id}` }; },
-    async reconcile() { return { status: 'failed' as const }; },
+    async fire(item) {
+      return { dispatchHash: `h-${item.id}` };
+    },
+    async reconcile() {
+      return { status: 'failed' as const };
+    },
   };
 }
 
@@ -440,26 +819,30 @@ describe('tick — retry with backoff', () => {
   it('requeues a failed item (with attempts remaining) instead of failing it', async () => {
     const store = new SqliteRunStateStore();
     store.ensureQueue('default', 5);
-    store.saveRun({ id: 'rr1', queue: 'default', items: [
-      { id: 'a', executor: 'fail', inputs: {}, depends_on: [], resourceLocks: [] },
-    ] });
+    store.saveRun({
+      id: 'rr1',
+      queue: 'default',
+      items: [{ id: 'a', executor: 'fail', inputs: {}, depends_on: [], resourceLocks: [] }],
+    });
     store.markReady(['a']);
     const ex = failingExecutor();
     await tick(store, { fail: ex }, 'default', undefined, { maxAttempts: 2, now: 1000 }); // fire a
     await tick(store, { fail: ex }, 'default', undefined, { maxAttempts: 2, now: 1000 }); // reconcile -> failed -> requeue
     const a = store.getItems('rr1').find((i) => i.id === 'a')!;
-    expect(a.status).toBe('ready');                 // requeued, not terminally failed
+    expect(a.status).toBe('ready'); // requeued, not terminally failed
     expect(a.attempts).toBe(1);
-    expect(a.nextAttemptAt).toBeGreaterThan(1000);  // backoff gate set in the future
+    expect(a.nextAttemptAt).toBeGreaterThan(1000); // backoff gate set in the future
     store.close();
   });
 
   it('terminally fails an item once attempts are exhausted', async () => {
     const store = new SqliteRunStateStore();
     store.ensureQueue('default', 5);
-    store.saveRun({ id: 'rr2', queue: 'default', items: [
-      { id: 'a', executor: 'fail', inputs: {}, depends_on: [], resourceLocks: [] },
-    ] });
+    store.saveRun({
+      id: 'rr2',
+      queue: 'default',
+      items: [{ id: 'a', executor: 'fail', inputs: {}, depends_on: [], resourceLocks: [] }],
+    });
     store.markReady(['a']);
     const ex = failingExecutor();
     await tick(store, { fail: ex }, 'default', undefined, { maxAttempts: 1, now: 1000 }); // fire
@@ -471,9 +854,11 @@ describe('tick — retry with backoff', () => {
   it('does not fire a requeued item whose nextAttemptAt is still in the future', async () => {
     const store = new SqliteRunStateStore();
     store.ensureQueue('default', 5);
-    store.saveRun({ id: 'rr3', queue: 'default', items: [
-      { id: 'a', executor: 'fake', inputs: {}, depends_on: [], resourceLocks: [] },
-    ] });
+    store.saveRun({
+      id: 'rr3',
+      queue: 'default',
+      items: [{ id: 'a', executor: 'fake', inputs: {}, depends_on: [], resourceLocks: [] }],
+    });
     store.markReady(['a']);
     store.requeue('a', 9_999_999); // gate far in the future
     const ex = fakeExecutor();
@@ -485,9 +870,11 @@ describe('tick — retry with backoff', () => {
   it('fires a requeued item whose nextAttemptAt has passed', async () => {
     const store = new SqliteRunStateStore();
     store.ensureQueue('default', 5);
-    store.saveRun({ id: 'rr4', queue: 'default', items: [
-      { id: 'a', executor: 'fake', inputs: {}, depends_on: [], resourceLocks: [] },
-    ] });
+    store.saveRun({
+      id: 'rr4',
+      queue: 'default',
+      items: [{ id: 'a', executor: 'fake', inputs: {}, depends_on: [], resourceLocks: [] }],
+    });
     store.markReady(['a']);
     store.requeue('a', 500); // gate in the past
     const ex = fakeExecutor();
@@ -499,16 +886,20 @@ describe('tick — retry with backoff', () => {
   it('does NOT cascade dependents while a failed item still has retries left', async () => {
     const store = new SqliteRunStateStore();
     store.ensureQueue('default', 5);
-    store.saveRun({ id: 'rr5', queue: 'default', items: [
-      { id: 'a', executor: 'fail', inputs: {}, depends_on: [], resourceLocks: [] },
-      { id: 'b', executor: 'fail', inputs: {}, depends_on: ['a'], resourceLocks: [] },
-    ] });
+    store.saveRun({
+      id: 'rr5',
+      queue: 'default',
+      items: [
+        { id: 'a', executor: 'fail', inputs: {}, depends_on: [], resourceLocks: [] },
+        { id: 'b', executor: 'fail', inputs: {}, depends_on: ['a'], resourceLocks: [] },
+      ],
+    });
     store.markReady(['a']);
     const ex = failingExecutor();
     await tick(store, { fail: ex }, 'default', undefined, { maxAttempts: 2, now: 1000 }); // fire a
     await tick(store, { fail: ex }, 'default', undefined, { maxAttempts: 2, now: 1000 }); // a fails -> requeued
     const items = store.getItems('rr5');
-    expect(items.find((i) => i.id === 'a')!.status).toBe('ready');   // requeued
+    expect(items.find((i) => i.id === 'a')!.status).toBe('ready'); // requeued
     expect(items.find((i) => i.id === 'b')!.status).toBe('pending'); // NOT skipped
     store.close();
   });

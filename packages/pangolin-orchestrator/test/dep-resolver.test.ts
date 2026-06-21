@@ -2,8 +2,16 @@ import { describe, it, expect } from 'vitest';
 import { computeNewlyReady, computeSkipped, isSettled } from '../src/engine/dep-resolver.js';
 import type { ItemState } from '../src/contracts/index.js';
 
-const mk = (id: string, deps: string[], status: ItemState['status']): ItemState =>
-  ({ id, executor: 'fake', inputs: {}, depends_on: deps, resourceLocks: [], runId: 'r', queue: 'default', status });
+const mk = (id: string, deps: string[], status: ItemState['status']): ItemState => ({
+  id,
+  executor: 'fake',
+  inputs: {},
+  depends_on: deps,
+  resourceLocks: [],
+  runId: 'r',
+  queue: 'default',
+  status,
+});
 
 describe('computeNewlyReady', () => {
   it('readies roots (no deps) that are pending', () => {
@@ -35,16 +43,22 @@ describe('computeNewlyReady', () => {
     expect(result).toEqual(['a', 'b']);
   });
   it('holds item if only some deps are done', () => {
-    const items = [
-      mk('a', [], 'done'),
-      mk('b', [], 'running'),
-      mk('c', ['a', 'b'], 'pending'),
-    ];
+    const items = [mk('a', [], 'done'), mk('b', [], 'running'), mk('c', ['a', 'b'], 'pending')];
     expect(computeNewlyReady(items)).toEqual([]);
   });
 });
 
-const item = (id: string, status: string, deps: string[] = []) => ({ id, runId: 'r', queue: 'q', executor: 'e', inputs: {}, depends_on: deps, resourceLocks: [], status } as any);
+const item = (id: string, status: string, deps: string[] = []) =>
+  ({
+    id,
+    runId: 'r',
+    queue: 'q',
+    executor: 'e',
+    inputs: {},
+    depends_on: deps,
+    resourceLocks: [],
+    status,
+  }) as unknown as ItemState;
 
 describe('computeSkipped', () => {
   it('cascades a pending item whose dep failed', () => {
@@ -65,6 +79,10 @@ describe('computeSkipped', () => {
   it('returns multiple items if multiple qualify', () => {
     const items = [item('a', 'failed'), item('b', 'pending', ['a']), item('c', 'pending', ['a'])];
     expect(computeSkipped(items)).toEqual(['b', 'c']);
+  });
+  it('cascades a pending item whose dependency is denied', () => {
+    const items = [item('g', 'denied'), item('c', 'pending', ['g'])];
+    expect(computeSkipped(items)).toContain('c');
   });
 });
 
@@ -117,7 +135,12 @@ const SPAWN_FIX_GATE = {
 
 describe('§7 gate-skip predicate', () => {
   it('a done-but-red GATE blocks readiness and cascades skip to its dependents', () => {
-    const gate = gateItem({ id: 'g', status: 'done', verify: { passed: false }, inputs: SPAWN_FIX_GATE });
+    const gate = gateItem({
+      id: 'g',
+      status: 'done',
+      verify: { passed: false },
+      inputs: SPAWN_FIX_GATE,
+    });
     const dep = gateItem({ id: 'd', status: 'pending', depends_on: ['g'] });
     expect(computeNewlyReady([gate, dep])).toEqual([]);
     expect(computeSkipped([gate, dep])).toEqual(['d']);
@@ -138,21 +161,38 @@ describe('§7 gate-skip predicate', () => {
   });
 
   it('a green gate (verify.passed === true) passes its dependent normally', () => {
-    const gate = gateItem({ id: 'g', status: 'done', verify: { passed: true }, inputs: SPAWN_FIX_GATE });
+    const gate = gateItem({
+      id: 'g',
+      status: 'done',
+      verify: { passed: true },
+      inputs: SPAWN_FIX_GATE,
+    });
     const dep = gateItem({ id: 'd', status: 'pending', depends_on: ['g'] });
     expect(computeNewlyReady([gate, dep])).toEqual(['d']);
     expect(computeSkipped([gate, dep])).toEqual([]);
   });
 
   it('a gate copy (id suffixed with ~2) carrying the same inputs.gate blocks identically', () => {
-    const gate = gateItem({ id: 'g~2', status: 'done', verify: { passed: false }, inputs: SPAWN_FIX_GATE });
+    const gate = gateItem({
+      id: 'g~2',
+      status: 'done',
+      verify: { passed: false },
+      inputs: SPAWN_FIX_GATE,
+    });
     const dep = gateItem({ id: 'd', status: 'pending', depends_on: ['g~2'] });
     expect(computeNewlyReady([gate, dep])).toEqual([]);
     expect(computeSkipped([gate, dep])).toEqual(['d']);
   });
 
   it('a done-but-red gate with onRed !== spawn-fix does NOT block (report-only)', () => {
-    const gate = gateItem({ id: 'g', status: 'done', verify: { passed: false }, inputs: { gate: { onRed: 'report', subject: 's', fixTemplate: { executor: 'dispatch', inputs: {} } } } });
+    const gate = gateItem({
+      id: 'g',
+      status: 'done',
+      verify: { passed: false },
+      inputs: {
+        gate: { onRed: 'report', subject: 's', fixTemplate: { executor: 'dispatch', inputs: {} } },
+      },
+    });
     const dep = gateItem({ id: 'd', status: 'pending', depends_on: ['g'] });
     expect(computeNewlyReady([gate, dep])).toEqual(['d']);
     expect(computeSkipped([gate, dep])).toEqual([]);
@@ -162,7 +202,12 @@ describe('§7 gate-skip predicate', () => {
 
   it('data-edge exemption: fix-item (needs kind=output from the red gate) IS readied and NOT skipped', () => {
     // The fix item depends on the gate (auto-unioned by normalizeRun) AND consumes its findings output.
-    const gate = gateItem({ id: 'g', status: 'done', verify: { passed: false }, inputs: SPAWN_FIX_GATE });
+    const gate = gateItem({
+      id: 'g',
+      status: 'done',
+      verify: { passed: false },
+      inputs: SPAWN_FIX_GATE,
+    });
     const fix = gateItem({
       id: 'fix',
       status: 'pending',
@@ -175,7 +220,12 @@ describe('§7 gate-skip predicate', () => {
   });
 
   it('data-edge exemption: needs binding with kind=patch from red gate is NOT exempt (still blocked)', () => {
-    const gate = gateItem({ id: 'g', status: 'done', verify: { passed: false }, inputs: SPAWN_FIX_GATE });
+    const gate = gateItem({
+      id: 'g',
+      status: 'done',
+      verify: { passed: false },
+      inputs: SPAWN_FIX_GATE,
+    });
     const consumer = gateItem({
       id: 'c',
       status: 'pending',
@@ -188,7 +238,12 @@ describe('§7 gate-skip predicate', () => {
 
   it('data-edge exemption: needs kind=output from a DIFFERENT item does NOT exempt the red-gate edge', () => {
     // consumer has kind=output binding but from a different item — the gate edge is still blocking.
-    const gate = gateItem({ id: 'g', status: 'done', verify: { passed: false }, inputs: SPAWN_FIX_GATE });
+    const gate = gateItem({
+      id: 'g',
+      status: 'done',
+      verify: { passed: false },
+      inputs: SPAWN_FIX_GATE,
+    });
     const other = gateItem({ id: 'other', status: 'done' });
     const consumer = gateItem({
       id: 'c',

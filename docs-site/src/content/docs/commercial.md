@@ -17,8 +17,9 @@ You're building an **agent product** — and your buyers are security- or
 compliance-conscious (healthcare, finance, legal, gov, or any team that asks
 "where does it run, and can you prove what it did?"). Pangolin Scale lets you answer that:
 deterministic, credential-sealed execution **in your customer's own account**,
-emitting a **tamper-evident audit bundle they can verify independently** — so the
-security review becomes your funnel, not your wall.
+emitting a **verifiable audit bundle they can check independently** —
+tamper-detecting by default, **tamper-evident** at the S3 Object Lock (WORM) tier
+with a signed root — so the security review becomes your funnel, not your wall.
 
 The "what ran, to the byte" half is shippable and demoable today. The
 *authorized → ran → on whose behalf* chain of custody is the direction we build

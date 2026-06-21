@@ -29,12 +29,13 @@ function isBlockedBy(consumer: ItemState, dep: ItemState): boolean {
 export function computeNewlyReady(items: ItemState[]): string[] {
   const byId = new Map(items.map((i) => [i.id, i]));
   return items
-    .filter((i) =>
-      i.status === 'pending' &&
-      i.depends_on.every((d) => {
-        const dep = byId.get(d);
-        return dep?.status === 'done' && !isBlockedBy(i, dep);
-      }),
+    .filter(
+      (i) =>
+        i.status === 'pending' &&
+        i.depends_on.every((d) => {
+          const dep = byId.get(d);
+          return dep?.status === 'done' && !isBlockedBy(i, dep);
+        }),
     )
     .map((i) => i.id);
 }
@@ -46,19 +47,28 @@ export function computeNewlyReady(items: ItemState[]): string[] {
 export function computeSkipped(items: ItemState[]): string[] {
   const byId = new Map(items.map((i) => [i.id, i]));
   return items
-    .filter((i) =>
-      i.status === 'pending' &&
-      i.depends_on.some((d) => {
-        const dep = byId.get(d);
-        if (!dep) return false;
-        const s = dep.status;
-        return s === 'failed' || s === 'skipped' || s === 'cancelled' || isBlockedBy(i, dep);
-      }),
+    .filter(
+      (i) =>
+        i.status === 'pending' &&
+        i.depends_on.some((d) => {
+          const dep = byId.get(d);
+          if (!dep) return false;
+          const s = dep.status;
+          return (
+            s === 'failed' ||
+            s === 'skipped' ||
+            s === 'cancelled' ||
+            s === 'denied' ||
+            isBlockedBy(i, dep)
+          );
+        }),
     )
     .map((i) => i.id);
 }
 
 /** A run/queue is settled when nothing can still move (no pending/ready/running). */
 export function isSettled(items: ItemState[]): boolean {
-  return !items.some((i) => i.status === 'pending' || i.status === 'ready' || i.status === 'running');
+  return !items.some(
+    (i) => i.status === 'pending' || i.status === 'ready' || i.status === 'running',
+  );
 }

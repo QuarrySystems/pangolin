@@ -1,6 +1,10 @@
 import type { PangolinClient, InFlightDispatch } from '@quarry-systems/pangolin-client';
 import type { DispatchWork } from '@quarry-systems/pangolin-core';
-import { buildPangolinUri, buildDispatchRecordUri, computeContentHash } from '@quarry-systems/pangolin-core';
+import {
+  buildPangolinUri,
+  buildDispatchRecordUri,
+  computeContentHash,
+} from '@quarry-systems/pangolin-core';
 import type { Executor, ExecutionResult, FireContext, WorkItem } from '../contracts/index.js';
 import { buildManifest } from '../audit/manifest.js';
 import type { DispatchExecutorManifest } from '../contracts/manifest.js';
@@ -40,10 +44,15 @@ export class DispatchExecutor implements Executor {
 
   constructor(private readonly opts: DispatchExecutorOptions) {}
 
-  async fire(item: WorkItem, ctx?: FireContext): Promise<{ dispatchHash: string; manifestRef?: string }> {
+  async fire(
+    item: WorkItem,
+    ctx?: FireContext,
+  ): Promise<{ dispatchHash: string; manifestRef?: string }> {
     const subagent = item.inputs.subagent;
     if (typeof subagent !== 'string' || subagent.length === 0) {
-      throw new Error(`DispatchExecutor: WorkItem '${item.id}' is missing a string inputs.subagent`);
+      throw new Error(
+        `DispatchExecutor: WorkItem '${item.id}' is missing a string inputs.subagent`,
+      );
     }
     // Read the inputRefs carrier set by tick's resolve-at-fire.
     // Shape guard (not trust guard): filter out any non-string values.
@@ -93,8 +102,12 @@ export class DispatchExecutor implements Executor {
     const entry: InFlightEntry = { inflight: flight, settled: null };
     // Detached background await — never throws out; records terminal state for reconcile().
     void flight.awaitExit().then(
-      (exit) => { entry.settled = { kind: 'exit', exit }; },
-      (error) => { entry.settled = { kind: 'error', error }; },
+      (exit) => {
+        entry.settled = { kind: 'exit', exit };
+      },
+      (error) => {
+        entry.settled = { kind: 'error', error };
+      },
     );
     this.inflight.set(flight.dispatchId, entry);
 
@@ -121,13 +134,19 @@ export class DispatchExecutor implements Executor {
         submittedAt: ctx?.submittedAt,
         ...(inputRefs && Object.keys(inputRefs).length ? { inputRefs } : {}),
         ...(r.pipelineRef !== undefined ? { pipelineRef: r.pipelineRef } : {}),
+        authorization: ctx?.authorization,
       });
       // Content-address: compute hash FIRST, build pinned URI, put to it (mirrors
       // subagent-register.ts — round-trips on real LocalStorageProvider AND on the
       // in-memory test stub which stores by exact URI).
       const ns = this.opts.client.namespace;
       const contentHash = computeContentHash(bytes);
-      manifestRef = buildPangolinUri({ namespace: ns, type: 'manifest', name: flight.dispatchId, contentHash });
+      manifestRef = buildPangolinUri({
+        namespace: ns,
+        type: 'manifest',
+        name: flight.dispatchId,
+        contentHash,
+      });
       await this.opts.client.storage.put(manifestRef, bytes);
     } catch {
       manifestRef = undefined; // best-effort; do NOT rethrow (container already running)
@@ -155,19 +174,46 @@ export class DispatchExecutor implements Executor {
   }
 
   /**
+   * Best-effort cancel of a fired dispatch (e.g. on an engine deadline overrun). Routes through
+   * the client's canonical record-based cancel (`dispatch.cancel` → `ComputeProvider.cancel`,
+   * §7.6 idempotent) so the underlying worker is reaped, then drops the in-flight entry. NEVER
+   * throws — a provider reject / already-stopped / missing-record all collapse to a no-op.
+   */
+  async cancel(dispatchHash: string): Promise<void> {
+    try {
+      await this.opts.client.dispatch.cancel(dispatchHash);
+    } catch {
+      /* best-effort reap — swallow (the engine force-fails the item regardless) */
+    }
+    const entry = this.inflight.get(dispatchHash);
+    if (entry) {
+      this.inflight.delete(dispatchHash);
+      entry.inflight.cleanup();
+    }
+  }
+
+  /**
    * Best-effort: read the patchRef, verify signal, and outputs from the dispatch
    * output sentinel. NEVER throws — any failure returns an empty object.
    */
   private async readSentinel(
     dispatchId: string,
-  ): Promise<{ patchRef?: string; verify?: ExecutionResult['verify']; outputRefs?: ExecutionResult['outputRefs'] }> {
+  ): Promise<{
+    patchRef?: string;
+    verify?: ExecutionResult['verify'];
+    outputRefs?: ExecutionResult['outputRefs'];
+  }> {
     try {
       const ns = this.opts.client.namespace;
       const bytes = await this.opts.client.storage.get(
         buildDispatchRecordUri(ns, dispatchId, 'output.json'),
       );
       const sentinel = JSON.parse(new TextDecoder().decode(bytes));
-      const out: { patchRef?: string; verify?: ExecutionResult['verify']; outputRefs?: ExecutionResult['outputRefs'] } = {};
+      const out: {
+        patchRef?: string;
+        verify?: ExecutionResult['verify'];
+        outputRefs?: ExecutionResult['outputRefs'];
+      } = {};
       if (typeof sentinel.patchRef === 'string') out.patchRef = sentinel.patchRef;
       // Construct a clean, bounded verify from the (worker-written but possibly
       // older/tampered) sentinel — don't forward the raw object by reference.

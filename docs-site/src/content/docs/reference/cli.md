@@ -19,6 +19,12 @@ See [The privilege boundary](/pangolin/explanation/privilege-boundary/).
 Most subcommands load the client lazily, so the `pangolin.config` resolution cost
 is only paid when a subcommand actually runs.
 
+### Errors and debugging
+
+An uncaught error prints its **message only** (the subcommands throw actionable
+`Error`s) and exits `1`. Set **`PANGOLIN_DEBUG`** (to any non-empty value) to print
+the full stack trace instead — useful when diagnosing an unexpected failure.
+
 ## `pangolin capabilities`
 
 Manage capability bundles.
@@ -62,7 +68,7 @@ Dispatch and observe workers.
 
 | Subcommand | Args / options | Behavior |
 |---|---|---|
-| `run` | `--subagent <name>` (required), `--target <name>` (required), `--env <names...>`, `--input <json>` (default `{}`), `--capability <names...>`, `--add-capability <names...>`, `--worker-image <digest>` | Parses `--input` as JSON (invalid JSON → error + exit `1`). Calls `client.dispatch`. `--worker-image` defaults to `ghcr.io/quarrysystems/pangolin-worker:latest` (the published worker image). Prints the `DispatchResult` as pretty JSON. **Exits `1` if `result.failure` is set.** |
+| `run` | `--subagent <name>` (required), `--target <name>` (required), `--env <names...>`, `--input <json>` (default `{}`), `--capability <names...>`, `--add-capability <names...>`, `--worker-image <digest>` | Parses `--input` as JSON (invalid JSON → error + exit `1`). Calls `client.dispatch`. `--worker-image` defaults to `ghcr.io/quarrysystems/pangolin-worker:latest` (the published worker image). Prints the `DispatchResult` as pretty JSON. **Exits `1` if `result.failure` is set OR the worker's `exitCode` is non-zero** — an app-level non-zero exit carries no `failure` block (that field is provider/infra failures only), so a crashed worker is never reported as success. |
 | `describe <id>` | — | Calls `client.dispatch.describe(id)`, prints the full `DispatchResult` as pretty JSON. |
 | `cancel <id>` | — | Calls `client.dispatch.cancel(id)`, prints `cancelled: <id>`. |
 
@@ -159,7 +165,7 @@ are not MCP-reachable.
 |---|---|---|
 | `register <file>` | — | Reads a `PipelineSpec` JSON file and calls `client.pipeline.register`. The spec is validated (collect-all), content-addressed over its canonical-JSON form, and stored as a pinned immutable version. Prints `{ id, contentHash, registeredAt, pinnedUri }` as JSON — `pinnedUri` is the `pangolin://<namespace>/pipeline/<id>@<hash>` ref a dispatch pins. Missing file, invalid JSON, or an invalid spec → error + exit `1`. Re-registering the identical spec is idempotent (same hash, original `registeredAt`). |
 | `validate <file>` | — | **Storage-free** structural validation — no `pangolin.config`, no client, no network. Runs the same `validatePipelineSpec` check as `register` (known block kinds, reserved `seal` rejected, `<pack>.<name>` id form, non-empty `blocks`, script/capture parameter validity, edge-type tags). Collect-all: every error prints on stderr and **exit code is `1` on an invalid spec**; a valid spec prints `OK`. |
-| `list` | — | Prints one tab-delimited line per pipeline: `id\tcontentHash\tregisteredAt` — mirroring the `subagent` / `capabilities` list surface. Catalog enumeration is not yet implemented in the storage layer, so today this surfaces the same "not yet implemented" error those resource types would. |
+| `list` | — | Prints one tab-delimited line per pipeline: `id\tcontentHash\tregisteredAt`. **Not yet implemented for pipelines:** unlike the `capabilities` / `subagents` / `envs` list surface (which now enumerates via `StorageProvider.listNames`), pipelines use a different on-store layout (`pipeline/<id>@<hash>`) that the name-walk does not cover, so this verb still surfaces a "not yet implemented" error. Use the ref printed by `register` (or a known id) meanwhile. |
 
 ## `pangolin verify`
 
