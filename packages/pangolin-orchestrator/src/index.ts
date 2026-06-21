@@ -17,8 +17,13 @@ export { LocalDirMailbox } from './mailbox/local-dir.js';
 export { S3Mailbox } from './mailbox/s3.js';
 export { serve } from './serve/driver.js';
 export type { ServeOptions } from './serve/driver.js';
-export { evaluateHealth } from './serve/http.js';
-export type { ServeHealth, HealthVerdict } from './serve/http.js';
+export { evaluateHealth, startHealthServer } from './serve/http.js';
+export type {
+  ServeHealth,
+  HealthVerdict,
+  HealthServerOptions,
+  HealthServerHandle,
+} from './serve/http.js';
 export { buildManifest } from './audit/manifest.js';
 export type { BuildManifestInput } from './audit/manifest.js';
 export type {
