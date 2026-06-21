@@ -1,9 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import {
-  writeDispatchRecord,
-  readDispatchRecord,
-  type DispatchRecord,
-} from '../src/retention.js';
+import { writeDispatchRecord, readDispatchRecord, type DispatchRecord } from '../src/retention.js';
 import { PangolinClient } from '../src/client.js';
 import type { DispatchResult, StorageProvider } from '@quarry-systems/pangolin-core';
 
@@ -65,12 +61,7 @@ describe('writeDispatchRecord', () => {
     const storage = makeMemoryStorage();
     const client = makeClient(storage, 30);
     await expect(
-      writeDispatchRecord(
-        client,
-        'd1',
-        { ...baseResult, providerTaskId: 'p', target: 't' },
-        99,
-      ),
+      writeDispatchRecord(client, 'd1', { ...baseResult, providerTaskId: 'p', target: 't' }, 99),
     ).rejects.toThrow(/maxDays/);
   });
 
@@ -148,12 +139,7 @@ describe('writeDispatchRecord', () => {
       ...baseResult,
       needsInput: { question: 'proceed?', options: ['y', 'n'] },
     };
-    await writeDispatchRecord(
-      client,
-      'd1',
-      { ...withInput, providerTaskId: 'p', target: 't' },
-      1,
-    );
+    await writeDispatchRecord(client, 'd1', { ...withInput, providerTaskId: 'p', target: 't' }, 1);
     const bytes = storage.blobs.get('pangolin://o/dispatches/d1/record.json')!;
     const parsed = JSON.parse(new TextDecoder().decode(bytes)) as DispatchRecord;
     expect(parsed.needsInput).toEqual({ question: 'proceed?', options: ['y', 'n'] });
@@ -226,5 +212,28 @@ describe('readDispatchRecord', () => {
     };
     const client = makeClient(storage, 30);
     await expect(readDispatchRecord(client, 'd1')).rejects.toThrow(/bucket policy/);
+  });
+
+  it('round-trips a trace on the dispatch record', async () => {
+    const storage = makeMemoryStorage();
+    const client = makeClient(storage, 30);
+    await writeDispatchRecord(
+      client,
+      'd-trace',
+      {
+        dispatchId: 'd-trace',
+        exitCode: 0,
+        stdout: '',
+        stderr: '',
+        durationMs: 1,
+        resolved: { subagent: { name: 's', contentHash: 'sha256:x' }, capabilities: [], env: [] },
+        providerTaskId: 'p',
+        target: 'local',
+        trace: { traceId: 'run-9', runId: 'run-9', itemId: 'a' },
+      },
+      7,
+    );
+    const record = await readDispatchRecord(client, 'd-trace');
+    expect(record?.trace).toEqual({ traceId: 'run-9', runId: 'run-9', itemId: 'a' });
   });
 });

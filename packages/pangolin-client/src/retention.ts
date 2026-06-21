@@ -14,6 +14,7 @@
 import {
   buildDispatchRecordUri,
   type DispatchResult,
+  type TraceContext,
 } from '@quarry-systems/pangolin-core';
 import type { PangolinClient } from './client.js';
 
@@ -28,6 +29,8 @@ export interface DispatchRecord extends DispatchResult {
   retentionDays: number;
   /** ISO 8601 timestamp at which `writeDispatchRecord` sealed the record. */
   recordedAt: string;
+  /** Correlation context (observability 3b) — enables a dispatchId -> trace join after the fact. */
+  trace?: TraceContext;
 }
 
 const RECORD_SUFFIX = 'record.json';
@@ -42,7 +45,7 @@ const RECORD_SUFFIX = 'record.json';
 export async function writeDispatchRecord(
   client: PangolinClient,
   dispatchId: string,
-  result: DispatchResult & { providerTaskId?: string; target?: string },
+  result: DispatchResult & { providerTaskId?: string; target?: string; trace?: TraceContext },
   retentionDays: number,
 ): Promise<void> {
   if (retentionDays > client.retention.maxDays) {
@@ -50,13 +53,14 @@ export async function writeDispatchRecord(
       `writeDispatchRecord: retentionDays ${retentionDays} exceeds client maxDays ${client.retention.maxDays}`,
     );
   }
-  const { providerTaskId, target, ...rest } = result;
+  const { providerTaskId, target, trace, ...rest } = result;
   const record: DispatchRecord = {
     ...(rest as DispatchResult),
     providerTaskId: providerTaskId ?? '',
     target: target ?? '',
     retentionDays,
     recordedAt: new Date().toISOString(),
+    ...(trace ? { trace } : {}),
   };
   const uri = buildDispatchRecordUri(client.namespace, dispatchId, RECORD_SUFFIX);
   await client.storage.put(uri, new TextEncoder().encode(JSON.stringify(record)));
