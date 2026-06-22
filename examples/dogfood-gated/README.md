@@ -78,7 +78,7 @@ pnpm start:env
 pnpm start
 ```
 
-Timeout: 15 minutes (red arc = up to 5 mostly-sequential dispatches; concurrency 2).
+Timeout: 30 minutes (red arc = up to 5 mostly-sequential opus dispatches at 11-13 turns each; concurrency 2).
 
 ---
 

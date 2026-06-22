@@ -77,7 +77,7 @@ const PATCHES_DIR = join(__dirname, '../patches');
 const NAMESPACE = 'dogfood-gated';
 // :main MUST be rebuilt from this branch — see the header preflight note.
 const WORKER_IMAGE = 'ghcr.io/quarrysystems/pangolin-worker:main';
-const RUN_TIMEOUT_MS = 900_000; // 15 min: red arc = up to 5 mostly-sequential dispatches.
+const RUN_TIMEOUT_MS = 1_800_000; // 30 min: red arc = up to 5 mostly-sequential opus dispatches (11-13 turns each); 15 min was too tight when the gate/fixer/re-gate run long.
 
 // Capability shipped to the apply-work-patch subagents: git-applies the upstream
 // patch (materialized at inputs/work — the needs key is `work`) before the agent
@@ -96,7 +96,9 @@ const PROMPT =
 
 const apiKeyRaw = process.env.ANTHROPIC_API_KEY;
 if (!apiKeyRaw) {
-  console.error('ANTHROPIC_API_KEY is not set. Run `pnpm start:env` (reads ../../.env) or export it.');
+  console.error(
+    'ANTHROPIC_API_KEY is not set. Run `pnpm start:env` (reads ../../.env) or export it.',
+  );
   process.exit(1);
 }
 const apiKey: string = apiKeyRaw;
@@ -140,7 +142,9 @@ async function main(): Promise<void> {
     if (!manifestRef) return undefined;
     try {
       const dispatchId = parsePangolinUri(manifestRef).name;
-      const bytes = await client.storage.get(buildDispatchRecordUri(NAMESPACE, dispatchId, 'output.json'));
+      const bytes = await client.storage.get(
+        buildDispatchRecordUri(NAMESPACE, dispatchId, 'output.json'),
+      );
       return (JSON.parse(new TextDecoder().decode(bytes)) as { usage?: RuntimeUsage }).usage;
     } catch {
       return undefined;
@@ -160,9 +164,18 @@ async function main(): Promise<void> {
     });
 
     // 2. Capabilities — seed bundles (per config.ts) + the work-patch applier.
-    await client.capabilities.register({ name: 'docs-seeds', files: await seedFiles(TOPIC.subjectSeeds) });
-    await client.capabilities.register({ name: 'source-seeds', files: await seedFiles(TOPIC.gateSeeds) });
-    await client.capabilities.register({ name: 'announce-seeds', files: await seedFiles(TOPIC.announceSeeds) });
+    await client.capabilities.register({
+      name: 'docs-seeds',
+      files: await seedFiles(TOPIC.subjectSeeds),
+    });
+    await client.capabilities.register({
+      name: 'source-seeds',
+      files: await seedFiles(TOPIC.gateSeeds),
+    });
+    await client.capabilities.register({
+      name: 'announce-seeds',
+      files: await seedFiles(TOPIC.announceSeeds),
+    });
     await client.capabilities.register({
       name: 'apply-work-patch',
       files: { 'pangolin-setup.sh': APPLY_WORK_SETUP_SH },
@@ -231,8 +244,10 @@ async function main(): Promise<void> {
     const ac = new AbortController();
     const servePromise = serve({ orchestrator, transport, signal: ac.signal });
 
-    const verifySignature = (root: Uint8Array, sig: { alg: string; bytes: Uint8Array; keyRef?: string }) =>
-      verifyEd25519(root, sig, signer.publicKey);
+    const verifySignature = (
+      root: Uint8Array,
+      sig: { alg: string; bytes: Uint8Array; keyRef?: string },
+    ) => verifyEd25519(root, sig, signer.publicKey);
     const api = new OperationsApi({ transport, anchor, storage: client.storage, verifySignature });
 
     // 7. Submit the plan.
@@ -259,11 +274,17 @@ async function main(): Promise<void> {
           if (u) usageCache.set(it.id, u);
         }
       }
-      const frame = nextFrame(prevFrame, renderRunView(
-        buildRunView({ plan, pattern: pipeline, status, evidence: usageCache }),
-        { color: false, unicode: true },
-      ));
-      if (frame) { console.log(frame.join('\n')); prevFrame = frame; }
+      const frame = nextFrame(
+        prevFrame,
+        renderRunView(buildRunView({ plan, pattern: pipeline, status, evidence: usageCache }), {
+          color: false,
+          unicode: true,
+        }),
+      );
+      if (frame) {
+        console.log(frame.join('\n'));
+        prevFrame = frame;
+      }
     }
     clearTimeout(timeoutHandle);
 
@@ -371,7 +392,8 @@ async function main(): Promise<void> {
 
       // (a) a run.extended audit entry: kind, itemId=cause, actor=pattern:default.
       const extended = bundle.auditLog.entries.find(
-        (e) => e.kind === 'run.extended' && e.itemId === 'fact-check' && e.actor === 'pattern:default',
+        (e) =>
+          e.kind === 'run.extended' && e.itemId === 'fact-check' && e.actor === 'pattern:default',
       );
       const aOk = extended !== undefined;
       console.log(`  run.extended (itemId='fact-check', actor='pattern:default'): ${aOk}`);
@@ -384,7 +406,9 @@ async function main(): Promise<void> {
       // (c) the gate copy fact-check~2 is done AND green (verify.passed !== false).
       const gate2 = byId.get('fact-check~2');
       const cOk = gate2?.status === 'done' && gate2.verify?.passed !== false;
-      console.log(`  fact-check~2 done+green: ${cOk} (status=${gate2?.status ?? 'absent'}, verify.passed=${gate2?.verify?.passed})`);
+      console.log(
+        `  fact-check~2 done+green: ${cOk} (status=${gate2?.status ?? 'absent'}, verify.passed=${gate2?.verify?.passed})`,
+      );
 
       // (d) announce~2 is done AND its inputRefs.work === the fix's resultRef (remap).
       const ann2Status = byId.get('announce~2');
@@ -416,7 +440,9 @@ async function main(): Promise<void> {
         console.error('  Row 3 FAIL: green path but announce not done.');
       } else {
         console.log('  GATE GREEN — no circle-back exercised');
-        console.log('  Row 3 OK (exit 0). Rerun protocol (R6): re-invoke with the block-pipeline-runner page as subject.');
+        console.log(
+          '  Row 3 OK (exit 0). Rerun protocol (R6): re-invoke with the block-pipeline-runner page as subject.',
+        );
       }
     }
 
@@ -441,7 +467,9 @@ async function main(): Promise<void> {
         const turns = typeof usage.turns === 'number' ? String(usage.turns) : '?';
         console.log(`  ${outcome.id} | ${requested} | ${models} | ${cost} | ${turns}`);
       } else {
-        console.log(`  ${outcome.id} | ${requested} | (not captured) | (not captured) | (not captured)`);
+        console.log(
+          `  ${outcome.id} | ${requested} | (not captured) | (not captured) | (not captured)`,
+        );
       }
     }
     console.log(`  run-total costUsd: ${runTotalCost.toFixed(4)}`);
@@ -449,7 +477,7 @@ async function main(): Promise<void> {
       ok = false;
       console.error(
         '  Row 4 FAIL: no usage captured on any dispatch — rebuild the worker image from this branch ' +
-        '(docker build -f docker/pangolin-worker/Dockerfile -t ghcr.io/quarrysystems/pangolin-worker:main .)',
+          '(docker build -f docker/pangolin-worker/Dockerfile -t ghcr.io/quarrysystems/pangolin-worker:main .)',
       );
     } else {
       console.log('  Row 4 OK — at least one dispatch sealed usage.');
@@ -462,13 +490,19 @@ async function main(): Promise<void> {
     // 13. Honest exit. A failed ITEM alone does not fail the harness (Tier-0); the
     //     four §4 rows are the contract.
     if (!ok) {
-      console.error('\n=== dogfood-gated run 3: one or more §4 acceptance rows FAILED — see above ===');
+      console.error(
+        '\n=== dogfood-gated run 3: one or more §4 acceptance rows FAILED — see above ===',
+      );
       process.exitCode = 1;
     } else {
-      console.log(`\n=== dogfood-gated run 3 OK — ${redArc ? 'RED arc (circle-back)' : 'GREEN arc'}: all §4 rows green ===`);
+      console.log(
+        `\n=== dogfood-gated run 3 OK — ${redArc ? 'RED arc (circle-back)' : 'GREEN arc'}: all §4 rows green ===`,
+      );
       console.log('   patches in examples/dogfood-gated/patches/ — Tier-0 review before merge.');
       if (redArc) {
-        console.log('   red-arc apply order (spec §6): the FIX patch + announce~2 patch (NOT write-page + fix — both create the page).');
+        console.log(
+          '   red-arc apply order (spec §6): the FIX patch + announce~2 patch (NOT write-page + fix — both create the page).',
+        );
       }
     }
   } finally {

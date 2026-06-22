@@ -31,30 +31,28 @@ export interface RunTopic {
  * announceSeeds = CHANGELOG baseline.
  */
 export const EXECUTION_PATTERNS_TOPIC: RunTopic = {
-  pagePath: "docs-site/src/content/docs/explanation/execution-patterns.md",
+  pagePath: 'docs-site/src/content/docs/explanation/execution-patterns.md',
 
   subjectSeeds: [
-    "docs/superpowers/specs/2026-06-05-pangolin-pattern-layer-design.md",
-    "examples/pattern-dogfood/README.md",
-    "docs-site/src/content/docs/explanation/how-offload-runs.md",
+    'docs/superpowers/specs/2026-06-05-agora-pattern-layer-design.md',
+    'examples/pattern-dogfood/README.md',
+    'docs-site/src/content/docs/explanation/how-offload-runs.md',
   ],
 
   gateSeeds: [
     // Pattern source files — what the page's claims are about
-    "packages/pangolin-orchestrator/src/patterns/map-reduce.ts",
-    "packages/pangolin-orchestrator/src/patterns/pipeline.ts",
-    "packages/pangolin-orchestrator/src/patterns/respawn.ts",
-    "packages/pangolin-orchestrator/src/patterns/scan.ts",
-    "packages/pangolin-orchestrator/src/patterns/static-dag.ts",
-    "packages/pangolin-orchestrator/src/contracts/pattern.ts",
-    "packages/pangolin-orchestrator/src/orchestrator.ts",
+    'packages/pangolin-orchestrator/src/patterns/map-reduce.ts',
+    'packages/pangolin-orchestrator/src/patterns/pipeline.ts',
+    'packages/pangolin-orchestrator/src/patterns/respawn.ts',
+    'packages/pangolin-orchestrator/src/patterns/scan.ts',
+    'packages/pangolin-orchestrator/src/patterns/static-dag.ts',
+    'packages/pangolin-orchestrator/src/contracts/pattern.ts',
+    'packages/pangolin-orchestrator/src/orchestrator.ts',
     // Plus the three subjectSeeds — gate needs the page's baseline context too
-    "docs/superpowers/specs/2026-06-05-pangolin-pattern-layer-design.md",
-    "examples/pattern-dogfood/README.md",
-    "docs-site/src/content/docs/explanation/how-offload-runs.md",
+    'docs/superpowers/specs/2026-06-05-agora-pattern-layer-design.md',
+    'examples/pattern-dogfood/README.md',
+    'docs-site/src/content/docs/explanation/how-offload-runs.md',
   ],
 
-  announceSeeds: [
-    "CHANGELOG.md",
-  ],
+  announceSeeds: ['CHANGELOG.md'],
 };
