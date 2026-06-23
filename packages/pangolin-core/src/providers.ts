@@ -56,6 +56,10 @@ export interface TaskSpec {
 export interface ProviderContext {
   credentials: ResolvedCredentials;
   telemetry?: TelemetryHook;
+  /** Aborted when the caller's liveness deadline elapses. Providers SHOULD
+   *  stop waiting and best-effort reap when this fires; the caller settles the
+   *  wait regardless. Absent for callers with no deadline. */
+  signal?: AbortSignal;
 }
 
 /**
@@ -80,6 +84,19 @@ export interface TaskExit {
   stdout: string;
   stderr: string;
   providerFailureReason?: string;
+}
+
+/** Canonical terminal for a wait that blew its liveness deadline.
+ *  `providerFailureReason: 'timeout'` maps to DispatchResult.failure.reason='timeout'. */
+export function makeTimeoutExit(startedAt: Date = new Date()): TaskExit {
+  return {
+    exitCode: -1,
+    startedAt,
+    finishedAt: new Date(),
+    stdout: '',
+    stderr: '',
+    providerFailureReason: 'timeout',
+  };
 }
 
 /** A secret staged into a {@link SecretStore}. */
