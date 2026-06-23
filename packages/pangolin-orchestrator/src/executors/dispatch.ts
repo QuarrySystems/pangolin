@@ -26,6 +26,9 @@ export interface DispatchExecutorOptions {
   secrets?: DispatchWork['secrets'];
   /** Authorization-side default when the subagent def pins no model (spec D3/D6). */
   defaultModel?: string;
+  /** Engine wall-clock deadline (ms); when set, fire passes a derived
+   *  timeoutSeconds so the client bounds awaitExit to the same budget. */
+  maxRuntimeMs?: number;
 }
 
 type Settled =
@@ -99,6 +102,9 @@ export class DispatchExecutor implements Executor {
       ...(inputRefs && Object.keys(inputRefs).length ? { inputRefs } : {}),
       ...(pipelineRef !== undefined ? { pipelineRef } : {}),
       ...(ctx?.runId ? { trace: { traceId: ctx.runId, runId: ctx.runId, itemId: item.id } } : {}),
+      ...(this.opts.maxRuntimeMs !== undefined
+        ? { timeoutSeconds: Math.ceil(this.opts.maxRuntimeMs / 1000) }
+        : {}),
     });
     const entry: InFlightEntry = { inflight: flight, settled: null };
     // Detached background await — never throws out; records terminal state for reconcile().
