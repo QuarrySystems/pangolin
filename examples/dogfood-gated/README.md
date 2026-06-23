@@ -82,6 +82,42 @@ Timeout: 30 minutes (red arc = up to 5 mostly-sequential opus dispatches at 11-1
 
 ---
 
+## Fake mode — pressure-test the circle-back for $0 (no Docker, no credits)
+
+The only part of a live run that spends money is the `claude` CLI behind the
+runtime-adapter seam. Everything this example actually validates — the pattern
+engine's gated red-arc circle-back, patch capture, the subagent-level verify
+gate, seal/audit/hash-chain, and the §4 acceptance rows — is **model-independent**.
+
+`--fake` (or `PANGOLIN_FAKE=1`) swaps two things and nothing else:
+
+- the **compute provider** → an in-process one (`src/inproc-compute-provider.ts`)
+  that runs `runWorker()` directly instead of starting a container, and
+- the **model** → a scripted fake `RuntimeAdapter` (`src/fake-runtime.ts`) that
+  writes the same workspace files a real agent would and seals synthetic `usage`
+  (`costUsd: 0`). It drives the gate **red on the first fact-check, green on the
+  re-gate** — the exact respawn convergence.
+
+The **real** client dispatch path runs unchanged (capability pinning, env
+firewall, secret staging, manifest sealing) — only the container boundary and
+the model are faked.
+
+```sh
+pnpm start:fake                      # red arc (default) — exercises the circle-back
+PANGOLIN_FAKE_ARC=green pnpm start:fake   # green arc — gate passes first time
+```
+
+**POSIX only for the full run.** The worker's `apply-work-patch` setup script is
+spawned via `/bin/bash` and calls `git` (it normally runs in a Linux container).
+On Linux/macOS/WSL/CI those exist and the **whole** gated circle-back goes green
+at $0. On a **Windows** host the setup-script items (`fact-check`, the re-gate,
+`announce`) fail with `spawn /bin/bash ENOENT` — `write-page`, the fixer, the
+respawn engine, and evidence sealing still run, so it's useful for fast wiring
+iteration, but the full proof belongs on a POSIX host (see the `dogfood-fake` CI
+job, which runs this on every push).
+
+---
+
 ## What the driver asserts
 
 The driver IS the acceptance test (spec §4). After terminal state it assembles

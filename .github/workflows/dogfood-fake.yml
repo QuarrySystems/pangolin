@@ -1,0 +1,65 @@
+name: dogfood-fake
+
+# Runs the dogfood-gated example in FAKE mode: the full gated red-arc circle-back
+# end-to-end through the REAL client + orchestrator + worker lifecycle, but with
+# an in-process compute provider and a scripted fake RuntimeAdapter in place of
+# Docker and the `claude` CLI. Zero AI credits, no Docker daemon, no worker image.
+#
+# This is a $0 pressure-test gate for the pattern engine, patch capture, the
+# verify gate, seal/audit/hash-chain, and the §4 acceptance rows. The example's
+# driver IS the assertion — it exits non-zero unless all four §4 rows hold, so a
+# red job here is a real regression in the gated circle-back, not flake.
+#
+# ubuntu-latest is required: the worker's apply-work-patch setup script is spawned
+# via /bin/bash and calls git (it normally runs inside a Linux container). Those
+# hold on the runner, so the in-process worker runs the whole DAG to green.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dogfood-fake:
+    name: gated circle-back (fake, $0)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Enable corepack
+        run: corepack enable
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Resolve pnpm store path
+        id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install
+
+      # The example imports `@quarry-systems/*` by name, resolving to each
+      # package's built dist/; build the workspace first (topological order).
+      - name: Build
+        run: pnpm -r build
+
+      # Red arc (default): gate red -> audited respawn -> fix -> re-gate green ->
+      # announce remapped. Exits 0 only if all four §4 acceptance rows hold.
+      - name: Dogfood gated circle-back (red arc, fake)
+        run: pnpm --filter dogfood-gated-example start:fake

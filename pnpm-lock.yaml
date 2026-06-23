@@ -214,6 +214,9 @@ importers:
       '@quarry-systems/pangolin-storage-local':
         specifier: workspace:*
         version: link:../../packages/pangolin-storage-local
+      '@quarry-systems/pangolin-worker':
+        specifier: workspace:*
+        version: link:../../packages/pangolin-worker
     devDependencies:
       '@quarry-systems/pangolin-cli':
         specifier: workspace:*

@@ -28,3 +28,7 @@ Thumbs.db
 # RFC 3161 spike: dependencies + lockfile are throwaway (ratified versions live in FINDINGS.md)
 spike/rfc3161/node_modules/
 spike/rfc3161/package-lock.json
+
+# dogfood-gated fake-mode ($0) run artifacts — throwaway; the committed real-run
+# proof (bundle.json / verify-context.json / patches/) must never be clobbered.
+examples/dogfood-gated/fake-out/
