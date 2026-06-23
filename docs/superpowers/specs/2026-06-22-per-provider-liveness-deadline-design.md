@@ -115,7 +115,7 @@ On deadline the wrapper: (1) aborts `ctx.signal` (a good-citizen provider stops 
 ### 4.3 Deadline sourcing (derive-with-default-floor)
 
 - **Derive:** `DispatchExecutor.fire` (`executors/dispatch.ts:91`) passes `timeoutSeconds` derived from the orchestrator's `maxRuntimeMs` (e.g. `Math.ceil(maxRuntimeMs / 1000)`), closing the gap where the orchestrator never passes it. `maxRuntimeMs` is plumbed to the executor from the orchestrator/tick options (it currently lives only in `tick`).
-- **Floor:** `PangolinClient` gains a `defaultDispatchTimeoutSeconds` with a generous built-in default (proposed **7200s / 2h**, matching the engine default) so the standalone `client.dispatch` path and any un-plumbed caller are never unbounded. `effectiveTimeoutSeconds = work.timeoutSeconds ?? defaultDispatchTimeoutSeconds` already implements the precedence.
+- **Floor:** `PangolinClient` gains a `defaultDispatchTimeoutSeconds` with a generous built-in default of **7200s / 2h** (matching the engine default) so the standalone `client.dispatch` path and any un-plumbed caller are never unbounded. `effectiveTimeoutSeconds = work.timeoutSeconds ?? defaultDispatchTimeoutSeconds` already implements the precedence.
 - **Layering:** the provider bound (inner) is independent of the engine `maxRuntimeMs` (outer). Both at ~2h is intentional and correct: the inner exists to make the promise *settle and reap*, not to fire earlier. If an operator wants earlier provider give-up they set a smaller `timeoutSeconds`/`maxRuntimeMs`.
 
 ### 4.4 Fargate provider becomes a good citizen
@@ -159,7 +159,7 @@ Two independently-shippable slices over one shared concept:
 
 Both are demand-pulled by the same trigger as the unattended-`serve` work: you do not want an always-on daemon with hung-task holes. This is the on-ramp to that.
 
-## 9. Open questions
+## 9. Resolved decisions
 
-- **Default floor value:** 7200s (match engine) vs a tighter operational default. Proposed 7200s for the client floor; agent 3600s / plugin 300s for the worker children. Operator-overridable.
-- **Extract-to-core vs duplicate:** the spec assumes extract `bounded-command` → `pangolin-core`. If a lighter touch is preferred, duplicate `killTree` into claude-code (rejected here as a DRY violation, but cheaper blast radius).
+- **Default floor value (decided):** `defaultDispatchTimeoutSeconds = 7200s` (match the engine default) for the client floor; worker children default to agent `3600s` / plugin-install `300s`. All operator-overridable via the `PANGOLIN_*_TIMEOUT_SECONDS` env convention.
+- **Helper placement (decided):** extract `bounded-command` into `pangolin-core` as the single home; `pangolin-worker` and `pangolin-runtime-claude-code` both consume it. (Duplicating `killTree` into the adapter was rejected as a DRY violation.)
