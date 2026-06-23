@@ -8,6 +8,7 @@
   "scripts": {
     "start": "tsx src/index.ts",
     "start:env": "tsx --env-file=../../.env src/index.ts",
+    "start:fake": "tsx src/index.ts --fake",
     "typecheck": "tsc --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --esModuleInterop --skipLibCheck --strict src/index.ts",
     "build": "tsc --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --esModuleInterop --skipLibCheck --strict src/index.ts"
   },
@@ -17,7 +18,8 @@
     "@quarry-systems/pangolin-orchestrator": "workspace:*",
     "@quarry-systems/pangolin-providers-local-docker": "workspace:*",
     "@quarry-systems/pangolin-secret-store": "workspace:*",
-    "@quarry-systems/pangolin-storage-local": "workspace:*"
+    "@quarry-systems/pangolin-storage-local": "workspace:*",
+    "@quarry-systems/pangolin-worker": "workspace:*"
   },
   "devDependencies": {
     "@quarry-systems/pangolin-cli": "workspace:*",

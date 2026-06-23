@@ -67,13 +67,25 @@ import type {
   StatusLike,
 } from '@quarry-systems/pangolin-orchestrator';
 import { parsePangolinUri, buildDispatchRecordUri } from '@quarry-systems/pangolin-core';
-import type { RuntimeUsage } from '@quarry-systems/pangolin-core';
+import type { RuntimeUsage, ComputeProvider } from '@quarry-systems/pangolin-core';
 import { EXECUTION_PATTERNS_TOPIC as TOPIC } from './config.js';
+import { InprocComputeProvider } from './inproc-compute-provider.js';
+import { createFakeRuntime } from './fake-runtime.js';
+
+// FAKE mode: `PANGOLIN_FAKE=1` (or `--fake`) runs the identical gated DAG through an
+// in-process worker + scripted fake adapter — NO Docker, NO `claude` CLI, $0 credits.
+// Everything except the model is real (pattern engine, patch capture, verify gate,
+// seal/audit, the §4 rows). Arc via PANGOLIN_FAKE_ARC=red|green (default red).
+const FAKE = process.env.PANGOLIN_FAKE === '1' || process.argv.includes('--fake');
+const FAKE_ARC = process.env.PANGOLIN_FAKE_ARC === 'green' ? 'green' : 'red';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, '../../..');
 const PLAN_PATH = join(__dirname, '../plan.json');
-const PATCHES_DIR = join(__dirname, '../patches');
+// FAKE runs write their artifacts under a gitignored fake-out/ dir so they never
+// clobber the committed real-run proof (bundle.json / verify-context.json / patches/).
+const OUT_DIR = FAKE ? join(__dirname, '../fake-out') : join(__dirname, '..');
+const PATCHES_DIR = join(OUT_DIR, 'patches');
 const NAMESPACE = 'dogfood-gated';
 // :main MUST be rebuilt from this branch — see the header preflight note.
 const WORKER_IMAGE = 'ghcr.io/quarrysystems/pangolin-worker:main';
@@ -95,13 +107,14 @@ const PROMPT =
   'change nothing else. Use the Edit/Write tools, then stop.\n\nTASK:\n{{{instructions}}}';
 
 const apiKeyRaw = process.env.ANTHROPIC_API_KEY;
-if (!apiKeyRaw) {
+if (!FAKE && !apiKeyRaw) {
   console.error(
-    'ANTHROPIC_API_KEY is not set. Run `pnpm start:env` (reads ../../.env) or export it.',
+    'ANTHROPIC_API_KEY is not set. Run `pnpm start:env` (reads ../../.env) or export it. ' +
+      '(Or run with PANGOLIN_FAKE=1 for a $0 no-credit pressure-test run.)',
   );
   process.exit(1);
 }
-const apiKey: string = apiKeyRaw;
+const apiKey: string = apiKeyRaw ?? '';
 
 /** Read the seed files (repo-relative paths) into a capability `files` map. */
 async function seedFiles(rels: readonly string[]): Promise<Record<string, string>> {
@@ -152,14 +165,30 @@ async function main(): Promise<void> {
   }
 
   try {
-    // 1. Wire the local-stack client.
+    // 1. Wire the local-stack client. FAKE mode swaps ONLY the compute provider:
+    //    the real client dispatch path (capability pinning, env firewall, secret
+    //    staging, manifest sealing) runs unchanged — just the container boundary
+    //    and the model are faked. storage + secretStore are hoisted so the in-proc
+    //    provider shares the exact instances the client registers bundles to.
+    const storage = new LocalStorageProvider({ rootDir: storageRoot });
+    const secretStore = new LocalSecretStore({ dir: secretDir });
+    const computeName = FAKE ? 'inproc' : 'local-docker';
+    const compute: Record<string, ComputeProvider> = FAKE
+      ? {
+          inproc: new InprocComputeProvider({
+            storage,
+            secretStore,
+            adapter: createFakeRuntime(FAKE_ARC),
+          }),
+        }
+      : { 'local-docker': new LocalDockerProvider({ allowUnpinnedImage: true }) };
     client = new PangolinClient({
       namespace: NAMESPACE,
-      compute: { 'local-docker': new LocalDockerProvider({ allowUnpinnedImage: true }) },
-      storage: new LocalStorageProvider({ rootDir: storageRoot }),
-      secretStores: { local: new LocalSecretStore({ dir: secretDir }) },
+      compute,
+      storage,
+      secretStores: { local: secretStore },
       credentials: { none: new NoopCredentialProvider() },
-      targets: { local: { compute: 'local-docker', credentials: 'none', secretStore: 'local' } },
+      targets: { local: { compute: computeName, credentials: 'none', secretStore: 'local' } },
       resultSink: new StdoutResultSink(),
     });
 
@@ -231,7 +260,8 @@ async function main(): Promise<void> {
           client,
           target: 'local',
           workerImage: WORKER_IMAGE,
-          secrets: { ANTHROPIC_API_KEY: { inline: apiKey } },
+          // No real secret needed in FAKE mode — the fake adapter never calls Claude.
+          ...(FAKE ? {} : { secrets: { ANTHROPIC_API_KEY: { inline: apiKey } } }),
         }),
       },
       triggers: { manual: new ManualTrigger() },
@@ -253,6 +283,18 @@ async function main(): Promise<void> {
     // 7. Submit the plan.
     const plan = JSON.parse(await readFile(PLAN_PATH, 'utf-8')) as Run;
     const runId = await api.submit(plan, 'human:dogfood');
+    if (FAKE) {
+      console.log(
+        `*** FAKE MODE (${FAKE_ARC} arc) — in-process worker, no Docker, no claude, $0 credits ***`,
+      );
+      if (process.platform === 'win32') {
+        console.log(
+          '    NOTE: items with an apply-work-patch setup script need a POSIX /bin/bash + git on PATH, ' +
+            'which the in-process worker borrows from the host. On Windows those items fail (the worker ' +
+            'normally runs in a Linux container). Run this fake on Linux/WSL/CI for a fully-green circle-back.',
+        );
+      }
+    }
     console.log(`submitted run '${runId}' (${plan.items.length} items) — watching…`);
 
     // 8. Watch until terminal or timeout.
@@ -334,7 +376,7 @@ async function main(): Promise<void> {
     //      anchored root(s) so a SEPARATE process — `pnpm exec pangolin verify
     //      bundle.json` via this example's pangolin.config.mjs — can re-verify all
     //      five rows without any access to this run's store or memory.
-    const exampleDir = join(__dirname, '..');
+    const exampleDir = OUT_DIR;
     await writeFile(join(exampleDir, 'bundle.json'), JSON.stringify(bundle, null, 2));
     const anchoredRoots = await anchor.fetch({ epochId: runId });
     await writeFile(
