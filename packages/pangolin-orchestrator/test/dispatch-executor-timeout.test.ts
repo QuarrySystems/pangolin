@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { DispatchExecutor } from '../src/executors/dispatch.js';
+import type { DispatchExecutorOptions } from '../src/executors/dispatch.js';
 
 function fakeClient() {
   const fire = vi.fn(async () => ({
@@ -15,13 +16,14 @@ function fakeClient() {
     reconcile: async () => ({ exitCode: 0 }),
     cleanup: () => {},
   }));
-  return {
+  const client = {
     namespace: 'ns',
     storage: { put: vi.fn(async () => {}), get: vi.fn(), resolveLatest: vi.fn(async () => null) },
     dispatch: { fire },
-  } as unknown as Parameters<typeof makeExec>[0]['client'];
+  } as unknown as DispatchExecutorOptions['client'];
+  return { client, fire };
 }
-function makeExec(opts: { client: any; maxRuntimeMs?: number }) {
+function makeExec(opts: { client: DispatchExecutorOptions['client']; maxRuntimeMs?: number }) {
   return new DispatchExecutor({
     client: opts.client,
     target: 'local',
@@ -32,19 +34,27 @@ function makeExec(opts: { client: any; maxRuntimeMs?: number }) {
 
 describe('DispatchExecutor timeout derivation', () => {
   it('passes timeoutSeconds derived from maxRuntimeMs', async () => {
-    const client = fakeClient();
+    const { client, fire } = fakeClient();
     const ex = makeExec({ client, maxRuntimeMs: 90_000 });
-    await ex.fire({ id: 'i1', inputs: { subagent: 'a' } } as any, { runId: 'r1' } as any);
-    expect((client as any).dispatch.fire).toHaveBeenCalledWith(
-      expect.objectContaining({ timeoutSeconds: 90 }),
+    const workItem: unknown = { id: 'i1', inputs: { subagent: 'a' } };
+    const ctx: unknown = { runId: 'r1' };
+    await ex.fire(
+      workItem as unknown as Parameters<typeof ex.fire>[0],
+      ctx as unknown as Parameters<typeof ex.fire>[1],
     );
+    expect(fire).toHaveBeenCalledWith(expect.objectContaining({ timeoutSeconds: 90 }));
   });
 
   it('omits timeoutSeconds when maxRuntimeMs is unset (client floor applies)', async () => {
-    const client = fakeClient();
+    const { client, fire } = fakeClient();
     const ex = makeExec({ client });
-    await ex.fire({ id: 'i1', inputs: { subagent: 'a' } } as any, { runId: 'r1' } as any);
-    const arg = (client as any).dispatch.fire.mock.calls[0][0];
+    const workItem: unknown = { id: 'i1', inputs: { subagent: 'a' } };
+    const ctx: unknown = { runId: 'r1' };
+    await ex.fire(
+      workItem as unknown as Parameters<typeof ex.fire>[0],
+      ctx as unknown as Parameters<typeof ex.fire>[1],
+    );
+    const arg = fire.mock.calls[0][0];
     expect('timeoutSeconds' in arg).toBe(false);
   });
 });
