@@ -24,6 +24,7 @@ import {
 } from '@aws-sdk/client-ecs';
 import {
   UnpinnedImageError,
+  makeTimeoutExit,
   type ComputeProvider,
   type ProviderContext,
   type TaskExit,
@@ -139,7 +140,7 @@ export class FargateProvider implements ComputeProvider {
     return { providerTaskId: arn };
   }
 
-  async awaitExit(handle: TaskHandle, _ctx: ProviderContext): Promise<TaskExit> {
+  async awaitExit(handle: TaskHandle, ctx: ProviderContext): Promise<TaskExit> {
     // Poll DescribeTasks until the task reaches the STOPPED lifecycle state,
     // then project the task metadata into a TaskExit. We do not attempt to
     // surface stdout/stderr for the MVP; production deployments wire the task
@@ -147,6 +148,21 @@ export class FargateProvider implements ComputeProvider {
     // band (a follow-up task can teach awaitExit() to do that opportunistically
     // when log config is present).
     for (;;) {
+      if (ctx.signal?.aborted) {
+        try {
+          await this.ecs.send(
+            new StopTaskCommand({
+              cluster: this.opts.cluster,
+              task: handle.providerTaskId,
+              reason: 'pangolin-cancel: awaitExit deadline exceeded',
+            }),
+          );
+        } catch {
+          // best-effort reap
+        }
+        return makeTimeoutExit();
+      }
+
       const res = await this.ecs.send(
         new DescribeTasksCommand({
           cluster: this.opts.cluster,
@@ -156,19 +172,21 @@ export class FargateProvider implements ComputeProvider {
 
       const task = res.tasks?.[0];
       if (task && task.lastStatus === 'STOPPED') {
-        const container = task.containers?.find((c) => c.name === CONTAINER_NAME)
-          ?? task.containers?.[0];
+        const container =
+          task.containers?.find((c) => c.name === CONTAINER_NAME) ?? task.containers?.[0];
         const exitCode = container?.exitCode ?? -1;
-        const startedAt = task.startedAt instanceof Date
-          ? task.startedAt
-          : task.startedAt
-            ? new Date(task.startedAt)
-            : new Date(0);
-        const finishedAt = task.stoppedAt instanceof Date
-          ? task.stoppedAt
-          : task.stoppedAt
-            ? new Date(task.stoppedAt)
-            : new Date(0);
+        const startedAt =
+          task.startedAt instanceof Date
+            ? task.startedAt
+            : task.startedAt
+              ? new Date(task.startedAt)
+              : new Date(0);
+        const finishedAt =
+          task.stoppedAt instanceof Date
+            ? task.stoppedAt
+            : task.stoppedAt
+              ? new Date(task.stoppedAt)
+              : new Date(0);
 
         // Treat the task's stoppedReason as an infrastructural failure reason
         // when it is set AND the exit code is non-zero (or missing). A clean
@@ -189,7 +207,7 @@ export class FargateProvider implements ComputeProvider {
         };
       }
 
-      await sleep(this.pollIntervalMs);
+      await sleep(this.pollIntervalMs, ctx.signal);
     }
   }
 
@@ -221,6 +239,17 @@ export class FargateProvider implements ComputeProvider {
   }
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal?.aborted) return resolve();
+    const t = setTimeout(resolve, ms);
+    signal?.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(t);
+        resolve();
+      },
+      { once: true },
+    );
+  });
 }
