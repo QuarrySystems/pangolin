@@ -21,10 +21,24 @@
 
 ---
 
+## Audit revisions (2026-06-22)
+
+Findings from a code-grounded audit, folded into the tasks below:
+
+- **R1 (correctness, Task 6):** preserve `spawnClaude`'s **throw on spawn-error** (binary-not-found) — the pipeline-runner maps an adapter throw → `worker-failed` (infra), distinct from an agent non-zero exit. Only a **timeout** maps to `exitCode -1`. Keeps the existing `claude-spawn.test.ts` `.rejects` test green.
+- **R2 (DRY, Tasks 5/8):** the repo already has `parsePositiveInteger` (`packages/pangolin-worker/src/env-parser.ts`, unexported). Extract it to `pangolin-core` and reuse in the worker env-parser + the claude-code adapter instead of a new `envSeconds`. Follow its fail-fast convention: `env.X ? parsePositiveInteger(env.X, 'X') : default`.
+- **R3 (DRY, Tasks 1/4):** add `makeTimeoutExit(startedAt?)` to `pangolin-core`; both `boundedAwaitExit` and the Fargate provider use it instead of duplicating the `{exitCode:-1, providerFailureReason:'timeout'}` literal.
+- **R4 (derive consistency, Task 2):** emit `PANGOLIN_AGENT_TIMEOUT_SECONDS` + `PANGOLIN_PLUGIN_INSTALL_TIMEOUT_SECONDS` from the single client env-builder (`dispatch.ts:254-284`), derived from `effectiveTimeoutSeconds` — not just worker-side defaults.
+- **R5 (observability, Task 2 test):** the resolve-not-throw timeout path still emits `dispatch.failed` via the reconcile/result-sink emit site (Site B, `dispatch.ts:376-383`) — add a test asserting `failure.reason === 'timeout'` so it cannot regress. No new metric required (the `timeout` outcome rides `pangolin_dispatch_completed_total{outcome:'failed'}`); a dedicated counter is a deferred nice-to-have.
+- **R6 (no local-docker task):** `LocalDockerProvider.cancel()` already reaps (SIGTERM→poll→SIGKILL), so the wrapper's `cancel?()` on timeout covers it; honoring `ctx.signal` in its `awaitExit` is an optional future good-citizen upgrade, not required here.
+- **R7 (lint):** the root eslint forbids an **unused** `catch (e)` binding (`caughtErrorsIgnorePattern: '^_'`) — use `catch {}` or `catch (_e)` when the error is unused; `as any`/`as unknown as` casts are permitted. The abortable `sleep` in Task 4 intentionally mirrors the orchestrator's canonical one (per-package duplication is the repo idiom — there are already 5 `sleep` defs).
+
+---
+
 ## File Structure
 
 **Slice A — provider seam (ship first):**
-- `packages/pangolin-core/src/providers.ts` — add `signal?: AbortSignal` to `ProviderContext`.
+- `packages/pangolin-core/src/providers.ts` — add `signal?: AbortSignal` to `ProviderContext`; add `makeTimeoutExit()` factory (R3).
 - `packages/pangolin-client/src/bounded-await-exit.ts` (new) — the `boundedAwaitExit` wrapper.
 - `packages/pangolin-client/src/dispatch.ts` — call `boundedAwaitExit` in the shared `awaitExit` closure; thread `effectiveTimeoutSeconds`.
 - `packages/pangolin-client/src/` client options — add `defaultDispatchTimeoutSeconds` (default 7200).
@@ -33,6 +47,7 @@
 
 **Slice B — worker-internal:**
 - `packages/pangolin-core/src/bounded-command.ts` (new, extracted) — single home for the bounded child-process runner.
+- `packages/pangolin-core/src/env-int.ts` (new, extracted) — `parsePositiveInteger` (R2), reused by the worker env-parser + claude-code adapter.
 - `packages/pangolin-worker/src/bounded-command.ts` — re-export from core; update importers (`setup-script.ts`, self-verify).
 - `packages/pangolin-runtime-claude-code/src/claude-spawn.ts` — bound the agent spawn.
 - `packages/pangolin-runtime-claude-code/src/plugin-installer.ts` — bound each install spawn.
@@ -51,7 +66,7 @@
 - Consumes: `ComputeProvider`, `TaskHandle`, `TaskExit`, `ProviderContext`, `ResolvedCredentials`, `TelemetryHook` from `@quarry-systems/pangolin-core`.
 - Produces: `export async function boundedAwaitExit(compute: ComputeProvider, handle: TaskHandle, baseCtx: { credentials: ResolvedCredentials; telemetry?: TelemetryHook }, deadlineSeconds: number | undefined): Promise<TaskExit>` — resolves (never rejects) with a real exit, or a synthetic `TaskExit { exitCode: -1, providerFailureReason: 'timeout' }` on deadline.
 
-- [ ] **Step 1: Add the contract field.** In `packages/pangolin-core/src/providers.ts`, add to `ProviderContext`:
+- [ ] **Step 1: Add the contract field + the shared timeout-exit factory (R3).** In `packages/pangolin-core/src/providers.ts`, add to `ProviderContext`:
 
 ```ts
 export interface ProviderContext {
@@ -63,6 +78,25 @@ export interface ProviderContext {
   signal?: AbortSignal;
 }
 ```
+
+and a single source of truth for a deadline-exceeded exit (used by the client wrapper AND providers — R3):
+
+```ts
+/** Canonical terminal for a wait that blew its liveness deadline.
+ *  `providerFailureReason: 'timeout'` maps to DispatchResult.failure.reason='timeout'. */
+export function makeTimeoutExit(startedAt: Date = new Date()): TaskExit {
+  return {
+    exitCode: -1,
+    startedAt,
+    finishedAt: new Date(),
+    stdout: '',
+    stderr: '',
+    providerFailureReason: 'timeout',
+  };
+}
+```
+
+Export `makeTimeoutExit` from `packages/pangolin-core/src/index.ts`.
 
 - [ ] **Step 2: Build core so the client sees the new field.**
 
@@ -151,13 +185,14 @@ Expected: FAIL — `Cannot find module '../src/bounded-await-exit.js'`.
 - [ ] **Step 5: Implement the wrapper.** Create `packages/pangolin-client/src/bounded-await-exit.ts`:
 
 ```ts
-import type {
-  ComputeProvider,
-  ProviderContext,
-  ResolvedCredentials,
-  TaskExit,
-  TaskHandle,
-  TelemetryHook,
+import {
+  makeTimeoutExit,
+  type ComputeProvider,
+  type ProviderContext,
+  type ResolvedCredentials,
+  type TaskExit,
+  type TaskHandle,
+  type TelemetryHook,
 } from '@quarry-systems/pangolin-core';
 
 type BaseCtx = { credentials: ResolvedCredentials; telemetry?: TelemetryHook };
@@ -195,14 +230,7 @@ export async function boundedAwaitExit(
         } catch {
           // best-effort reap — the synthetic exit stands regardless
         }
-        resolve({
-          exitCode: -1,
-          startedAt: new Date(),
-          finishedAt: new Date(),
-          stdout: '',
-          stderr: '',
-          providerFailureReason: 'timeout',
-        });
+        resolve(makeTimeoutExit()); // R3: shared factory, not an inline literal
       })();
     }, deadlineSeconds * 1000);
   });
@@ -303,6 +331,19 @@ const awaitExit = async (): Promise<TaskExit> => {
 ```
 
 Keep the existing `emitLifecycleEvent` call and its arguments exactly as they are — only the `compute.awaitExit(...)` line becomes the `boundedAwaitExit(...)` line. (`effectiveTimeoutSeconds` must be in scope here; it is computed earlier in the same `fireWork`. If the closure is in a different scope, thread `effectiveTimeoutSeconds` into it as a captured const.)
+
+- [ ] **Step 4b: Emit derived worker-timeout env vars (R4).** In the single worker env-builder (`dispatch.ts:254-284`, the `envVars` map), derive the worker children's bounds from `effectiveTimeoutSeconds` so the worker side is derive-with-floor too (not just defaults). Add after the existing conditional env entries, following the repo's conditional style:
+
+```ts
+if (effectiveTimeoutSeconds !== undefined) {
+  envVars.PANGOLIN_AGENT_TIMEOUT_SECONDS = String(effectiveTimeoutSeconds);
+  envVars.PANGOLIN_PLUGIN_INSTALL_TIMEOUT_SECONDS = String(Math.min(300, effectiveTimeoutSeconds));
+}
+```
+
+(With the 7200s floor now always defined, these are always emitted; the adapter's `envSecondsOr` defaults in Task 8 remain the safety net for any older/standalone worker image that doesn't receive them.)
+
+- [ ] **Step 4c: Assert the timeout failure reason (R5).** The deadline test from Step 1 asserts `result.failure?.reason === 'timeout'`. That value flows through `reconcile` → the result-sink's `providerFailureReason → failure` mapping → the `dispatch.failed` lifecycle emit (Site B, `dispatch.ts:376-383`), so this single assertion also guards that the resolve-not-throw path keeps the failed event. Add a one-line comment in the test citing R5 so the intent survives.
 
 - [ ] **Step 5: Build + run the new test + the existing dispatch tests.**
 
@@ -461,15 +502,7 @@ for (;;) {
     } catch {
       // best-effort reap
     }
-    const now = new Date();
-    return {
-      exitCode: -1,
-      startedAt: now,
-      finishedAt: now,
-      stdout: '',
-      stderr: '',
-      providerFailureReason: 'timeout',
-    };
+    return makeTimeoutExit(); // R3: shared factory (import from @quarry-systems/pangolin-core)
   }
   const res = await this.ecs.send(new DescribeTasksCommand({ /* unchanged */ }));
   // ...unchanged STOPPED handling...
@@ -519,12 +552,28 @@ git commit -m "feat(fargate): honor ctx.signal in awaitExit (bail + StopTask + t
 
 - [ ] **Step 1: Move the file.** Copy `packages/pangolin-worker/src/bounded-command.ts` to `packages/pangolin-core/src/bounded-command.ts` unchanged (it imports only `node:child_process`).
 
-- [ ] **Step 2: Export from core.** Add to `packages/pangolin-core/src/index.ts`:
+- [ ] **Step 2: Export from core + extract the env-int parser (R2).** Add to `packages/pangolin-core/src/index.ts`:
 
 ```ts
 export { runBoundedCommand } from './bounded-command.js';
 export type { RunBoundedCommandOpts, BoundedCommandResult } from './bounded-command.js';
+export { parsePositiveInteger } from './env-int.js';
 ```
+
+Create `packages/pangolin-core/src/env-int.ts` by moving the existing helper from `packages/pangolin-worker/src/env-parser.ts` (currently unexported), with a package-neutral error prefix:
+
+```ts
+/** Parse a non-negative integer env value; throw on malformed (fail-fast). */
+export function parsePositiveInteger(raw: string, varName: string): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || !Number.isInteger(n) || n < 0) {
+    throw new Error(`${varName} must be a non-negative integer, got: ${raw}`);
+  }
+  return n;
+}
+```
+
+Update `packages/pangolin-worker/src/env-parser.ts` to import `parsePositiveInteger` from `@quarry-systems/pangolin-core` and delete its local copy (its `parseWorkerEnv` call site is unchanged). The worker's existing env-parser tests must stay green.
 
 - [ ] **Step 3: Re-export from the worker (keep the worker's import paths stable).** Replace the body of `packages/pangolin-worker/src/bounded-command.ts` with:
 
@@ -545,9 +594,9 @@ Expected: PASS — bounded-command tests green from core; worker suite (setup-sc
 - [ ] **Step 6: Commit.**
 
 ```bash
-git add packages/pangolin-core/src/bounded-command.ts packages/pangolin-core/src/index.ts packages/pangolin-core/test/bounded-command.test.ts packages/pangolin-worker/src/bounded-command.ts
+git add packages/pangolin-core/src/bounded-command.ts packages/pangolin-core/src/env-int.ts packages/pangolin-core/src/index.ts packages/pangolin-core/test/bounded-command.test.ts packages/pangolin-worker/src/bounded-command.ts packages/pangolin-worker/src/env-parser.ts
 git rm packages/pangolin-worker/test/bounded-command.test.ts
-git commit -m "refactor(core): extract bounded-command into pangolin-core (worker re-exports)"
+git commit -m "refactor(core): extract bounded-command + parsePositiveInteger into pangolin-core"
 ```
 
 ---
@@ -618,23 +667,22 @@ export async function spawnClaude(opts: SpawnClaudeOptions): Promise<ClaudeSpawn
     timeoutSeconds: opts.timeoutSeconds ?? 3600,
     maxOutputChars: AGENT_OUTPUT_CAP,
   });
-  // timedOut and startError both collapse to a non-zero (-1) exit; the adapter
-  // surfaces non-zero as a failed RuntimeExit. stderr carries the spawn error
-  // message when the binary could not start.
-  return {
-    exitCode: r.exitCode,
-    stdout: r.stdout,
-    stderr: r.startError ? `${r.stderr}${r.startError.message}` : r.stderr,
-  };
+  // R1: preserve the existing contract. A SPAWN ERROR (binary not found) is
+  // infrastructural — rethrow so the pipeline-runner classifies it as
+  // worker-failed (an adapter throw → worker-failed), keeping the existing
+  // `.rejects` test green. Only a TIMEOUT (or non-zero exit) is an agent/app
+  // failure, surfaced via a non-zero exitCode (-1 on timeout).
+  if (r.startError) throw r.startError;
+  return { exitCode: r.exitCode, stdout: r.stdout, stderr: r.stderr };
 }
 ```
 
-Note: this changes spawn-error from a thrown rejection to `exitCode -1` + message on stderr. The adapter already treats non-zero `exitCode` as a failed block, so the dispatch still fails — but as a clean terminal, not an unhandled rejection.
+Note: spawn-error semantics are **unchanged** (still a throw → `worker-failed`). The only new terminal is the timeout → `exitCode -1`. On the timeout path stdout may be empty/partial; guard the adapter's envelope parse (Task 8).
 
 - [ ] **Step 4: Build core (dep) + claude-code, run.**
 
 Run: `pnpm --filter @quarry-systems/pangolin-core build && pnpm --filter @quarry-systems/pangolin-runtime-claude-code build && pnpm --filter @quarry-systems/pangolin-runtime-claude-code exec vitest run`
-Expected: PASS — timeout test green; existing `claude-spawn`/`adapter` tests still green (the stub-binary success path returns the same `{exitCode, stdout, stderr}`). If an existing test asserted spawn-error *rejection*, update it to assert `exitCode === -1`.
+Expected: PASS — timeout test green; existing `claude-spawn`/`adapter` tests still green, **including the `claude-spawn.test.ts` `.rejects`-on-binary-not-found test (R1: we preserve the throw)**. The stub-binary success path returns the same `{exitCode, stdout, stderr}`.
 
 - [ ] **Step 5: Commit.**
 
@@ -734,13 +782,13 @@ it('bounds the agent spawn by PANGOLIN_AGENT_TIMEOUT_SECONDS', async () => {
 Run: `pnpm --filter @quarry-systems/pangolin-runtime-claude-code exec vitest run test/adapter.test.ts`
 Expected: FAIL — the agent spawn isn't bounded by the env value yet.
 
-- [ ] **Step 3: Parse + pass through.** In `adapter.ts`, add a small parser and thread the values:
+- [ ] **Step 3: Parse + pass through (R2: reuse `parsePositiveInteger`).** In `adapter.ts`, reuse the extracted core parser with the repo's `env.X ? parse(env.X, 'X') : default` idiom — no new `envSeconds` helper:
 
 ```ts
-function envSeconds(env: Record<string, string>, key: string, fallback: number): number {
-  const raw = env[key];
-  const n = raw === undefined ? NaN : Number(raw);
-  return Number.isFinite(n) && n > 0 ? n : fallback;
+import { parsePositiveInteger } from '@quarry-systems/pangolin-core';
+
+function envSecondsOr(env: Record<string, string>, key: string, fallback: number): number {
+  return env[key] ? parsePositiveInteger(env[key], key) : fallback;
 }
 
 // inside invoke():
@@ -748,7 +796,7 @@ await installPluginsFromManifest({
   workspaceDir: spec.workspaceDir,
   env: ctx.env,
   claudeBin: this.opts.claudeBin,
-  timeoutSeconds: envSeconds(ctx.env, 'PANGOLIN_PLUGIN_INSTALL_TIMEOUT_SECONDS', 300),
+  timeoutSeconds: envSecondsOr(ctx.env, 'PANGOLIN_PLUGIN_INSTALL_TIMEOUT_SECONDS', 300),
 });
 // ...
 const spawnResult = await spawnClaude({
@@ -758,9 +806,20 @@ const spawnResult = await spawnClaude({
   claudeBin: this.opts.claudeBin,
   dangerouslySkipPermissions: resolveBypassFlag(ctx.env),
   model: modelArg,
-  timeoutSeconds: envSeconds(ctx.env, 'PANGOLIN_AGENT_TIMEOUT_SECONDS', 3600),
+  timeoutSeconds: envSecondsOr(ctx.env, 'PANGOLIN_AGENT_TIMEOUT_SECONDS', 3600),
 });
 ```
+
+- [ ] **Step 3b: Guard the envelope parse on a non-zero exit (R1 follow-through).** A timeout returns `exitCode -1` with possibly-empty `stdout`; don't feed that to `parseClaudeEnvelope`. In `invoke`, after the spawn:
+
+```ts
+const { text, usage } =
+  spawnResult.exitCode === 0
+    ? parseClaudeEnvelope(spawnResult.stdout)
+    : { text: spawnResult.stdout, usage: undefined };
+```
+
+(Keep the rest of the `RuntimeExit` return unchanged — a non-zero `exitCode` already makes the worker fail the block.)
 
 - [ ] **Step 4: Build + run.**
 
@@ -812,4 +871,6 @@ git commit -m "docs(config): document per-provider/worker liveness timeout knobs
 
 **Placeholder scan:** No TBD/TODO. Two deliberate "locate the exact site" notes (Task 2 `defaultDispatchTimeoutSeconds`, Task 3 construction site) carry the `rg` command and the surrounding code so the implementer can pin them — not placeholders.
 
-**Type consistency:** `boundedAwaitExit(compute, handle, baseCtx, deadlineSeconds)` is defined in Task 1 and consumed identically in Task 2. `runBoundedCommand`/`RunBoundedCommandOpts`/`BoundedCommandResult` defined (extracted) in Task 5, consumed in Tasks 6-7 with the same field names (`timedOut`, `startError`, `exitCode`, `stdout`, `stderr`). `timeoutSeconds` added consistently to `SpawnClaudeOptions` (Task 6) and `InstallPluginsOptions` (Task 7) and passed from the adapter (Task 8). `providerFailureReason: 'timeout'` consistent across Tasks 1 and 4. ✓
+**Type consistency:** `boundedAwaitExit(compute, handle, baseCtx, deadlineSeconds)` is defined in Task 1 and consumed identically in Task 2. `runBoundedCommand`/`RunBoundedCommandOpts`/`BoundedCommandResult` defined (extracted) in Task 5, consumed in Tasks 6-7 with the same field names (`timedOut`, `startError`, `exitCode`, `stdout`, `stderr`). `timeoutSeconds` added consistently to `SpawnClaudeOptions` (Task 6) and `InstallPluginsOptions` (Task 7) and passed from the adapter (Task 8). `makeTimeoutExit()` (core, Task 1) is the single timeout-`TaskExit` source, used in Tasks 1 + 4 — no inline `providerFailureReason:'timeout'` literal duplicated. `parsePositiveInteger` (core, Task 5) is reused by the worker env-parser + the adapter (Task 8) — no `envSeconds` duplicate. ✓
+
+**Audit revisions:** R1 (spawn-error throw preserved), R2 (`parsePositiveInteger` extracted+reused), R3 (`makeTimeoutExit` factory), R4 (client emits derived worker-timeout env), R5 (timeout→failure-reason test), R6 (no local-docker task — covered by wrapper+cancel), R7 (lint: no unused `catch (e)`) — all folded into the tasks above. ✓
