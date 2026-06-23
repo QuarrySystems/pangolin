@@ -59,6 +59,11 @@ export interface PangolinClientOptions {
   dispatchRetention?: DispatchRetentionConfig;
   /** Per-target secret stores. Defaults to {} — no implicit AWS store. */
   secretStores?: Record<string, SecretStore>;
+  /**
+   * Fallback timeout for every dispatch that omits `work.timeoutSeconds`.
+   * Defaults to 7200 (2 hours). `work.timeoutSeconds` takes precedence.
+   */
+  defaultDispatchTimeoutSeconds?: number;
 }
 
 const DEFAULT_RETENTION_DAYS = 30;
@@ -81,6 +86,8 @@ export class PangolinClient {
   readonly resultSink?: ResultSink;
   readonly defaultModel?: string;
   readonly retention: Required<DispatchRetentionConfig>;
+  /** Fallback timeout for dispatches that omit `work.timeoutSeconds`. Always a number (floor: 7200). */
+  readonly defaultDispatchTimeoutSeconds: number;
 
   constructor(opts: PangolinClientOptions) {
     if (!opts.namespace) {
@@ -109,8 +116,7 @@ export class PangolinClient {
         );
       }
     }
-    const defaultDays =
-      opts.dispatchRetention?.defaultDays ?? DEFAULT_RETENTION_DAYS;
+    const defaultDays = opts.dispatchRetention?.defaultDays ?? DEFAULT_RETENTION_DAYS;
     const maxDays = opts.dispatchRetention?.maxDays ?? MAX_RETENTION_DAYS;
     if (maxDays > MAX_RETENTION_DAYS) {
       throw new Error(
@@ -132,5 +138,6 @@ export class PangolinClient {
     this.resultSink = opts.resultSink;
     this.defaultModel = opts.defaultModel;
     this.retention = { defaultDays, maxDays };
+    this.defaultDispatchTimeoutSeconds = opts.defaultDispatchTimeoutSeconds ?? 7200;
   }
 }
