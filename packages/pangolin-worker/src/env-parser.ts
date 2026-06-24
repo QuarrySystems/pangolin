@@ -1,6 +1,8 @@
 // pangolin-worker: env var parser
 // Parses + validates PANGOLIN_* env vars per spec §6.1.
 
+import { parsePositiveInteger } from '@quarry-systems/pangolin-core';
+
 export interface BundleRef {
   uri: string;
   contentHash: string;
@@ -47,7 +49,7 @@ export interface WorkerConfig {
    * Defaults to `"aws-secrets-manager"` when `PANGOLIN_SECRET_STORE_KIND` is
    * absent, preserving the existing AWS behavior.
    */
-  secretStoreKind: "aws-secrets-manager" | "local-file";
+  secretStoreKind: 'aws-secrets-manager' | 'local-file';
   runtimeAdapter: string;
   setupTimeoutSeconds: number;
   disableNeedsInputHelper: boolean;
@@ -61,19 +63,7 @@ export interface WorkerConfig {
   runtimeEnvAllow: string[];
 }
 
-function parsePositiveInteger(raw: string, varName: string): number {
-  const n = Number(raw);
-  if (!Number.isFinite(n) || !Number.isInteger(n) || n < 0) {
-    throw new Error(
-      `pangolin-worker: ${varName} must be a non-negative integer, got: ${raw}`,
-    );
-  }
-  return n;
-}
-
-export function parseWorkerEnv(
-  env: NodeJS.ProcessEnv = process.env,
-): WorkerConfig {
+export function parseWorkerEnv(env: NodeJS.ProcessEnv = process.env): WorkerConfig {
   const required = (k: string): string => {
     const v = env[k];
     if (!v) {
@@ -82,10 +72,10 @@ export function parseWorkerEnv(
     return v;
   };
 
-  const dispatchId = required("PANGOLIN_DISPATCH_ID");
-  const namespace = required("PANGOLIN_NAMESPACE");
-  const storageUri = required("PANGOLIN_STORAGE_URI");
-  const bundleRefsRaw = required("PANGOLIN_BUNDLE_REFS_JSON");
+  const dispatchId = required('PANGOLIN_DISPATCH_ID');
+  const namespace = required('PANGOLIN_NAMESPACE');
+  const storageUri = required('PANGOLIN_STORAGE_URI');
+  const bundleRefsRaw = required('PANGOLIN_BUNDLE_REFS_JSON');
 
   let bundleRefs: BundleRefs;
   try {
@@ -97,7 +87,7 @@ export function parseWorkerEnv(
   }
   if (
     !bundleRefs ||
-    typeof bundleRefs !== "object" ||
+    typeof bundleRefs !== 'object' ||
     !bundleRefs.subagent ||
     !Array.isArray(bundleRefs.capabilities) ||
     !Array.isArray(bundleRefs.env)
@@ -110,17 +100,15 @@ export function parseWorkerEnv(
   // Validate inputs field if present
   if (bundleRefs.inputs !== undefined) {
     if (!Array.isArray(bundleRefs.inputs)) {
-      throw new Error(
-        `pangolin-worker: PANGOLIN_BUNDLE_REFS_JSON inputs field must be an array`,
-      );
+      throw new Error(`pangolin-worker: PANGOLIN_BUNDLE_REFS_JSON inputs field must be an array`);
     }
     for (const entry of bundleRefs.inputs) {
       if (
         !entry ||
-        typeof entry !== "object" ||
-        typeof entry.key !== "string" ||
-        typeof entry.uri !== "string" ||
-        typeof entry.contentHash !== "string"
+        typeof entry !== 'object' ||
+        typeof entry.key !== 'string' ||
+        typeof entry.uri !== 'string' ||
+        typeof entry.contentHash !== 'string'
       ) {
         throw new Error(
           `pangolin-worker: PANGOLIN_BUNDLE_REFS_JSON inputs entries must have key, uri, and contentHash fields as strings`,
@@ -134,9 +122,9 @@ export function parseWorkerEnv(
     const p = bundleRefs.pipeline as unknown as Record<string, unknown>;
     if (
       !p ||
-      typeof p !== "object" ||
-      typeof p.uri !== "string" ||
-      typeof p.contentHash !== "string"
+      typeof p !== 'object' ||
+      typeof p.uri !== 'string' ||
+      typeof p.contentHash !== 'string'
     ) {
       throw new Error(
         `pangolin-worker: PANGOLIN_BUNDLE_REFS_JSON pipeline field must be an object with string uri and contentHash`,
@@ -158,9 +146,10 @@ export function parseWorkerEnv(
   let perDispatchSecretRefs: Record<string, string> = {};
   if (env.PANGOLIN_PER_DISPATCH_SECRET_REFS_JSON) {
     try {
-      perDispatchSecretRefs = JSON.parse(
-        env.PANGOLIN_PER_DISPATCH_SECRET_REFS_JSON,
-      ) as Record<string, string>;
+      perDispatchSecretRefs = JSON.parse(env.PANGOLIN_PER_DISPATCH_SECRET_REFS_JSON) as Record<
+        string,
+        string
+      >;
     } catch (err) {
       throw new Error(
         `pangolin-worker: PANGOLIN_PER_DISPATCH_SECRET_REFS_JSON is not valid JSON: ${(err as Error).message}`,
@@ -170,14 +159,14 @@ export function parseWorkerEnv(
 
   const secretStoreDir = env.PANGOLIN_SECRET_STORE_DIR || undefined;
 
-  const VALID_SECRET_STORE_KINDS = ["aws-secrets-manager", "local-file"] as const;
-  const rawKind = env.PANGOLIN_SECRET_STORE_KIND ?? "aws-secrets-manager";
+  const VALID_SECRET_STORE_KINDS = ['aws-secrets-manager', 'local-file'] as const;
+  const rawKind = env.PANGOLIN_SECRET_STORE_KIND ?? 'aws-secrets-manager';
   if (!(VALID_SECRET_STORE_KINDS as readonly string[]).includes(rawKind)) {
     throw new Error(
-      `pangolin-worker: PANGOLIN_SECRET_STORE_KIND must be one of ${VALID_SECRET_STORE_KINDS.join(", ")}, got: ${rawKind}`,
+      `pangolin-worker: PANGOLIN_SECRET_STORE_KIND must be one of ${VALID_SECRET_STORE_KINDS.join(', ')}, got: ${rawKind}`,
     );
   }
-  const secretStoreKind = rawKind as WorkerConfig["secretStoreKind"];
+  const secretStoreKind = rawKind as WorkerConfig['secretStoreKind'];
 
   const callbackUrl = env.PANGOLIN_CALLBACK_URL;
   const callbackTokenRef = env.PANGOLIN_CALLBACK_TOKEN_REF;
@@ -187,15 +176,16 @@ export function parseWorkerEnv(
     );
   }
 
-  const runtimeAdapter = env.PANGOLIN_RUNTIME_ADAPTER || "claude-code";
+  const runtimeAdapter = env.PANGOLIN_RUNTIME_ADAPTER || 'claude-code';
   const setupTimeoutSeconds = env.PANGOLIN_SETUP_TIMEOUT_SECONDS
-    ? parsePositiveInteger(env.PANGOLIN_SETUP_TIMEOUT_SECONDS, "PANGOLIN_SETUP_TIMEOUT_SECONDS")
+    ? parsePositiveInteger(env.PANGOLIN_SETUP_TIMEOUT_SECONDS, 'PANGOLIN_SETUP_TIMEOUT_SECONDS')
     : 120;
-  const disableNeedsInputHelper =
-    env.PANGOLIN_DISABLE_NEEDS_INPUT_HELPER === "true";
+  const disableNeedsInputHelper = env.PANGOLIN_DISABLE_NEEDS_INPUT_HELPER === 'true';
 
-  const runtimeEnvAllow = (env.PANGOLIN_RUNTIME_ENV_ALLOW ?? "")
-    .split(",").map((s) => s.trim()).filter((s) => s.length > 0);
+  const runtimeEnvAllow = (env.PANGOLIN_RUNTIME_ENV_ALLOW ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
 
   return {
     dispatchId,

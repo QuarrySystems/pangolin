@@ -52,6 +52,7 @@ import { mintCallbackHmac } from './callback-hmac.js';
 import { writeDispatchRecord } from './retention.js';
 import { SecretStoreMismatchError } from './errors.js';
 import { emitLifecycleEvent } from './lifecycle-emit.js';
+import { boundedAwaitExit } from './bounded-await-exit.js';
 
 export interface ClientDispatchOpts {
   /** Worker image (digest-pinned) the provider should run. */
@@ -282,6 +283,16 @@ export async function fireWork(
     // is non-undefined here by construction.
     envVars.PANGOLIN_CALLBACK_TOKEN_REF = callbackTokenRef!;
   }
+  // Emit derived worker-side timeout bounds (R4). With the 7200s floor always
+  // defined, these are always emitted. The adapter's envSecondsOr defaults
+  // remain a safety net for any older/standalone worker image that doesn't
+  // receive them.
+  if (effectiveTimeoutSeconds !== undefined) {
+    envVars.PANGOLIN_AGENT_TIMEOUT_SECONDS = String(effectiveTimeoutSeconds);
+    envVars.PANGOLIN_PLUGIN_INSTALL_TIMEOUT_SECONDS = String(
+      Math.min(300, effectiveTimeoutSeconds),
+    );
+  }
 
   // 7. Merge env-bundle secrets + per-dispatch secrets. Per-dispatch wins on
   //    collision per §6.2 step 6 — this is enforced HERE (client-side).
@@ -327,7 +338,12 @@ export async function fireWork(
   //    can collect the result whenever the task exits. ────────────────────
   const awaitExit = async (): Promise<TaskExit> => {
     try {
-      return await compute.awaitExit(handle, { credentials, telemetry: client.telemetry });
+      return await boundedAwaitExit(
+        compute,
+        handle,
+        { credentials, telemetry: client.telemetry },
+        effectiveTimeoutSeconds,
+      );
     } catch (err) {
       // Infra rejection: the orchestrator path never calls our reconcile here, so this is the
       // only place `failed` can be emitted for a hard provider throw.

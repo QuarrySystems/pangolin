@@ -254,14 +254,19 @@ Object.defineProperty(PangolinClient.prototype, 'dispatch', {
       const { workerImage, defaultDispatchTimeoutSeconds, ...work } = workAndOpts;
       return dispatchWork(this, work as DispatchWork, {
         workerImage,
-        defaultDispatchTimeoutSeconds,
+        defaultDispatchTimeoutSeconds:
+          defaultDispatchTimeoutSeconds ?? this.defaultDispatchTimeoutSeconds,
       });
     };
     fn.describe = (dispatchId: string) => describeDispatch(this, dispatchId);
     fn.cancel = (dispatchId: string) => cancelDispatch(this, dispatchId);
     fn.fire = (workAndOpts: DispatchWork & ClientDispatchOpts): Promise<InFlightDispatch> => {
       const { workerImage, defaultDispatchTimeoutSeconds, ...work } = workAndOpts;
-      return fireWork(this, work as DispatchWork, { workerImage, defaultDispatchTimeoutSeconds });
+      return fireWork(this, work as DispatchWork, {
+        workerImage,
+        defaultDispatchTimeoutSeconds:
+          defaultDispatchTimeoutSeconds ?? this.defaultDispatchTimeoutSeconds,
+      });
     };
     return fn as unknown as PangolinClientDispatchFn;
   },
