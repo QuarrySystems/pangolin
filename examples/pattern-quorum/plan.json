@@ -1,0 +1,25 @@
+{
+  "id": "quorum-demo",
+  "queue": "default",
+  "items": [
+    {
+      "id": "draft",
+      "executor": "dispatch",
+      "inputs": {
+        "quorum": {
+          "reviewers": [
+            { "executor": "dispatch", "inputs": {} },
+            { "executor": "dispatch", "inputs": {} },
+            { "executor": "dispatch", "inputs": {} }
+          ],
+          "threshold": 2,
+          "commit": { "executor": "dispatch", "inputs": {} },
+          "onReject": "spawn-fix",
+          "fixTemplate": { "executor": "dispatch", "inputs": {} }
+        }
+      },
+      "depends_on": [],
+      "resourceLocks": []
+    }
+  ]
+}

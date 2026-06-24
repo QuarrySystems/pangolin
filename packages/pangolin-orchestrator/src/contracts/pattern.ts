@@ -2,7 +2,7 @@ import type { ItemState, Run, WorkItem } from './types.js';
 
 /** Items a pattern asks to append to a run, in submission (pre-namespace) id space. */
 export interface SpawnDirective {
-  items: WorkItem[];   // deterministic ids — replay-safe by construction (spec §5.1)
+  items: WorkItem[]; // deterministic ids — replay-safe by construction (spec §5.1)
 }
 
 export interface PatternContext {
@@ -12,7 +12,7 @@ export interface PatternContext {
 }
 
 export interface Pattern {
-  id: string;          // 'static-dag' | 'pipeline' | 'map-reduce'
+  id: string; // 'static-dag' | 'pipeline' | 'map-reduce'
   /** Expand/normalize a submission BEFORE validateRun. Pure. Identity for static-dag.
    *  MAY throw a descriptive Error on malformed pattern config — submitRun surfaces it
    *  before saveRun, so the store stays clean (spec §4). */
@@ -34,19 +34,43 @@ export interface SpawnTemplate {
 /** Gate policy carried on a gate item's reserved `inputs.gate` key (spec §6c). */
 export interface GateConfig {
   onRed: 'advance' | 'spawn-fix';
-  subject: string;              // itemId whose product is being gated
+  subject: string; // itemId whose product is being gated
   fixTemplate?: SpawnTemplate;
-  maxFixAttempts?: number;      // default 1
+  maxFixAttempts?: number; // default 1
 }
 
 /** Map-reduce config carried on the splitter's reserved `inputs.mapReduce` key (spec §6d). */
 export interface MapReduceConfig {
-  map: SpawnTemplate & { needsKey?: string; outputPath?: string };   // defaults 'input', 'result'
-  reduce: SpawnTemplate & { keyPrefix?: string };                    // default 'part'
+  map: SpawnTemplate & { needsKey?: string; outputPath?: string }; // defaults 'input', 'result'
+  reduce: SpawnTemplate & { keyPrefix?: string }; // default 'part'
+}
+
+/** Independent-review quorum config carried on a subject's reserved `inputs.quorum` key.
+ *  N independent reviewers review the subject's product; the `commit` item is spawned only when
+ *  at least `threshold` reviewers approve (status `done` with `verify.passed !== false`).
+ *  Sub-threshold tallies either circle back (`spawn-fix`) or seal the rejection as final history
+ *  (`block`). The per-reviewer verdicts and the tally are sealed evidence.
+ *
+ *  Two assurance tiers, selected by WHAT a reviewer is (the pattern is reviewer-agnostic — a
+ *  reviewer is just an executor that returns a verdict):
+ *    - INDEPENDENT-VALIDATION tier — reviewers are AI subagents with distinct `subagentShape`s.
+ *      An automated independent check (SR 11-7-style); AI-validates-AI. The sealed tally proves
+ *      N independent *models* reached consensus.
+ *    - OVERSIGHT / FOUR-EYES tier — at least one reviewer slot is a HUMAN-approval executor
+ *      whose `reconcile()` stays pending until a natural person submits a decision, sealing the
+ *      approver's identity + timestamp. Required for human-oversight controls (EU AI Act
+ *      Art. 14, segregation-of-duties / four-eyes); an AI-only quorum does NOT meet these. */
+export interface QuorumConfig {
+  reviewers: SpawnTemplate[]; // one independent reviewer per template
+  threshold: number; // min approvals (1..reviewers.length) to advance
+  commit: SpawnTemplate; // spawned when the quorum approves
+  onReject?: 'spawn-fix' | 'block'; // default 'spawn-fix'
+  fixTemplate?: SpawnTemplate; // required when onReject === 'spawn-fix'
+  maxRounds?: number; // circle-back bound; default 1
 }
 
 /** One applied scan result: which terminal item caused which spawn (collectSpawns return). */
 export interface CollectedSpawn {
-  causeItemId: string;     // de-namespaced id of the terminal item that triggered the spawn
-  items: WorkItem[];       // pre-namespace id space (extendRun namespaces)
+  causeItemId: string; // de-namespaced id of the terminal item that triggered the spawn
+  items: WorkItem[]; // pre-namespace id space (extendRun namespaces)
 }

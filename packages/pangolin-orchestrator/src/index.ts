@@ -9,6 +9,15 @@ export { PangolinOrchestrator, PRIVILEGE } from './orchestrator.js';
 export type { PangolinOrchestratorOptions, QueueConfig, StatusItem } from './orchestrator.js';
 export { DispatchExecutor } from './executors/dispatch.js';
 export type { DispatchExecutorOptions } from './executors/dispatch.js';
+export { HumanApprovalExecutor } from './executors/human-approval.js';
+export type {
+  HumanApprovalExecutorOptions,
+  ApprovalDecision,
+  ApprovalRequest,
+  ApprovalSource,
+  ApprovalRecord,
+  ApprovalRecordSink,
+} from './executors/human-approval.js';
 export { PackRegistry } from './packs/registry.js';
 export { devPack, devCodeEdit, devVerify, devRegistry } from './packs/dev.js';
 export { dataPack, dataSplit, dataTransform, dataAggregate, dataRegistry } from './packs/data.js';
@@ -56,6 +65,7 @@ export { resolveInputRefs, selectProductRef } from './engine/needs-resolver.js';
 export { staticDag } from './patterns/static-dag.js';
 export { pipeline } from './patterns/pipeline.js';
 export { mapReduce } from './patterns/map-reduce.js';
+export { quorum } from './patterns/quorum.js';
 export { collectSpawns } from './patterns/scan.js';
 export { respawnLineage, parseAttempt } from './patterns/respawn.js';
 export { buildRunView } from './view/build.js';
