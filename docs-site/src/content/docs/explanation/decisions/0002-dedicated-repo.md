@@ -43,3 +43,7 @@ What becomes harder:
 Trade-offs:
 
 - We accept duplicated tooling and cross-repo coordination overhead in exchange for a structural guarantee that Pangolin Scale cannot accidentally bind to internals of other Quarry Systems code. The orthogonality principle is the product's biggest long-term asset; physical separation defends it more durably than any process or lint rule.
+
+:::note[On "OSS donation"]
+The "future OSS donation or hand-off" mentioned above is a hypothetical describing how cheap a transfer *would* be, not a commitment to one — it does **not** change Pangolin Scale's current status: **source-available under BSL 1.1, not open source** (see [ADR-0017](/pangolin/explanation/decisions/0017-source-available-bsl/)).
+:::

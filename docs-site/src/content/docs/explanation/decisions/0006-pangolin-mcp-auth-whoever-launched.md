@@ -16,7 +16,7 @@ dispatch with the `code-reviewer` subagent"), or none of the above.
 
 The forces in tension:
 
-- **Construction-buyer demo and most early integrations** run one
+- **Early self-hosted integrations** run one
   orchestrator process on a host the integrator already controls. The
   integrator's host-IAM story (filesystem permissions, container orchestration
   policy, IAM credentials available to the launching process) already
@@ -49,7 +49,7 @@ From §10.1:
 > process. The orchestrator's environment IS the trust boundary. Per-call
 > auth, per-orchestrator scoping, and granular MCP-level ACLs (e.g., "this
 > orchestrator can only dispatch with the `code-reviewer` subagent") are all
-> v0.2+. For the construction-buyer demo and most early integrations,
+> v0.2+. For early self-hosted integrations,
 > host-IAM scoping is sufficient; for hosted or multi-tenant Pangolin Scale, more is
 > required.
 

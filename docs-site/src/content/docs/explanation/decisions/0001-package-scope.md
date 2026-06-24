@@ -42,3 +42,7 @@ What becomes harder:
 Trade-offs:
 
 - We trade a theoretical future-rename cost for present-day consistency and release simplicity. The future rename is conditional on a spinout actually happening; the consistency benefit is paid out immediately and continuously.
+
+:::note[On "open-source spinout"]
+The "OSS spinout" framing above describes a *rejected* option and a hypothetical future repo transfer — it does **not** change Pangolin Scale's current status, which is **source-available under BSL 1.1, not open source** (see [ADR-0017](/pangolin/explanation/decisions/0017-source-available-bsl/)).
+:::

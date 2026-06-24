@@ -90,3 +90,26 @@ Trade-offs:
 - This ADR supersedes the FSL-1.1-MIT choice (which predated the ADR series and
   was recorded only in the MVP spec + the `8e33e4e`/`63e34b1` license commits),
   not an existing ADR.
+
+## Addendum (2026-06-24): license stability + scope clarification
+
+A licensing audit revisited this decision and reaffirmed it. Two points for readers:
+
+**The license is stable.** BSL 1.1 is the settled choice; we don't intend to relicense
+capriciously — version churn just creates needless re-review for the teams adopting it.
+Any future change to the grant would be deliberate and announced, and `LICENSE` is always
+the authoritative statement of the terms in effect.
+
+**Scope clarification — what "self-hosting" covers.** The Additional Use Grant reserves
+only *offering Pangolin Scale (or a derivative) to third parties as a hosted or managed
+service*. Running Pangolin Scale yourself — including embedding it into a product your
+users **self-host** — is permitted by the current grant. The public copy
+(`commercial.md`, `licensing-bsl.md`) was reconciled to say so; it previously implied
+self-hosted embedding required a commercial license, which the grant does not compel. If
+you're embedding Pangolin Scale into something you ship, a commercial agreement is about
+support and indemnity, not a license you're forced to buy.
+
+**Housekeeping.** `"license": "BUSL-1.1"` is now set on every workspace `package.json`,
+including four previously-bare `private: true` packages (`docs-site`, `hello-world`,
+`orchestrator-offload`, `spike/rfc3161`), making the body's "root and every workspace
+`package.json`" statement literally true.

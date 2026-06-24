@@ -2,6 +2,7 @@
   "name": "hello-world-example",
   "version": "0.0.0",
   "private": true,
+  "license": "BUSL-1.1",
   "description": "The §4.4 Hello World worked example: PangolinClient + LocalDockerProvider + LocalStorageProvider, dispatched end-to-end.",
   "type": "module",
   "scripts": {
