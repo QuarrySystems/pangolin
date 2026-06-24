@@ -2,6 +2,7 @@
   "name": "orchestrator-offload-example",
   "version": "0.0.0",
   "private": true,
+  "license": "BUSL-1.1",
   "description": "Battle-test / on-ramp: PangolinOrchestrator + DispatchExecutor driving a real container dispatch end-to-end (fire -> reconcile) against the local Docker stack.",
   "type": "module",
   "scripts": {

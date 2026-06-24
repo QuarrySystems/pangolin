@@ -25,9 +25,11 @@ page is a plain-language summary, not the grant.
 
 ## Embedding Pangolin Scale in a product you ship?
 
-If you're building Pangolin Scale into a product or service delivered to third parties —
-hosted **or** self-hosted — get in touch about commercial licensing. It keeps you
-on solid footing as the project's grant evolves toward a clean "free to build,
+If you're building Pangolin Scale into a product **you host** for third parties,
+that's a hosted/managed service and needs a commercial license (see the restriction
+above). If you're embedding it into a product others **self-host**, the current grant
+**permits** that — but get in touch anyway: a commercial agreement gives you support,
+indemnity, and a stable footing as the grant evolves toward a clean "free to build,
 pay to ship" line, and it's how the engine stays sustainably maintained.
 [Talk to us about a commercial license or pilot →](/pangolin/commercial/).
 

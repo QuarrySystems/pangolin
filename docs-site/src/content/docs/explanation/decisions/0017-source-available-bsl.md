@@ -90,3 +90,43 @@ Trade-offs:
 - This ADR supersedes the FSL-1.1-MIT choice (which predated the ADR series and
   was recorded only in the MVP spec + the `8e33e4e`/`63e34b1` license commits),
   not an existing ADR.
+
+## Addendum (2026-06-24): license stability + the self-hosted-embedding scope
+
+A licensing audit revisited this decision. Three things settled:
+
+**The license is frozen — do not relicense again without a concrete trigger.**
+Each relicense re-triggers adopter legal review, the exact friction this ADR removed,
+so license churn is itself an adoption tax (this would be the second change in a month).
+Revenue protection lives in **open-core mechanics** — the closed Enterprise modules and
+the hosted Cloud control plane — both already covered by the Additional Use Grant's
+hosted/managed-service restriction. It does **not** depend on tightening the core grant.
+Alternatives weighed and rejected for now: **Elastic License 2.0** (a sidegrade — adds
+perpetual protection but loses the Apache-2.0 conversion goodwill), **PolyForm Perimeter**
+(closes the embedding gap below but reintroduces FSL's fuzzy "compete" line this ADR fled),
+**SSPL** (adoption-toxic, OSI-rejected, enterprise-banned), and **AGPL + commercial
+dual-license** (a different model that requires the OSI "open source" branding this
+project explicitly rejects).
+
+**Scope clarified: self-hosted embedding is permitted by the current grant.** The
+Additional Use Grant reserves only *offering Pangolin Scale (or a derivative) to third
+parties as a hosted or managed service*. Embedding Pangolin Scale into a product a third
+party **self-hosts** is **not** restricted by the current LICENSE. The public copy
+(`commercial.md`, `licensing-bsl.md`) was reconciled to say so — it previously implied
+self-hosted embedding required a commercial license, which the grant does not compel.
+The commercial track for self-hosted embedders is a support/indemnity relationship, not
+a license obligation.
+
+**`"license": "BUSL-1.1"` is now on every workspace `package.json`**, including the
+four previously-bare `private: true` packages (`docs-site`, `hello-world`,
+`orchestrator-offload`, `spike/rfc3161`), making the body's "root and every workspace
+`package.json`" statement literally true.
+
+**Revisit the Additional Use Grant** (widen it, or move to PolyForm Perimeter) **only**
+if a concrete trigger fires:
+
+- a competitor ships Pangolin Scale embedded in a rival **self-hosted** product, or
+- the hosted Cloud offering launches and a third party resells the engine as a competing
+  hosted service in a way the current grant doesn't cleanly reach.
+
+Until a trigger fires, the license is stable.

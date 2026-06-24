@@ -1,6 +1,7 @@
 {
   "name": "@pangolin/docs-site",
   "private": true,
+  "license": "BUSL-1.1",
   "type": "module",
   "version": "0.0.1",
   "scripts": {

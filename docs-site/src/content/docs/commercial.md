@@ -5,11 +5,14 @@ sidebar:
   order: 99
 ---
 
-Pangolin Scale is **free to build on** and **commercially licensed to ship**. Self-host it,
-evaluate it, run your own production workloads — no cost, no conversation needed.
-When you embed Pangolin Scale in a product you deliver to third parties, or you need the
-enterprise compliance layer and a support contract, that's where commercial
-licensing comes in.
+Pangolin Scale is **free to build on**. Self-host it, evaluate it, run your own
+production workloads — no cost, no conversation needed. The one thing the
+[license](/pangolin/explanation/licensing-bsl/) reserves is offering Pangolin Scale
+(or a derivative) to third parties as a **hosted or managed** orchestration /
+agent-dispatch service — that needs a commercial license. And if you're
+**embedding Pangolin Scale in a product you ship**, or you need the enterprise
+compliance layer and a support contract, let's talk — that's the commercial
+relationship that keeps the engine sustainably maintained.
 
 ## Who this is for
 
@@ -38,10 +41,12 @@ side, no procurement marathon.
 
 | Tier | For | License |
 |---|---|---|
-| **Community** | internal use, evaluation, dev/test, your own production | BSL (free) — full engine, self-host, audit bundle |
-| **Commercial** | shipping or embedding Pangolin Scale in a product delivered to third parties (hosted *or* self-hosted) | commercial license |
+| **Community** | internal use, evaluation, dev/test, your own production, self-hosting | BSL (free) — full engine, self-host, audit bundle |
+| **Commercial** | offering Pangolin Scale (or a derivative) to third parties as a **hosted or managed** service; *or* embedding it in a product you ship and want on a clear commercial footing | commercial license |
 | **Enterprise** | the above plus SSO/RBAC, compliance-evidence tooling (retention / attestation / export), and support/SLA | commercial license + Enterprise modules |
 | **Cloud** *(later, demand-pulled)* | teams who want it hosted — where the logs **are** the chain of custody | subscription |
+
+The license's one **hard** restriction today is the hosted/managed-service case — that's what the BSL [Additional Use Grant](/pangolin/explanation/licensing-bsl/) reserves. Embedding Pangolin Scale into a product others **self-host** is permitted by the current grant; the commercial track there is about support, indemnity, and a stable footing as the grant evolves — not a license you're compelled to buy. The [`LICENSE`](https://github.com/quarrysystems/pangolin/blob/main/LICENSE) is always authoritative.
 
 The Community engine is the real thing, not crippleware: it runs fully standalone.
 The Enterprise modules are seam *implementations* (RBAC, SSO, compliance tooling,
