@@ -178,6 +178,7 @@ export type AuditEntryKind =
   | 'run.cancelled'
   | 'run.completed'
   | 'run.extended'
+  | 'run.closed' // producer signalled "no more work; seal this epoch"
   | 'item.denied';
 
 export interface AuditEntry {
