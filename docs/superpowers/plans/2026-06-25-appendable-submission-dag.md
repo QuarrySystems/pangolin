@@ -5,13 +5,13 @@ created: 2026-06-25
 
 ```mermaid
 flowchart TD
-    task-core-run-closed-kind["task-core-run-closed-kind: add 'run.closed' kind<br/>files: packages/pangolin-core/src/audit.ts"]
-    task-appendable-contracts["task-appendable-contracts: Run.openEnded + AppendChannel + close<br/>files: .../contracts/types.ts +1 more"]
-    task-store-run-flags["task-store-run-flags: open/closed run flags<br/>files: .../contracts/runstate-store.ts +1 more"]
-    task-orchestrator-extend-close["task-orchestrator-extend-close: closeRun + guards + seal-gate<br/>files: .../orchestrator.ts"]
-    task-mailbox-extend-impl["task-mailbox-extend-impl: AppendChannel mailbox impl<br/>files: .../transport/storage-transport.ts"]
-    task-serve-driver-poll["task-serve-driver-poll: poll extends + close branch<br/>files: .../serve/driver.ts"]
-    task-example-appendable-stream["task-example-appendable-stream: runnable proof<br/>files: examples/appendable-stream/src/index.ts +2 more"]
+    task-core-run-closed-kind["task-core-run-closed-kind: add 'run.closed' kind<br/>files: packages/pangolin-core/src/audit.ts"]:::done
+    task-appendable-contracts["task-appendable-contracts: Run.openEnded + AppendChannel + close<br/>files: .../contracts/types.ts +1 more"]:::done
+    task-store-run-flags["task-store-run-flags: open/closed run flags<br/>files: .../contracts/runstate-store.ts +1 more"]:::done
+    task-orchestrator-extend-close["task-orchestrator-extend-close: closeRun + guards + seal-gate<br/>files: .../orchestrator.ts"]:::done
+    task-mailbox-extend-impl["task-mailbox-extend-impl: AppendChannel mailbox impl<br/>files: .../transport/storage-transport.ts"]:::done
+    task-serve-driver-poll["task-serve-driver-poll: poll extends + close branch<br/>files: .../serve/driver.ts"]:::done
+    task-example-appendable-stream["task-example-appendable-stream: runnable proof<br/>files: examples/appendable-stream/src/index.ts +2 more"]:::done
 
     task-core-run-closed-kind --> task-orchestrator-extend-close
     task-appendable-contracts --> task-orchestrator-extend-close
@@ -54,7 +54,7 @@ id: task-core-run-closed-kind
 depends_on: []
 files:
   - packages/pangolin-core/src/audit.ts
-status: pending
+status: done
 ```
 
 Add `'run.closed'` to the `AuditEntryKind` union so `closeRun` can emit a sealed lifecycle entry distinct from `run.completed`. Additive union member only.
@@ -97,7 +97,7 @@ depends_on: []
 files:
   - packages/pangolin-orchestrator/src/contracts/types.ts
   - packages/pangolin-orchestrator/src/contracts/submission-transport.ts
-status: pending
+status: done
 ```
 
 Define the producer-push contract surface, co-located in `contracts/`: the opt-in `Run.openEnded` flag, the `ExtendEnvelope` type, a NEW optional `AppendChannel` capability interface (mirroring `ControlChannel` — NOT methods on `SubmissionTransport`), and the additive `'close'` member on `ControlEnvelope.kind`.
@@ -178,7 +178,7 @@ depends_on: []
 files:
   - packages/pangolin-orchestrator/src/contracts/runstate-store.ts
   - packages/pangolin-orchestrator/src/runstate/sqlite.ts
-status: pending
+status: done
 ```
 
 Add OPTIONAL `markOpenEnded`/`isOpenEnded`/`markClosed`/`isClosed` to `RunStateStore` (optional, mirroring the `runningSinceMs?` back-compat-for-fakes precedent so the ~4 test fakes keep compiling) and implement them in the sole impl (`SqliteRunStateStore`) via a new `runs` table. Interface + only-impl of one capability are co-owned here (an interface method without its impl is an untestable stub).
@@ -252,7 +252,7 @@ id: task-orchestrator-extend-close
 depends_on: [task-core-run-closed-kind, task-appendable-contracts, task-store-run-flags]
 files:
   - packages/pangolin-orchestrator/src/orchestrator.ts
-status: pending
+status: done
 ```
 
 In `submitRun`, mark `openEnded` runs. Add a NEW `producerExtend` (the guarded producer push that delegates to the **unchanged** internal `extendRun`); add `closeRun` (sibling of `cancelRun`); make the seal-gate opt-in. The closed-guard lives on `producerExtend`, NOT on `extendRun` — `extendRun` stays untouched so the pattern layer's spawn (`orchestrator.ts:292`) still circles back after `close` and drains. All store flag calls null-coalesce (the methods are optional).
@@ -317,7 +317,7 @@ id: task-mailbox-extend-impl
 depends_on: [task-appendable-contracts]
 files:
   - packages/pangolin-orchestrator/src/transport/storage-transport.ts
-status: pending
+status: done
 ```
 
 Implement `AppendChannel` on `MailboxSubmissionTransport` over the existing `MailboxStore`, REUSING the module-level `enc`/`dec` helpers and the existing key-builder idiom. Each extend gets a unique, restart-safe mailbox key (`randomUUID`) under `{ns}/extends/{runId}/`; `pollExtends` surfaces that key as `seq` so the service can `ackExtend`. `close` needs no code here (it rides the existing control mailbox).
@@ -374,7 +374,7 @@ id: task-serve-driver-poll
 depends_on: [task-appendable-contracts, task-orchestrator-extend-close]
 files:
   - packages/pangolin-orchestrator/src/serve/driver.ts
-status: pending
+status: done
 ```
 
 Widen the `ServeOptions.transport` type to compose `Partial<AppendChannel>`, add one new poll step (`pollExtends` → `orchestrator.producerExtend`, ack by surfaced `seq`) before the existing control poll, and add a `close` branch to the existing control dispatch. The driver uses `producerExtend` (the guarded producer path), NOT `extendRun`. Best-effort + dead-letter, matching the existing submit/cancel handling.
@@ -390,11 +390,11 @@ Widen the `ServeOptions.transport` type to compose `Partial<AppendChannel>`, add
 for (const env of (await opts.transport.pollExtends?.()) ?? []) {
   try {
     opts.orchestrator.producerExtend(env.runId, env.items, env.actor, env.causeItemId);
-    if (env.seq) await opts.transport.ackExtend?.(env.runId, env.seq);
   } catch (err) {
-    onError(err);
-    await opts.transport.deadLetter(env.runId);
+    onError(err); // invalid/poison extend — surfaced. Do NOT deadLetter(runId): that targets the SUBMISSION envelope, not this extend.
   }
+  // ALWAYS remove the extend envelope by seq (success OR failure) so a poison extend never re-delivers.
+  if (env.seq) await opts.transport.ackExtend?.(env.runId, env.seq);
 }
 
 // (c) the EXISTING control loop (~:104-107) gains the close branch:
@@ -418,7 +418,7 @@ it("ingests a polled extend then a polled close, and the openEnded run seals", a
 
 - `ServeOptions.transport` composes `Partial<AppendChannel>`; a transport WITHOUT append support still type-checks and runs (the existing `Partial<ControlChannel>` posture is preserved).
 - Each iteration calls `pollExtends` (after `pollInbox`, before the control poll), routes each envelope to `orchestrator.producerExtend`, and `ackExtend`s by the envelope's `seq` on success.
-- A throwing extend is routed to `deadLetter` and does not abort the loop.
+- A throwing/invalid extend is surfaced via `onError` and the envelope is acked (removed by `seq`) so it does NOT re-deliver on the next poll; the loop is not aborted. (`deadLetter(runId)` targets the submission, not an extend envelope, so it MUST NOT be used for extends.)
 - The control dispatch routes `ctl.kind === 'close'` to `orchestrator.closeRun(ctl.target, ctl.actor)`; the `cancel` branch is unchanged.
 
 Test file: `packages/pangolin-orchestrator/test/serve-driver-appendable.test.ts`.
@@ -432,7 +432,7 @@ files:
   - examples/appendable-stream/src/index.ts
   - examples/appendable-stream/test/appendable-stream.test.ts
   - examples/appendable-stream/package.json
-status: pending
+status: done
 ```
 
 A driver-is-the-assertion example on a **patterned** open-ended queue: an external producer submits a seed run with `openEnded: true` to a queue bound to a curated pattern (e.g. `pipeline`), pushes items across several waves via `transport.extend`, the pattern routes them via `onTaskDone` (so ≥1 pushed item triggers a pattern spawn), sends a `close`, then reads the sealed bundle and verifies it `intact` over the grown+routed graph. Demonstrates pattern-aware extend end-to-end. Runs $0 in CI via the fake in-proc compute — mirrors `examples/offload-fanout` (+ `dogfood-gated`'s fake-arc for the scripted pattern outcome).
