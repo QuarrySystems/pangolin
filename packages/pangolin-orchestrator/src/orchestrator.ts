@@ -266,8 +266,10 @@ export class PangolinOrchestrator {
   closeRun(runId: string, actor?: string): void {
     if (this.store.getItems(runId).length === 0)
       throw new Error(`closeRun: unknown run '${runId}'`);
+    const alreadyClosed = this.store.isClosed?.(runId) ?? false;
     this.store.markClosed?.(runId); // idempotent
-    this.auditLog?.tryAppend({ kind: 'run.closed', runId, actor, at: new Date().toISOString() });
+    if (!alreadyClosed)
+      this.auditLog?.tryAppend({ kind: 'run.closed', runId, actor, at: new Date().toISOString() });
   }
 
   /** Apply the pattern phase for a single queue: for each unsealed (or all, if no auditLog) run,

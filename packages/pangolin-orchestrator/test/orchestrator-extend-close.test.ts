@@ -181,6 +181,9 @@ describe('closeRun', () => {
     orch.closeRun(runId, 'human:brett');
     expect(() => orch.closeRun(runId, 'human:brett')).not.toThrow();
 
+    // Second close must NOT emit a duplicate run.closed audit entry
+    expect(store.getAuditEntries(runId).filter((e) => e.kind === 'run.closed')).toHaveLength(1);
+
     store.close();
   });
 
