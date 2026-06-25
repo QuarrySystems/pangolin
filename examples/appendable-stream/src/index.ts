@@ -109,6 +109,8 @@ export async function runAppendableStream(): Promise<AppendableStreamResult> {
   await mkdir(mailboxDir, { recursive: true });
 
   const store = new SqliteRunStateStore();
+  const ac = new AbortController();
+  let servePromise: Promise<void> | undefined;
   try {
     // 1. Audit primitives (NoneSigner = no crypto overhead in CI).
     const anchor = new LocalAnchor(store);
@@ -126,8 +128,7 @@ export async function runAppendableStream(): Promise<AppendableStreamResult> {
 
     // 3. Transport + serve loop.
     const transport = new MailboxSubmissionTransport(new LocalDirMailbox(mailboxDir));
-    const ac = new AbortController();
-    const servePromise = serve({
+    servePromise = serve({
       orchestrator,
       transport,
       queue: 'patterned-q',
@@ -221,10 +222,6 @@ export async function runAppendableStream(): Promise<AppendableStreamResult> {
     }
     if (!auditBody) throw new Error('audit record never appeared in outbox within 5 s');
 
-    // 9. Stop the serve loop.
-    ac.abort();
-    await servePromise.catch(() => {});
-
     // 10. Assemble final item statuses from the orchestrator (still-live store).
     const items = orchestrator.getStatus(runId);
 
@@ -250,6 +247,8 @@ export async function runAppendableStream(): Promise<AppendableStreamResult> {
 
     return { bundle: verifiedBundle, items };
   } finally {
+    ac.abort();
+    await servePromise?.catch(() => {});
     store.close();
     await rm(runDir, { recursive: true, force: true }).catch(() => {});
   }
