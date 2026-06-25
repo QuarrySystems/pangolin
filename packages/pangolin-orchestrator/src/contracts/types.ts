@@ -50,6 +50,10 @@ export interface Run {
   id: string;
   queue: string;
   items: WorkItem[];
+  /** OPT-IN append-able mode. When true the run does NOT auto-seal at all-terminal —
+   *  it waits for an explicit close (the epoch boundary). Absent/false = today's
+   *  closed-plan behaviour (seal at all-terminal). */
+  openEnded?: boolean;
 }
 
 /** Persisted per-item run-state row (WorkItem + mutable state). */
