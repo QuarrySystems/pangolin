@@ -202,8 +202,13 @@ Expected: `✓ TAMPER-DETECTING` with all five rows green (chain / root /
 signature / anchor / handoff) and the full hash-linked ledger — including the
 `item.skipped` → `run.extended` sequence that IS the circle-back, readable
 straight off the proof. The committed `bundle.json` is a real run's sealed
-output (run id `dogfood-gated-run3`, 2026-06-07, $3.11 of real model spend):
-clone the repo and the command above works forever.
+output (plan `dogfood-gated-run3`, regenerated 2026-06-25). It was regenerated
+because the Agora→Pangolin rename rewrote `agora://`→`pangolin://` refs *inside*
+the original 2026-06-07 bundle, mutating the exact bytes its hash chain commits
+over and invalidating the seal (see the `.gitattributes` guard at the repo root).
+In this run the single fix attempt did not fully converge, so the re-gate stayed
+red and `announce~2` was skipped — the seal itself is still valid and verifies.
+Clone the repo and the command above works forever.
 
 ## After the run
 

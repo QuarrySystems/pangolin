@@ -3,11 +3,18 @@
   "manifests": [
     {
       "actor": "human:dogfood",
+      "authorization": {
+        "at": "2026-06-25T07:39:45.699Z",
+        "effectClass": "unknown",
+        "policyRef": "none",
+        "principal": "none",
+        "verdict": "not-evaluated"
+      },
       "executor": "dispatch",
       "executorManifest": {
         "capabilities": [
           {
-            "contentHash": "sha256:e236204592fc9f3780128b33c66296c2c021bdc75e72392245de9d95cd888559",
+            "contentHash": "sha256:9f3a5dd1f8f9738de67088cbb3dfa62d2a2fa18015715d7be7a39126347af6ac",
             "name": "docs-seeds"
           }
         ],
@@ -18,34 +25,41 @@
           "temperature": 0
         },
         "subagent": {
-          "contentHash": "sha256:2f18b73867b0c16787ef51da5df063c5b2e7dbbb60ee6ac9bc31b8d3046c53bf",
+          "contentHash": "sha256:8d7fccf214ada5284504d0e6b7f1468b9586f03bd1268f2e77954263223f0659",
           "name": "page-writer"
         },
         "workerImage": "ghcr.io/quarrysystems/pangolin-worker:main"
       },
-      "firedAt": "2026-06-07T15:46:06.364Z",
+      "firedAt": "2026-06-25T07:39:46.128Z",
       "itemId": "write-page",
-      "manifestHash": "sha256:1cd4c7f4830a7bd48a9ead8c6eb45596f2e01bfb74a89b0bb04e9e92ad7bf1d3",
+      "manifestHash": "sha256:485fd31538ceb22e1751ce45dc6953ef6770c57865c9876a863ee1d39e1ec86f",
       "parent": "run:dogfood-gated-run3",
       "runId": "dogfood-gated-run3",
       "schemaVersion": 1,
       "secretRefs": [
-        "local-secret://1e311e5d-42dc-40c1-a62d-09503e6cbd9c"
+        "local-secret://13e90ce5-cd47-4a5e-8a51-1627ba9aa830"
       ],
-      "submittedAt": "2026-06-07T15:46:03.821Z"
+      "submittedAt": "2026-06-25T07:39:43.709Z"
     },
     {
       "actor": "human:dogfood",
+      "authorization": {
+        "at": "2026-06-25T07:41:10.380Z",
+        "effectClass": "unknown",
+        "policyRef": "none",
+        "principal": "none",
+        "verdict": "not-evaluated"
+      },
       "executor": "dispatch",
       "executorManifest": {
         "capabilities": [
           {
-            "contentHash": "sha256:695986c4be2b846e00ee0d3371801542e2796fb7dcdac51bf0da681485ebed66",
-            "name": "source-seeds"
+            "contentHash": "sha256:d7b054d09106c2959088ca236c567c8c90d4dc2eca864f6192023a96f9ea9696",
+            "name": "apply-work-patch"
           },
           {
-            "contentHash": "sha256:a39d31318413268b24806841c459f3919e94573d005b079572de40c4fae33486",
-            "name": "apply-work-patch"
+            "contentHash": "sha256:ef7c248c5743948d8a6b2dff7d3704b04fc633a1b78cd989e8901a09c26653b6",
+            "name": "source-seeds"
           }
         ],
         "env": [],
@@ -55,37 +69,44 @@
           "temperature": 0
         },
         "subagent": {
-          "contentHash": "sha256:8ac4b0888c72f5e27f0a488c750ef0dfd40e0410c32a148a8d40a9ea006dd577",
+          "contentHash": "sha256:9de2659edd075f0834fe9034e73bf47ec982252d8ede2554bd902901de7d98e3",
           "name": "fact-checker"
         },
         "workerImage": "ghcr.io/quarrysystems/pangolin-worker:main"
       },
-      "firedAt": "2026-06-07T15:47:39.028Z",
+      "firedAt": "2026-06-25T07:41:10.759Z",
       "inputRefs": {
-        "work": "pangolin://dogfood-gated/artifact/04a150b9-dee4-458d-a27b-c69665e7cacd/sha256:140acbc4ab7132801852fffadd23a64ce2d087099a430577063f2401bcae482d"
+        "work": "pangolin://dogfood-gated/artifact/4c9df365-d3bc-4d2c-835c-8b1da2741541/sha256:2ae68df55618371e1f8f5ad7c0c95fed81cb6d4ca91a64068ce61ee20d31a8e1"
       },
       "itemId": "fact-check",
-      "manifestHash": "sha256:5844563235a262e3e0bdbc7de5c8303455301531c48fb041a628fa36a88c870a",
+      "manifestHash": "sha256:f22fb45f3588e69978b38e71c5c93e2c34d69acccc55463489a43212e9774d26",
       "parent": "run:dogfood-gated-run3",
       "runId": "dogfood-gated-run3",
       "schemaVersion": 1,
       "secretRefs": [
-        "local-secret://8c4d02be-8cf5-4c22-bddc-9454b44cbd1e"
+        "local-secret://50950329-7dfc-4758-bc95-48eae4d4b89a"
       ],
-      "submittedAt": "2026-06-07T15:46:03.821Z"
+      "submittedAt": "2026-06-25T07:39:43.709Z"
     },
     {
       "actor": "pattern:default",
+      "authorization": {
+        "at": "2026-06-25T07:46:21.031Z",
+        "effectClass": "unknown",
+        "policyRef": "none",
+        "principal": "none",
+        "verdict": "not-evaluated"
+      },
       "executor": "dispatch",
       "executorManifest": {
         "capabilities": [
           {
-            "contentHash": "sha256:695986c4be2b846e00ee0d3371801542e2796fb7dcdac51bf0da681485ebed66",
-            "name": "source-seeds"
+            "contentHash": "sha256:9f3a5dd1f8f9738de67088cbb3dfa62d2a2fa18015715d7be7a39126347af6ac",
+            "name": "docs-seeds"
           },
           {
-            "contentHash": "sha256:e236204592fc9f3780128b33c66296c2c021bdc75e72392245de9d95cd888559",
-            "name": "docs-seeds"
+            "contentHash": "sha256:ef7c248c5743948d8a6b2dff7d3704b04fc633a1b78cd989e8901a09c26653b6",
+            "name": "source-seeds"
           }
         ],
         "env": [],
@@ -95,38 +116,45 @@
           "temperature": 0
         },
         "subagent": {
-          "contentHash": "sha256:dacecb8fdc9ec2b86e6de7ce9666591731f303f64347451fa76f70c759b080ac",
+          "contentHash": "sha256:58bfbf7948cc411ea8c76d316a7719dd1f194644103fcf733186df2d156c51f4",
           "name": "page-fixer"
         },
         "workerImage": "ghcr.io/quarrysystems/pangolin-worker:main"
       },
-      "firedAt": "2026-06-07T15:51:14.245Z",
+      "firedAt": "2026-06-25T07:46:21.357Z",
       "inputRefs": {
-        "findings": "pangolin://dogfood-gated/artifact/e57dd457-2f6b-4e75-8ecd-e811ef572c93/sha256:15be93953281c8a4a848c8e4b7a4bb07e41c5de6388c3b97de26504477954afb",
-        "work": "pangolin://dogfood-gated/artifact/04a150b9-dee4-458d-a27b-c69665e7cacd/sha256:140acbc4ab7132801852fffadd23a64ce2d087099a430577063f2401bcae482d"
+        "findings": "pangolin://dogfood-gated/artifact/54523e7d-bf25-4b83-9167-f0a227696702/sha256:6f70dd660b627e2bf6fc882ce0c2f6f74f60a52cfd69e4c3a207f16e437afeeb",
+        "work": "pangolin://dogfood-gated/artifact/4c9df365-d3bc-4d2c-835c-8b1da2741541/sha256:2ae68df55618371e1f8f5ad7c0c95fed81cb6d4ca91a64068ce61ee20d31a8e1"
       },
       "itemId": "fact-check-fix-1",
-      "manifestHash": "sha256:8573e0fc750a51328544b75439d9347124a933ab076ee623b17df11bd6a34a3a",
+      "manifestHash": "sha256:d56f4c43c576908ee9f899477920a6fab99b0edc3e34d222eaaf73958d7ba919",
       "parent": "run:dogfood-gated-run3",
       "runId": "dogfood-gated-run3",
       "schemaVersion": 1,
       "secretRefs": [
-        "local-secret://11f2a502-65b0-4166-902b-0cf01469b572"
+        "local-secret://7d2d80d9-1906-431b-a443-2ae7f841bea0"
       ],
-      "submittedAt": "2026-06-07T15:51:11.864Z"
+      "submittedAt": "2026-06-25T07:46:19.021Z"
     },
     {
       "actor": "pattern:default",
+      "authorization": {
+        "at": "2026-06-25T07:52:47.387Z",
+        "effectClass": "unknown",
+        "policyRef": "none",
+        "principal": "none",
+        "verdict": "not-evaluated"
+      },
       "executor": "dispatch",
       "executorManifest": {
         "capabilities": [
           {
-            "contentHash": "sha256:695986c4be2b846e00ee0d3371801542e2796fb7dcdac51bf0da681485ebed66",
-            "name": "source-seeds"
+            "contentHash": "sha256:d7b054d09106c2959088ca236c567c8c90d4dc2eca864f6192023a96f9ea9696",
+            "name": "apply-work-patch"
           },
           {
-            "contentHash": "sha256:a39d31318413268b24806841c459f3919e94573d005b079572de40c4fae33486",
-            "name": "apply-work-patch"
+            "contentHash": "sha256:ef7c248c5743948d8a6b2dff7d3704b04fc633a1b78cd989e8901a09c26653b6",
+            "name": "source-seeds"
           }
         ],
         "env": [],
@@ -136,64 +164,24 @@
           "temperature": 0
         },
         "subagent": {
-          "contentHash": "sha256:8ac4b0888c72f5e27f0a488c750ef0dfd40e0410c32a148a8d40a9ea006dd577",
+          "contentHash": "sha256:9de2659edd075f0834fe9034e73bf47ec982252d8ede2554bd902901de7d98e3",
           "name": "fact-checker"
         },
         "workerImage": "ghcr.io/quarrysystems/pangolin-worker:main"
       },
-      "firedAt": "2026-06-07T15:55:33.922Z",
+      "firedAt": "2026-06-25T07:52:47.708Z",
       "inputRefs": {
-        "work": "pangolin://dogfood-gated/artifact/8aba618e-5149-409f-8995-683081c2b4d2/sha256:29fc92b548c6b0f5038b916d0ebd2e236d308db3f120eeab5c79c5da112db91a"
+        "work": "pangolin://dogfood-gated/artifact/ab2b0df0-c431-43ae-829c-7ba497ba515b/sha256:9b27f708056353f33a1929972b608a08a894f5d7a938cf7ad3abbc496204e15d"
       },
       "itemId": "fact-check~2",
-      "manifestHash": "sha256:16a94bcbee10fa185b1bfe304d2ca2b18409a74b505b6d4a6a96894e46d28815",
+      "manifestHash": "sha256:14ab5f6220e520eb20338da879a47ac4e11004f5aa27d0e6616e1819b4a46b05",
       "parent": "run:dogfood-gated-run3",
       "runId": "dogfood-gated-run3",
       "schemaVersion": 1,
       "secretRefs": [
-        "local-secret://63fb813f-53f4-4f0c-bfc3-e973f2f23be2"
+        "local-secret://8dea9ec1-257e-4713-ab6d-e0eaeb114457"
       ],
-      "submittedAt": "2026-06-07T15:51:11.864Z"
-    },
-    {
-      "actor": "pattern:default",
-      "executor": "dispatch",
-      "executorManifest": {
-        "capabilities": [
-          {
-            "contentHash": "sha256:4a6631aba4b77d587f492834a1c02296391ddabe7f6c21fdd38ebb646bf359e9",
-            "name": "announce-seeds"
-          },
-          {
-            "contentHash": "sha256:a39d31318413268b24806841c459f3919e94573d005b079572de40c4fae33486",
-            "name": "apply-work-patch"
-          }
-        ],
-        "env": [],
-        "model": {
-          "id": "standard",
-          "maxTokens": 0,
-          "temperature": 0
-        },
-        "subagent": {
-          "contentHash": "sha256:e5cb56d27c3bf261e8eaf171799d529581cb90cb6acb0b39ca03ee10db6053ac",
-          "name": "announcer"
-        },
-        "workerImage": "ghcr.io/quarrysystems/pangolin-worker:main"
-      },
-      "firedAt": "2026-06-07T15:58:41.435Z",
-      "inputRefs": {
-        "work": "pangolin://dogfood-gated/artifact/8aba618e-5149-409f-8995-683081c2b4d2/sha256:29fc92b548c6b0f5038b916d0ebd2e236d308db3f120eeab5c79c5da112db91a"
-      },
-      "itemId": "announce~2",
-      "manifestHash": "sha256:5243325ea06539fbda5245a28f892f09204150c9f6f941ec2e54e6bb1ec54b8e",
-      "parent": "run:dogfood-gated-run3",
-      "runId": "dogfood-gated-run3",
-      "schemaVersion": 1,
-      "secretRefs": [
-        "local-secret://7a4ccd38-f16f-4436-b858-741de0705f46"
-      ],
-      "submittedAt": "2026-06-07T15:51:11.864Z"
+      "submittedAt": "2026-06-25T07:46:19.021Z"
     }
   ],
   "auditLog": {
@@ -202,8 +190,8 @@
         "runId": "dogfood-gated-run3",
         "seq": 0,
         "kind": "run.submitted",
-        "at": "2026-06-07T15:46:05.835Z",
-        "entryHash": "7d525467f7bff29d53109e08673d9af9acb5f55640b68ac7601365e999544829",
+        "at": "2026-06-25T07:39:45.697Z",
+        "entryHash": "28a8764e3ea1f9f5034fa6c0b2267e9c77ae0b820f398c72a203f8af502ebc12",
         "prevHash": "",
         "actor": "human:dogfood"
       },
@@ -211,60 +199,63 @@
         "runId": "dogfood-gated-run3",
         "seq": 1,
         "kind": "item.fired",
-        "at": "2026-06-07T15:46:05.837Z",
-        "entryHash": "1b7a7f833292bf599ccb70c67b4a47040e379ede8d0d2c4125b11d2fb83bb067",
-        "prevHash": "7d525467f7bff29d53109e08673d9af9acb5f55640b68ac7601365e999544829",
+        "at": "2026-06-25T07:39:45.699Z",
+        "entryHash": "431d9b9fd75fa62d11c14b9c715178efcbaa67ca6a9421ec0eea77aa60579f15",
+        "prevHash": "28a8764e3ea1f9f5034fa6c0b2267e9c77ae0b820f398c72a203f8af502ebc12",
         "itemId": "write-page",
-        "manifestRef": "pangolin://dogfood-gated/manifest/04a150b9-dee4-458d-a27b-c69665e7cacd/sha256:879619bf33a29c140e9f447cae998651ea65d9e9ebb8a17af5a1ff006df5f32a"
+        "manifestRef": "pangolin://dogfood-gated/manifest/4c9df365-d3bc-4d2c-835c-8b1da2741541/sha256:ffee5097114dd757eb9c213d3592680877b473cf7cc5c36cdf081d5ddb124835"
       },
       {
         "runId": "dogfood-gated-run3",
         "seq": 2,
         "kind": "item.reconciled",
-        "at": "2026-06-07T15:47:38.625Z",
-        "entryHash": "2e207b3eddc24013ba14ef31f037b735e2a144cd82fe1cc8bcbb24167a672f26",
-        "prevHash": "1b7a7f833292bf599ccb70c67b4a47040e379ede8d0d2c4125b11d2fb83bb067",
+        "at": "2026-06-25T07:41:10.380Z",
+        "entryHash": "25715cb49bc5aebd872c26e8aa91f326e2ccb7ef8e8ca4f51a353afe39a9549d",
+        "prevHash": "431d9b9fd75fa62d11c14b9c715178efcbaa67ca6a9421ec0eea77aa60579f15",
         "itemId": "write-page",
         "status": "done",
-        "resultRef": "pangolin://dogfood-gated/artifact/04a150b9-dee4-458d-a27b-c69665e7cacd/sha256:140acbc4ab7132801852fffadd23a64ce2d087099a430577063f2401bcae482d"
+        "resultRef": "pangolin://dogfood-gated/artifact/4c9df365-d3bc-4d2c-835c-8b1da2741541/sha256:2ae68df55618371e1f8f5ad7c0c95fed81cb6d4ca91a64068ce61ee20d31a8e1"
       },
       {
         "runId": "dogfood-gated-run3",
         "seq": 3,
         "kind": "item.fired",
-        "at": "2026-06-07T15:47:38.625Z",
-        "entryHash": "f611f6a7497f0f15c23f46b78e74fd5f11de05a2f8220175837dfb7207afa402",
-        "prevHash": "2e207b3eddc24013ba14ef31f037b735e2a144cd82fe1cc8bcbb24167a672f26",
+        "at": "2026-06-25T07:41:10.380Z",
+        "entryHash": "c1508b91f9a7a9d2ff469555e8ede355a446619c3469feafb8cbda84a0c0c7f8",
+        "prevHash": "25715cb49bc5aebd872c26e8aa91f326e2ccb7ef8e8ca4f51a353afe39a9549d",
         "itemId": "fact-check",
-        "manifestRef": "pangolin://dogfood-gated/manifest/e57dd457-2f6b-4e75-8ecd-e811ef572c93/sha256:0ef04d94690c96308cd2e0bb5933bb09925945af99b6289c08852b937a2c0ab1"
+        "manifestRef": "pangolin://dogfood-gated/manifest/54523e7d-bf25-4b83-9167-f0a227696702/sha256:c7edfba26a6f06c9cd2ee438e0ddda4c7fbb9ca11c286ea76da692752b0a10d0"
       },
       {
         "runId": "dogfood-gated-run3",
         "seq": 4,
         "kind": "item.reconciled",
-        "at": "2026-06-07T15:51:11.859Z",
-        "entryHash": "9218a2a525a3e4736e84c9aa53ec4fb95ae04a3d364f2e9732022fae6fa0c33f",
-        "prevHash": "f611f6a7497f0f15c23f46b78e74fd5f11de05a2f8220175837dfb7207afa402",
+        "at": "2026-06-25T07:46:19.013Z",
+        "entryHash": "c5ed7de364e726b68dd7ce24ea3365341f306870408c5e750f02cf4b51e8d9cb",
+        "prevHash": "c1508b91f9a7a9d2ff469555e8ede355a446619c3469feafb8cbda84a0c0c7f8",
         "itemId": "fact-check",
         "status": "done",
-        "resultRef": "pangolin://dogfood-gated/artifact/e57dd457-2f6b-4e75-8ecd-e811ef572c93/sha256:80ce6a80f681aba48fe67ab8ba7c148214ee341ddac4be0780bd88ca8439991f"
+        "resultRef": "pangolin://dogfood-gated/artifact/54523e7d-bf25-4b83-9167-f0a227696702/sha256:2f4bd60d6a8616733fdd0df810c1e36b0fb667a529c30d02d79e237de7c79e6b",
+        "outputRefs": {
+          "findings": "pangolin://dogfood-gated/artifact/54523e7d-bf25-4b83-9167-f0a227696702/sha256:6f70dd660b627e2bf6fc882ce0c2f6f74f60a52cfd69e4c3a207f16e437afeeb"
+        }
       },
       {
         "runId": "dogfood-gated-run3",
         "seq": 5,
         "kind": "item.skipped",
-        "at": "2026-06-07T15:51:11.859Z",
-        "entryHash": "1f3b2f359c04aa80a8c3635f87f4b4f4834f822b26e4e9a1acf6c8e4117fd808",
-        "prevHash": "9218a2a525a3e4736e84c9aa53ec4fb95ae04a3d364f2e9732022fae6fa0c33f",
+        "at": "2026-06-25T07:46:19.013Z",
+        "entryHash": "a5b9b7d45be18e87a4e1290bd133aee0ce1bcfb607801ff3fa165c7ffe317cac",
+        "prevHash": "c5ed7de364e726b68dd7ce24ea3365341f306870408c5e750f02cf4b51e8d9cb",
         "itemId": "announce"
       },
       {
         "runId": "dogfood-gated-run3",
         "seq": 6,
         "kind": "run.extended",
-        "at": "2026-06-07T15:51:11.864Z",
-        "entryHash": "a993347868082071e6e7c504eacb15d148c5b38440df0aae94ca3e76778bcfc5",
-        "prevHash": "1f3b2f359c04aa80a8c3635f87f4b4f4834f822b26e4e9a1acf6c8e4117fd808",
+        "at": "2026-06-25T07:46:19.021Z",
+        "entryHash": "91a58d37a028c71e7a8dfbabe5020919da7b3705f32587b5fa2a6ad3b6506b72",
+        "prevHash": "a5b9b7d45be18e87a4e1290bd133aee0ce1bcfb607801ff3fa165c7ffe317cac",
         "itemId": "fact-check",
         "actor": "pattern:default"
       },
@@ -272,181 +263,174 @@
         "runId": "dogfood-gated-run3",
         "seq": 7,
         "kind": "item.fired",
-        "at": "2026-06-07T15:51:13.871Z",
-        "entryHash": "e42a0e8bfc18573db72c2633212f7e6f4c4e8c329db233228545b7cc9144fc7e",
-        "prevHash": "a993347868082071e6e7c504eacb15d148c5b38440df0aae94ca3e76778bcfc5",
+        "at": "2026-06-25T07:46:21.031Z",
+        "entryHash": "2b7582725b306361321270829ccac5e43fe69d9a0d4d4c65313c91e83e57c1e8",
+        "prevHash": "91a58d37a028c71e7a8dfbabe5020919da7b3705f32587b5fa2a6ad3b6506b72",
         "itemId": "fact-check-fix-1",
-        "manifestRef": "pangolin://dogfood-gated/manifest/8aba618e-5149-409f-8995-683081c2b4d2/sha256:d1298cef1b5ccf47cbec86a604d05d2404e1332311cd47b75e00f8dcba35b299"
+        "manifestRef": "pangolin://dogfood-gated/manifest/ab2b0df0-c431-43ae-829c-7ba497ba515b/sha256:9bddf42ebccf9a2d8e241a9a6f5aa0251f4826c41bb07df00fea76646a5a793d"
       },
       {
         "runId": "dogfood-gated-run3",
         "seq": 8,
         "kind": "item.reconciled",
-        "at": "2026-06-07T15:55:33.541Z",
-        "entryHash": "a2907dfae3520e14f2153601ae9bc9adc9345504f767a72c14d7a2cac8b9b49d",
-        "prevHash": "e42a0e8bfc18573db72c2633212f7e6f4c4e8c329db233228545b7cc9144fc7e",
+        "at": "2026-06-25T07:52:47.387Z",
+        "entryHash": "48db13b1d91bc9e6bf2fbdc5a5093130f0de87b9a6bc71741e2e9a0f25e2e7a0",
+        "prevHash": "2b7582725b306361321270829ccac5e43fe69d9a0d4d4c65313c91e83e57c1e8",
         "itemId": "fact-check-fix-1",
         "status": "done",
-        "resultRef": "pangolin://dogfood-gated/artifact/8aba618e-5149-409f-8995-683081c2b4d2/sha256:29fc92b548c6b0f5038b916d0ebd2e236d308db3f120eeab5c79c5da112db91a"
+        "resultRef": "pangolin://dogfood-gated/artifact/ab2b0df0-c431-43ae-829c-7ba497ba515b/sha256:9b27f708056353f33a1929972b608a08a894f5d7a938cf7ad3abbc496204e15d"
       },
       {
         "runId": "dogfood-gated-run3",
         "seq": 9,
         "kind": "item.fired",
-        "at": "2026-06-07T15:55:33.541Z",
-        "entryHash": "8f277ee5c32b2efb385291f62c88c6b0995b2fe0c84f68c03d13a4a333a5fffb",
-        "prevHash": "a2907dfae3520e14f2153601ae9bc9adc9345504f767a72c14d7a2cac8b9b49d",
+        "at": "2026-06-25T07:52:47.387Z",
+        "entryHash": "91f199ec9edaf1e3421e4f305cc6e1442122d0facdedbade10447e5af6899888",
+        "prevHash": "48db13b1d91bc9e6bf2fbdc5a5093130f0de87b9a6bc71741e2e9a0f25e2e7a0",
         "itemId": "fact-check~2",
-        "manifestRef": "pangolin://dogfood-gated/manifest/947386aa-4d22-484c-bea6-6fb2af99f14c/sha256:1c16983b71970ffb24f546263821768b0e5420f616b8ace096780e4f4156945f"
+        "manifestRef": "pangolin://dogfood-gated/manifest/bfa52e70-5ff4-4f5f-b35b-bfa07b41531e/sha256:aba1d50d3ee6375826587af378de4251a433ec35f7ce7a90cb9d2fbff8d37499"
       },
       {
         "runId": "dogfood-gated-run3",
         "seq": 10,
         "kind": "item.reconciled",
-        "at": "2026-06-07T15:58:41.036Z",
-        "entryHash": "d72ded9fc0ab4589b9ade90d561a2994560bdb82cf9f991cd7ad257b7146fda4",
-        "prevHash": "8f277ee5c32b2efb385291f62c88c6b0995b2fe0c84f68c03d13a4a333a5fffb",
+        "at": "2026-06-25T07:58:09.721Z",
+        "entryHash": "88463baa6796b4ab2895e5a746f294bb68732c332d225d086bef2a31bcb3c14f",
+        "prevHash": "91f199ec9edaf1e3421e4f305cc6e1442122d0facdedbade10447e5af6899888",
         "itemId": "fact-check~2",
-        "status": "done"
+        "status": "done",
+        "resultRef": "pangolin://dogfood-gated/artifact/bfa52e70-5ff4-4f5f-b35b-bfa07b41531e/sha256:b81be6b63547555a7d7d09ccf84d73e09b2eacf41922fe6f3c6415b9db25fcbb",
+        "outputRefs": {
+          "findings": "pangolin://dogfood-gated/artifact/bfa52e70-5ff4-4f5f-b35b-bfa07b41531e/sha256:e9913893d0852fefc69eaba263730f7d035185c939e4840d7450c1a8f882e9b5"
+        }
       },
       {
         "runId": "dogfood-gated-run3",
         "seq": 11,
-        "kind": "item.fired",
-        "at": "2026-06-07T15:58:41.036Z",
-        "entryHash": "a05de48f899e44c1b101a85be566045d0f3358465326147f540a3352c4325615",
-        "prevHash": "d72ded9fc0ab4589b9ade90d561a2994560bdb82cf9f991cd7ad257b7146fda4",
-        "itemId": "announce~2",
-        "manifestRef": "pangolin://dogfood-gated/manifest/4efb91fa-52c5-4b61-ba57-81c034e51bfd/sha256:7aa69c21af8bd3700cf0f2f6c8db2088934b698d89492be210b0a8417790c4f4"
+        "kind": "item.skipped",
+        "at": "2026-06-25T07:58:09.721Z",
+        "entryHash": "424116c5b20feea7b1963e33ec21f9fe5666e9d7080c286ff510c8b748a86735",
+        "prevHash": "88463baa6796b4ab2895e5a746f294bb68732c332d225d086bef2a31bcb3c14f",
+        "itemId": "announce~2"
       },
       {
         "runId": "dogfood-gated-run3",
         "seq": 12,
-        "kind": "item.reconciled",
-        "at": "2026-06-07T15:59:51.855Z",
-        "entryHash": "a5a3d01dae435c0fe2656f90dd592b23937653580ef41301aff232a4bd07a3e4",
-        "prevHash": "a05de48f899e44c1b101a85be566045d0f3358465326147f540a3352c4325615",
-        "itemId": "announce~2",
-        "status": "done"
-      },
-      {
-        "runId": "dogfood-gated-run3",
-        "seq": 13,
         "kind": "run.completed",
-        "at": "2026-06-07T15:59:51.860Z",
-        "entryHash": "08f9a5706451d9dafc9e761a955fe8cad00c1ab63faabf18ce9b49437298aa61",
-        "prevHash": "a5a3d01dae435c0fe2656f90dd592b23937653580ef41301aff232a4bd07a3e4"
+        "at": "2026-06-25T07:58:09.725Z",
+        "entryHash": "5397ef044b3ea1352eb6b8f3dbf09ef9383d7cb18ab6f028be5207fcb777b3c3",
+        "prevHash": "424116c5b20feea7b1963e33ec21f9fe5666e9d7080c286ff510c8b748a86735"
       }
     ],
     "root": {
       "epochId": "dogfood-gated-run3",
       "root": {
-        "0": 101,
-        "1": 25,
-        "2": 48,
-        "3": 147,
-        "4": 47,
-        "5": 137,
-        "6": 123,
+        "0": 234,
+        "1": 232,
+        "2": 10,
+        "3": 201,
+        "4": 207,
+        "5": 56,
+        "6": 83,
         "7": 111,
-        "8": 87,
-        "9": 217,
-        "10": 242,
-        "11": 255,
-        "12": 197,
-        "13": 3,
-        "14": 123,
-        "15": 90,
-        "16": 62,
-        "17": 33,
-        "18": 53,
-        "19": 161,
-        "20": 0,
-        "21": 182,
-        "22": 196,
-        "23": 45,
-        "24": 123,
-        "25": 91,
-        "26": 5,
-        "27": 36,
-        "28": 222,
-        "29": 109,
-        "30": 90,
-        "31": 5
+        "8": 207,
+        "9": 67,
+        "10": 43,
+        "11": 220,
+        "12": 236,
+        "13": 79,
+        "14": 45,
+        "15": 220,
+        "16": 233,
+        "17": 25,
+        "18": 56,
+        "19": 170,
+        "20": 38,
+        "21": 66,
+        "22": 191,
+        "23": 254,
+        "24": 147,
+        "25": 144,
+        "26": 170,
+        "27": 145,
+        "28": 0,
+        "29": 207,
+        "30": 24,
+        "31": 69
       },
       "receipt": {
         "anchorId": "local",
         "epochId": "dogfood-gated-run3",
         "guarantee": "detect",
-        "at": 1780847991861
+        "at": 1782374289727
       },
       "signature": {
         "alg": "ed25519",
         "bytes": {
-          "0": 165,
-          "1": 196,
-          "2": 185,
-          "3": 245,
-          "4": 210,
-          "5": 235,
-          "6": 175,
-          "7": 75,
-          "8": 212,
-          "9": 25,
-          "10": 53,
-          "11": 248,
-          "12": 79,
-          "13": 136,
-          "14": 2,
-          "15": 194,
-          "16": 86,
-          "17": 148,
-          "18": 97,
-          "19": 78,
-          "20": 10,
-          "21": 208,
-          "22": 178,
-          "23": 6,
-          "24": 10,
-          "25": 73,
-          "26": 126,
-          "27": 186,
-          "28": 49,
-          "29": 234,
-          "30": 222,
-          "31": 161,
-          "32": 180,
-          "33": 112,
-          "34": 199,
-          "35": 143,
-          "36": 186,
-          "37": 70,
-          "38": 26,
-          "39": 88,
-          "40": 7,
-          "41": 186,
-          "42": 99,
-          "43": 65,
-          "44": 210,
-          "45": 224,
-          "46": 130,
-          "47": 239,
-          "48": 95,
-          "49": 148,
-          "50": 254,
-          "51": 248,
-          "52": 226,
-          "53": 84,
-          "54": 36,
-          "55": 122,
-          "56": 69,
-          "57": 227,
-          "58": 86,
-          "59": 104,
-          "60": 150,
-          "61": 100,
-          "62": 5,
-          "63": 10
+          "0": 147,
+          "1": 158,
+          "2": 231,
+          "3": 102,
+          "4": 203,
+          "5": 229,
+          "6": 42,
+          "7": 31,
+          "8": 249,
+          "9": 243,
+          "10": 204,
+          "11": 207,
+          "12": 33,
+          "13": 245,
+          "14": 113,
+          "15": 114,
+          "16": 107,
+          "17": 186,
+          "18": 53,
+          "19": 163,
+          "20": 76,
+          "21": 166,
+          "22": 210,
+          "23": 157,
+          "24": 8,
+          "25": 177,
+          "26": 149,
+          "27": 89,
+          "28": 200,
+          "29": 135,
+          "30": 110,
+          "31": 34,
+          "32": 33,
+          "33": 70,
+          "34": 162,
+          "35": 226,
+          "36": 172,
+          "37": 110,
+          "38": 72,
+          "39": 234,
+          "40": 162,
+          "41": 75,
+          "42": 115,
+          "43": 27,
+          "44": 145,
+          "45": 39,
+          "46": 119,
+          "47": 18,
+          "48": 54,
+          "49": 170,
+          "50": 214,
+          "51": 7,
+          "52": 245,
+          "53": 237,
+          "54": 107,
+          "55": 157,
+          "56": 44,
+          "57": 106,
+          "58": 121,
+          "59": 6,
+          "60": 242,
+          "61": 214,
+          "62": 182,
+          "63": 6
         },
         "keyRef": "local"
       }
@@ -457,17 +441,17 @@
       "id": "write-page",
       "status": "done",
       "actor": "human:dogfood",
-      "resultRef": "pangolin://dogfood-gated/artifact/04a150b9-dee4-458d-a27b-c69665e7cacd/sha256:140acbc4ab7132801852fffadd23a64ce2d087099a430577063f2401bcae482d",
-      "manifestRef": "pangolin://dogfood-gated/manifest/04a150b9-dee4-458d-a27b-c69665e7cacd/sha256:879619bf33a29c140e9f447cae998651ea65d9e9ebb8a17af5a1ff006df5f32a"
+      "resultRef": "pangolin://dogfood-gated/artifact/4c9df365-d3bc-4d2c-835c-8b1da2741541/sha256:2ae68df55618371e1f8f5ad7c0c95fed81cb6d4ca91a64068ce61ee20d31a8e1",
+      "manifestRef": "pangolin://dogfood-gated/manifest/4c9df365-d3bc-4d2c-835c-8b1da2741541/sha256:ffee5097114dd757eb9c213d3592680877b473cf7cc5c36cdf081d5ddb124835"
     },
     {
       "id": "fact-check",
       "status": "done",
       "actor": "human:dogfood",
-      "resultRef": "pangolin://dogfood-gated/artifact/e57dd457-2f6b-4e75-8ecd-e811ef572c93/sha256:80ce6a80f681aba48fe67ab8ba7c148214ee341ddac4be0780bd88ca8439991f",
-      "manifestRef": "pangolin://dogfood-gated/manifest/e57dd457-2f6b-4e75-8ecd-e811ef572c93/sha256:0ef04d94690c96308cd2e0bb5933bb09925945af99b6289c08852b937a2c0ab1",
+      "resultRef": "pangolin://dogfood-gated/artifact/54523e7d-bf25-4b83-9167-f0a227696702/sha256:2f4bd60d6a8616733fdd0df810c1e36b0fb667a529c30d02d79e237de7c79e6b",
+      "manifestRef": "pangolin://dogfood-gated/manifest/54523e7d-bf25-4b83-9167-f0a227696702/sha256:c7edfba26a6f06c9cd2ee438e0ddda4c7fbb9ca11c286ea76da692752b0a10d0",
       "outputRefs": {
-        "findings": "pangolin://dogfood-gated/artifact/e57dd457-2f6b-4e75-8ecd-e811ef572c93/sha256:15be93953281c8a4a848c8e4b7a4bb07e41c5de6388c3b97de26504477954afb"
+        "findings": "pangolin://dogfood-gated/artifact/54523e7d-bf25-4b83-9167-f0a227696702/sha256:6f70dd660b627e2bf6fc882ce0c2f6f74f60a52cfd69e4c3a207f16e437afeeb"
       }
     },
     {
@@ -479,20 +463,23 @@
       "id": "fact-check-fix-1",
       "status": "done",
       "actor": "pattern:default",
-      "resultRef": "pangolin://dogfood-gated/artifact/8aba618e-5149-409f-8995-683081c2b4d2/sha256:29fc92b548c6b0f5038b916d0ebd2e236d308db3f120eeab5c79c5da112db91a",
-      "manifestRef": "pangolin://dogfood-gated/manifest/8aba618e-5149-409f-8995-683081c2b4d2/sha256:d1298cef1b5ccf47cbec86a604d05d2404e1332311cd47b75e00f8dcba35b299"
+      "resultRef": "pangolin://dogfood-gated/artifact/ab2b0df0-c431-43ae-829c-7ba497ba515b/sha256:9b27f708056353f33a1929972b608a08a894f5d7a938cf7ad3abbc496204e15d",
+      "manifestRef": "pangolin://dogfood-gated/manifest/ab2b0df0-c431-43ae-829c-7ba497ba515b/sha256:9bddf42ebccf9a2d8e241a9a6f5aa0251f4826c41bb07df00fea76646a5a793d"
     },
     {
       "id": "fact-check~2",
       "status": "done",
       "actor": "pattern:default",
-      "manifestRef": "pangolin://dogfood-gated/manifest/947386aa-4d22-484c-bea6-6fb2af99f14c/sha256:1c16983b71970ffb24f546263821768b0e5420f616b8ace096780e4f4156945f"
+      "resultRef": "pangolin://dogfood-gated/artifact/bfa52e70-5ff4-4f5f-b35b-bfa07b41531e/sha256:b81be6b63547555a7d7d09ccf84d73e09b2eacf41922fe6f3c6415b9db25fcbb",
+      "manifestRef": "pangolin://dogfood-gated/manifest/bfa52e70-5ff4-4f5f-b35b-bfa07b41531e/sha256:aba1d50d3ee6375826587af378de4251a433ec35f7ce7a90cb9d2fbff8d37499",
+      "outputRefs": {
+        "findings": "pangolin://dogfood-gated/artifact/bfa52e70-5ff4-4f5f-b35b-bfa07b41531e/sha256:e9913893d0852fefc69eaba263730f7d035185c939e4840d7450c1a8f882e9b5"
+      }
     },
     {
       "id": "announce~2",
-      "status": "done",
-      "actor": "pattern:default",
-      "manifestRef": "pangolin://dogfood-gated/manifest/4efb91fa-52c5-4b61-ba57-81c034e51bfd/sha256:7aa69c21af8bd3700cf0f2f6c8db2088934b698d89492be210b0a8417790c4f4"
+      "status": "skipped",
+      "actor": "pattern:default"
     }
   ],
   "report": {
@@ -501,6 +488,7 @@
     "guarantee": "detect",
     "intact": true,
     "claim": "tamper-detecting",
+    "timeTier": "asserted",
     "checks": {
       "chain": {
         "ok": true
@@ -515,6 +503,9 @@
         "ok": true
       },
       "handoff": {
+        "ok": "n/a"
+      },
+      "time": {
         "ok": "n/a"
       }
     }

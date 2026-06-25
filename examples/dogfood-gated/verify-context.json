@@ -1,20 +1,20 @@
 {
   "runId": "dogfood-gated-run3",
-  "publicKey": "MCowBQYDK2VwAyEAvf9816TkKIyai4U3+N/EzC/q8U0e1gC7codPnnx5chs=",
+  "publicKey": "MCowBQYDK2VwAyEAUrLLmBcsP7fkfiiCmA3FD7zQ4HuhPbn8EiSw8Hb8DEg=",
   "anchoredRoots": [
     {
       "epochId": "dogfood-gated-run3",
-      "root": "ZRkwky+Je29X2fL/xQN7Wj4hNaEAtsQte1sFJN5tWgU=",
+      "root": "6ugKyc84U2/PQyvc7E8t3OkZOKomQr/+k5CqkQDPGEU=",
       "signature": {
         "alg": "ed25519",
         "keyRef": "local",
-        "bytes": "pcS59dLrr0vUGTX4T4gCwlaUYU4K0LIGCkl+ujHq3qG0cMePukYaWAe6Y0HS4ILvX5T++OJUJHpF41ZolmQFCg=="
+        "bytes": "k57nZsvlKh/588zPIfVxcmu6NaNMptKdCLGVWciHbiIhRqLirG5I6qJLcxuRJ3cSNqrWB/Xta50sankG8ta2Bg=="
       },
       "receipt": {
         "anchorId": "local",
         "epochId": "dogfood-gated-run3",
         "guarantee": "detect",
-        "at": 1780847991861
+        "at": 1782374289727
       }
     }
   ]

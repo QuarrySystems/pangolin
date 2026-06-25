@@ -1,0 +1,11 @@
+# Sealed audit-proof artifacts are byte-immutable: their hash chain commits over
+# the exact bytes of each entry. Any line-ending conversion (autocrlf on Windows
+# checkout) or in-place text substitution (codemods, renames) changes those bytes
+# and invalidates the seal — `pangolin verify` then correctly reports TAMPERED.
+#
+# Marking them `-text` disables EOL conversion so they round-trip byte-for-byte on
+# every platform. Do NOT run repo-wide find-replace over these files; regenerate
+# them from a fresh run instead. (Background: the Agora->Pangolin rename rewrote
+# `agora://`->`pangolin://` inside a committed bundle and broke its verify.)
+examples/**/bundle.json -text
+examples/**/verify-context.json -text
