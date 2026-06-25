@@ -12,6 +12,7 @@
 import { mkdtemp, rm, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import {
   PangolinOrchestrator,
   SqliteRunStateStore,
@@ -279,12 +280,8 @@ async function main(): Promise<void> {
   }
 }
 
-// Run when invoked directly (not imported by the test).
-if (
-  typeof process !== 'undefined' &&
-  process.argv[1] !== undefined &&
-  // Compare by suffix to handle tsx/ts-node wrappers.
-  process.argv[1].replace(/\\/g, '/').endsWith('src/index')
-) {
+// Run when invoked directly (not imported by the test). Standard ESM main-module
+// check: the module URL equals the file URL of the script node/tsx was given.
+if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main();
 }
