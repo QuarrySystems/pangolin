@@ -173,6 +173,9 @@ const orchestrator = new PangolinOrchestrator({
       client,
       target: 'local',
       workerImage,
+      // One Claude credential, staged through the per-dispatch secret lane.
+      // The `claudeAuthSecrets()` helper builds this map and also supports a
+      // Pro/Max subscription token — see "Authentication" below.
       secrets: {
         ANTHROPIC_API_KEY: { inline: process.env.ANTHROPIC_API_KEY ?? '' },
       },
@@ -200,6 +203,46 @@ export const orch = {
 };
 ```
 
+## Authentication: API key or subscription
+
+The stock worker image runs the `claude-code` runtime adapter, which spawns the
+`claude` binary. That binary needs a Claude credential, supplied through the
+per-dispatch [secret lane](#targeting-a-self-hosted--s3-compatible-store-minio-localstack)
+as one of two mutually-exclusive env vars:
+
+| Lane | Env var | Billing | Mint it |
+|---|---|---|---|
+| API key | `ANTHROPIC_API_KEY` | Your Anthropic **API** organization, per token | [console.anthropic.com](https://console.anthropic.com/) |
+| Subscription | `CLAUDE_CODE_OAUTH_TOKEN` | Your **Claude Pro/Max subscription** (no API credits) | `claude setup-token` on a machine with a browser; paste the `sk-ant-oat01-…` token |
+
+`claudeAuthSecrets(env = process.env)` (from `@quarry-systems/pangolin-core`)
+builds the `secrets` map for you and returns `{ mode, credentialName, present,
+secrets }`:
+
+```javascript
+import { claudeAuthSecrets } from '@quarry-systems/pangolin-core';
+
+const auth = claudeAuthSecrets();      // reads process.env
+// auth.mode           → 'subscription' | 'api-key'
+// auth.present        → false when the chosen credential is empty (gate your live run on this)
+// auth.secrets        → pass straight to DispatchExecutor's `secrets`
+```
+
+**It stages exactly one credential** — never both. This matters: the `claude`
+CLI ranks `ANTHROPIC_API_KEY` *above* `CLAUDE_CODE_OAUTH_TOKEN`, so if both
+reached the worker the API key would silently win and bill credits. Selection:
+
+- `PANGOLIN_CLAUDE_AUTH=subscription|api-key` forces a lane.
+- Otherwise it auto-detects: a non-empty `CLAUDE_CODE_OAUTH_TOKEN` → subscription;
+  else `ANTHROPIC_API_KEY`.
+
+:::caution
+Anthropic's docs don't prohibit subscription auth for automation, but running
+many parallel sandboxed agents on a personal Pro/Max subscription is a fair-use
+grey area. It's fine for local development and dogfooding; confirm with Anthropic
+support before relying on it for scaled or sustained automated workloads.
+:::
+
 ## Config keys reference
 
 The `PangolinClient` constructor options are documented in full on the
@@ -221,13 +264,13 @@ example is [`examples/offload-minio/`](https://github.com/quarrysystems/pangolin
 |---|---|---|
 | `endpoint`, `forcePathStyle`, `region` | `new S3StorageProvider({ bucket, endpoint, forcePathStyle: true, region })` | Point content-addressed storage at the custom endpoint (or inject a pre-built `client`). |
 | `S3Mailbox` | `new MailboxSubmissionTransport(new S3Mailbox(s3MailboxClient))` | The submission inbox/outbox over S3 (the cross-machine analogue of `LocalDirMailbox`). |
-| `AwsSecretStore` + `AWS_ENDPOINT_URL_SECRETS_MANAGER` | `secretStores: { aws: new AwsSecretStore() }` + the endpoint env on serve & workers | Secrets (e.g. the API key) staged into Secrets Manager — LocalStack for self-host, real SM on AWS. Network-reachable, so it crosses the serve→worker boundary; refs-only in the audit. |
+| `AwsSecretStore` + `AWS_ENDPOINT_URL_SECRETS_MANAGER` | `secretStores: { aws: new AwsSecretStore() }` + the endpoint env on serve & workers | Secrets (e.g. the Claude credential — API key or subscription token) staged into Secrets Manager — LocalStack for self-host, real SM on AWS. Network-reachable, so it crosses the serve→worker boundary; refs-only in the audit. |
 | `PANGOLIN_S3_ENDPOINT` (+ `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_REGION`) | **worker container env** | The worker builds its own S3 client at boot to fetch bundles/upload patches; it reads these to reach the same endpoint. |
 | `extraEnv` | `new LocalDockerProvider({ extraEnv: { PANGOLIN_S3_ENDPOINT, AWS_*, AWS_ENDPOINT_URL_SECRETS_MANAGER } })` | Delivers the worker-boot env above (S3 bootstrap + the Secrets Manager endpoint) to every launched worker container. |
 
 The S3 endpoint/creds **must** reach the worker as container env (via `extraEnv`),
 not via a bundle — the worker needs S3 access *before* it can resolve anything else.
-**Secrets** (the API key) go the proper secret lane — staged into a
+**Secrets** (the Claude credential) go the proper secret lane — staged into a
 network-reachable `SecretStore` (Secrets Manager) and resolved by the worker over
 the wire, **not** a bundle value. Non-secret config travels as
 [env bundles](/pangolin/explanation/how-offload-runs/#running-serve-in-a-container-self-hosted-delivery)

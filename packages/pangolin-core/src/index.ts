@@ -8,6 +8,7 @@ export * from './errors.js';
 export * from './uri.js';
 export * from './content-hash.js';
 export * from './refs.js';
+export * from './claude-auth.js';
 export * from './lifecycle.js';
 export * from './trace.js';
 export * from './telemetry.js';

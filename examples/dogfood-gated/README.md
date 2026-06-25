@@ -46,8 +46,15 @@ would fail to apply it.
 ## Prerequisites
 
 - **Docker reachable** (local Desktop, or `DOCKER_HOST` pointing to a remote daemon).
-- **`ANTHROPIC_API_KEY`** — either via `pnpm start:env` (reads `../../.env`) or
-  exported in your shell.
+- **A Claude credential** — either via `pnpm start:env` (reads `../../.env`) or
+  exported in your shell. Two lanes, auto-detected:
+  - `ANTHROPIC_API_KEY` — bills API credits.
+  - `CLAUDE_CODE_OAUTH_TOKEN` — bills a Claude Pro/Max **subscription** (no API
+    credits). Mint it once on a machine with a browser via `claude setup-token`,
+    then put it in `../../.env`. When both are set the subscription wins; force a
+    lane with `PANGOLIN_CLAUDE_AUTH=subscription|api-key`. Exactly one credential
+    is staged per dispatch (the CLI ranks an API key above the OAuth token, so
+    staging both would silently fall back to credits).
 - **Worker image rebuilt from this branch** — mandatory (see below).
 
 ### Worker image rebuild — mandatory
@@ -71,7 +78,7 @@ docker build -f docker/pangolin-worker/Dockerfile -t ghcr.io/quarrysystems/pango
 From this directory (`examples/dogfood-gated`):
 
 ```sh
-# reads ../../.env for ANTHROPIC_API_KEY
+# reads ../../.env for ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN
 pnpm start:env
 
 # or with the key already exported

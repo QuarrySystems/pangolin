@@ -27,7 +27,10 @@
 //     run-2-era image silently ignores both. The all-sentinels-lack-usage failure
 //     in row 4 doubles as the stale-image preflight.
 //       docker build -f docker/pangolin-worker/Dockerfile -t ghcr.io/quarrysystems/pangolin-worker:main .
-//   - ANTHROPIC_API_KEY set. Run: `pnpm start:env` (reads ../../.env) or export it.
+//   - A Claude credential set: either ANTHROPIC_API_KEY (API credits) or
+//     CLAUDE_CODE_OAUTH_TOKEN (Claude Pro/Max subscription, from `claude
+//     setup-token` — no API credits). Run: `pnpm start:env` (reads ../../.env)
+//     or export it. Auto-detected; force with PANGOLIN_CLAUDE_AUTH.
 
 import { readFile, writeFile, mkdtemp, mkdir, rm } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
@@ -66,7 +69,11 @@ import type {
   DispatchExecutorManifest,
   StatusLike,
 } from '@quarry-systems/pangolin-orchestrator';
-import { parsePangolinUri, buildDispatchRecordUri } from '@quarry-systems/pangolin-core';
+import {
+  parsePangolinUri,
+  buildDispatchRecordUri,
+  claudeAuthSecrets,
+} from '@quarry-systems/pangolin-core';
 import type { RuntimeUsage, ComputeProvider } from '@quarry-systems/pangolin-core';
 import { EXECUTION_PATTERNS_TOPIC as TOPIC } from './config.js';
 import { InprocComputeProvider } from './inproc-compute-provider.js';
@@ -106,15 +113,20 @@ const PROMPT =
   'Complete EXACTLY the task below. Create or edit only the file(s) the task names; ' +
   'change nothing else. Use the Edit/Write tools, then stop.\n\nTASK:\n{{{instructions}}}';
 
-const apiKeyRaw = process.env.ANTHROPIC_API_KEY;
-if (!FAKE && !apiKeyRaw) {
+// Auth lane (api-key vs subscription) is auto-detected from the env: set
+// CLAUDE_CODE_OAUTH_TOKEN (from `claude setup-token`) to bill a Claude Pro/Max
+// subscription instead of API credits; set ANTHROPIC_API_KEY for the API org.
+// Force either with PANGOLIN_CLAUDE_AUTH=subscription|api-key. Exactly one
+// credential is staged per dispatch.
+const auth = claudeAuthSecrets();
+if (!FAKE && !auth.present) {
   console.error(
-    'ANTHROPIC_API_KEY is not set. Run `pnpm start:env` (reads ../../.env) or export it. ' +
+    `${auth.credentialName} is not set (auth mode: ${auth.mode}). ` +
+      'Run `pnpm start:env` (reads ../../.env) or export it. ' +
       '(Or run with PANGOLIN_FAKE=1 for a $0 no-credit pressure-test run.)',
   );
   process.exit(1);
 }
-const apiKey: string = apiKeyRaw ?? '';
 
 /** Read the seed files (repo-relative paths) into a capability `files` map. */
 async function seedFiles(rels: readonly string[]): Promise<Record<string, string>> {
@@ -261,7 +273,7 @@ async function main(): Promise<void> {
           target: 'local',
           workerImage: WORKER_IMAGE,
           // No real secret needed in FAKE mode — the fake adapter never calls Claude.
-          ...(FAKE ? {} : { secrets: { ANTHROPIC_API_KEY: { inline: apiKey } } }),
+          ...(FAKE ? {} : { secrets: auth.secrets }),
         }),
       },
       triggers: { manual: new ManualTrigger() },

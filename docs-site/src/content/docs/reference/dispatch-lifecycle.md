@@ -329,11 +329,13 @@ but its output isn't structured. Use a `ResultSink` to capture, or write
 a setup script that produces visible diagnostics (`ls`, `cat`, etc.) —
 its stdout DOES show up in the `setup-script.ran` event.
 
-**"`provider-failed` with `runtime exited with code 1`."** Almost always
-missing `ANTHROPIC_API_KEY` in the dispatch's env. Check
-`result.resolved.env` for the env bundle that ran, then confirm the bundle
-includes the key (`pangolin env get <name>` shows the ref; the actual values
-require `pangolin env get` upgrades or a manual storage inspection).
+**"`provider-failed` with `runtime exited with code 1`."** Almost always a
+missing Claude credential (`ANTHROPIC_API_KEY`, or `CLAUDE_CODE_OAUTH_TOKEN` on
+a subscription) in the dispatch's env. Check `result.resolved.env` for the env
+bundle that ran, then confirm the bundle includes the credential (`pangolin env
+get <name>` shows the ref; the actual values require `pangolin env get` upgrades
+or a manual storage inspection). On a subscription, also make sure
+`ANTHROPIC_API_KEY` is *not* also set — the CLI ranks it above the OAuth token.
 
 **"setup-script.ran shows only one of my N skills installed."** Multiple
 capabilities each shipped a `pangolin-setup.sh`. Only one wins
