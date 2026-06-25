@@ -30,4 +30,8 @@ export interface RunStateStore {
   setOutputRefs(itemId: string, outputRefs: Record<string, string>): void; // persist deliverable refs
   setManifestRef(itemId: string, ref: string): void; // persist opaque dispatch-manifest ref
   close(): void;
+  markOpenEnded?(runId: string): void; // record an append-able run; orchestrator is sole writer (D3)
+  isOpenEnded?(runId: string): boolean;
+  markClosed?(runId: string): void; // idempotent
+  isClosed?(runId: string): boolean;
 }
