@@ -21,12 +21,15 @@ You need:
 
 - Node.js 20+ and pnpm 9.
 - Docker Desktop (or an equivalent engine) running locally.
-- An `ANTHROPIC_API_KEY`. The stock worker image runs the `claude-code` runtime
-  adapter, which spawns the `claude` binary. Without a key the adapter exits
-  non-zero and the dispatch is reported as `provider-failed` — the setup step
-  still runs, so you will see its output, but the run fails. This is expected
-  v0.1 behavior: the credential is needed by the adapter, not by Pangolin Scale's own
-  machinery.
+- A Claude credential. The stock worker image runs the `claude-code` runtime
+  adapter, which spawns the `claude` binary. Supply **either** an
+  `ANTHROPIC_API_KEY` (bills API credits) **or** a `CLAUDE_CODE_OAUTH_TOKEN`
+  (bills a Claude Pro/Max subscription — no API credits; mint it with `claude
+  setup-token`). Without one the adapter exits non-zero and the dispatch is
+  reported as `provider-failed` — the setup step still runs, so you will see its
+  output, but the run fails. This is expected v0.1 behavior: the credential is
+  needed by the adapter, not by Pangolin Scale's own machinery. See
+  [Authentication](/pangolin/reference/config/#authentication-api-key-or-subscription).
 
 ## Build and dispatch
 
@@ -103,18 +106,24 @@ Follow these steps in order.
    unpublished workspace packages. Once they ship on npm you switch to bare
    specifiers and `pnpm add @quarry-systems/pangolin-client`.
 
-4. **Set `ANTHROPIC_API_KEY`.**
+4. **Set a Claude credential.**
 
-   The default Claude Code runtime adapter runs `claude --print`, which needs
-   an API key:
+   The default Claude Code runtime adapter runs `claude --print`, which needs a
+   credential. Pick one lane:
 
    ```bash
+   # API credits:
    export ANTHROPIC_API_KEY=sk-ant-...
+
+   # OR a Claude Pro/Max subscription (no API credits) — mint once with
+   # `claude setup-token`, then:
+   export CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...
    ```
 
-   The MCP server (last step) inherits this from whatever shell launches Claude
-   Code, so set it persistently if you want to use it from the AI surface — a
-   Windows user env var, `~/.bashrc`, etc.
+   Use exactly one. The CLI ranks the API key above the subscription token, so
+   setting both falls back to credits. The MCP server (last step) inherits this
+   from whatever shell launches Claude Code, so set it persistently if you want
+   to use it from the AI surface — a Windows user env var, `~/.bashrc`, etc.
 
 5. **Wire up the CLI.**
 
@@ -145,6 +154,8 @@ Follow these steps in order.
      --system-prompt "Say hi and exit." --capability hello-cap
    pangolin env register --name minimal --value LOG_LEVEL=info \
      --secret ANTHROPIC_API_KEY=inline:$ANTHROPIC_API_KEY
+   # On a subscription, register the OAuth token instead (same secret lane):
+   #   --secret CLAUDE_CODE_OAUTH_TOKEN=inline:$CLAUDE_CODE_OAUTH_TOKEN
    ```
 
    Each `register` prints the resulting ref as JSON, including a `contentHash` —
@@ -186,8 +197,8 @@ this to `.mcp.json` (or `~/.claude/settings.json` for global):
 ```
 
 No `env:` block — the server inherits the shell that launched Claude Code,
-including `ANTHROPIC_API_KEY` and any `DOCKER_HOST` you set for cross-machine
-dispatch. Reload Claude Code; you should see nine `pangolin_*` tools — the dispatch
+including your Claude credential (`ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`)
+and any `DOCKER_HOST` you set for cross-machine dispatch. Reload Claude Code; you should see nine `pangolin_*` tools — the dispatch
 verbs (`pangolin_dispatch`, `pangolin_dispatch_describe`, `pangolin_dispatch_cancel`), the
 registry reads (`pangolin_capabilities_list`, `pangolin_subagents_list`,
 `pangolin_envs_list`), and the orchestrator verbs (`pangolin_orchestrator_submit`,

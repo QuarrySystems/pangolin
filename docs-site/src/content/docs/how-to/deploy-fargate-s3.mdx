@@ -215,10 +215,10 @@ dispatch will fail at launch:
    the same digest you dispatch with (see step 1).
 3. **Secrets must be pre-declared in the task definition's `secrets:[]`.** The
    provider **throws** if a dispatch carries `secretRefs`, because `RunTask`
-   cannot inject new secrets at launch. Declare each secret (e.g. your
-   `ANTHROPIC_API_KEY`, sourced from AWS Secrets Manager via the
-   `AwsSecretStore` adapter) in the task definition so it is present when the
-   task starts.
+   cannot inject new secrets at launch. Declare each secret (e.g. your Claude
+   credential — `ANTHROPIC_API_KEY` or a `CLAUDE_CODE_OAUTH_TOKEN` subscription
+   token — sourced from AWS Secrets Manager via the `AwsSecretStore` adapter) in
+   the task definition so it is present when the task starts.
 4. **`awsvpc` networking.** The `subnets` and `securityGroups` you pass populate
    the `awsvpcConfiguration`. Make sure the security group and subnet routing let
    the task reach S3, Secrets Manager, your model endpoint, and the image

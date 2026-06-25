@@ -4,7 +4,7 @@
 //   default / client  — wired PangolinClient (namespace 'offload-minio')
 //   orch              — OrchContext: { transport, storage, anchor, verifySignature, createOrchestrator }
 //
-// IMPORT-SAFE: no throw at load when ANTHROPIC_API_KEY / PANGOLIN_S3_ENDPOINT are absent.
+// IMPORT-SAFE: no throw at load when the Claude credential (ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN) / PANGOLIN_S3_ENDPOINT are absent.
 // No SQLite opened at module level — only inside createOrchestrator() (D3 single-writer).
 
 import { tmpdir } from 'node:os';
@@ -13,6 +13,7 @@ import { createPrivateKey, createPublicKey, sign as edSign } from 'node:crypto';
 
 import { S3Client } from '@aws-sdk/client-s3';
 import { PangolinClient, NoopCredentialProvider, StdoutResultSink } from '@quarry-systems/pangolin-client';
+import { claudeAuthSecrets } from '@quarry-systems/pangolin-core';
 import { LocalDockerProvider } from '@quarry-systems/pangolin-providers-local-docker';
 import { AwsSecretStore } from '@quarry-systems/pangolin-secret-store';
 import { S3StorageProvider } from '@quarry-systems/pangolin-storage-s3';
@@ -156,7 +157,7 @@ function makeExecutors() {
     client,
     target: 'local',
     workerImage,
-    secrets: { ANTHROPIC_API_KEY: { inline: process.env.ANTHROPIC_API_KEY ?? '' } },
+    secrets: claudeAuthSecrets().secrets,
   };
   return {
     'dispatch-a': new DispatchExecutor(opts),

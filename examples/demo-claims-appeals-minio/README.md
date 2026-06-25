@@ -17,7 +17,8 @@ the retention window expires.
 
 - **Safe fan-out**: three `claim-appeal` items fire concurrently (concurrency 2),
   each under a per-output `resourceLock` so they never collide.
-- **Sealed credentials (Beat 2)**: `ANTHROPIC_API_KEY` and `PAYER_PORTAL_TOKEN`
+- **Sealed credentials (Beat 2)**: the Claude credential (`ANTHROPIC_API_KEY` or a
+  `CLAUDE_CODE_OAUTH_TOKEN` subscription token) and `PAYER_PORTAL_TOKEN`
   are staged per-dispatch into LocalStack Secrets Manager. The credential
   (`PAYER_PORTAL_TOKEN`) is staged into each dispatch and is provably absent from
   the sealed record — `pangolin orch audit` shows refs-only, no raw values.
@@ -122,6 +123,8 @@ before proceeding.
 
 ```sh
 export ANTHROPIC_API_KEY=sk-ant-...
+# …or bill a Claude Pro/Max subscription instead (no API credits; `claude setup-token`):
+# export CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...
 # Optional — defaults to 'sk-payer-DEMO-not-a-real-token' if not set:
 export PAYER_PORTAL_TOKEN=sk-payer-DEMO-not-a-real-token
 ```
@@ -217,7 +220,7 @@ byte** — a flipped hex character in the first audit entry hash. This causes
 # Prereqs: worker image REBUILT (not pulled); docker compose up; key + PAYER_PORTAL_TOKEN; pangolin on PATH
 docker build -t ghcr.io/quarrysystems/pangolin-worker:latest -f docker/pangolin-worker/Dockerfile .   # from repo root
 docker compose -f examples/demo-claims-appeals-minio/docker-compose.yml up -d
-export ANTHROPIC_API_KEY=...   # and optionally PAYER_PORTAL_TOKEN
+export ANTHROPIC_API_KEY=...   # or CLAUDE_CODE_OAUTH_TOKEN for a subscription; and optionally PAYER_PORTAL_TOKEN
 cd examples/demo-claims-appeals-minio
 node register.mjs                          # one-time: registers claim-appeal/verify/appeal-kit/minimal into S3 storage
 pangolin orch serve &                      # host-side serve (sole DB owner; launches worker containers)

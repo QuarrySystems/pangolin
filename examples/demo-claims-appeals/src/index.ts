@@ -17,10 +17,8 @@
 import { readFile, writeFile, mkdtemp, mkdir, rm } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import {
-  PangolinClient,
-  NoopCredentialProvider,
-} from '@quarry-systems/pangolin-client';
+import { PangolinClient, NoopCredentialProvider } from '@quarry-systems/pangolin-client';
+import { claudeAuthSecrets } from '@quarry-systems/pangolin-core';
 import { LocalStorageProvider } from '@quarry-systems/pangolin-storage-local';
 import { LocalDockerProvider } from '@quarry-systems/pangolin-providers-local-docker';
 import { LocalSecretStore } from '@quarry-systems/pangolin-secret-store';
@@ -50,7 +48,12 @@ const CLAIM_FILES = ['claim-001.json', 'claim-002.json', 'claim-003.json'] as co
 
 // --- demo presentation helpers (keep the live output readable on camera) -----
 const STATUS_ICON: Record<string, string> = {
-  pending: '·', ready: '•', running: '▸', done: '✓', failed: '✗', skipped: '⊘',
+  pending: '·',
+  ready: '•',
+  running: '▸',
+  done: '✓',
+  failed: '✗',
+  skipped: '⊘',
 };
 // pangolin://…/sha256:<64hex> → sha256:<10hex>… (full ref stays in the bundle).
 const shortRef = (ref?: string): string => {
@@ -65,14 +68,16 @@ const itemLine = (id: string, status: string, resultRef?: string): string => {
 };
 
 // Live-run guard HERE (not in pangolin.config.mjs) so config import stays safe.
-const apiKeyRaw = process.env.ANTHROPIC_API_KEY;
-if (!apiKeyRaw) {
+// Auth lane (api-key vs subscription) auto-detected from env. Set
+// CLAUDE_CODE_OAUTH_TOKEN (from `claude setup-token`) to bill a Claude Pro/Max
+// subscription instead of API credits; or ANTHROPIC_API_KEY for the API org.
+const auth = claudeAuthSecrets();
+if (!auth.present) {
   console.error(
-    'ANTHROPIC_API_KEY is not set. Run `pnpm start:env` (reads ../../.env) or export it.',
+    `${auth.credentialName} is not set (auth mode: ${auth.mode}). Run \`pnpm start:env\` (reads ../../.env) or export it.`,
   );
   process.exit(1);
 }
-const apiKey: string = apiKeyRaw;
 
 async function main(): Promise<void> {
   // Per-run unique dirs (see offload-fanout for why a fixed path causes stale
@@ -165,7 +170,7 @@ async function main(): Promise<void> {
           client,
           target: 'local',
           workerImage: WORKER_IMAGE,
-          secrets: { ANTHROPIC_API_KEY: { inline: apiKey } },
+          secrets: auth.secrets,
         }),
       },
       triggers: { manual: new ManualTrigger() },
@@ -190,7 +195,9 @@ async function main(): Promise<void> {
     const raw = await readFile(PLAN_PATH, 'utf-8');
     const plan = JSON.parse(raw) as Run;
     const runId = await api.submit(plan, 'human:demo');
-    console.log(`\n▶ submitted run '${runId}' — ${plan.items.length} items (3 appeals fan out, then the verify gate)\n`);
+    console.log(
+      `\n▶ submitted run '${runId}' — ${plan.items.length} items (3 appeals fan out, then the verify gate)\n`,
+    );
 
     // 10. Watch until terminal or timeout. Print ONE line per status TRANSITION
     //     (not the full table every poll) so the live log reads as a clean
@@ -257,7 +264,10 @@ async function main(): Promise<void> {
       await writeFile(bundlePath, JSON.stringify(bundle, null, 2));
 
       console.log('\n━━━ Tamper check (forge one byte → verification fails) ━━━');
-      const clean = await verifyBundle(JSON.parse(await readFile(bundlePath, 'utf8')), { anchor, verifySignature });
+      const clean = await verifyBundle(JSON.parse(await readFile(bundlePath, 'utf8')), {
+        anchor,
+        verifySignature,
+      });
       console.log(`  clean bundle.json:   intact=${clean.intact}  claim=${clean.claim}`);
 
       // Forge: flip one hex char of the first entry's hash, write a tampered copy.
@@ -267,8 +277,13 @@ async function main(): Promise<void> {
       const forgedPath = join(runDir, 'bundle.forged.json');
       await writeFile(forgedPath, JSON.stringify(forged, null, 2));
 
-      const tampered = await verifyBundle(JSON.parse(await readFile(forgedPath, 'utf8')), { anchor, verifySignature });
-      console.log(`  forged 1 byte:       intact=${tampered.intact}  failure=${tampered.failure ?? '(none)'}`);
+      const tampered = await verifyBundle(JSON.parse(await readFile(forgedPath, 'utf8')), {
+        anchor,
+        verifySignature,
+      });
+      console.log(
+        `  forged 1 byte:       intact=${tampered.intact}  failure=${tampered.failure ?? '(none)'}`,
+      );
 
       if (clean.intact === true && tampered.intact === false) {
         console.log('  ✓ tamper DETECTED — a single forged byte fails verification');
@@ -290,7 +305,9 @@ async function main(): Promise<void> {
       console.error('\n✗ demo-claims-appeals FAILED (item failure or !intact bundle)');
       process.exitCode = 1;
     } else {
-      console.log('\n✓ demo-claims-appeals OK — parallel appeals drafted, sealed, and tamper-detecting');
+      console.log(
+        '\n✓ demo-claims-appeals OK — parallel appeals drafted, sealed, and tamper-detecting',
+      );
     }
   } finally {
     store.close();

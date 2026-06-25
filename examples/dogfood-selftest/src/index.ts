@@ -29,6 +29,7 @@ import {
   NoopCredentialProvider,
   StdoutResultSink,
 } from '@quarry-systems/pangolin-client';
+import { claudeAuthSecrets } from '@quarry-systems/pangolin-core';
 import { LocalStorageProvider } from '@quarry-systems/pangolin-storage-local';
 import { LocalDockerProvider } from '@quarry-systems/pangolin-providers-local-docker';
 import { LocalSecretStore } from '@quarry-systems/pangolin-secret-store';
@@ -62,8 +63,8 @@ const RUN_TIMEOUT_MS = 600_000; // 10 min: 2 real edit tasks, B strictly after A
 // Both tasks share one seed capability: A edits README.md; B's workspace gets the
 // SAME README.md base so A's patch (materialized at inputs/patch) applies cleanly.
 const SEED_FILES = [
-  'README.md',     // A's target; B's apply base
-  'CHANGELOG.md',  // wording source for A
+  'README.md', // A's target; B's apply base
+  'CHANGELOG.md', // wording source for A
   'docs-site/src/content/docs/explanation/how-offload-runs.md', // style reference for B's new page
 ] as const;
 
@@ -74,12 +75,16 @@ const SEED_FILES = [
 // repo until captureBaseline. (Path is inputs/<needs-key>; the needs key is `patch`.)
 const APPLY_PATCH_SETUP_SH = '#!/bin/sh\nset -e\ngit init -q\ngit apply inputs/patch\n';
 
-const apiKeyRaw = process.env.ANTHROPIC_API_KEY;
-if (!apiKeyRaw) {
-  console.error('ANTHROPIC_API_KEY is not set. Run `pnpm start:env` (reads ../../.env) or export it.');
+// Auth lane (api-key vs subscription) auto-detected from env. Set
+// CLAUDE_CODE_OAUTH_TOKEN (from `claude setup-token`) to bill a Claude Pro/Max
+// subscription instead of API credits; or ANTHROPIC_API_KEY for the API org.
+const auth = claudeAuthSecrets();
+if (!auth.present) {
+  console.error(
+    `${auth.credentialName} is not set (auth mode: ${auth.mode}). Run \`pnpm start:env\` (reads ../../.env) or export it.`,
+  );
   process.exit(1);
 }
-const apiKey: string = apiKeyRaw;
 
 async function main(): Promise<void> {
   // Fresh per-run dirs (a fixed storage/mailbox path would let a later run read a
@@ -155,7 +160,7 @@ async function main(): Promise<void> {
           client,
           target: 'local',
           workerImage: WORKER_IMAGE,
-          secrets: { ANTHROPIC_API_KEY: { inline: apiKey } },
+          secrets: auth.secrets,
         }),
       },
       triggers: { manual: new ManualTrigger() },
@@ -168,8 +173,10 @@ async function main(): Promise<void> {
     const ac = new AbortController();
     const servePromise = serve({ orchestrator, transport, signal: ac.signal });
 
-    const verifySignature = (root: Uint8Array, sig: { alg: string; bytes: Uint8Array; keyRef?: string }) =>
-      verifyEd25519(root, sig, signer.publicKey);
+    const verifySignature = (
+      root: Uint8Array,
+      sig: { alg: string; bytes: Uint8Array; keyRef?: string },
+    ) => verifyEd25519(root, sig, signer.publicKey);
     const api = new OperationsApi({ transport, anchor, storage: client.storage, verifySignature });
 
     // 7. Submit the plan.
@@ -188,7 +195,9 @@ async function main(): Promise<void> {
     for await (const rec of api.watch(runId, { intervalMs: 3_000, signal: watchAc.signal })) {
       if (Array.isArray(rec.body)) {
         for (const item of rec.body as Array<{ id: string; status: string; resultRef?: string }>) {
-          console.log(`  ${item.id}: ${item.status}${item.resultRef ? ' resultRef=' + item.resultRef : ''}`);
+          console.log(
+            `  ${item.id}: ${item.status}${item.resultRef ? ' resultRef=' + item.resultRef : ''}`,
+          );
         }
       }
     }
@@ -261,9 +270,14 @@ async function main(): Promise<void> {
       process.exitCode = 1;
     } else {
       const n = items.filter((i) => i.resultRef).length;
-      console.log(`\n=== dogfood run 2 OK — ${n}/${items.length} items produced a patch; provenance closure PROVEN on a real dependent run ===`);
-      console.log('   apply order from repo root: patches/readme-handoff-section.patch, then patches/docs-handoff-page.patch');
-      if (anyFailed) console.log('   (one or more items failed — expected-possible on Tier 0; inspect above)');
+      console.log(
+        `\n=== dogfood run 2 OK — ${n}/${items.length} items produced a patch; provenance closure PROVEN on a real dependent run ===`,
+      );
+      console.log(
+        '   apply order from repo root: patches/readme-handoff-section.patch, then patches/docs-handoff-page.patch',
+      );
+      if (anyFailed)
+        console.log('   (one or more items failed — expected-possible on Tier 0; inspect above)');
     }
   } finally {
     store.close();

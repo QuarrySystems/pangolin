@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@quarry-systems/pangolin-client": "workspace:*",
+    "@quarry-systems/pangolin-core": "workspace:*",
     "@quarry-systems/pangolin-orchestrator": "workspace:*",
     "@quarry-systems/pangolin-storage-s3": "workspace:*",
     "@quarry-systems/pangolin-providers-local-docker": "workspace:*",

@@ -4,7 +4,7 @@
 //   default / client  — wired PangolinClient (namespace 'offload-fanout')
 //   orch              — OrchContext: { transport, storage, anchor, verifySignature, runService }
 //
-// IMPORT-SAFE: no throw at load when ANTHROPIC_API_KEY is absent.
+// IMPORT-SAFE: no throw at load when the Claude credential (ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN) is absent.
 // The live-run guard (exit 1 on missing key) lives in src/index.ts, not here.
 
 import { mkdtemp } from 'node:fs/promises';
@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { PangolinClient, NoopCredentialProvider, StdoutResultSink } from '@quarry-systems/pangolin-client';
+import { claudeAuthSecrets } from '@quarry-systems/pangolin-core';
 import { LocalStorageProvider } from '@quarry-systems/pangolin-storage-local';
 import { LocalDockerProvider } from '@quarry-systems/pangolin-providers-local-docker';
 import { LocalSecretStore } from '@quarry-systems/pangolin-secret-store';
@@ -74,9 +75,7 @@ const orchestrator = new PangolinOrchestrator({
       client,
       target: 'local',
       workerImage,
-      secrets: {
-        ANTHROPIC_API_KEY: { inline: process.env.ANTHROPIC_API_KEY ?? '' },
-      },
+      secrets: claudeAuthSecrets().secrets,
     }),
   },
   triggers: { manual: new ManualTrigger() },
