@@ -4,7 +4,8 @@
 //   default / client  — wired PangolinClient (namespace 'serve-stack')
 //   orch              — OrchContext: { transport, storage, anchor, verifySignature, createOrchestrator }
 //
-// IMPORT-SAFE: no throw at load when ANTHROPIC_API_KEY / PANGOLIN_S3_ENDPOINT are absent.
+// IMPORT-SAFE: no throw at load when the Claude credential (ANTHROPIC_API_KEY or
+// CLAUDE_CODE_OAUTH_TOKEN) / PANGOLIN_S3_ENDPOINT are absent.
 // No SQLite opened at module level — only inside createOrchestrator() (D3 single-writer).
 // No filesystem I/O at module level either — the persisted signer seed is read /
 // created lazily inside getSigner() (first call from createOrchestrator() or
@@ -23,7 +24,7 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { PangolinClient, NoopCredentialProvider, StdoutResultSink, MetricsTelemetryHook, combineTelemetryHooks } from '@quarry-systems/pangolin-client';
-import { InMemoryMetricsRecorder } from '@quarry-systems/pangolin-core';
+import { InMemoryMetricsRecorder, claudeAuthSecrets } from '@quarry-systems/pangolin-core';
 import { LocalDockerProvider } from '@quarry-systems/pangolin-providers-local-docker';
 import { AwsSecretStore } from '@quarry-systems/pangolin-secret-store';
 import {
@@ -209,16 +210,17 @@ export default client;
 // DispatchExecutor does no I/O until fire() is called.
 // ---------------------------------------------------------------------------
 function makeExecutors() {
-  // ANTHROPIC_API_KEY is staged per-dispatch through the target's AwsSecretStore
+  // The Claude credential is staged per-dispatch through the target's AwsSecretStore
   // (LocalStack Secrets Manager). serve stages it → an ARN ref travels to the
   // worker → the worker resolves it over the network and the value is injected +
-  // log-redacted, recorded refs-only in the audit. serve reads ANTHROPIC_API_KEY
-  // from its env_file; the laptop never holds it.
+  // log-redacted, recorded refs-only in the audit. serve reads the credential
+  // (ANTHROPIC_API_KEY or a CLAUDE_CODE_OAUTH_TOKEN subscription token) from its
+  // env_file; the laptop never holds it. claudeAuthSecrets() picks the lane.
   const opts = {
     client,
     target: 'local',
     workerImage,
-    secrets: { ANTHROPIC_API_KEY: { inline: process.env.ANTHROPIC_API_KEY ?? '' } },
+    secrets: claudeAuthSecrets().secrets,
   };
   return {
     'dispatch-a': new DispatchExecutor(opts),

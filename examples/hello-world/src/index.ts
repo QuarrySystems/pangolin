@@ -23,6 +23,7 @@ import {
   NoopCredentialProvider,
   StdoutResultSink,
 } from '@quarry-systems/pangolin-client';
+import { claudeAuthSecrets } from '@quarry-systems/pangolin-core';
 import { LocalStorageProvider } from '@quarry-systems/pangolin-storage-local';
 import { LocalDockerProvider } from '@quarry-systems/pangolin-providers-local-docker';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -97,12 +98,19 @@ export async function main(): Promise<void> {
     // secrets (`work.secrets`) or `secretRefs` resolved against a secrets
     // manager — NOT as plaintext env-bundle values. This is fine for a local
     // hello-world whose tmp storage root is cleaned up on exit.
-    const apiKey = process.env.ANTHROPIC_API_KEY;
+    // claudeAuthSecrets() picks the lane from the env — ANTHROPIC_API_KEY (API
+    // credits) or a CLAUDE_CODE_OAUTH_TOKEN subscription token. We thread the
+    // chosen credential as a plaintext env-bundle value (the DEMO-ONLY shortcut
+    // noted above); a real deployment uses the per-dispatch secret lane instead.
+    const auth = claudeAuthSecrets();
+    const credential = auth.present
+      ? { [auth.credentialName]: auth.secrets[auth.credentialName].inline }
+      : {};
     await client.env.register({
       name: 'minimal',
       values: {
         LOG_LEVEL: 'info',
-        ...(apiKey ? { ANTHROPIC_API_KEY: apiKey } : {}),
+        ...credential,
       },
     });
 

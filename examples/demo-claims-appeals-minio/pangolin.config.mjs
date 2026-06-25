@@ -4,7 +4,8 @@
 //   default / client  — wired PangolinClient (namespace 'demo-claims-appeals')
 //   orch              — OrchContext: { transport, storage, anchor, verifySignature, createOrchestrator }
 //
-// IMPORT-SAFE: no throw at load when ANTHROPIC_API_KEY / PANGOLIN_S3_ENDPOINT are absent.
+// IMPORT-SAFE: no throw at load when the Claude credential (ANTHROPIC_API_KEY or
+// CLAUDE_CODE_OAUTH_TOKEN) / PANGOLIN_S3_ENDPOINT are absent.
 // No SQLite opened at module level — only inside createOrchestrator() (D3 single-writer).
 
 import { tmpdir } from 'node:os';
@@ -14,6 +15,7 @@ import { createPrivateKey, createPublicKey, sign as edSign } from 'node:crypto';
 import { S3Client } from '@aws-sdk/client-s3';
 import { SecretsManagerClient } from '@aws-sdk/client-secrets-manager';
 import { PangolinClient, NoopCredentialProvider, StdoutResultSink } from '@quarry-systems/pangolin-client';
+import { claudeAuthSecrets } from '@quarry-systems/pangolin-core';
 import { LocalDockerProvider } from '@quarry-systems/pangolin-providers-local-docker';
 import { AwsSecretStore } from '@quarry-systems/pangolin-secret-store';
 import { S3StorageProvider } from '@quarry-systems/pangolin-storage-s3';
@@ -169,7 +171,8 @@ function makeExecutors() {
     target: 'local',
     workerImage,
     secrets: {
-      ANTHROPIC_API_KEY: { inline: process.env.ANTHROPIC_API_KEY ?? '' },
+      // Claude credential (ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN) — one staged.
+      ...claudeAuthSecrets().secrets,
       // Synthetic portal token for Beat 2's redaction demo — shows even when unset.
       PAYER_PORTAL_TOKEN: {
         inline: process.env.PAYER_PORTAL_TOKEN ?? 'sk-payer-DEMO-not-a-real-token',

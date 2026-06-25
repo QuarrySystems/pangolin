@@ -22,6 +22,7 @@ import {
   NoopCredentialProvider,
   StdoutResultSink,
 } from '@quarry-systems/pangolin-client';
+import { claudeAuthSecrets } from '@quarry-systems/pangolin-core';
 import { LocalStorageProvider } from '@quarry-systems/pangolin-storage-local';
 import { LocalDockerProvider } from '@quarry-systems/pangolin-providers-local-docker';
 import { LocalSecretStore } from '@quarry-systems/pangolin-secret-store';
@@ -37,10 +38,13 @@ const RUN_TIMEOUT_MS = 180_000; // a real claude run can take a while; poll up t
 const TICK_INTERVAL_MS = 2_000;
 
 async function main(): Promise<void> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
+  // Auth lane (api-key vs subscription) auto-detected from env. Set
+  // CLAUDE_CODE_OAUTH_TOKEN (from `claude setup-token`) to bill a Claude Pro/Max
+  // subscription instead of API credits; or ANTHROPIC_API_KEY for the API org.
+  const auth = claudeAuthSecrets();
+  if (!auth.present) {
     console.error(
-      'ANTHROPIC_API_KEY is not set. Run `pnpm start:env` (reads ../../.env) or export it.',
+      `${auth.credentialName} is not set (auth mode: ${auth.mode}). Run \`pnpm start:env\` (reads ../../.env) or export it.`,
     );
     process.exit(1);
   }
@@ -89,7 +93,7 @@ async function main(): Promise<void> {
           client,
           target: 'local',
           workerImage: WORKER_IMAGE,
-          secrets: { ANTHROPIC_API_KEY: { inline: apiKey } },
+          secrets: auth.secrets,
         }),
       },
       triggers: { manual: new ManualTrigger() },

@@ -69,13 +69,15 @@ provenance closure is checked across the grown graph. See
 ## Run it yourself
 
 The live fan-out (real Docker workers, real agents) — requires Node 20+, pnpm,
-Docker, and an Anthropic API key, with the worker image built locally first:
+Docker, and a Claude credential (an Anthropic API key, or a `CLAUDE_CODE_OAUTH_TOKEN`
+[subscription token](/pangolin/reference/config/#authentication-api-key-or-subscription)),
+with the worker image built locally first:
 
 ```sh
 # from the repo root
 pnpm install
 docker build -f docker/pangolin-worker/Dockerfile -t ghcr.io/quarrysystems/pangolin-worker:latest .
-cp .env.example .env       # then set ANTHROPIC_API_KEY in .env
+cp .env.example .env       # then set ANTHROPIC_API_KEY (or CLAUDE_CODE_OAUTH_TOKEN) in .env
 pnpm --filter offload-fanout-example start:env
 ```
 

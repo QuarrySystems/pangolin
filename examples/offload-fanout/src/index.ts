@@ -19,6 +19,7 @@ import {
   NoopCredentialProvider,
   StdoutResultSink,
 } from '@quarry-systems/pangolin-client';
+import { claudeAuthSecrets } from '@quarry-systems/pangolin-core';
 import { LocalStorageProvider } from '@quarry-systems/pangolin-storage-local';
 import { LocalDockerProvider } from '@quarry-systems/pangolin-providers-local-docker';
 import { LocalSecretStore } from '@quarry-systems/pangolin-secret-store';
@@ -48,16 +49,16 @@ const RUN_TIMEOUT_MS = 300_000; // 5 min: fan-out of 3 edit items + verify
 // Live-run guard: check the API key HERE (not in pangolin.config.mjs) so config
 // import is always safe and composable.
 // ---------------------------------------------------------------------------
-const apiKeyRaw = process.env.ANTHROPIC_API_KEY;
-if (!apiKeyRaw) {
+// Auth lane (api-key vs subscription) auto-detected from env. Set
+// CLAUDE_CODE_OAUTH_TOKEN (from `claude setup-token`) to bill a Claude Pro/Max
+// subscription instead of API credits; or ANTHROPIC_API_KEY for the API org.
+const auth = claudeAuthSecrets();
+if (!auth.present) {
   console.error(
-    'ANTHROPIC_API_KEY is not set. Run `pnpm start:env` (reads ../../.env) or export it.',
+    `${auth.credentialName} is not set (auth mode: ${auth.mode}). Run \`pnpm start:env\` (reads ../../.env) or export it.`,
   );
   process.exit(1);
 }
-// After the guard above, apiKey is guaranteed a string. TS strict doesn't
-// narrow across the function boundary, so we use a non-null assertion here.
-const apiKey: string = apiKeyRaw;
 
 async function main(): Promise<void> {
   // Per-run unique dirs: the mailbox/storage persist on disk, so a FIXED path
@@ -144,7 +145,7 @@ async function main(): Promise<void> {
           client,
           target: 'local',
           workerImage: WORKER_IMAGE,
-          secrets: { ANTHROPIC_API_KEY: { inline: apiKey } },
+          secrets: auth.secrets,
         }),
       },
       triggers: { manual: new ManualTrigger() },
@@ -158,8 +159,10 @@ async function main(): Promise<void> {
     const servePromise = serve({ orchestrator, transport, signal: ac.signal });
 
     // 6. OperationsApi: submit → watch → audit.
-    const verifySignature = (root: Uint8Array, sig: { alg: string; bytes: Uint8Array; keyRef?: string }) =>
-      verifyEd25519(root, sig, signer.publicKey);
+    const verifySignature = (
+      root: Uint8Array,
+      sig: { alg: string; bytes: Uint8Array; keyRef?: string },
+    ) => verifyEd25519(root, sig, signer.publicKey);
 
     const api = new OperationsApi({
       transport,
@@ -187,7 +190,9 @@ async function main(): Promise<void> {
     for await (const rec of api.watch(runId, { intervalMs: 3_000, signal: watchAc.signal })) {
       if (Array.isArray(rec.body)) {
         for (const item of rec.body as Array<{ id: string; status: string; resultRef?: string }>) {
-          console.log(`  ${item.id}: ${item.status}${item.resultRef ? ' resultRef=' + item.resultRef : ''}`);
+          console.log(
+            `  ${item.id}: ${item.status}${item.resultRef ? ' resultRef=' + item.resultRef : ''}`,
+          );
         }
       }
     }
@@ -244,7 +249,9 @@ async function main(): Promise<void> {
       console.error('\n=== offload-fanout FAILED (item failure or !intact bundle) ===');
       process.exitCode = 1;
     } else {
-      console.log('\n=== offload-fanout OK — fan-out completed with tamper-detecting audit bundle ===');
+      console.log(
+        '\n=== offload-fanout OK — fan-out completed with tamper-detecting audit bundle ===',
+      );
     }
   } finally {
     store.close();

@@ -60,14 +60,15 @@ documents — the proof beats are identical.
 
 ## Run it yourself
 
-Requires Node 20+, pnpm, Docker, and an Anthropic API key. The worker image is
-not anonymously pullable, so build it locally first:
+Requires Node 20+, pnpm, Docker, and a Claude credential — an Anthropic API key,
+or a `CLAUDE_CODE_OAUTH_TOKEN` [subscription token](/pangolin/reference/config/#authentication-api-key-or-subscription).
+The worker image is not anonymously pullable, so build it locally first:
 
 ```sh
 # from the repo root
 pnpm install
 docker build -f docker/pangolin-worker/Dockerfile -t ghcr.io/quarrysystems/pangolin-worker:latest .
-cp .env.example .env       # then set ANTHROPIC_API_KEY in .env
+cp .env.example .env       # then set ANTHROPIC_API_KEY (or CLAUDE_CODE_OAUTH_TOKEN) in .env
 pnpm --filter demo-claims-appeals-example start:env
 ```
 

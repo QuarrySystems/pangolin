@@ -137,6 +137,9 @@ importers:
       '@quarry-systems/pangolin-client':
         specifier: workspace:*
         version: link:../../packages/pangolin-client
+      '@quarry-systems/pangolin-core':
+        specifier: workspace:*
+        version: link:../../packages/pangolin-core
       '@quarry-systems/pangolin-orchestrator':
         specifier: workspace:*
         version: link:../../packages/pangolin-orchestrator
@@ -171,6 +174,9 @@ importers:
       '@quarry-systems/pangolin-client':
         specifier: workspace:*
         version: link:../../packages/pangolin-client
+      '@quarry-systems/pangolin-core':
+        specifier: workspace:*
+        version: link:../../packages/pangolin-core
       '@quarry-systems/pangolin-orchestrator':
         specifier: workspace:*
         version: link:../../packages/pangolin-orchestrator
@@ -233,6 +239,9 @@ importers:
       '@quarry-systems/pangolin-client':
         specifier: workspace:*
         version: link:../../packages/pangolin-client
+      '@quarry-systems/pangolin-core':
+        specifier: workspace:*
+        version: link:../../packages/pangolin-core
       '@quarry-systems/pangolin-orchestrator':
         specifier: workspace:*
         version: link:../../packages/pangolin-orchestrator
@@ -258,6 +267,9 @@ importers:
       '@quarry-systems/pangolin-client':
         specifier: workspace:*
         version: link:../../packages/pangolin-client
+      '@quarry-systems/pangolin-core':
+        specifier: workspace:*
+        version: link:../../packages/pangolin-core
       '@quarry-systems/pangolin-orchestrator':
         specifier: workspace:*
         version: link:../../packages/pangolin-orchestrator
@@ -286,6 +298,9 @@ importers:
       '@quarry-systems/pangolin-client':
         specifier: workspace:*
         version: link:../../packages/pangolin-client
+      '@quarry-systems/pangolin-core':
+        specifier: workspace:*
+        version: link:../../packages/pangolin-core
       '@quarry-systems/pangolin-providers-local-docker':
         specifier: workspace:*
         version: link:../../packages/pangolin-providers-local-docker
@@ -308,6 +323,9 @@ importers:
       '@quarry-systems/pangolin-client':
         specifier: workspace:*
         version: link:../../packages/pangolin-client
+      '@quarry-systems/pangolin-core':
+        specifier: workspace:*
+        version: link:../../packages/pangolin-core
       '@quarry-systems/pangolin-orchestrator':
         specifier: workspace:*
         version: link:../../packages/pangolin-orchestrator
@@ -339,6 +357,9 @@ importers:
       '@quarry-systems/pangolin-client':
         specifier: workspace:*
         version: link:../../packages/pangolin-client
+      '@quarry-systems/pangolin-core':
+        specifier: workspace:*
+        version: link:../../packages/pangolin-core
       '@quarry-systems/pangolin-orchestrator':
         specifier: workspace:*
         version: link:../../packages/pangolin-orchestrator
@@ -367,6 +388,9 @@ importers:
       '@quarry-systems/pangolin-client':
         specifier: workspace:*
         version: link:../../packages/pangolin-client
+      '@quarry-systems/pangolin-core':
+        specifier: workspace:*
+        version: link:../../packages/pangolin-core
       '@quarry-systems/pangolin-orchestrator':
         specifier: workspace:*
         version: link:../../packages/pangolin-orchestrator
