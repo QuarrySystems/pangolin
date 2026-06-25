@@ -103,16 +103,20 @@ docker build -t ghcr.io/quarrysystems/pangolin-worker:latest \
              -f docker/pangolin-worker/Dockerfile .
 ```
 
-### Step 2 — Put the Anthropic key in the repo-root `.env`
+### Step 2 — Put a Claude credential in the repo-root `.env`
 
 ```sh
-# repo root .env
+# repo root .env — set ONE of these
 ANTHROPIC_API_KEY=sk-ant-...
+# …or a Claude Pro/Max subscription token instead (no API credits; mint with
+# `claude setup-token`):
+# CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...
 ```
 
 An `.env.example` at the repo root shows the expected format. The **`serve`
-container** reads it (via compose `env_file`) and stages the key as a per-dispatch
-secret — see "Key delivery" below. The **host driver needs no key**.
+container** reads it (via compose `env_file`) and stages the credential as a
+per-dispatch secret — see "Key delivery" below. The **host driver needs no
+credential**.
 
 **Key delivery (how the worker gets the API key).** `ANTHROPIC_API_KEY` flows the
 **proper secret lane**: the serve-side executor stages it as a per-dispatch secret

@@ -37,13 +37,15 @@ where you stalled.
 - Docker Desktop (or equivalent) running locally
 - A locally-built `ghcr.io/quarrysystems/pangolin-worker:latest` image
   available to your Docker daemon
-- **An `ANTHROPIC_API_KEY`** available to the dispatch. The stock worker
-  image runs the `claude-code` runtime adapter, which spawns the `claude`
-  binary. Without a key the adapter exits non-zero and the dispatch is
-  reported as **`provider-failed`** (see "What you'll see" below). This is
-  expected v0.1 behavior — the adapter, not pangolin's machinery, is what
-  needs the credential. A credential-free `noop` runtime adapter for a
-  zero-setup on-ramp is tracked as a follow-up.
+- **A Claude credential** available to the dispatch — either an `ANTHROPIC_API_KEY`
+  (API credits) or a `CLAUDE_CODE_OAUTH_TOKEN` (Claude Pro/Max subscription, no API
+  credits; mint with `claude setup-token`). The stock worker image runs the
+  `claude-code` runtime adapter, which spawns the `claude` binary. Without a
+  credential the adapter exits non-zero and the dispatch is reported as
+  **`provider-failed`** (see "What you'll see" below). This is expected v0.1
+  behavior — the adapter, not pangolin's machinery, is what needs the credential.
+  A credential-free `noop` runtime adapter for a zero-setup on-ramp is tracked as
+  a follow-up.
 
 The example sets `allowUnpinnedImage: true` on `LocalDockerProvider` so
 the `:latest` tag works for local iteration. Production dispatches must
@@ -102,9 +104,9 @@ greeting is carried inside the `setup-script.ran` event's `stdout` field:
 
 Finally, the dispatch **outcome**:
 
-- **With** an `ANTHROPIC_API_KEY`, the `claude-code` adapter exits 0 and you
-  see `=== dispatch OK ===` (exit code 0).
-- **Without** a key, the adapter exits non-zero — the `setup-script.ran`
+- **With** a credential (`ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`), the
+  `claude-code` adapter exits 0 and you see `=== dispatch OK ===` (exit code 0).
+- **Without** a credential, the adapter exits non-zero — the `setup-script.ran`
   line above still shows the greeting (the setup step ran fine), but the
   terminal event is `dispatch.failed` / `provider-failed`, and the example
   prints `=== dispatch FAILED ===` and exits non-zero:

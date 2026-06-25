@@ -22,17 +22,19 @@ patch, with every byte provenance-sealed and verifiable.
 The guarantee tier is **tamper-detecting** (LocalAnchor stores the Merkle root in SQLite).
 Swap `LocalAnchor` for `S3ObjectLockAnchor` for `external-immutable` / tamper-evident.
 
-## Live demo (requires Docker + Anthropic API key)
+## Live demo (requires Docker + a Claude credential)
 
 ```sh
-# From repo root — reads ../../.env for ANTHROPIC_API_KEY
+# From repo root — reads ../../.env for ANTHROPIC_API_KEY (or CLAUDE_CODE_OAUTH_TOKEN)
 pnpm --filter handoff-dag-example start:env
 ```
 
-Or set the key in your shell:
+Or set a credential in your shell:
 
 ```sh
 export ANTHROPIC_API_KEY=sk-ant-...
+# …or bill a Claude Pro/Max subscription instead (no API credits; mint with
+# `claude setup-token`):  export CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...
 pnpm --filter handoff-dag-example start
 ```
 
@@ -53,7 +55,8 @@ The demo:
 
 - Docker reachable (local Docker Desktop, or `DOCKER_HOST` pointing at a remote daemon).
 - Worker image pullable: `ghcr.io/quarrysystems/pangolin-worker:latest`.
-- `ANTHROPIC_API_KEY` set (Claude runs inside the worker container).
+- A Claude credential set (Claude runs inside the worker container): `ANTHROPIC_API_KEY`
+  for API credits, or `CLAUDE_CODE_OAUTH_TOKEN` for a Claude Pro/Max subscription.
 
 ## CI smoke test (no Docker / no API key)
 

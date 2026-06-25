@@ -30,9 +30,10 @@ worker code; `:latest` only rolls on v* tags and is still pre-handoff — do not
 use it for this run).
 
 ```sh
-# from this dir, with ../../.env containing ANTHROPIC_API_KEY
+# from this dir, with ../../.env containing ANTHROPIC_API_KEY (or CLAUDE_CODE_OAUTH_TOKEN)
 pnpm start:env
 # or: export ANTHROPIC_API_KEY=sk-ant-... && pnpm start
+# (subscription instead of API credits: export CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...)
 ```
 
 Review afterwards, in order, from the repo root:

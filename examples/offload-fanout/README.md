@@ -10,17 +10,19 @@ Demonstrates safe parallel fan-out dispatch with a tamper-detecting audit bundle
 
 The guarantee tier is **tamper-detecting** (LocalAnchor stores the root in the SQLite DB). For a stronger guarantee swap `LocalAnchor` for `S3ObjectLockAnchor` — `report.guarantee` will read `'external-immutable'`. Never describe LocalAnchor as "tamper-evident" or "compliant".
 
-## Live demo (requires Docker + Anthropic API key)
+## Live demo (requires Docker + a Claude credential)
 
 ```sh
-# From repo root — reads ../../.env for ANTHROPIC_API_KEY
+# From repo root — reads ../../.env for ANTHROPIC_API_KEY (or CLAUDE_CODE_OAUTH_TOKEN)
 pnpm --filter offload-fanout-example start:env
 ```
 
-Or set the key in your shell and run:
+Or set a credential in your shell and run:
 
 ```sh
 export ANTHROPIC_API_KEY=sk-ant-...
+# …or bill a Claude Pro/Max subscription instead (no API credits; mint with
+# `claude setup-token`):  export CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...
 pnpm --filter offload-fanout-example start
 ```
 

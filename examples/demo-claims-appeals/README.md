@@ -28,10 +28,10 @@ For the **tamper-evident** (`external-immutable`) recording, swap `LocalAnchor` 
 `S3ObjectLockAnchor` in `pangolin.config.mjs` / `src/index.ts` — the only change
 needed. Never describe LocalAnchor as "tamper-evident" or "compliant".
 
-## Live demo (requires Docker + Anthropic API key)
+## Live demo (requires Docker + a Claude credential)
 
 ```sh
-# From repo root — reads ../../.env for ANTHROPIC_API_KEY
+# From repo root — reads ../../.env for ANTHROPIC_API_KEY (or CLAUDE_CODE_OAUTH_TOKEN)
 pnpm --filter demo-claims-appeals-example start:env
 ```
 
