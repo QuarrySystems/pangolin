@@ -104,11 +104,11 @@ export async function serve(opts: ServeOptions): Promise<void> {
         for (const env of (await opts.transport.pollExtends?.()) ?? []) {
           try {
             opts.orchestrator.producerExtend(env.runId, env.items, env.actor, env.causeItemId);
-            if (env.seq) await opts.transport.ackExtend?.(env.runId, env.seq);
           } catch (err) {
-            onError(err);
-            await opts.transport.deadLetter(env.runId);
+            onError(err); // invalid/poison extend — surfaced. Do NOT deadLetter(runId): that targets the SUBMISSION, not this extend.
           }
+          // ALWAYS remove the extend envelope by seq (success OR failure) so a poison extend never re-delivers.
+          if (env.seq) await opts.transport.ackExtend?.(env.runId, env.seq);
         }
         for (const ctl of (await opts.transport.pollControl?.()) ?? []) {
           try {

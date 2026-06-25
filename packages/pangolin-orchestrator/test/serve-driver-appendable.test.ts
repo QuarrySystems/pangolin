@@ -202,7 +202,7 @@ describe('serve driver — appendable (AppendChannel)', () => {
     store.close();
   });
 
-  it('a throwing producerExtend is routed to deadLetter and does not abort the loop', async () => {
+  it('a throwing producerExtend is routed to onError, acked by seq, and does NOT re-deliver', async () => {
     const store = new SqliteRunStateStore();
     const orch = new PangolinOrchestrator({
       store,
@@ -223,7 +223,14 @@ describe('serve driver — appendable (AppendChannel)', () => {
     const ac = new AbortController();
     const errors: unknown[] = [];
 
+    // Track how many times pollExtends is called to detect re-delivery
+    let extendPollCount = 0;
     const transport = makeFakeAppendableTransport({ extends_: [badExtendEnv] });
+    const originalPollExtends = transport.pollExtends.bind(transport);
+    transport.pollExtends = async () => {
+      extendPollCount++;
+      return originalPollExtends();
+    };
 
     const servePromise = serve({
       orchestrator: orch,
@@ -234,17 +241,28 @@ describe('serve driver — appendable (AppendChannel)', () => {
       onError: (err) => errors.push(err),
     });
 
-    // Let a couple ticks pass so the extend is processed
+    // Let several ticks pass so re-delivery would be observable if it occurred
     await new Promise((r) => setTimeout(r, 80));
     ac.abort();
     await servePromise;
 
     // Error was routed to onError, loop did not crash
     expect(errors.length).toBeGreaterThan(0);
-    // The bad extend should have been dead-lettered
-    expect(transport.deadLettered).toContain('run-does-not-exist');
-    // The serve loop resolved normally (did not throw)
 
+    // The poison extend should have been ACKED (removed by seq) — not dead-lettered
+    expect(transport.ackedExtendSeqs).toContainEqual({
+      runId: 'run-does-not-exist',
+      seq: 'seq-bad',
+    });
+
+    // deadLetter MUST NOT have been called for the extend (deadLetter targets the submission envelope)
+    expect(transport.deadLettered).not.toContain('run-does-not-exist');
+
+    // pollExtends was called more than once (multiple ticks ran), but the extend was only
+    // returned once — so it was not re-delivered on subsequent polls (fake returns [] after first call)
+    expect(extendPollCount).toBeGreaterThan(1);
+
+    // The serve loop resolved normally (did not throw)
     store.close();
   });
 
@@ -257,7 +275,7 @@ describe('serve driver — appendable (AppendChannel)', () => {
       queues: { default: { concurrency: 5 } },
     });
 
-    // Plain transport: no pollExtends, no ackExtend
+    // Plain transport: no pollExtends, no ackExtend — the optional-chaining path must not throw
     const transport: SubmissionTransport = {
       async submit() {
         return '';
@@ -280,11 +298,19 @@ describe('serve driver — appendable (AppendChannel)', () => {
     };
 
     const ac = new AbortController();
-    ac.abort(); // abort immediately
+    // Let at least one tick execute (tickIntervalMs=5) before aborting, so the
+    // pollExtends?.() optional-chaining path is actually exercised rather than
+    // short-circuited by a pre-abort signal.
+    const servePromise = serve({
+      orchestrator: orch,
+      transport,
+      tickIntervalMs: 5,
+      signal: ac.signal,
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    ac.abort();
 
-    await expect(
-      serve({ orchestrator: orch, transport, tickIntervalMs: 5, signal: ac.signal }),
-    ).resolves.toBeUndefined();
+    await expect(servePromise).resolves.toBeUndefined();
 
     store.close();
   });
