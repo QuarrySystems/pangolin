@@ -1,6 +1,11 @@
-import { canonicalJsonString, computeContentHash } from '@quarry-systems/pangolin-core';
+import { computeContentHash } from '@quarry-systems/pangolin-core';
 import type { Executor, ExecutionResult, FireContext, WorkItem } from '../contracts/index.js';
 import { buildManifest } from '../audit/manifest.js';
+import { sealApproval, type ApprovalRecord } from '../audit/approval.js';
+
+// Re-exported so existing `from './executors/human-approval.js'` imports (incl. the package
+// index) keep resolving ApprovalRecord; its canonical home is now the engine-free audit/approval.
+export type { ApprovalRecord } from '../audit/approval.js';
 
 /** A natural person's decision on a pending approval — the human-input "sentinel" payload. */
 export interface ApprovalDecision {
@@ -31,18 +36,6 @@ export interface ApprovalSource {
 /** Content-addressed sink for the sealed approval record (e.g. the run's storage/blob store). */
 export interface ApprovalRecordSink {
   put(ref: string, bytes: Uint8Array): Promise<void> | void;
-}
-
-/** The immutable evidence sealed when a decision arrives — proves WHO approved, WHEN, of what. */
-export interface ApprovalRecord {
-  approvalId: string;
-  runId: string;
-  subjectItemId: string;
-  approverRole: string;
-  approver: string;
-  decision: 'approve' | 'reject';
-  decidedAt: string;
-  reason?: string;
 }
 
 export interface HumanApprovalExecutorOptions {
@@ -159,8 +152,8 @@ export class HumanApprovalExecutor implements Executor {
       decidedAt: decision.decidedAt,
       ...(decision.reason !== undefined ? { reason: decision.reason } : {}),
     };
-    const bytes = new TextEncoder().encode(canonicalJsonString(record));
-    const ref = `pangolin://${this.namespace}/approval/a/${computeContentHash(bytes)}`;
+    // Single source of truth for the seal — the same path an external orchestrator calls directly.
+    const { ref, bytes } = sealApproval(record, { namespace: this.namespace });
     await this.opts.sink.put(ref, bytes);
 
     const passed = decision.decision === 'approve';
