@@ -1,6 +1,6 @@
 ---
 title: Execution patterns
-description: How queue-level execution patterns (static-dag, pipeline, map-reduce) layer above the tick engine — the Pattern contract, the extendRun seam, run.extended audit entries, the gate/respawn circle-back, and the forward-arc-never-rewind invariant.
+description: How queue-level execution patterns (static-dag, pipeline, map-reduce, quorum) layer above the tick engine — the Pattern contract, the extendRun seam, run.extended audit entries, the gate/respawn circle-back, open-ended producer append, and the forward-arc-never-rewind invariant.
 ---
 
 The core tick engine described in [How an offload run executes](/pangolin/explanation/how-offload-runs/)
@@ -27,7 +27,7 @@ has two hooks:
   call is pure: `ctx.runItems` is a snapshot of the run's items, de-namespaced,
   and the pattern never touches the store directly.
 
-Three patterns ship in the engine:
+Four patterns ship in the engine:
 
 - **`static-dag`** — `plan` is the identity; `onTaskDone` always returns `null`.
   The run's DAG is fully specified at submit time and never changes.
@@ -44,8 +44,20 @@ Three patterns ship in the engine:
   `map-<key>` item per output key. When every spawned `map-<key>` is `done`,
   `onTaskDone` then spawns a single `reduce` item whose `needs` bind each map's
   output.
+- **`quorum`** — independent N-of-M review. A subject's product (carried on
+  `inputs.quorum: QuorumConfig`) is reviewed by `reviewers`; `onTaskDone` tallies
+  their verdicts (`done` with `verify.passed !== false` = approve) and spawns the
+  `commit` item only when at least `threshold` approve. A sub-threshold tally
+  either circles back (`onReject: 'spawn-fix'`, bounded by `maxRounds`) or seals
+  the rejection as final history (`block`). The per-reviewer verdicts and the
+  tally are sealed evidence. Reviewers are pattern-agnostic — a reviewer is just
+  an executor that returns a verdict — which selects the assurance tier: AI
+  subagents with distinct `subagentShape`s give **independent-validation**, while
+  a **`HumanApprovalExecutor`** reviewer gives the **oversight / four-eyes** tier
+  (its `reconcile()` stays pending until a natural person submits a decision,
+  sealing the approver's identity + timestamp via `outputRefs.approval`).
 
-All three implement the same `Pattern` interface and reuse the identical engine.
+All four implement the same `Pattern` interface and reuse the identical engine.
 The pattern layer is purely an *item producer* — scheduling, locking, and
 concurrency remain the engine's job.
 
@@ -136,10 +148,45 @@ run whose graph just grew has `pending` items in it when the seal check
 inspects it. A run never seals with phantom-unseen items: the engine always
 drains what the pattern produced before declaring the run complete.
 
-`extendRun` is marked internal in v1: the pattern phase is its sole intended
-caller. The orchestrator's `applyPatternPhase` wraps each `extendRun` call in a
-try/catch so that a spawn-validation failure for one run logs to stderr but
-does not abort the tick — best-effort posture per spec §4.
+`extendRun` is marked internal in v1. Its callers are the **pattern phase**
+(automatic, engine-internal spawn) and **`producerExtend`** (the external,
+operator/producer-driven append seam described below); both funnel through the
+same validate-and-append gateway, so every growth path shares one audit and
+provenance story. The orchestrator's `applyPatternPhase` wraps each `extendRun`
+call in a try/catch so that a spawn-validation failure for one run logs to
+stderr but does not abort the tick — best-effort posture per spec §4.
+
+## Open-ended runs: producer-driven append
+
+The pattern phase grows a run *from inside* the engine, in response to its own
+items completing. An **open-ended run** lets a run also grow *from outside* — an
+external producer pushes new items into an already-running, audited run over
+time, then closes it to seal one bundle over the grown graph. This is the same
+"should the run grow?" question, answered by a producer instead of a pattern.
+
+It is fully opt-in and back-compatible:
+
+- **`Run.openEnded`** — absent/`false` is today's closed-plan behaviour (seal at
+  all-terminal). When `true`, the run does **not** auto-seal when all items are
+  terminal; it waits for an explicit close. The seal gate is
+  `all-terminal && (!openEnded || closed)`.
+- **`AppendChannel`** — an *optional* transport capability
+  (`extend` / `pollExtends` / `ackExtend`), kept separate from `SubmissionTransport`
+  exactly like `ControlChannel`, so existing transports and fakes are unaffected.
+  A producer writes an `ExtendEnvelope`; the `serve` driver polls and ingests it.
+- **`producerExtend`** — the ingestion entry the driver calls. It carries a
+  closed-guard (no appends after close) and then delegates to the **unchanged**
+  internal `extendRun` — so producer-pushed items get the identical validation,
+  id-skip, runaway fuse, and `run.extended` audit entry as pattern spawns.
+- **`close`** — an `ControlEnvelope` kind (alongside `cancel`) that marks the run
+  closed and triggers the seal on the next tick. `closeRun` is idempotent and
+  emits a single `run.closed` audit entry on first close.
+
+Because `producerExtend` reuses `extendRun`, the forward-arc-never-rewind
+invariant and provenance closure cover producer-grown graphs with **zero new
+verification code** — an auditor verifies an open-ended run's bundle exactly like
+any other. Runnable offline ($0, fake in-proc executor):
+[`examples/appendable-stream`](https://github.com/quarrysystems/pangolin/tree/main/examples/appendable-stream).
 
 ## `run.extended` audit entries
 
@@ -280,8 +327,10 @@ The full per-tick order on a pattern-bound queue is:
 4. **Seal check** — for each `runId` on the queue whose audit epoch is not yet
    sealed, if every item is in a terminal status (`done` / `failed` / `skipped`
    / `cancelled`), append a `run.completed` audit entry and call
-   `sealEpoch(runId)`. Both calls are best-effort: an audit failure must not
-   throw out of `tick()`.
+   `sealEpoch(runId)`. An [open-ended run](#open-ended-runs-producer-driven-append)
+   additionally requires `close` before it seals (gate =
+   `all-terminal && (!openEnded || closed)`). Both calls are best-effort: an audit
+   failure must not throw out of `tick()`.
 
 ```mermaid
 flowchart TD

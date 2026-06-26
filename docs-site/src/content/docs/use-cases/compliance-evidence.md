@@ -81,6 +81,17 @@ pnpm install
 pnpm --filter demo-claims-appeals-example test
 ```
 
+A second offline path shows the same sealed bundle produced by wrapping an
+**unchanged external orchestrator** — a
+[`examples/langgraph-changeorder`](https://github.com/quarrysystems/pangolin/tree/main/examples/langgraph-changeorder)
+LangGraph.js agent runs as-is while a thin Pangolin seam emits the bundle, and a
+**human approve/reject decision is cryptographically sealed into it** (the
+standalone verifier recomputes the approval's hash and rejects any tampering):
+
+```sh
+pnpm --filter langgraph-changeorder-example test
+```
+
 :::caution[Shipped today vs. on the roadmap]
 - `S3ObjectLockAnchor` ships, but **no concrete `S3LockClient` adapter ships
   with it** — the interface is provided and you implement the client. The

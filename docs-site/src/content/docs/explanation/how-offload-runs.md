@@ -195,9 +195,9 @@ loop.
 
 ## Execution patterns and audited spawn
 
-A queue may carry an **execution pattern** (`static-dag`, `pipeline`, or
-`map-reduce`) — a per-queue strategy object layered *above* the unchanged
-engine. After each engine tick, the orchestrator runs a **pattern phase**: it
+A queue may carry an **execution pattern** (`static-dag`, `pipeline`,
+`map-reduce`, or `quorum`) — a per-queue strategy object layered *above* the
+unchanged engine. After each engine tick, the orchestrator runs a **pattern phase**: it
 scans the terminal items of every unsealed run on a pattern-bound queue, and
 the pattern may answer with new items to **spawn**. Spawns are applied through
 the audited `extendRun` seam — validated against the merged graph (same
