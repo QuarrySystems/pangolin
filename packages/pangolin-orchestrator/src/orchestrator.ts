@@ -194,6 +194,8 @@ export class PangolinOrchestrator {
     };
     this.store.saveRun(nsRun, actor, submittedAt);
     this.store.markReady(trigger.initialReady(nsRun));
+    // Record append-able mode so the seal gate knows to wait for an explicit close.
+    if (run.openEnded) this.store.markOpenEnded?.(run.id);
     // Audit is best-effort — a failing append must NOT abort submitRun (drops are counted by tryAppend).
     this.auditLog?.tryAppend({
       kind: 'run.submitted',
@@ -247,6 +249,27 @@ export class PangolinOrchestrator {
       at: new Date().toISOString(),
     });
     return normalized.map((it) => it.id);
+  }
+
+  /** PRODUCER push — the guarded append that external producers (drivers, control plane) call.
+   *  Adds ONLY a closed-guard on top of the internal extendRun path: if the run has been closed
+   *  via closeRun(), producers may no longer append. Unknown-run checks, validation, audit, and
+   *  the fuse all remain in extendRun (no duplication here). */
+  producerExtend(runId: string, items: WorkItem[], actor: string, causeItemId?: string): string[] {
+    if (this.store.isClosed?.(runId)) throw new Error(`producerExtend: run '${runId}' is closed`);
+    return this.extendRun(runId, items, actor, causeItemId);
+  }
+
+  /** Close an openEnded run — marks it as no longer accepting producer appends and triggers
+   *  the seal condition for the next tick. Mirrors cancelRun() structure. Throws on unknown
+   *  run; idempotent on repeated calls (markClosed is a no-op when already closed). */
+  closeRun(runId: string, actor?: string): void {
+    if (this.store.getItems(runId).length === 0)
+      throw new Error(`closeRun: unknown run '${runId}'`);
+    const alreadyClosed = this.store.isClosed?.(runId) ?? false;
+    this.store.markClosed?.(runId); // idempotent
+    if (!alreadyClosed)
+      this.auditLog?.tryAppend({ kind: 'run.closed', runId, actor, at: new Date().toISOString() });
   }
 
   /** Apply the pattern phase for a single queue: for each unsealed (or all, if no auditLog) run,
@@ -349,7 +372,15 @@ export class PangolinOrchestrator {
           if (auditStore.getAuditRoot(runId) !== undefined) continue;
           // All items for this run (across all queues — a run may span queues in theory, but in practice it's one queue).
           const runItems = allItems.filter((i) => i.runId === runId);
-          if (runItems.length > 0 && runItems.every((i) => TERMINAL_STATUSES.has(i.status))) {
+          // Seal gate: normal runs seal at all-terminal; openEnded runs wait for an explicit close.
+          const isOpenEnded = this.store.isOpenEnded?.(runId) ?? false;
+          const isClosed = this.store.isClosed?.(runId) ?? false;
+          const readyToSeal = !isOpenEnded || isClosed;
+          if (
+            runItems.length > 0 &&
+            runItems.every((i) => TERMINAL_STATUSES.has(i.status)) &&
+            readyToSeal
+          ) {
             this.auditLog.tryAppend({ kind: 'run.completed', runId, at });
             try {
               await this.auditLog.sealEpoch(runId);

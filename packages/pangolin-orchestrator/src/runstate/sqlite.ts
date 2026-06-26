@@ -67,6 +67,8 @@ CREATE TABLE IF NOT EXISTS audit_roots (
   anchor_id TEXT NOT NULL, guarantee TEXT NOT NULL, receipt_at INTEGER NOT NULL,
   locator TEXT, anchored_at TEXT NOT NULL,
   ts_token TEXT);
+CREATE TABLE IF NOT EXISTS runs (
+  run_id TEXT PRIMARY KEY, open_ended INTEGER NOT NULL DEFAULT 0, closed INTEGER NOT NULL DEFAULT 0);
 `;
 
 /** Columns added after the initial release — bring a pre-existing db up to date. */
@@ -271,6 +273,36 @@ export class SqliteRunStateStore implements RunStateStore, AuditStore {
 
   setManifestRef(itemId: string, ref: string): void {
     this.db.prepare('UPDATE items SET manifest_ref=? WHERE id=?').run(ref, itemId);
+  }
+
+  markOpenEnded(runId: string): void {
+    this.db
+      .prepare(
+        'INSERT INTO runs(run_id, open_ended) VALUES(?,1) ON CONFLICT(run_id) DO UPDATE SET open_ended=1',
+      )
+      .run(runId);
+  }
+
+  isOpenEnded(runId: string): boolean {
+    const r = this.db.prepare('SELECT open_ended FROM runs WHERE run_id=?').get(runId) as
+      | { open_ended: number }
+      | undefined;
+    return r?.open_ended === 1;
+  }
+
+  markClosed(runId: string): void {
+    this.db
+      .prepare(
+        'INSERT INTO runs(run_id, closed) VALUES(?,1) ON CONFLICT(run_id) DO UPDATE SET closed=1',
+      )
+      .run(runId);
+  }
+
+  isClosed(runId: string): boolean {
+    const r = this.db.prepare('SELECT closed FROM runs WHERE run_id=?').get(runId) as
+      | { closed: number }
+      | undefined;
+    return r?.closed === 1;
   }
 
   // ── AuditStore ────────────────────────────────────────────────────────────

@@ -1,13 +1,13 @@
 // packages/pangolin-orchestrator/src/serve/driver.ts
 import type { PangolinOrchestrator } from '../orchestrator.js';
-import type { SubmissionTransport, ControlChannel } from '../contracts/index.js';
+import type { SubmissionTransport, ControlChannel, AppendChannel } from '../contracts/index.js';
 import type { CronScheduler } from '../scheduling/cron-scheduler.js';
 import { startHealthServer, type ServeHealth, type HealthServerHandle } from './http.js';
 import type { MetricsSnapshot } from '@quarry-systems/pangolin-core';
 
 export interface ServeOptions {
   orchestrator: PangolinOrchestrator;
-  transport: SubmissionTransport & Partial<ControlChannel>;
+  transport: SubmissionTransport & Partial<ControlChannel> & Partial<AppendChannel>;
   queue?: string;
   tickIntervalMs?: number;
   signal?: AbortSignal;
@@ -101,9 +101,19 @@ export async function serve(opts: ServeOptions): Promise<void> {
             await opts.transport.deadLetter(env.run.id); // poison -> dead-letter, NOT infinite re-poll
           }
         }
+        for (const env of (await opts.transport.pollExtends?.()) ?? []) {
+          try {
+            opts.orchestrator.producerExtend(env.runId, env.items, env.actor, env.causeItemId);
+          } catch (err) {
+            onError(err); // invalid/poison extend — surfaced. Do NOT deadLetter(runId): that targets the SUBMISSION, not this extend.
+          }
+          // ALWAYS remove the extend envelope by seq (success OR failure) so a poison extend never re-delivers.
+          if (env.seq) await opts.transport.ackExtend?.(env.runId, env.seq);
+        }
         for (const ctl of (await opts.transport.pollControl?.()) ?? []) {
           try {
             if (ctl.kind === 'cancel') opts.orchestrator.cancelRun(ctl.target, ctl.actor);
+            else if (ctl.kind === 'close') opts.orchestrator.closeRun(ctl.target, ctl.actor);
             await opts.transport.ackControl?.(ctl.target);
           } catch (err) {
             onError(err);

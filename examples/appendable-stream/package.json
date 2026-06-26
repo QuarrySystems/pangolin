@@ -1,0 +1,22 @@
+{
+  "name": "appendable-stream-example",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Pattern-aware open-ended run demo: extend + close + intact bundle. Runs $0 in CI via a fake in-proc executor.",
+  "type": "module",
+  "license": "BUSL-1.1",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --esModuleInterop --skipLibCheck --strict src/index.ts test/appendable-stream.test.ts",
+    "build": "tsc --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --esModuleInterop --skipLibCheck --strict src/index.ts"
+  },
+  "dependencies": {
+    "@quarry-systems/pangolin-orchestrator": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.9"
+  }
+}
