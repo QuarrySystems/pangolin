@@ -158,15 +158,16 @@ prevHash)` and Merkle roots with `0x00`/`0x01` domain separators, all in
   *detects* any mutation (which is the acceptance bar). Swapping in
   `S3ObjectLockAnchor` (WORM) promotes the same bundle to `tamper-evident`; no
   other change.
-- **The approval sealing is replicated, not driven by Pangolin's run-engine.**
-  Because the thesis is "keep *your* orchestrator," the seam does **not** hand
-  control to Pangolin's `submitRun` engine — that would replace LangGraph.
-  Instead it reproduces `HumanApprovalExecutor.reconcile()`'s sealing path
-  (same `ApprovalRecord` shape, same `canonicalJsonString → computeContentHash →
-  pangolin://…/approval/a/<sha256>`, same `outputRefs.approval` binding), so the
-  bundle is byte-compatible with that executor and the standard verifier's
-  handoff/manifest checks bind it unmodified. Flagged in `seam.ts` with a
-  `TODO(pangolin)`.
+- **The seam keeps its own control flow — it does not drive Pangolin's run-engine.**
+  Because the thesis is "keep *your* orchestrator," the seam never hands control
+  to Pangolin's `submitRun` engine (that would replace LangGraph). It seals the
+  human decision through Pangolin's **engine-free `sealApproval()` helper** — the
+  exact same function `HumanApprovalExecutor.reconcile()` calls — so the approval
+  ref/bytes are byte-identical to what the run-engine would produce, and the
+  standard verifier's handoff/manifest checks bind it unmodified. (Earlier this
+  demo hand-replicated that ~10-line seal with a `TODO(pangolin)`; the helper was
+  then extracted so external orchestrators can seal without the engine, and this
+  demo now calls it directly.)
 - **No Pangolin core was modified** to make this work.
 
 ## Acceptance criteria

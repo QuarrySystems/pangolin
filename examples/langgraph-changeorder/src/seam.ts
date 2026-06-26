@@ -24,8 +24,9 @@ import {
   assembleBundle,
   createLocalSigner,
   buildManifest,
+  sealApproval,
+  type ApprovalRecord,
 } from '@quarry-systems/pangolin-orchestrator';
-import { computeContentHash, canonicalJsonString } from '@quarry-systems/pangolin-core';
 import type {
   AuditBundle,
   AuditItemOutcome,
@@ -38,27 +39,6 @@ import {
   type Outcome,
 } from './agent.js';
 import type { Decide } from './run-plain.js';
-
-/** The immutable evidence sealed when a human decides — proves WHO approved,
- *  WHEN, of what, and the verdict. This shape mirrors Pangolin's own
- *  ApprovalRecord (packages/pangolin-orchestrator/src/executors/human-approval.ts).
- *
- *  TODO(pangolin): when Pangolin's run-engine drives the graph, this is produced
- *  by HumanApprovalExecutor.reconcile() instead of being assembled here. We
- *  replicate its sealing path (canonicalJsonString → computeContentHash →
- *  pangolin://ns/approval/a/<sha256>, referenced via outputRefs.approval) so the
- *  bundle is byte-compatible with that executor's output and the standard
- *  verifier's handoff/manifest checks bind it without modification. */
-export interface ApprovalRecord {
-  approvalId: string;
-  runId: string;
-  subjectItemId: string;
-  approverRole: string;
-  approver: string;
-  decision: 'approve' | 'reject';
-  decidedAt: string;
-  reason?: string;
-}
 
 export interface ProvenanceResult {
   /** The agent's ordinary outcome — identical to what run-plain.ts returns. */
@@ -178,8 +158,9 @@ export async function withProvenance(
     decidedAt: approval.decidedAt,
     ...(approval.reason !== undefined ? { reason: approval.reason } : {}),
   };
-  const approvalBytes = new TextEncoder().encode(canonicalJsonString(approvalRecord));
-  const approvalRef = `pangolin://${namespace}/approval/a/${computeContentHash(approvalBytes)}`;
+  // Seal it through Pangolin's own engine-free helper — the SAME path
+  // HumanApprovalExecutor.reconcile() uses, so the bundle is byte-compatible.
+  const { ref: approvalRef, bytes: approvalBytes } = sealApproval(approvalRecord, { namespace });
   blobs.set(approvalRef, approvalBytes);
 
   // ── Pass 2: resume with the decision; seal the remaining nodes. ──

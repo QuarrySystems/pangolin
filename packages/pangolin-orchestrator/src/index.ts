@@ -58,6 +58,8 @@ export type { ConfigRule, ConfigAuthorizerOpts } from './audit/authorizer.js';
 export { verify } from './audit/verify.js';
 export { renderVerification } from './audit/render.js';
 export { verifyBundle } from './audit/verify-bundle.js';
+export { sealApproval } from './audit/approval.js';
+export type { SealApprovalOptions, SealApprovalResult } from './audit/approval.js';
 export { CronScheduler, nextDueAfter } from './scheduling/cron-scheduler.js';
 export { SqliteScheduleStore } from './runstate/sqlite-schedule-store.js';
 export { validateRun, normalizeRun } from './engine/run-validator.js';
