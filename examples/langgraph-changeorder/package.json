@@ -1,0 +1,27 @@
+{
+  "name": "langgraph-changeorder-example",
+  "version": "0.0.0",
+  "private": true,
+  "description": "An ordinary LangGraph.js change-order agent runs unchanged; a thin Pangolin seam wraps its execution to emit a tamper-evident audit bundle (incl. a cryptographically sealed human approval) that a standalone verifier independently checks. Runs $0 / offline in CI.",
+  "type": "module",
+  "license": "BUSL-1.1",
+  "scripts": {
+    "agent": "tsx src/run-plain.ts",
+    "sealed": "tsx src/run-sealed.ts",
+    "verify": "tsx src/verify.ts",
+    "tamper": "tsx src/tamper.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --esModuleInterop --skipLibCheck --strict src/agent.ts src/seam.ts src/verify.ts src/run-plain.ts src/run-sealed.ts src/tamper.ts"
+  },
+  "dependencies": {
+    "@langchain/langgraph": "^0.2.74",
+    "@quarry-systems/pangolin-core": "workspace:*",
+    "@quarry-systems/pangolin-orchestrator": "workspace:*",
+    "@quarry-systems/pangolin-verify": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.9"
+  }
+}
