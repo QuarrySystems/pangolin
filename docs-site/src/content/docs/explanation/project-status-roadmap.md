@@ -39,14 +39,35 @@ audit bundle.
   consumed ref equals a sealed product of a verified item in the same run. See
   the [plan.json reference](/pangolin/reference/plan-json/#needs--typed-product-handoff).
 - **The execution-pattern layer** — per-queue execution patterns
-  (`static-dag`, `pipeline`, `map-reduce`) over the unchanged engine. Dynamic
-  fan-out and circle-back are **audited spawn** through the internal
+  (`static-dag`, `pipeline`, `map-reduce`, `quorum`) over the unchanged engine.
+  Dynamic fan-out and circle-back are **audited spawn** through the internal
   `extendRun` seam: spawned items are validated against the merged graph,
   actor-attributed as `pattern:<queue>`, and recorded as `run.extended` audit
   entries naming the cause item. Growth is always new forward arcs — never
   cycles — and provenance closure covers spawned graphs with zero new
   verification code. See
   [How an offload run executes](/pangolin/explanation/how-offload-runs/#execution-patterns-and-audited-spawn).
+- **`quorum` independent-review + human approval** — an N-of-M review pattern: a
+  subject's product is reviewed by independent reviewers, and the `commit` item
+  is spawned only when at least `threshold` reviewers approve; sub-threshold
+  tallies either circle back (`spawn-fix`) or seal the rejection as final history
+  (`block`). The per-reviewer verdicts and the tally are **sealed evidence**.
+  Reviewers can be AI subagents with distinct `subagentShape`s (independent-
+  validation), or a **`HumanApprovalExecutor`** whose `reconcile()` stays pending
+  until a natural person decides — sealing the **approver identity + timestamp**
+  (the four-eyes / human-oversight tier). Runnable offline ($0) via
+  [`examples/pattern-quorum`](https://github.com/quarrysystems/pangolin/tree/main/examples/pattern-quorum).
+- **Append-able (open-ended) runs** — opt-in `Run.openEnded` ingestion: an
+  external producer pushes items into an already-running, audited run *over time*
+  through the optional `AppendChannel` transport
+  (`extend` / `pollExtends` / `ackExtend`, kept separate so existing transports are
+  unaffected), then issues a `close` control signal to seal one bundle over the
+  grown graph. Closed-plan runs are **unchanged** — they still seal at all-terminal;
+  only open-ended runs defer sealing until close (seal-gate =
+  `all-terminal && (!openEnded || closed)`). `producerExtend` reuses the same
+  audited `extendRun` path, so provenance closure covers producer-grown graphs
+  with **zero new verification code**. Proven offline ($0, fake in-proc executor)
+  by [`examples/appendable-stream`](https://github.com/quarrysystems/pangolin/tree/main/examples/appendable-stream).
 - **The block-pipeline runner + the data pack** — the worker's execution core
   is a runner of typed block-pipelines (`PipelineSpec`: `agent` / `script` /
   `capture` blocks over a structural, auto-appended `seal`). The legacy steps
@@ -252,6 +273,9 @@ No refactor required when pulled — that is what the architecture bought.
 - Named queues beyond `default`; rate-limiting.
 - `pause` / `resume`.
 - An HTTP submission transport (V1 is storage-prefix polling only).
+- Continuous **epoch-window sealing** for never-closing open-ended runs — today
+  an open-ended run seals once, at `close`; a long-lived run that must be sealed
+  continuously into a growing ledger is the additive next step.
 - The `Claim` core type + Mneme integration.
 
 ## Versioning & stability
