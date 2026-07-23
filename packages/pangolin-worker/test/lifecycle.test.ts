@@ -308,7 +308,7 @@ describe('LifecycleEmitter', () => {
       expect(outcome).toEqual({ delivered: false, reason: 'timeout' });
     });
 
-    it.each([-1, NaN, 5.5, Infinity, 2 ** 32, Number.MAX_SAFE_INTEGER])(
+    it.each([NaN, 5.5, Infinity, 2 ** 32, Number.MAX_SAFE_INTEGER])(
       'does not throw when attemptTimeoutMs is %s',
       async (attemptTimeoutMs) => {
         const mockFetch = vi.fn().mockResolvedValue(new Response('ok', { status: 200 }));
@@ -328,6 +328,34 @@ describe('LifecycleEmitter', () => {
         await expect(emitter.emit(event)).resolves.toEqual({ delivered: true, status: 200 });
       },
     );
+
+    it('falls back to the default timeout instead of aborting when attemptTimeoutMs is negative', async () => {
+      const mockFetch = vi.fn().mockResolvedValue(new Response('ok', { status: 200 }));
+      const emitter = new LifecycleEmitter({
+        callbackUrl: 'https://example.com/callback',
+        hmacKey: 'k',
+        fetchImpl: mockFetch as unknown as typeof fetch,
+        attemptTimeoutMs: -1,
+      });
+      const event: LifecycleEvent = {
+        kind: 'dispatch.started',
+        dispatchId: 'd-1',
+        providerTaskId: 'p-1',
+        at: '2026-05-21T12:00:00Z',
+      };
+
+      const outcome = await emitter.emit(event);
+      expect(outcome).toEqual({ delivered: true, status: 200 });
+
+      const [, init] = mockFetch.mock.calls[0]!;
+      const signal = init.signal as AbortSignal;
+      // Yield to the macrotask queue: a 0 ms AbortSignal.timeout fires on the next
+      // macrotask tick, which discriminates it from the 5 s default (which cannot have
+      // fired yet). A resolving mock plus this check is wall-clock-free and still proves
+      // -1 did not collapse to an instant abort.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(signal.aborted).toBe(false);
+    });
 
     it('classifies on the signal, not the error message: an abort-worded rejection with no abort is a network failure', async () => {
       const mockFetch = vi.fn().mockRejectedValue(new Error('The operation was aborted'));
@@ -371,7 +399,11 @@ describe('LifecycleEmitter', () => {
         at: '2026-05-21T12:00:00Z',
       };
       const outcome = await emitter.emit(event);
-      expect(outcome.delivered).toBe(delivered);
+      expect(outcome).toEqual(
+        delivered
+          ? { delivered: true, status }
+          : { delivered: false, status, reason: 'http-status' },
+      );
     });
   });
 });
