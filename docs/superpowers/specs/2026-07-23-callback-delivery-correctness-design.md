@@ -45,7 +45,14 @@ x-pangolin-*`** — applied under `test/` but not `packages/`, which is why
 while the source sends something else.
 
 **Definitionally non-breaking:** invalid names mean `fetch` throws before sending, so no receiver has
-ever received these headers. Six occurrences in `src`, no other producer, no published doc.
+ever received these headers. **Exactly six occurrences in `src`** — three at `lifecycle.ts:25-27`, three
+at `notifications.ts:86-88` — no other producer, no published doc.
+
+> **Path-scope every replacement to `packages/` and `test/`.** The working tree carries four stale
+> source copies under `.claude/worktrees/` (`agent-a758713d7d25e656b`, `agent-a9bbc36e043575237`,
+> `agent-af642df0583932d68`, `secret-handling-hardening`), so a repo-wide grep returns **17 hits across
+> 30 files** rather than 6 in 2. An instruction to "replace all occurrences" without a path scope will
+> have someone editing worktree copies and reporting a false completion.
 
 **The two channels fail differently.** Lifecycle: `emit()` throws and `entrypoint.ts:163-170` logs it.
 Notifications: the throw lands inside `Promise.allSettled` (`notifications.ts:91`) whose results are
@@ -281,12 +288,26 @@ Each test must fail against `main` **by asserting** — not by failing to compil
 
 Repo gate: `pnpm lint && pnpm typecheck && pnpm test`, plus `pnpm check:deps`.
 
-**The e2e should be made to run, and it is out of this slice's scope to fund that.**
-`test/e2e/callback-signing-roundtrip.test.ts` documents this contract but is `itIfDocker` and needs a
-reachable Secrets Manager, so on Linux CI it **passes as skipped** — a green `pnpm test:e2e` is
-compatible with it never executing, which is why the source/test mismatch survived. Making it run also
-requires the e2e helper to pass `extraHosts` (a supported provider option,
-`providers-local-docker/src/index.ts:85-91,:133`; the test's comment claiming otherwise is stale) and a
-chosen Secrets Manager environment (real or LocalStack — neither is selected). Both are unowned by any
-slice. **Tracked as its own task**, and noted here because it is §2.1's only guard on the third
-`signCallback` drift.
+**Two e2e tests should be made to run, and it is out of this slice's scope to fund that.**
+
+- `test/e2e/callback-signing-roundtrip.test.ts` — the lifecycle channel. Documents this contract
+  (`:210-212`) but is `itIfDocker` and needs a reachable Secrets Manager, so on Linux CI it **passes as
+  skipped**.
+- `test/e2e/notification-fanout.test.ts` — the **notifications** channel, and its **only** end-to-end
+  guard. Both cases are `itIfDocker` (`:88`, `:210`) with the same host-reach caveat recorded in its own
+  header (`:36`). It already asserts the correct lowercase names (`:182-184`, `:192`), which further
+  corroborates the `37b19af` provenance story.
+
+A green `pnpm test:e2e` is compatible with **neither** having executed, which is why the source/test
+mismatch survived. Making them run also requires the e2e helper to pass `extraHosts` (a supported
+provider option, `providers-local-docker/src/index.ts:85-91,:133`; the test comment claiming otherwise is
+stale) and a chosen Secrets Manager environment (real or LocalStack — neither is selected). Both are
+unowned by any slice. **Tracked as its own task.**
+
+**Note which channel is the riskier one.** Notifications fail *completely silently* today (§1's throws
+land in `Promise.allSettled` and are never inspected), yet under a gate naming only the roundtrip test,
+the notifications half of D1 would ship guarded by §4.1's reconstructed-`Headers` assertion and §4.7's
+mocked-fetch check — and §1.1's own argument is that an injected-fetch mock is *structurally incapable*
+of catching an invalid-header-name defect. If only one e2e can be made to run, it should be
+`notification-fanout`, not the roundtrip. This is also §2.1's only guard on the third `signCallback`
+drift.
