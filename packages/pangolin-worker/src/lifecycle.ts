@@ -14,18 +14,23 @@ export interface DeliveryOutcome {
 }
 
 export class LifecycleEmitter {
-  constructor(private readonly opts: {
-    callbackUrl?: string;
-    hmacKey?: string;
-    fetchImpl?: typeof fetch;
-    /** Default 5_000. Injectable because the package has no vitest.config.* and runs at
-     *  vitest's 5 s default testTimeout. Mirrors orchestrator/src/engine/tick.ts:22/:37.
-     *  NOT an env var: the worker's env is minted by the client
-     *  (pangolin-client/src/dispatch.ts:255-296), so a PANGOLIN_* knob is dead on arrival. */
-    attemptTimeoutMs?: number;
-  }) {}
+  constructor(
+    private readonly opts: {
+      callbackUrl?: string;
+      hmacKey?: string;
+      fetchImpl?: typeof fetch;
+      /** Default 5_000. Injectable because the package has no vitest.config.* and runs at
+       *  vitest's 5 s default testTimeout. Mirrors orchestrator/src/engine/tick.ts:22/:37.
+       *  NOT an env var: the worker's env is minted by the client
+       *  (pangolin-client/src/dispatch.ts:255-296), so a PANGOLIN_* knob is dead on arrival. */
+      attemptTimeoutMs?: number;
+    },
+  ) {}
 
   async emit(event: LifecycleEvent): Promise<DeliveryOutcome> {
+    // An absent `reason` here means "not configured, nothing attempted" — distinct from a
+    // delivery attempt that failed (which always sets `reason`). A consumer checking only
+    // `delivered` cannot tell the two apart from this return alone.
     if (!this.opts.callbackUrl || !this.opts.hmacKey) return { delivered: false };
 
     const timestamp = new Date().toISOString();
@@ -45,18 +50,27 @@ export class LifecycleEmitter {
       'X-Pangolin-Timestamp': timestamp,
     };
 
-    // Clamp before constructing: AbortSignal.timeout throws a RangeError on a negative,
-    // NaN, or fractional delay (measured). Unclamped and outside the try, that is the same
-    // escape-the-guarded-region shape as the reverted `new Headers` bug — lower likelihood,
-    // identical failure mode.
-    // Note: `Math.max(0, NaN)` is itself `NaN` (NaN comparisons are always false), so a plain
-    // `Math.trunc(Math.max(0, requested))` does NOT clamp a NaN input — it must be special-cased.
-    const requested = this.opts.attemptTimeoutMs ?? 5_000;
-    const safeRequested = Number.isNaN(requested) ? 0 : requested;
-    const signal = AbortSignal.timeout(Math.trunc(Math.max(0, safeRequested)));
+    // Clamp before constructing: AbortSignal.timeout throws a RangeError on a delay that is
+    // negative, NaN, fractional, +Infinity, or outside [0, 2^32-1] (measured). Unclamped and
+    // outside the try, that is the same escape-the-guarded-region shape as the reverted
+    // `new Headers` bug. `Number.isFinite` is false for undefined, null, NaN, +/-Infinity, and
+    // any non-number (a string, or anything slipping past TypeScript from test/ or an untyped
+    // JS caller of this published package), so any of those falls back to the default rather
+    // than clamping to 0 — `AbortSignal.timeout(0)` fires within a macrotask, so a garbage
+    // config must not silently become "always times out".
+    const DEFAULT_ATTEMPT_TIMEOUT_MS = 5_000;
+    const MAX_ATTEMPT_TIMEOUT_MS = 2_147_483_647;
+    const requested = this.opts.attemptTimeoutMs;
+    const delayMs = Number.isFinite(requested)
+      ? Math.trunc(Math.min(Math.max(0, requested as number), MAX_ATTEMPT_TIMEOUT_MS))
+      : DEFAULT_ATTEMPT_TIMEOUT_MS;
+    const signal = AbortSignal.timeout(delayMs);
     try {
       const res = await (this.opts.fetchImpl ?? fetch)(this.opts.callbackUrl, {
-        method: 'POST', headers, body: payload, signal,
+        method: 'POST',
+        headers,
+        body: payload,
+        signal,
       });
       return res.status >= 200 && res.status < 300
         ? { delivered: true, status: res.status }

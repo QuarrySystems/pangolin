@@ -3,7 +3,12 @@ import { LifecycleEmitter } from '../src/lifecycle.js';
 import type { LifecycleEvent } from '@quarry-systems/pangolin-core';
 import { createHmac } from 'node:crypto';
 
-function computeSignature(hmacKey: string, dispatchId: string, timestamp: string, payload: string): string {
+function computeSignature(
+  hmacKey: string,
+  dispatchId: string,
+  timestamp: string,
+  payload: string,
+): string {
   const message = `${dispatchId}.${timestamp}.${payload}`;
   return createHmac('sha256', hmacKey).update(message).digest('hex');
 }
@@ -159,7 +164,10 @@ describe('LifecycleEmitter', () => {
         fetchImpl: mockFetch as unknown as typeof fetch,
       });
       const event: LifecycleEvent = {
-        kind: 'dispatch.started', dispatchId: 'd-1', providerTaskId: 'p-1', at: '2026-05-21T12:00:00Z',
+        kind: 'dispatch.started',
+        dispatchId: 'd-1',
+        providerTaskId: 'p-1',
+        at: '2026-05-21T12:00:00Z',
       };
       await emitter.emit(event);
 
@@ -167,10 +175,15 @@ describe('LifecycleEmitter', () => {
       // Fails by ASSERTION on main: expect(fn).not.toThrow() catches the TypeError and converts
       // it to an AssertionError. Stays live after the fix because production passes a plain object.
       let headers!: Headers;
-      expect(() => { headers = new Headers(init.headers as HeadersInit); }).not.toThrow();
+      expect(() => {
+        headers = new Headers(init.headers as HeadersInit);
+      }).not.toThrow();
       // Positive control — keeps .not.toThrow() from passing vacuously.
       expect([...headers.keys()].sort()).toEqual([
-        'content-type', 'x-pangolin-dispatch-id', 'x-pangolin-signature', 'x-pangolin-timestamp',
+        'content-type',
+        'x-pangolin-dispatch-id',
+        'x-pangolin-signature',
+        'x-pangolin-timestamp',
       ]);
     });
 
@@ -182,7 +195,10 @@ describe('LifecycleEmitter', () => {
         fetchImpl: mockFetch as unknown as typeof fetch,
       });
       const event: LifecycleEvent = {
-        kind: 'dispatch.started', dispatchId: 'd-1', providerTaskId: 'p-1', at: '2026-05-21T12:00:00Z',
+        kind: 'dispatch.started',
+        dispatchId: 'd-1',
+        providerTaskId: 'p-1',
+        at: '2026-05-21T12:00:00Z',
       };
       const outcome = await emitter.emit(event);
       // Asserting the OBJECT is what discriminates: on main this is `undefined` vs an object,
@@ -198,7 +214,10 @@ describe('LifecycleEmitter', () => {
         fetchImpl: mockFetch as unknown as typeof fetch,
       });
       const event: LifecycleEvent = {
-        kind: 'dispatch.started', dispatchId: 'd-1', providerTaskId: 'p-1', at: '2026-05-21T12:00:00Z',
+        kind: 'dispatch.started',
+        dispatchId: 'd-1',
+        providerTaskId: 'p-1',
+        at: '2026-05-21T12:00:00Z',
       };
       const outcome = await emitter.emit(event);
       expect(outcome).toEqual({ delivered: false, status: 403, reason: 'http-status' });
@@ -212,7 +231,10 @@ describe('LifecycleEmitter', () => {
         fetchImpl: mockFetch as unknown as typeof fetch,
       });
       const event: LifecycleEvent = {
-        kind: 'dispatch.started', dispatchId: 'd-1', providerTaskId: 'p-1', at: '2026-05-21T12:00:00Z',
+        kind: 'dispatch.started',
+        dispatchId: 'd-1',
+        providerTaskId: 'p-1',
+        at: '2026-05-21T12:00:00Z',
       };
       const outcome = await emitter.emit(event);
       expect(outcome).toStrictEqual({ delivered: false, reason: 'network' });
@@ -228,13 +250,24 @@ describe('LifecycleEmitter', () => {
       });
 
       const started: LifecycleEvent = {
-        kind: 'dispatch.started', dispatchId: 'd-1', providerTaskId: 'p-1', at: '2026-05-21T12:00:00Z',
+        kind: 'dispatch.started',
+        dispatchId: 'd-1',
+        providerTaskId: 'p-1',
+        at: '2026-05-21T12:00:00Z',
       };
       const accepted: LifecycleEvent = {
-        kind: 'dispatch.accepted', dispatchId: 'd-2', target: 't', resolved: [], at: '2026-05-21T12:00:00Z',
+        kind: 'dispatch.accepted',
+        dispatchId: 'd-2',
+        target: 't',
+        resolved: [],
+        at: '2026-05-21T12:00:00Z',
       };
       const finished: LifecycleEvent = {
-        kind: 'dispatch.finished', dispatchId: 'd-3', exitCode: 0, durationMs: 1, at: '2026-05-21T12:00:00Z',
+        kind: 'dispatch.finished',
+        dispatchId: 'd-3',
+        exitCode: 0,
+        durationMs: 1,
+        at: '2026-05-21T12:00:00Z',
       };
 
       const startedOutcome = await emitter.emit(started);
@@ -262,7 +295,10 @@ describe('LifecycleEmitter', () => {
         attemptTimeoutMs: 10,
       });
       const event: LifecycleEvent = {
-        kind: 'dispatch.started', dispatchId: 'd-1', providerTaskId: 'p-1', at: '2026-05-21T12:00:00Z',
+        kind: 'dispatch.started',
+        dispatchId: 'd-1',
+        providerTaskId: 'p-1',
+        at: '2026-05-21T12:00:00Z',
       };
       const outcome = await emitter.emit(event);
 
@@ -272,7 +308,7 @@ describe('LifecycleEmitter', () => {
       expect(outcome).toEqual({ delivered: false, reason: 'timeout' });
     });
 
-    it.each([-1, NaN, 5.5])(
+    it.each([-1, NaN, 5.5, Infinity, 2 ** 32, Number.MAX_SAFE_INTEGER])(
       'does not throw when attemptTimeoutMs is %s',
       async (attemptTimeoutMs) => {
         const mockFetch = vi.fn().mockResolvedValue(new Response('ok', { status: 200 }));
@@ -283,11 +319,59 @@ describe('LifecycleEmitter', () => {
           attemptTimeoutMs,
         });
         const event: LifecycleEvent = {
-          kind: 'dispatch.started', dispatchId: 'd-1', providerTaskId: 'p-1', at: '2026-05-21T12:00:00Z',
+          kind: 'dispatch.started',
+          dispatchId: 'd-1',
+          providerTaskId: 'p-1',
+          at: '2026-05-21T12:00:00Z',
         };
 
         await expect(emitter.emit(event)).resolves.toEqual({ delivered: true, status: 200 });
       },
     );
+
+    it('classifies on the signal, not the error message: an abort-worded rejection with no abort is a network failure', async () => {
+      const mockFetch = vi.fn().mockRejectedValue(new Error('The operation was aborted'));
+      const emitter = new LifecycleEmitter({
+        callbackUrl: 'https://example.com/callback',
+        hmacKey: 'k',
+        fetchImpl: mockFetch as unknown as typeof fetch,
+        attemptTimeoutMs: 5_000, // long enough that the signal cannot have fired
+      });
+      const event: LifecycleEvent = {
+        kind: 'dispatch.started',
+        dispatchId: 'd-1',
+        providerTaskId: 'p-1',
+        at: '2026-05-21T12:00:00Z',
+      };
+      await expect(emitter.emit(event)).resolves.toStrictEqual({
+        delivered: false,
+        reason: 'network',
+      });
+    });
+
+    it.each([
+      [204, true],
+      [299, true],
+      [300, false],
+      [199, false],
+    ])('status %i is delivered=%s', async (status, delivered) => {
+      // A plain object, not `new Response(...)`: the Fetch API's Response constructor
+      // rejects status codes outside 200-599 and disallows a body on 204, so it cannot
+      // represent 199 or a bodyless 204 — but the emitter only reads `res.status`.
+      const mockFetch = vi.fn().mockResolvedValue({ status } as unknown as Response);
+      const emitter = new LifecycleEmitter({
+        callbackUrl: 'https://example.com/callback',
+        hmacKey: 'k',
+        fetchImpl: mockFetch as unknown as typeof fetch,
+      });
+      const event: LifecycleEvent = {
+        kind: 'dispatch.started',
+        dispatchId: 'd-1',
+        providerTaskId: 'p-1',
+        at: '2026-05-21T12:00:00Z',
+      };
+      const outcome = await emitter.emit(event);
+      expect(outcome.delivered).toBe(delivered);
+    });
   });
 });
