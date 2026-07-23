@@ -15,7 +15,7 @@ export function safeEndpointLabel(webhook: string, index: number): string {
   const fallback = `notification[${index}] <unparseable>`;
   try {
     const u = new URL(webhook);
-    if (u.protocol !== "http:" && u.protocol !== "https:") return fallback;
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return fallback;
     // .origin strips userinfo; it keeps a non-default port, which is not credential-bearing.
     return u.origin;
   } catch {
