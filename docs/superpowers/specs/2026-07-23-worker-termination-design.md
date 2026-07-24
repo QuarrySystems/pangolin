@@ -1,7 +1,7 @@
 ---
 title: Worker Termination on SIGTERM — Design (slice C of 3)
 date: 2026-07-23
-status: designed — Q1/Q2 resolved 2026-07-24 (flush-only; set-on-start); C1 reconciled (exec-replace); ready for a plan
+status: designed — Q1/Q2 resolved 2026-07-24 (flush-only; set-on-start); spec-audit findings resolved (guarded claim closes the handler-first race; signal threaded through deliver.ts); ready for a plan
 branch: fix/callback-delivery-reliability
 authors: [human:Brett, agent:claude-opus-4-8]
 severity: medium-high (a cancelled dispatch loses its terminal event; a documented behaviour has never existed)
@@ -130,34 +130,63 @@ When termination wins, `runWorker` resolves a normal exit code and returns. The 
 `.then(process.exit)` force-exits, killing the (now-orphaned) adapter promise. When no signal is injected,
 `terminationOutcome` never resolves and the race is a no-op wrapper around `mainFlow()`.
 
+**`mainFlow` is a real extraction, not a wrapper.** `runWorker`'s body is one ~470-line function with 15+
+early `return failWith(...)` / `return N` exits. Racing it means hoisting that body into an inner
+`mainFlow()` and lifting the shared state — `terminalClaimed`, `terminalDelivery`, the `emit` closure, and
+`failWith` — into the outer `runWorker` scope so `terminationOutcome` (itself an **inner closure**, not the
+free function the pseudocode above abbreviates) can read and mutate them. The plan must budget for this
+restructure explicitly (§8).
+
 ### 4.2 The handler state machine
 
-State: the `runWorker`-scoped `terminalClaimed` flag (§3, Q2). Every existing terminal emit is wrapped to
-set the flag first and retain the in-flight promise:
+State: a single `runWorker`-scoped flag behind a claim helper (§3, Q2 — set-on-START):
 
 ```
-terminalClaimed = true;                 // set-on-START (Q2)
-terminalDelivery = emit(terminalEvent); // finished | failed | needs_input
-await terminalDelivery;
+let terminalClaimed = false;
+let terminalDelivery: Promise<void> | null = null;
+function claimTerminal(): boolean {   // flips synchronously, before any await
+  if (terminalClaimed) return false;  // someone already owns this dispatch's terminal
+  terminalClaimed = true;
+  return true;
+}
 ```
 
-On `terminationSignal` abort:
+**Every terminal emit is guarded by the claim — a read AND a set, not a bare set** (this is the correction
+the spec audit forced: a bare set lets a late main-flow completion emit a second terminal kind *after* the
+handler's `cancelled`). The first caller to claim wins and emits; any later caller sees `false` and emits
+nothing. The terminal-emit sites are the tail `finished`/`needs_input` emits, **`failWith` — which emits
+`dispatch.failed` from 14 call sites (`entrypoint.ts:177`); guarding inside `failWith` covers all of them in
+one edit** — and the handler's own `cancelled` emit:
 
-- **`terminalClaimed === true`** (a terminal outcome already owns this dispatch, or its emit is mid-flight):
-  do **not** emit `cancelled` (Q1). Await `terminalDelivery` — it is already **self-bounded by its own
-  internal per-attempt timeout** (5 s; the main-flow emit passed no termination signal), so the handler
-  imposes no further bound here; the §5 `B` budget applies only to the cancel emit below. Then resolve exit
-  code **0**. slice B's durable-undelivered record is the backstop if the flush does not finish before
-  SIGKILL.
-- **`terminalClaimed === false`** (adapter still running, no terminal produced): claim it
-  (`terminalClaimed = true`, so the main flow cannot also emit a terminal), then
-  `await emit({ kind: 'dispatch.cancelled', dispatchId, at }, { signal: budgetSignal })`. On delivery
-  failure `deliverLifecycle` persists `dispatches/<id>/undelivered/cancelled.json`
-  (`deliver.ts:46`) → the receiver reconciles by polling. Resolve exit code **0**.
+```
+if (claimTerminal()) {
+  terminalDelivery = emit(terminalEvent);   // finished | failed | needs_input
+  await terminalDelivery;
+}
+```
 
-The race window (SIGTERM mid-`await emit({kind:'finished'})`, `entrypoint.ts:577`) resolves correctly:
-set-on-start means the flag is already `true`, so the handler takes the flush branch — never a second
-terminal kind.
+On `terminationSignal` abort (`Promise.race` does **not** cancel the loser — `mainFlow` keeps running):
+
+- **claim already taken** (`claimTerminal()` returns `false` — a terminal outcome owns this dispatch, or its
+  emit is mid-flight): do **not** emit `cancelled` (Q1). Await `terminalDelivery` if present — it is
+  **self-bounded by its own internal per-attempt timeout** (5 s; the main-flow emit passed no termination
+  signal). Resolve exit code **0**. slice B's durable-undelivered record is the backstop if the flush does
+  not finish before SIGKILL.
+- **handler wins the claim** (`claimTerminal()` returns `true` — adapter still running, no terminal
+  produced): `await emit({ kind: 'dispatch.cancelled', dispatchId, at }, { signal: budgetSignal })`. On
+  delivery failure `deliverLifecycle` persists `dispatches/<id>/undelivered/dispatch.cancelled.json`
+  (`deliver.ts:41` builds the path from `event.kind`) → the receiver reconciles by polling. Resolve exit
+  code **0**.
+
+**The claim closes both orderings** — this is the load-bearing correctness argument:
+
+- *Main-first* (SIGTERM lands during an in-flight terminal emit, `entrypoint.ts:580`): the emit already
+  claimed, so the handler sees `false` and takes the flush branch.
+- *Handler-first* (SIGTERM while the adapter runs, then the adapter completes **within** the cancel budget):
+  the handler claimed first, so `mainFlow`'s trailing terminal emit sees `false` and is **suppressed** — the
+  `cancelled` outcome stands, the late `finished`/`failed` is discarded.
+
+Neither ordering produces two terminal kinds for one `dispatchId`.
 
 **Exit code: 0 on cancellation** — a graceful cancellation is not a worker failure (mirrors the
 `finished`/`needs_input` paths). The container is being torn down regardless; the code is provider
@@ -180,13 +209,24 @@ reason, so reconciliation is unaffected. The value is distinguishing "we aborted
 timed out" in the log and the durable record. (`notifications.ts:160`'s parallel classification is out of
 scope — notifications do not receive this slice's signal.)
 
+**The signal is not yet wired end-to-end — this slice must thread it (the audit's B2).** The `AbortSignal.any`
+seam exists *only* on `LifecycleEmitter.emit` (`lifecycle.ts:86`). The path the worker actually uses drops
+any `opts`: the `emit` closure (`entrypoint.ts:155`, signature `async (event) => Promise<void>`) →
+`deliverLifecycle(event, ctx)` (`deliver.ts:50`) → `ctx.emitter.emit(event)` (`deliver.ts:51`). So
+`emit({…}, { signal })` as written in §4.2 **does not compile today**, the `B` budget is inert, and the
+`'aborted'` branch is unreachable until the signal is plumbed. Required plumbing: the `emit` closure gains an
+optional `signal`; `deliverLifecycle` (and `DeliverContext`, or its call) forwards it to
+`emitter.emit(event, { signal })` for the **lifecycle webhook only** — never to the `deliverNotifications`
+call in the same closure (notifications stay out of scope, per above). This is a `deliver.ts` change, listed
+as its own build step in §8.
+
 ---
 
 ## 5. Budget arithmetic
 
 With Q1 = flush, the cancel path is **one** delivery, not two — the earlier "≈2 s vs ~4 s" contradiction
 dissolves. Worst-case handler cost is one bounded `fetch` + (on failure) one `storage.put` of
-`undelivered/cancelled.json`.
+`undelivered/dispatch.cancelled.json`.
 
 Grace is **not knowable in-worker** (local-docker default 10 s; Fargate `stopTimeout` operator-owned, set
 nowhere in-repo), so the budget is **self-imposed and conservative**, sized to leave room for the durable
@@ -200,6 +240,12 @@ write:
 - `B` is a **named constant with the derivation in a comment**, not a magic number. **No new env var** to
   pass grace in (YAGNI until an operator actually tightens `stopTimeout`; the durable record covers the
   loss). If that need materialises, the seam is: read grace from env, `B = grace − margin`.
+- **`B` bounds the `fetch`, not the follow-on `storage.put`.** `persistUndelivered` (`deliver.ts:42`) has no
+  timeout, so under a hung storage backend the durable write itself can miss the grace window and be
+  SIGKILLed with neither the callback delivered nor the record written. The backstop is therefore
+  **best-effort, not guaranteed** — the same at-most-once ceiling slice B already accepts. This slice does
+  not promise the record always lands; it promises the `cancelled` event is *minted and attempted* through
+  the durable path.
 
 ---
 
@@ -210,18 +256,25 @@ The handler's seam is `deps.terminationSignal` + `deps.onLifecycleEvent` (the sy
 onLifecycleEvent, fetchImpl })` and asserts on the **captured event sequence and returned exit code**, not
 call counts alone (green-on-main = vacuous). Cases:
 
-1. **Cancel path** — abort the signal while the adapter is mid-run (a `fetchImpl`/adapter that blocks on a
-   released latch); assert exactly one `dispatch.cancelled` is observed, no terminal precedes it, exit 0.
+1. **Cancel path** — abort the signal while the adapter is mid-run (a `fetchImpl`/adapter that blocks on an
+   unreleased latch); assert exactly one `dispatch.cancelled` is observed, no terminal precedes it, exit 0.
 2. **Flush path (terminal already complete)** — let the run reach `dispatch.finished`, then abort; assert
    **no** `dispatch.cancelled` is observed, exit 0.
-3. **The race (Q2)** — abort *during* the terminal emit (a `fetchImpl` that blocks after the handler's
+3. **Main-first race (Q2)** — abort *during* the terminal emit (a `fetchImpl` that blocks after the handler's
    `onLifecycleEvent` fires); assert set-on-start took the flush branch: `finished` observed, `cancelled`
-   **not** observed. This is the test the whole slice exists to make pass; mutate the flag to set-on-complete
-   and it must fail (positive control on the discriminating claim).
-4. **`'aborted'` classification** — a `fetchImpl` that hangs until the budget signal fires; assert the
+   **not** observed. Mutate the claim to set-on-complete and it must fail (positive control).
+4. **Handler-first race (the audit's B1 — the one the first draft missed)** — abort while the adapter runs,
+   then release the adapter latch so it completes **within** the cancel budget (after the handler's
+   `cancelled` emit has begun). Assert `dispatch.cancelled` is delivered and the trailing `finished`/`failed`
+   is **suppressed** (not observed), exit 0. Mutate the terminal wrap to a bare set (drop the `claimTerminal`
+   read-guard) and it must fail (positive control on the guard). Also exercise the same race through an early
+   `failWith` (setup failure concurrent with SIGTERM) to prove the guard covers all 14 `failWith` sites, not
+   just the tail emits.
+5. **`'aborted'` classification** — a `fetchImpl` that hangs until the budget signal fires; assert the
    delivery outcome reason is `'aborted'`, not `'timeout'`/`'network'`, and that
-   `undelivered/cancelled.json` is persisted (assert the storage write, not just the reason).
-5. **No-signal regression** — `runWorker(env, {})` with no `terminationSignal` registers no listener and
+   `undelivered/dispatch.cancelled.json` is persisted (assert the storage write, not just the reason). This
+   case fails until the B2 signal-threading (§4.3) exists — it is the end-to-end proof of that plumbing.
+6. **No-signal regression** — `runWorker(env, {})` with no `terminationSignal` registers no listener and
    behaves identically to today (guard the test-safety seam).
 
 Discipline (from the arc): verify any container/PID-1 mechanism in Docker before relying on it; MEASURE
@@ -256,15 +309,24 @@ regardless of the rest (it was false before this slice too).
 Build order (all in `packages/pangolin-worker` + the entry script + MVP doc):
 
 1. `DeliveryFailureReason += 'aborted'` and the `catch` classification (`lifecycle.ts:4,101`).
-2. `RunWorkerDeps.terminationSignal?: AbortSignal` (`entrypoint.ts:79`); wrap terminal emits with the
-   set-on-start `terminalClaimed` flag + retained `terminalDelivery` promise; the
-   `Promise.race([mainFlow, terminationOutcome])` handler with the flush/cancel branches and the `B = 2000
-   ms` budget (§4, §5).
-3. `docker/pangolin-worker/bin/pangolin-worker-entry.mjs`: `process.on('SIGTERM', …)` →
+2. **Signal-threading (B2 — do this before the handler, or the handler won't compile).** Add an optional
+   `signal` to the `emit` closure (`entrypoint.ts:155`) and to `deliverLifecycle`/`DeliverContext`
+   (`deliver.ts:50-51`), forwarding it to `emitter.emit(event, { signal })` for the lifecycle webhook
+   **only**, never to `deliverNotifications` (§4.3).
+3. **Restructure (N4).** Hoist `runWorker`'s body into an inner `mainFlow()`; lift `terminalClaimed`,
+   `terminalDelivery`, the `emit` closure, and `failWith` into the outer scope. Add the `claimTerminal()`
+   helper (§4.2) and guard **every** terminal emit with it — the tail `finished`/`needs_input` emits **and
+   inside `failWith`** (covers all 14 `dispatch.failed` sites, `entrypoint.ts:177`).
+4. `RunWorkerDeps.terminationSignal?: AbortSignal` (`entrypoint.ts:79`); the
+   `Promise.race([mainFlow(), terminationOutcome()])` wrapper with `terminationOutcome` as an inner closure
+   over the lifted state; the flush/cancel branches (§4.2) with the `B = 2000 ms` budget signal on the cancel
+   emit (§5).
+5. `docker/pangolin-worker/bin/pangolin-worker-entry.mjs`: `process.on('SIGTERM', …)` →
    `controller.abort()`, pass `controller.signal` as `deps.terminationSignal` (§4.1).
-4. Tests §6 (five cases, assert on returned values + captured events, positive control on the race).
-5. Correct MVP §7.6 (§7).
-6. Record the exec-replace requirement in `worker-env-block-exposure` (§7) — a one-line cross-reference.
+6. Tests §6 (six cases; positive controls on **both** race orderings — set-on-complete for main-first,
+   bare-set for handler-first — and the end-to-end `'aborted'` case that proves the B2 plumbing).
+7. Correct MVP §7.6 (§7).
+8. Record the exec-replace requirement in `worker-env-block-exposure` (§7) — a one-line cross-reference.
 
 Gate order is BUILD-FIRST (`pnpm -r build` before `typecheck`); `check:deps` is the orthogonality guard;
 no `docs:check` in agora.
