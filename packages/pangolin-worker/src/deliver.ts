@@ -47,8 +47,12 @@ export async function persistUndelivered(
  * undelivered record (when storage is present) and log; on success, do
  * nothing further.
  */
-export async function deliverLifecycle(event: LifecycleEvent, ctx: DeliverContext): Promise<void> {
-  const outcome: DeliveryOutcome = await ctx.emitter.emit(event);
+export async function deliverLifecycle(
+  event: LifecycleEvent,
+  ctx: DeliverContext,
+  opts?: { signal?: AbortSignal },
+): Promise<void> {
+  const outcome: DeliveryOutcome = await ctx.emitter.emit(event, { signal: opts?.signal });
   if (outcome.delivered) return;
   // No `reason` means "not configured — nothing attempted" (see lifecycle.ts's
   // `emit`), distinct from a real failed attempt (which always sets `reason`).

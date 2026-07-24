@@ -101,6 +101,14 @@ export interface RunWorkerDeps {
   onLifecycleEvent?: (event: LifecycleEvent) => void;
   /** Override the global fetch (lifecycle + notification webhooks). */
   fetchImpl?: typeof fetch;
+  /**
+   * Container SIGTERM bridge: the entry script's AbortController.signal (tests
+   * pass it directly). When present, an abort races the orchestration and — if
+   * no terminal has been claimed yet — emits a single `dispatch.cancelled`
+   * under a self-bounded budget (spec §4.1–4.2, §5). When absent, `runWorker`
+   * registers no listener and behaves byte-identically to before.
+   */
+  terminationSignal?: AbortSignal;
 }
 
 /**
@@ -152,7 +160,7 @@ export async function runWorker(
   // construction failure path, which DeliverContext models as optional.
   let storage: StorageProvider | undefined;
 
-  const emit = async (event: LifecycleEvent): Promise<void> => {
+  const emit = async (event: LifecycleEvent, opts?: { signal?: AbortSignal }): Promise<void> => {
     deps.onLifecycleEvent?.(event);
     const ctx: DeliverContext = {
       emitter: lifecycleEmitter,
@@ -170,8 +178,42 @@ export async function runWorker(
           : undefined,
     };
     // deliverLifecycle/deliverNotifications never throw — no try/catch needed.
-    await deliverLifecycle(event, ctx);
+    // The signal is routed to the lifecycle callback only — notifications
+    // deliberately never receive it (§4.3).
+    await deliverLifecycle(event, ctx, { signal: opts?.signal });
     await deliverNotifications(event, ctx);
+  };
+
+  // Slice C termination (spec §4.1–4.2, §5). A single-winner claim guards every
+  // terminal-emit site so a SIGTERM-driven `dispatch.cancelled` and an in-flight
+  // orchestration terminal (finished / failed / needs_input) can never both be
+  // delivered. `claimTerminal()` is a read+set: the FIRST caller wins and takes
+  // the claim; every later caller (including a late `mainFlow` completion) sees
+  // `false` and suppresses its emit. `terminalDelivery` holds the in-flight
+  // terminal's delivery promise so the flush branch can await it. With no
+  // `terminationSignal` injected the guard is a no-op transform — the first (and
+  // only) terminal always claims — so existing callers are unaffected.
+  let terminalClaimed = false;
+  let terminalDelivery: Promise<void> | null = null;
+  const claimTerminal = (): boolean => (terminalClaimed ? false : ((terminalClaimed = true), true));
+  // Self-bounded cancel budget (§5): < the 5 s internal emit attempt timeout,
+  // leaving room for the storage.put backstop on a hung callback.
+  const CANCEL_BUDGET_MS = 2000;
+
+  // Every `mainFlow` terminal-emit site funnels through this one guard: claim
+  // the single terminal slot and, if won, deliver `event` and record the
+  // in-flight promise so the termination flush branch can await it. A caller
+  // that loses the claim (e.g. a late completion after the handler already
+  // emitted `cancelled`) emits nothing. One shared path on purpose — a divergent
+  // hand-rolled copy is exactly how the direct provider-failed site was
+  // originally left unguarded. (The handler's own `cancelled` emit stays inline
+  // in `terminationOutcome` — it carries the budget signal and drives the
+  // else-flush branch, so it does not fit this shape.)
+  const emitTerminal = async (event: LifecycleEvent): Promise<void> => {
+    if (claimTerminal()) {
+      terminalDelivery = emit(event);
+      await terminalDelivery;
+    }
   };
 
   const failWith = async (
@@ -184,7 +226,8 @@ export async function runWorker(
     // long-form detail goes only into the worker log — that way redacted
     // secrets in `detail` never get POSTed to a webhook.
     logger.log({ kind: 'dispatch.failed', dispatchId: cfg.dispatchId, reason, detail });
-    await emit({
+    // Terminal-emit site 1 of 4 (covers all failWith call sites in one guard).
+    await emitTerminal({
       kind: 'dispatch.failed',
       dispatchId: cfg.dispatchId,
       reason,
@@ -193,398 +236,440 @@ export async function runWorker(
     return exitCode;
   };
 
-  // Construct the SecretStore ONCE — before StorageProvider construction,
-  // bundle fetch, and pipeline-spec validation — so it can serve all three
-  // resolution paths: the callback HMAC key, env-bundle secrets, and
-  // per-dispatch secrets. The secretsClient is threaded in as the AWS test seam.
-  // Moved ahead of those early failure sites (D5) so a callback configured for
-  // the dispatch is actually keyed in time to report an early integrity/setup
-  // failure — previously the emitter stayed keyless until after bundle fetch
-  // and pipeline validation, so those early `failWith` calls emitted nothing.
-  const secretsClient = deps.secretsManagerClient ?? new SecretsManagerClient({});
-  // Build the SecretStore directly from the configured kind. The dispatcher
-  // always emits PANGOLIN_SECRET_STORE_KIND, so no auto-detect is needed here.
-  const secretStore =
-    deps.secretStore ??
-    storeFromConfig({
-      kind: cfg.secretStoreKind,
-      dir: cfg.secretStoreDir,
-      client: secretsClient,
-    });
+  // The full 14-step orchestration lives in `mainFlow`. It is raced against
+  // `terminationOutcome` below; the shared terminal-claim state above lets the
+  // two coordinate so exactly one terminal event is ever delivered.
+  const mainFlow = async (): Promise<number> => {
+    // Construct the SecretStore ONCE — before StorageProvider construction,
+    // bundle fetch, and pipeline-spec validation — so it can serve all three
+    // resolution paths: the callback HMAC key, env-bundle secrets, and
+    // per-dispatch secrets. The secretsClient is threaded in as the AWS test seam.
+    // Moved ahead of those early failure sites (D5) so a callback configured for
+    // the dispatch is actually keyed in time to report an early integrity/setup
+    // failure — previously the emitter stayed keyless until after bundle fetch
+    // and pipeline validation, so those early `failWith` calls emitted nothing.
+    const secretsClient = deps.secretsManagerClient ?? new SecretsManagerClient({});
+    // Build the SecretStore directly from the configured kind. The dispatcher
+    // always emits PANGOLIN_SECRET_STORE_KIND, so no auto-detect is needed here.
+    const secretStore =
+      deps.secretStore ??
+      storeFromConfig({
+        kind: cfg.secretStoreKind,
+        dir: cfg.secretStoreDir,
+        client: secretsClient,
+      });
 
-  // Resolve the callback HMAC key (if a callback is configured) and rebuild
-  // the emitter so it is keyed before any later failure path can fire.
-  if (cfg.callbackUrl && cfg.callbackTokenRef) {
-    let key: string;
-    try {
-      key = await secretStore.resolve(cfg.callbackTokenRef);
-    } catch (err) {
-      return failWith('fetch-failed', `callback HMAC key fetch failed: ${(err as Error).message}`);
-    }
-    logger.registerSecret(key);
-    hmacKeyForNotifications = key;
-
-    // Bearer admission is optional and independent of the mandatory HMAC key
-    // above — resolve it only when configured, so the resolve() call and the
-    // Authorization header are both fully gated on PANGOLIN_CALLBACK_BEARER_REF.
-    // This whole block is itself subordinate to the mandatory HMAC block
-    // (`cfg.callbackUrl && cfg.callbackTokenRef`): a config with a callback
-    // URL and a bearer ref but no token ref never reaches here, so the
-    // bearer is silently ignored in that case — deliberate, not a bug.
-    let bearerToken: string | undefined;
-    if (cfg.callbackBearerRef) {
+    // Resolve the callback HMAC key (if a callback is configured) and rebuild
+    // the emitter so it is keyed before any later failure path can fire.
+    if (cfg.callbackUrl && cfg.callbackTokenRef) {
+      let key: string;
       try {
-        bearerToken = await secretStore.resolve(cfg.callbackBearerRef);
+        key = await secretStore.resolve(cfg.callbackTokenRef);
       } catch (err) {
-        return failWith('fetch-failed', `callback bearer fetch failed: ${(err as Error).message}`);
+        return failWith(
+          'fetch-failed',
+          `callback HMAC key fetch failed: ${(err as Error).message}`,
+        );
       }
-      logger.registerSecret(bearerToken);
-    }
+      logger.registerSecret(key);
+      hmacKeyForNotifications = key;
 
-    lifecycleEmitter = new LifecycleEmitter({
-      callbackUrl: cfg.callbackUrl,
-      hmacKey: key,
-      fetchImpl: deps.fetchImpl,
-      bearerToken,
-    });
-  }
-
-  // Step 1b: construct StorageProvider.
-  try {
-    storage = deps.storage ?? (await constructStorageProvider(cfg.storageUri));
-  } catch (err) {
-    return failWith('worker-failed', `storage construction failed: ${(err as Error).message}`);
-  }
-
-  // Step 2: load runtime adapter.
-  let adapter: RuntimeAdapter;
-  try {
-    adapter =
-      deps.adapter ??
-      (await loadRuntimeAdapter(cfg.runtimeAdapter, {
-        adaptersRoot: deps.adaptersRoot,
-      }));
-  } catch (err) {
-    return failWith('worker-failed', `adapter load failed: ${(err as Error).message}`);
-  }
-
-  // Step 3: fetch + integrity-verify bundles.
-  let bundles: FetchedBundles;
-  try {
-    bundles = await fetchBundles(cfg.bundleRefs, storage);
-  } catch (err) {
-    return failWith('integrity-failed', `bundle fetch/verify failed: ${(err as Error).message}`);
-  }
-
-  // Step 3b: if a declared pipeline spec was fetched, validate it structurally
-  // before anything runs. An invalid spec is a bundle integrity problem — the
-  // dispatcher is responsible for registering only valid specs, so a malformed
-  // one indicates a corrupted or tampered bundle. Fail before the adapter is
-  // ever invoked so no side-effects occur on an invalid spec.
-  if (bundles.pipeline !== undefined) {
-    const pipelineErrors = validatePipelineSpec(bundles.pipeline as unknown as PipelineSpec);
-    if (pipelineErrors.length > 0) {
-      return failWith(
-        'integrity-failed',
-        `declared pipeline spec is invalid: ${pipelineErrors.join('; ')}`,
-      );
-    }
-  }
-
-  // Step 5: emit dispatch.started.
-  await emit({
-    kind: 'dispatch.started',
-    dispatchId: cfg.dispatchId,
-    providerTaskId: cfg.dispatchId,
-    at: new Date().toISOString(),
-  });
-
-  // Step 6: overlay capabilities to a fresh workspace.
-  const workspaceDir = deps.workspaceDir ?? (await mkdtemp(join(tmpdir(), 'pangolin-workspace-')));
-  try {
-    const capabilityBundles: CapabilityBundle[] = bundles.capabilities.map(
-      (c: FetchedCapability) => ({
-        name: c.name,
-        files: unpackBundle(c.bytes),
-      }),
-    );
-    // Include input bundles in the same overlay call so they land before
-    // captureBaseline (and therefore before the adapter runs). One pass,
-    // no separate code path (spec §5 step 6).
-    const overlayBundles = [...capabilityBundles];
-    if (bundles.inputs.length > 0) {
-      // Guard against path traversal in input keys before touching the filesystem.
-      // Reject absolute paths, backslash-containing paths, empty segments, and
-      // any segment that is exactly '..' so 'inputs/<key>' cannot escape the
-      // workspace. Failure routes through the established integrity-failed path.
-      for (const i of bundles.inputs) {
-        if (
-          i.key.startsWith('/') ||
-          i.key.includes('\\') ||
-          i.key.split('/').some((seg) => seg === '..' || seg === '')
-        ) {
-          return failWith('integrity-failed', `input key contains path traversal: ${i.key}`);
+      // Bearer admission is optional and independent of the mandatory HMAC key
+      // above — resolve it only when configured, so the resolve() call and the
+      // Authorization header are both fully gated on PANGOLIN_CALLBACK_BEARER_REF.
+      // This whole block is itself subordinate to the mandatory HMAC block
+      // (`cfg.callbackUrl && cfg.callbackTokenRef`): a config with a callback
+      // URL and a bearer ref but no token ref never reaches here, so the
+      // bearer is silently ignored in that case — deliberate, not a bug.
+      let bearerToken: string | undefined;
+      if (cfg.callbackBearerRef) {
+        try {
+          bearerToken = await secretStore.resolve(cfg.callbackBearerRef);
+        } catch (err) {
+          return failWith(
+            'fetch-failed',
+            `callback bearer fetch failed: ${(err as Error).message}`,
+          );
         }
+        logger.registerSecret(bearerToken);
       }
-      overlayBundles.push({
-        name: 'inputs',
-        files: Object.fromEntries(bundles.inputs.map((i) => [`inputs/${i.key}`, i.bytes])),
+
+      lifecycleEmitter = new LifecycleEmitter({
+        callbackUrl: cfg.callbackUrl,
+        hmacKey: key,
+        fetchImpl: deps.fetchImpl,
+        bearerToken,
       });
     }
-    await overlayCapabilities({
-      workspaceDir,
-      bundles: overlayBundles,
-      adapter,
-    });
-  } catch (err) {
-    return failWith('integrity-failed', `overlay failed: ${(err as Error).message}`);
-  }
 
-  // Post-overlay: load capability-content notifications so failure paths
-  // beyond this point notify subscribers too.
-  try {
-    capabilityNotifications = await loadCapabilityNotifications(workspaceDir);
-  } catch (err) {
-    logger.log({
-      kind: 'notifications.load.failed',
-      detail: (err as Error).message,
-    });
-  }
+    // Step 1b: construct StorageProvider.
+    try {
+      storage = deps.storage ?? (await constructStorageProvider(cfg.storageUri));
+    } catch (err) {
+      return failWith('worker-failed', `storage construction failed: ${(err as Error).message}`);
+    }
 
-  // Step 7: resolve env-bundle secrets through the single SecretStore.
-  const envBundles: EnvBundle[] = [];
-  for (const envBundle of bundles.envs) {
-    const def = envBundle.def as {
-      values?: Record<string, string>;
-      secretRefs?: Record<string, string>;
-    };
-    const resolvedSecrets: Record<string, string> = {};
-    for (const [k, ref] of Object.entries(def.secretRefs ?? {})) {
+    // Step 2: load runtime adapter.
+    let adapter: RuntimeAdapter;
+    try {
+      adapter =
+        deps.adapter ??
+        (await loadRuntimeAdapter(cfg.runtimeAdapter, {
+          adaptersRoot: deps.adaptersRoot,
+        }));
+    } catch (err) {
+      return failWith('worker-failed', `adapter load failed: ${(err as Error).message}`);
+    }
+
+    // Step 3: fetch + integrity-verify bundles.
+    let bundles: FetchedBundles;
+    try {
+      bundles = await fetchBundles(cfg.bundleRefs, storage);
+    } catch (err) {
+      return failWith('integrity-failed', `bundle fetch/verify failed: ${(err as Error).message}`);
+    }
+
+    // Step 3b: if a declared pipeline spec was fetched, validate it structurally
+    // before anything runs. An invalid spec is a bundle integrity problem — the
+    // dispatcher is responsible for registering only valid specs, so a malformed
+    // one indicates a corrupted or tampered bundle. Fail before the adapter is
+    // ever invoked so no side-effects occur on an invalid spec.
+    if (bundles.pipeline !== undefined) {
+      const pipelineErrors = validatePipelineSpec(bundles.pipeline as unknown as PipelineSpec);
+      if (pipelineErrors.length > 0) {
+        return failWith(
+          'integrity-failed',
+          `declared pipeline spec is invalid: ${pipelineErrors.join('; ')}`,
+        );
+      }
+    }
+
+    // Step 5: emit dispatch.started.
+    await emit({
+      kind: 'dispatch.started',
+      dispatchId: cfg.dispatchId,
+      providerTaskId: cfg.dispatchId,
+      at: new Date().toISOString(),
+    });
+
+    // Step 6: overlay capabilities to a fresh workspace.
+    const workspaceDir =
+      deps.workspaceDir ?? (await mkdtemp(join(tmpdir(), 'pangolin-workspace-')));
+    try {
+      const capabilityBundles: CapabilityBundle[] = bundles.capabilities.map(
+        (c: FetchedCapability) => ({
+          name: c.name,
+          files: unpackBundle(c.bytes),
+        }),
+      );
+      // Include input bundles in the same overlay call so they land before
+      // captureBaseline (and therefore before the adapter runs). One pass,
+      // no separate code path (spec §5 step 6).
+      const overlayBundles = [...capabilityBundles];
+      if (bundles.inputs.length > 0) {
+        // Guard against path traversal in input keys before touching the filesystem.
+        // Reject absolute paths, backslash-containing paths, empty segments, and
+        // any segment that is exactly '..' so 'inputs/<key>' cannot escape the
+        // workspace. Failure routes through the established integrity-failed path.
+        for (const i of bundles.inputs) {
+          if (
+            i.key.startsWith('/') ||
+            i.key.includes('\\') ||
+            i.key.split('/').some((seg) => seg === '..' || seg === '')
+          ) {
+            return failWith('integrity-failed', `input key contains path traversal: ${i.key}`);
+          }
+        }
+        overlayBundles.push({
+          name: 'inputs',
+          files: Object.fromEntries(bundles.inputs.map((i) => [`inputs/${i.key}`, i.bytes])),
+        });
+      }
+      await overlayCapabilities({
+        workspaceDir,
+        bundles: overlayBundles,
+        adapter,
+      });
+    } catch (err) {
+      return failWith('integrity-failed', `overlay failed: ${(err as Error).message}`);
+    }
+
+    // Post-overlay: load capability-content notifications so failure paths
+    // beyond this point notify subscribers too.
+    try {
+      capabilityNotifications = await loadCapabilityNotifications(workspaceDir);
+    } catch (err) {
+      logger.log({
+        kind: 'notifications.load.failed',
+        detail: (err as Error).message,
+      });
+    }
+
+    // Step 7: resolve env-bundle secrets through the single SecretStore.
+    const envBundles: EnvBundle[] = [];
+    for (const envBundle of bundles.envs) {
+      const def = envBundle.def as {
+        values?: Record<string, string>;
+        secretRefs?: Record<string, string>;
+      };
+      const resolvedSecrets: Record<string, string> = {};
+      for (const [k, ref] of Object.entries(def.secretRefs ?? {})) {
+        let value: string;
+        try {
+          value = await secretStore.resolve(ref);
+        } catch (err) {
+          return failWith(
+            'fetch-failed',
+            `env-bundle ${envBundle.name} secret ${k}: ${(err as Error).message}`,
+          );
+        }
+        logger.registerSecret(value);
+        resolvedSecrets[k] = value;
+      }
+      // F1: register env-bundle plain `values` for redaction too. Redaction must
+      // not depend on the client-side scanner having classified a value as a
+      // secret — a misclassified credential in `values` is still scrubbed from
+      // the worker's logs. (registerSecret skips empty strings.)
+      for (const v of Object.values(def.values ?? {})) {
+        logger.registerSecret(v);
+      }
+      envBundles.push({ values: def.values ?? {}, secrets: resolvedSecrets });
+    }
+
+    // Step 7b: resolve per-dispatch secret refs through the same SecretStore and
+    // register every value for log redaction (§7.1). Previously per-dispatch
+    // secrets were injected ambiently by the compute layer and never passed
+    // through the worker, so their values escaped the redaction set and could
+    // surface verbatim in worker logs (e.g. an echoing setup script). Routing
+    // them through the worker here closes that gap — and the SecretStore seam
+    // makes it work for the local file store as well as AWS.
+    const perDispatchSecrets: Record<string, string> = {};
+    for (const [envName, ref] of Object.entries(cfg.perDispatchSecretRefs)) {
       let value: string;
       try {
         value = await secretStore.resolve(ref);
       } catch (err) {
         return failWith(
           'fetch-failed',
-          `env-bundle ${envBundle.name} secret ${k}: ${(err as Error).message}`,
+          `per-dispatch secret ${envName} resolution failed: ${(err as Error).message}`,
         );
       }
       logger.registerSecret(value);
-      resolvedSecrets[k] = value;
+      perDispatchSecrets[envName] = value;
     }
-    // F1: register env-bundle plain `values` for redaction too. Redaction must
-    // not depend on the client-side scanner having classified a value as a
-    // secret — a misclassified credential in `values` is still scrubbed from
-    // the worker's logs. (registerSecret skips empty strings.)
-    for (const v of Object.values(def.values ?? {})) {
-      logger.registerSecret(v);
-    }
-    envBundles.push({ values: def.values ?? {}, secrets: resolvedSecrets });
-  }
 
-  // Step 7b: resolve per-dispatch secret refs through the same SecretStore and
-  // register every value for log redaction (§7.1). Previously per-dispatch
-  // secrets were injected ambiently by the compute layer and never passed
-  // through the worker, so their values escaped the redaction set and could
-  // surface verbatim in worker logs (e.g. an echoing setup script). Routing
-  // them through the worker here closes that gap — and the SecretStore seam
-  // makes it work for the local file store as well as AWS.
-  const perDispatchSecrets: Record<string, string> = {};
-  for (const [envName, ref] of Object.entries(cfg.perDispatchSecretRefs)) {
-    let value: string;
+    // Step 8: merge env. The worker's own process.env seeds the base — PATH,
+    // HOME, locale, AWS_REGION, etc. need to survive into the child runtime —
+    // but `filterRuntimeEnv` is DEFAULT-DENY: it passes only an allow-list of
+    // non-credential system vars (plus the operator's PANGOLIN_RUNTIME_ENV_ALLOW)
+    // and drops everything else — the worker control plane (PANGOLIN_*), the
+    // ambient AWS task-role credential chain, and any other inherited var — so a
+    // prompt-injected sub-agent cannot inherit the worker's identity or the
+    // callback HMAC key reference. Credentials the sub-agent genuinely needs are
+    // supplied explicitly via an env bundle, which is merged on top of this base.
+    const rawBase: Record<string, string> = {};
+    for (const [k, v] of Object.entries(env)) {
+      if (v !== undefined) rawBase[k] = v;
+    }
+    const baseEnv = filterRuntimeEnv(rawBase, { allow: cfg.runtimeEnvAllow });
+    const mergedEnv = mergeEnv({
+      envBundles,
+      perDispatchSecrets,
+      baseEnv,
+    });
+
+    // Step 9: run pangolin-setup.sh if present. The captured stdout/stderr are
+    // surfaced via the structured logger per §6.3 so an integrator can see the
+    // setup script's output in the worker's stream (the `setup-script.ran`
+    // event) without having to also rebuild the worker to stream the script
+    // stdout live.
     try {
-      value = await secretStore.resolve(ref);
-    } catch (err) {
-      return failWith(
-        'fetch-failed',
-        `per-dispatch secret ${envName} resolution failed: ${(err as Error).message}`,
-      );
-    }
-    logger.registerSecret(value);
-    perDispatchSecrets[envName] = value;
-  }
-
-  // Step 8: merge env. The worker's own process.env seeds the base — PATH,
-  // HOME, locale, AWS_REGION, etc. need to survive into the child runtime —
-  // but `filterRuntimeEnv` is DEFAULT-DENY: it passes only an allow-list of
-  // non-credential system vars (plus the operator's PANGOLIN_RUNTIME_ENV_ALLOW)
-  // and drops everything else — the worker control plane (PANGOLIN_*), the
-  // ambient AWS task-role credential chain, and any other inherited var — so a
-  // prompt-injected sub-agent cannot inherit the worker's identity or the
-  // callback HMAC key reference. Credentials the sub-agent genuinely needs are
-  // supplied explicitly via an env bundle, which is merged on top of this base.
-  const rawBase: Record<string, string> = {};
-  for (const [k, v] of Object.entries(env)) {
-    if (v !== undefined) rawBase[k] = v;
-  }
-  const baseEnv = filterRuntimeEnv(rawBase, { allow: cfg.runtimeEnvAllow });
-  const mergedEnv = mergeEnv({
-    envBundles,
-    perDispatchSecrets,
-    baseEnv,
-  });
-
-  // Step 9: run pangolin-setup.sh if present. The captured stdout/stderr are
-  // surfaced via the structured logger per §6.3 so an integrator can see the
-  // setup script's output in the worker's stream (the `setup-script.ran`
-  // event) without having to also rebuild the worker to stream the script
-  // stdout live.
-  try {
-    const setupResult = await runSetupScriptIfPresent({
-      workspaceDir,
-      env: mergedEnv,
-      timeoutSeconds: cfg.setupTimeoutSeconds,
-    });
-    if (setupResult) {
-      logger.log({
-        kind: 'setup-script.ran',
-        exitCode: setupResult.exitCode,
-        durationMs: setupResult.durationMs,
-        stdout: setupResult.stdout,
-        stderr: setupResult.stderr,
-      });
-    }
-  } catch (err) {
-    if (err instanceof SetupScriptError) {
-      return failWith(
-        'worker-failed',
-        `setup-script exit ${err.result.exitCode}: ${err.result.stderr.slice(0, 500)}`,
-      );
-    }
-    return failWith('worker-failed', `setup-script failed: ${(err as Error).message}`);
-  }
-
-  // Capture workspace baseline BEFORE the adapter runs (post-overlay, post-setup).
-  // Best-effort: captureBaseline never throws; it returns { unavailable: true }
-  // when git is not available so the escape path degrades gracefully.
-  const baseline: WorkspaceBaseline = await captureBaseline(workspaceDir);
-
-  // Step 10: start the channel subscription (background; fire and forget).
-  let channel: ChannelHandle | null = null;
-  try {
-    channel = await loadChannelIfPresent({
-      workspaceDir,
-      adaptersRoot: deps.adaptersRoot,
-      logEvent: (event) => logger.log(event),
-    });
-  } catch (err) {
-    logger.log({
-      kind: 'channel.load.failed',
-      detail: (err as Error).message,
-    });
-  }
-
-  // Step 11–14: run the pipeline (agent + capture + verify + seal).
-  // Channel teardown (step 12) lives in a `finally` block so it runs whether
-  // runPipeline completes, throws (adapter blew up), or returns needs-input/failed.
-  const subagent = bundles.subagentDef as {
-    systemPrompt?: string;
-    promptTemplate?: string;
-    model?: string;
-    verify?: VerifyConfig;
-  };
-
-  // Choose the pipeline: declared (fetched + validated in step 3b) or default.
-  const declaredPipeline = bundles.pipeline !== undefined;
-  const pipelineSpec: PipelineSpec = declaredPipeline
-    ? (bundles.pipeline as unknown as PipelineSpec)
-    : buildDefaultPipeline(subagent);
-
-  // Runtime-effect model override: the control plane's requested model
-  // (PANGOLIN_MODEL → cfg.model) wins over the subagent def's default. The
-  // worker performs no level mapping — the string is opaque; levels resolve
-  // in the adapter. The trailing ?? undefined normalizes the canonical
-  // `model: null` a registered def carries when unpinned — RuntimeInvocation.model
-  // is typed `string | undefined`, never null.
-  const subagentForCtx = { ...subagent, model: cfg.model ?? subagent.model ?? undefined };
-
-  let result;
-  try {
-    result = await runPipeline(
-      pipelineSpec,
-      {
+      const setupResult = await runSetupScriptIfPresent({
         workspaceDir,
         env: mergedEnv,
-        storage,
-        namespace: cfg.namespace,
-        dispatchId: cfg.dispatchId,
-        adapter,
-        subagent: subagentForCtx,
-        // cfg.inputJson is a parsed Record<string,unknown> from env-parser;
-        // BlockContext.inputJson is a string the runner JSON-parses before
-        // passing to adapter.invoke — re-serialize to preserve the invariant.
-        inputJson: JSON.stringify(cfg.inputJson),
-        baseline,
-        redact: (s) => logger.redactString(s),
-        log: (e) => logger.log(e),
-      },
-      { declared: declaredPipeline },
-    );
-  } catch (err) {
-    // The runtime adapter itself blew up — that is a worker failure, not a
-    // dispatch failure: the adapter is part of the worker image.
-    return failWith('worker-failed', `runtime adapter threw: ${(err as Error).message}`);
-  } finally {
-    // Step 12: stop the channel subscription. Always runs — even on the
-    // catch above's early return — so the background loop never leaks.
-    if (channel) await channel.stop();
-  }
-
-  // Map PipelineResult back onto the existing terminal branches.
-
-  // needs-input: resolve the sentinel, emit dispatch.needs_input or worker-failed.
-  if (result.kind === 'needs-input') {
-    const outcome = await resolveNeedsInputSentinel(result.sentinelPath);
-    if (outcome.kind === 'malformed') {
-      return failWith('worker-failed', `needs_input sentinel malformed: ${outcome.detail}`);
+        timeoutSeconds: cfg.setupTimeoutSeconds,
+      });
+      if (setupResult) {
+        logger.log({
+          kind: 'setup-script.ran',
+          exitCode: setupResult.exitCode,
+          durationMs: setupResult.durationMs,
+          stdout: setupResult.stdout,
+          stderr: setupResult.stderr,
+        });
+      }
+    } catch (err) {
+      if (err instanceof SetupScriptError) {
+        return failWith(
+          'worker-failed',
+          `setup-script exit ${err.result.exitCode}: ${err.result.stderr.slice(0, 500)}`,
+        );
+      }
+      return failWith('worker-failed', `setup-script failed: ${(err as Error).message}`);
     }
-    if (outcome.kind === 'oversized') {
-      return failWith(
-        'worker-failed',
-        `needs_input sentinel oversized: ${outcome.sizeBytes} bytes`,
+
+    // Capture workspace baseline BEFORE the adapter runs (post-overlay, post-setup).
+    // Best-effort: captureBaseline never throws; it returns { unavailable: true }
+    // when git is not available so the escape path degrades gracefully.
+    const baseline: WorkspaceBaseline = await captureBaseline(workspaceDir);
+
+    // Step 10: start the channel subscription (background; fire and forget).
+    let channel: ChannelHandle | null = null;
+    try {
+      channel = await loadChannelIfPresent({
+        workspaceDir,
+        adaptersRoot: deps.adaptersRoot,
+        logEvent: (event) => logger.log(event),
+      });
+    } catch (err) {
+      logger.log({
+        kind: 'channel.load.failed',
+        detail: (err as Error).message,
+      });
+    }
+
+    // Step 11–14: run the pipeline (agent + capture + verify + seal).
+    // Channel teardown (step 12) lives in a `finally` block so it runs whether
+    // runPipeline completes, throws (adapter blew up), or returns needs-input/failed.
+    const subagent = bundles.subagentDef as {
+      systemPrompt?: string;
+      promptTemplate?: string;
+      model?: string;
+      verify?: VerifyConfig;
+    };
+
+    // Choose the pipeline: declared (fetched + validated in step 3b) or default.
+    const declaredPipeline = bundles.pipeline !== undefined;
+    const pipelineSpec: PipelineSpec = declaredPipeline
+      ? (bundles.pipeline as unknown as PipelineSpec)
+      : buildDefaultPipeline(subagent);
+
+    // Runtime-effect model override: the control plane's requested model
+    // (PANGOLIN_MODEL → cfg.model) wins over the subagent def's default. The
+    // worker performs no level mapping — the string is opaque; levels resolve
+    // in the adapter. The trailing ?? undefined normalizes the canonical
+    // `model: null` a registered def carries when unpinned — RuntimeInvocation.model
+    // is typed `string | undefined`, never null.
+    const subagentForCtx = { ...subagent, model: cfg.model ?? subagent.model ?? undefined };
+
+    let result;
+    try {
+      result = await runPipeline(
+        pipelineSpec,
+        {
+          workspaceDir,
+          env: mergedEnv,
+          storage,
+          namespace: cfg.namespace,
+          dispatchId: cfg.dispatchId,
+          adapter,
+          subagent: subagentForCtx,
+          // cfg.inputJson is a parsed Record<string,unknown> from env-parser;
+          // BlockContext.inputJson is a string the runner JSON-parses before
+          // passing to adapter.invoke — re-serialize to preserve the invariant.
+          inputJson: JSON.stringify(cfg.inputJson),
+          baseline,
+          redact: (s) => logger.redactString(s),
+          log: (e) => logger.log(e),
+        },
+        { declared: declaredPipeline },
       );
+    } catch (err) {
+      // The runtime adapter itself blew up — that is a worker failure, not a
+      // dispatch failure: the adapter is part of the worker image.
+      return failWith('worker-failed', `runtime adapter threw: ${(err as Error).message}`);
+    } finally {
+      // Step 12: stop the channel subscription. Always runs — even on the
+      // catch above's early return — so the background loop never leaks.
+      if (channel) await channel.stop();
     }
-    // Valid needs_input: emit and exit 0.
-    await emit({
-      kind: 'dispatch.needs_input',
+
+    // Map PipelineResult back onto the existing terminal branches.
+
+    // needs-input: resolve the sentinel, emit dispatch.needs_input or worker-failed.
+    if (result.kind === 'needs-input') {
+      const outcome = await resolveNeedsInputSentinel(result.sentinelPath);
+      if (outcome.kind === 'malformed') {
+        return failWith('worker-failed', `needs_input sentinel malformed: ${outcome.detail}`);
+      }
+      if (outcome.kind === 'oversized') {
+        return failWith(
+          'worker-failed',
+          `needs_input sentinel oversized: ${outcome.sizeBytes} bytes`,
+        );
+      }
+      // Valid needs_input: emit and exit 0. Terminal-emit site 2 of 4.
+      await emitTerminal({
+        kind: 'dispatch.needs_input',
+        dispatchId: cfg.dispatchId,
+        durationMs: Date.now() - startTime,
+        at: new Date().toISOString(),
+      });
+      logger.log({
+        kind: 'dispatch.needs_input',
+        dispatchId: cfg.dispatchId,
+        question: outcome.payload.question,
+      });
+      return 0;
+    }
+
+    // failed: adapter non-zero exit — carry the exit code as worker exit code.
+    if (result.kind === 'failed') {
+      logger.log({
+        kind: 'dispatch.failed',
+        dispatchId: cfg.dispatchId,
+        reason: 'provider-failed',
+        detail: `runtime exited with code ${result.exitCode}`,
+      });
+      // Terminal-emit site 3 of 4. This is the DIRECT provider-failed path (it
+      // does NOT go through failWith), so it needs its own guarded emit.
+      await emitTerminal({
+        kind: 'dispatch.failed',
+        dispatchId: cfg.dispatchId,
+        reason: 'provider-failed',
+        at: new Date().toISOString(),
+      });
+      return result.exitCode;
+    }
+
+    // completed: runner already sealed the sentinel (best-effort). Emit finished.
+    // Terminal-emit site 4 of 4.
+    await emitTerminal({
+      kind: 'dispatch.finished',
       dispatchId: cfg.dispatchId,
+      exitCode: 0,
       durationMs: Date.now() - startTime,
       at: new Date().toISOString(),
     });
-    logger.log({
-      kind: 'dispatch.needs_input',
-      dispatchId: cfg.dispatchId,
-      question: outcome.payload.question,
-    });
     return 0;
-  }
+  };
 
-  // failed: adapter non-zero exit — carry the exit code as worker exit code.
-  if (result.kind === 'failed') {
-    logger.log({
-      kind: 'dispatch.failed',
-      dispatchId: cfg.dispatchId,
-      reason: 'provider-failed',
-      detail: `runtime exited with code ${result.exitCode}`,
-    });
-    await emit({
-      kind: 'dispatch.failed',
-      dispatchId: cfg.dispatchId,
-      reason: 'provider-failed',
-      at: new Date().toISOString(),
-    });
-    return result.exitCode;
-  }
+  // Termination handler (spec §5). Resolves only when `terminationSignal`
+  // fires. On a win (claim taken here) it emits `dispatch.cancelled` under the
+  // self-bounded budget so a hung callback aborts at ~2 s (the delivery reason
+  // is then 'aborted' and slice B's backstop persists the undelivered record).
+  // On a loss (a `mainFlow` terminal already claimed) it flushes that terminal's
+  // in-flight delivery. Either way it returns 0 — a graceful cancellation is not
+  // a worker failure. With no signal injected it never resolves, so the race is
+  // a pure no-op and `mainFlow` alone decides the exit code.
+  const terminationOutcome = async (): Promise<number> => {
+    const sig = deps.terminationSignal;
+    if (!sig) return new Promise<number>(() => {});
+    if (!sig.aborted) {
+      await new Promise<void>((r) => sig.addEventListener('abort', () => r(), { once: true }));
+    }
+    if (claimTerminal()) {
+      await emit(
+        { kind: 'dispatch.cancelled', dispatchId: cfg.dispatchId, at: new Date().toISOString() },
+        { signal: AbortSignal.timeout(CANCEL_BUDGET_MS) },
+      );
+    } else if (terminalDelivery) {
+      await terminalDelivery;
+    }
+    return 0;
+  };
 
-  // completed: runner already sealed the sentinel (best-effort). Emit finished.
-  await emit({
-    kind: 'dispatch.finished',
-    dispatchId: cfg.dispatchId,
-    exitCode: 0,
-    durationMs: Date.now() - startTime,
-    at: new Date().toISOString(),
-  });
-  return 0;
+  return Promise.race([mainFlow(), terminationOutcome()]);
 }
 
 /**
