@@ -27,7 +27,7 @@ export class LifecycleEmitter {
     },
   ) {}
 
-  async emit(event: LifecycleEvent): Promise<DeliveryOutcome> {
+  async emit(event: LifecycleEvent, opts?: { signal?: AbortSignal }): Promise<DeliveryOutcome> {
     // An absent `reason` here means "not configured, nothing attempted" — distinct from a
     // delivery attempt that failed (which always sets `reason`). A consumer checking only
     // `delivered` cannot tell the two apart from this return alone.
@@ -73,7 +73,12 @@ export class LifecycleEmitter {
       Number.isFinite(requested) && (requested as number) > 0
         ? Math.trunc(Math.min(requested as number, MAX_ATTEMPT_TIMEOUT_MS))
         : DEFAULT_ATTEMPT_TIMEOUT_MS;
-    const signal = AbortSignal.timeout(delayMs);
+    const timeout = AbortSignal.timeout(delayMs);
+    // NOTE: AbortSignal.any sits before the try — an untyped caller passing a non-AbortSignal
+    // would throw a TypeError out of emit (same escape-the-guarded-region shape slice A guarded
+    // elsewhere). Unreachable from typed callers (only slice C passes opts.signal). Leave this
+    // comment as the record.
+    const signal = opts?.signal ? AbortSignal.any([timeout, opts.signal]) : timeout;
     try {
       const res = await (this.opts.fetchImpl ?? fetch)(this.opts.callbackUrl, {
         method: 'POST',
@@ -85,9 +90,10 @@ export class LifecycleEmitter {
         ? { delivered: true, status: res.status }
         : { delivered: false, status: res.status, reason: 'http-status' };
     } catch {
-      // Classify on the SIGNAL, not on the error's name or message: a hand-rolled mock
-      // rejecting with new Error('aborted') must not be able to pin the wrong branch.
-      return { delivered: false, reason: signal.aborted ? 'timeout' : 'network' };
+      // Classify on the INTERNAL timeout signal, not the composed one: an external abort
+      // (slice C) must not read as 'timeout'. A hand-rolled mock rejecting with
+      // new Error('aborted') must not be able to pin the wrong branch either.
+      return { delivered: false, reason: timeout.aborted ? 'timeout' : 'network' };
     }
   }
 }

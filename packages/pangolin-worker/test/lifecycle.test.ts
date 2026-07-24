@@ -405,5 +405,58 @@ describe('LifecycleEmitter', () => {
           : { delivered: false, status, reason: 'http-status' },
       );
     });
+
+    it('aborts the in-flight fetch when the external signal fires', async () => {
+      const ac = new AbortController();
+      const mockFetch = vi.fn((_url: string, init: RequestInit) => {
+        return new Promise((_resolve, reject) => {
+          (init.signal as AbortSignal).addEventListener('abort', () => {
+            reject(new Error('aborted'));
+          });
+          ac.abort();
+        });
+      });
+      const emitter = new LifecycleEmitter({
+        callbackUrl: 'https://example.com/callback',
+        hmacKey: 'k',
+        fetchImpl: mockFetch as unknown as typeof fetch,
+      });
+      const event: LifecycleEvent = {
+        kind: 'dispatch.started',
+        dispatchId: 'd-1',
+        providerTaskId: 'p-1',
+        at: '2026-05-21T12:00:00Z',
+      };
+
+      const outcome = await emitter.emit(event, { signal: ac.signal });
+
+      expect(outcome).toEqual({ delivered: false, reason: 'network' });
+    });
+
+    it('still classifies the internal deadline as timeout when no external signal is passed', async () => {
+      const mockFetch = vi.fn((_url: string, init: RequestInit) => {
+        return new Promise((_resolve, reject) => {
+          (init.signal as AbortSignal).addEventListener('abort', () => {
+            reject(new Error('t'));
+          });
+        });
+      });
+      const emitter = new LifecycleEmitter({
+        callbackUrl: 'https://example.com/callback',
+        hmacKey: 'k',
+        fetchImpl: mockFetch as unknown as typeof fetch,
+        attemptTimeoutMs: 20,
+      });
+      const event: LifecycleEvent = {
+        kind: 'dispatch.started',
+        dispatchId: 'd-1',
+        providerTaskId: 'p-1',
+        at: '2026-05-21T12:00:00Z',
+      };
+
+      const outcome = await emitter.emit(event);
+
+      expect(outcome.reason).toBe('timeout');
+    });
   });
 });
