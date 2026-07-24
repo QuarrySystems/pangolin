@@ -31,6 +31,14 @@ export interface WorkerConfig {
   callbackUrl?: string;
   callbackTokenRef?: string;
   /**
+   * Secret reference for a bearer token the callback receiver may require
+   * for admission. Optional and independent of `callbackTokenRef` (which is
+   * mandatory whenever `callbackUrl` is set) — a receiver may want HMAC
+   * integrity (via `callbackTokenRef`) without bearer admission, so this
+   * field carries no pairing validation.
+   */
+  callbackBearerRef?: string;
+  /**
    * Per-dispatch secret references (envName → store ref), passed by the
    * client so the WORKER resolves and registers them for redaction rather
    * than relying on ambient compute-layer injection (which left them
@@ -175,6 +183,8 @@ export function parseWorkerEnv(env: NodeJS.ProcessEnv = process.env): WorkerConf
       `pangolin-worker: PANGOLIN_CALLBACK_URL set without PANGOLIN_CALLBACK_TOKEN_REF`,
     );
   }
+  // Optional, independent of callbackTokenRef — no pairing validation.
+  const callbackBearerRef = env.PANGOLIN_CALLBACK_BEARER_REF;
 
   const runtimeAdapter = env.PANGOLIN_RUNTIME_ADAPTER || 'claude-code';
   const setupTimeoutSeconds = env.PANGOLIN_SETUP_TIMEOUT_SECONDS
@@ -195,6 +205,7 @@ export function parseWorkerEnv(env: NodeJS.ProcessEnv = process.env): WorkerConf
     inputJson,
     callbackUrl,
     callbackTokenRef,
+    callbackBearerRef,
     perDispatchSecretRefs,
     secretStoreDir,
     secretStoreKind,
