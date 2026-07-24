@@ -7,7 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 All packages are versioned in lockstep; this file is the changelog for the whole
 workspace. See [RELEASING.md](./RELEASING.md) for how a release is cut.
 
-## [Unreleased] — Renamed Agora → Pangolin Scale
+## [Unreleased]
+
+## [0.3.0] - 2026-07-24 — Renamed Agora → Pangolin Scale
 
 ### Changed
 
@@ -21,26 +23,50 @@ workspace. See [RELEASING.md](./RELEASING.md) for how a release is cut.
   changelog entries below this line retain their original "agora" text as
   intentional residue.
 
-## [Unreleased] — Pre-rename
-
 ### Added
 
+- **Callback-delivery reliability — correctness, durability, and worker termination (#93, #94).**
+  Three slices harden the lifecycle-callback path Pangolin uses to report dispatch outcomes.
+  **Correctness (slice A):** the callback HMAC/header contract is fixed so a receiver can verify and parse
+  it, and delivery is now honest **at-most-once** (the retry loop and its `(dispatchId, kind)` dedupe key were
+  withdrawn). **Durability (slice B):** a failed callback writes a durable
+  `dispatches/<id>/undelivered/<kind>.json` record, so a consumer reconciles by polling — no silent drops.
+  **Termination (slice C, #94):** the worker (running as PID 1) now traps SIGTERM and mints
+  `dispatch.cancelled` through the same `emit()` path when no terminal was produced (flushing an in-flight
+  terminal otherwise), guarded by a single-winner claim so a cancel and a late completion can never both be
+  delivered; adds an `'aborted'` `DeliveryFailureReason` distinguishing a grace-budget abort from a timeout.
+  MVP §7.6 (which documented a SIGTERM handler that never existed) is corrected.
+
+- **Direct-dispatch consumer seam (#93).** The seams an external orchestrator (e.g. ai-os) needs to drive
+  Pangolin as an execution + audit substrate without hosting the orchestrator: dispatch de-duplication via
+  `DispatchWork.dedupeOnDispatchId` and per-dispatch callback auth via `callbackTokenRef`, plus the
+  `emit(event, { signal })` abort seam composed with the internal attempt timeout via `AbortSignal.any`.
+
+- **Engine-free `sealApproval()` pure function (#92)** — the green-lighting primitive extracted so approval
+  can be sealed independently of the run engine.
+
+- **Append-able submission — push-then-close open-ended runs (#89).** Opt-in runs that stay open for
+  additional items until explicitly closed.
+
+- **`examples/langgraph-changeorder` (#90)** — an external-orchestrator provenance seam demonstrating the
+  direct-dispatch pattern end-to-end.
+
 - **Pattern-aware CLI run view — `agora orch render` + live `agora orch watch` (spec: docs/superpowers/specs/2026-06-07-agora-run-view-design.md).**
-  Four surfaces landed: **(1) Pre-run view** — `agora orch render <plan.json> [--pattern]` shows the expected DAG incl. dotted ghost respawn arcs under spawn-fix gates; works without a config file. 
-  **(2) Live watch default** — `agora orch watch` now renders a pattern-aware live view (status glyphs, ghosts materializing on red, per-item model/cost evidence, terminal verify summary) instead of flat JSON; **MIGRATION NOTE:** the previous raw JSON stream is available verbatim via `--json` (new flags also available: `--interval`/`--no-color`/`--no-clear`/`--ascii`/`--pattern`). 
-  **(3) Additive status field** — status items now carry `depends_on: string[]` (resolved edges, full dependency graph beside the existing filtered `blockedBy`). 
+  Four surfaces landed: **(1) Pre-run view** — `agora orch render <plan.json> [--pattern]` shows the expected DAG incl. dotted ghost respawn arcs under spawn-fix gates; works without a config file.
+  **(2) Live watch default** — `agora orch watch` now renders a pattern-aware live view (status glyphs, ghosts materializing on red, per-item model/cost evidence, terminal verify summary) instead of flat JSON; **MIGRATION NOTE:** the previous raw JSON stream is available verbatim via `--json` (new flags also available: `--interval`/`--no-color`/`--no-clear`/`--ascii`/`--pattern`).
+  **(3) Additive status field** — status items now carry `depends_on: string[]` (resolved edges, full dependency graph beside the existing filtered `blockedBy`).
   **(4) Driver adoption** — the dogfood-gated harness renders the shared live view instead of flat per-item status lines.
 
-- **Model + cost evidence in dispatch (spec: docs/superpowers/specs/2026-06-06-agora-model-cost-evidence-design.md).** 
+- **Model + cost evidence in dispatch (spec: docs/superpowers/specs/2026-06-06-agora-model-cost-evidence-design.md).**
   Dogfood run 2's manifests sealed `model: { id: '' }` and discarded cost — evidence now answers "which model, at what cost."
-  Four surfaces landed: **(1) Core contract** adds `DispatchWork.model?: string` and a shared `RuntimeUsage` type; 
-  `RuntimeExit.usage` carries actual usage across the adapter boundary. **(2) Executor option** — 
-  `DispatchExecutor.defaultModel` and pre-fire requested-model resolution (`subagent.model > defaultModel > unset seals ''`); 
-  manifest `model.id ≡ dispatched work` by construction. **(3) Adapter capture** — claude-code adapter now passes `--model` 
-  (reserved levels `fast`/`standard`/`max` → haiku/sonnet/opus bare aliases; other strings pass through) and runs 
-  `claude --print --output-format json`, parsing the envelope best-effort for actual usage (modelUsage/cost/turns/duration), 
-  verbatim fallback on unparseable output. **(4) Sentinel block** — additive `usage` block sealed after `outputs` 
-  (models actually run, costUsd, turns, model-time durationMs); absent → byte-identical sentinel. Capture-only 
+  Four surfaces landed: **(1) Core contract** adds `DispatchWork.model?: string` and a shared `RuntimeUsage` type;
+  `RuntimeExit.usage` carries actual usage across the adapter boundary. **(2) Executor option** —
+  `DispatchExecutor.defaultModel` and pre-fire requested-model resolution (`subagent.model > defaultModel > unset seals ''`);
+  manifest `model.id ≡ dispatched work` by construction. **(3) Adapter capture** — claude-code adapter now passes `--model`
+  (reserved levels `fast`/`standard`/`max` → haiku/sonnet/opus bare aliases; other strings pass through) and runs
+  `claude --print --output-format json`, parsing the envelope best-effort for actual usage (modelUsage/cost/turns/duration),
+  verbatim fallback on unparseable output. **(4) Sentinel block** — additive `usage` block sealed after `outputs`
+  (models actually run, costUsd, turns, model-time durationMs); absent → byte-identical sentinel. Capture-only
   (not forwarded into ExecutionResult).
 
 - **Block-pipeline worker runtime + the `data` pack (#46, #47).** The worker's
@@ -105,19 +131,19 @@ workspace. See [RELEASING.md](./RELEASING.md) for how a release is cut.
   (`npm test`, `dotnet test`, `cargo test`, …) over its own edit and seal
   `{ passed, report, durationMs }` into the output sentinel; surfaced on the
   dispatch result and item `status` / `watch`. **Report-only** — a failed verify
-  does not change the dispatch outcome. The patch is captured *before* verify so
+  does not change the dispatch outcome. The patch is captured _before_ verify so
   build artifacts never pollute it; registered secrets are redacted from the
   report; a new `verify.ran` worker event is emitted. Set it via
   `client.subagent.register({ verify: { command, timeout } })`.
 
 - **Red gates block dependents + live gated circle-back harness (spec: docs/superpowers/specs/2026-06-06-dogfood-run3-gated-circleback-design.md).**
-  Engine surface: `computeNewlyReady` and `computeSkipped` now treat a `done` + `verify.passed === false` + `inputs.gate.onRed === 'spawn-fix'` 
-  dependency as failed-like, blocking its dependents' readiness and triggering the skip cascade — closing the gap where findings-by-provenance and downstream 
-  skip+remap were mutually exclusive in the offline proof. Scoped gate-aware change with a data-edge exemption: dependents consuming the gate's own outputs 
-  (via `needs[*].from === gate` + `select.kind === 'output'`) remain unblocked, permitting the spawned fix to consume findings. 
-  Harness surface: **`examples/dogfood-gated`** ships the run-3 live harness — a 3-node gated plan on agora's own tree (docs explanation page → opus fact-check 
-  gate with `verify: test ! -s outputs/findings` → announce), pipeline pattern with spawn-fix, driver asserting provenance closure over the grown graph, the 
-  red-path remap (dependents skipped, fix spawned with gate outputs remapped), and live per-dispatch model/cost evidence (first table sealing manifest-requested + 
+  Engine surface: `computeNewlyReady` and `computeSkipped` now treat a `done` + `verify.passed === false` + `inputs.gate.onRed === 'spawn-fix'`
+  dependency as failed-like, blocking its dependents' readiness and triggering the skip cascade — closing the gap where findings-by-provenance and downstream
+  skip+remap were mutually exclusive in the offline proof. Scoped gate-aware change with a data-edge exemption: dependents consuming the gate's own outputs
+  (via `needs[*].from === gate` + `select.kind === 'output'`) remain unblocked, permitting the spawned fix to consume findings.
+  Harness surface: **`examples/dogfood-gated`** ships the run-3 live harness — a 3-node gated plan on agora's own tree (docs explanation page → opus fact-check
+  gate with `verify: test ! -s outputs/findings` → announce), pipeline pattern with spawn-fix, driver asserting provenance closure over the grown graph, the
+  red-path remap (dependents skipped, fix spawned with gate outputs remapped), and live per-dispatch model/cost evidence (first table sealing manifest-requested +
   worker-captured models and costUsd). The harness is ready; the live run has not yet occurred.
 
 - **Execution patterns** — new explanation page (`docs-site/src/content/docs/explanation/execution-patterns.md`) documenting how queue-level execution patterns (`staticDag`, `pipeline`, `mapReduce`) layer above the tick engine: the Pattern contract, the `extendRun` seam, `run.extended` audit entries, the gate/respawn circle-back, and the forward-arc-never-rewind invariant; see the design spec at docs/superpowers/specs/2026-06-06-dogfood-run3-gated-circleback-design.md.
@@ -132,7 +158,7 @@ published to npm under `@quarry-systems/agora-*`.
 ### Added
 
 - **Offload orchestrator (`agora-orchestrator`).** `agora orch serve | submit |
-  watch | cancel | audit` — a long-running driver runs a DAG of agent tasks
+watch | cancel | audit` — a long-running driver runs a DAG of agent tasks
   unattended: dependency ordering, parallel fan-out serialized by declared
   resource locks, retry/backoff with a `skipped` cascade, a reviewable patch
   artifact per task (`result_ref`), and an exportable, self-verifying audit bundle.
@@ -172,5 +198,6 @@ published to npm under `@quarry-systems/agora-*`.
 - **Effect-tier policy** is computed but not yet enforced.
 - **Pre-1.0 (`0.x`):** interfaces may change between minor versions.
 
-[Unreleased]: https://github.com/QuarrySystems/pangolin/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/QuarrySystems/pangolin/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/QuarrySystems/pangolin/compare/v0.2.0...v0.3.0
 [0.1.0]: https://github.com/QuarrySystems/pangolin/releases/tag/v0.1.0

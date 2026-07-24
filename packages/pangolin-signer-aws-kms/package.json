@@ -1,6 +1,6 @@
 {
   "name": "@quarry-systems/pangolin-signer-aws-kms",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "license": "BUSL-1.1",
   "description": "AWS KMS asymmetric ECDSA-P256 signer for the Pangolin audit seal.",
   "main": "dist/index.js",
