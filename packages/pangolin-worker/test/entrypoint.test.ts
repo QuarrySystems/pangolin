@@ -12,6 +12,7 @@ import { mkdtemp, rm, writeFile, mkdir, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runWorker, type RunWorkerDeps } from '../src/entrypoint.js';
+import { StructuredLogger } from '../src/logger.js';
 import { LocalSecretStore } from '@quarry-systems/pangolin-secret-store';
 import {
   computeContentHash,
@@ -283,6 +284,108 @@ describe('runWorker', () => {
     // fix, the SecretStore + emitter rebuild happens before bundle fetch, so
     // the callback URL is hit exactly once for the dispatch.failed event.
     expect(fetchCalls).toContain('https://example.test/callback');
+  });
+
+  it('resolves the bearer ref and sends Authorization on the callback POST', async () => {
+    const h = await setupHarness();
+    cleanupDirs.push(h.workDir, h.adaptersRoot);
+    h.env.PANGOLIN_CALLBACK_URL = 'https://example.test/callback';
+    h.env.PANGOLIN_CALLBACK_TOKEN_REF = 'arn:aws:secretsmanager:us-east-1:1:secret:hmac';
+    h.env.PANGOLIN_CALLBACK_BEARER_REF = 'arn:aws:secretsmanager:us-east-1:1:secret:bearer';
+
+    const secretStore = {
+      name: 'fake',
+      stage: async () => ({ ref: 'unused', ttlSeconds: 1 }),
+      resolve: async (ref: string) => {
+        if (ref === h.env.PANGOLIN_CALLBACK_TOKEN_REF) return 'HMAC_KEY';
+        if (ref === h.env.PANGOLIN_CALLBACK_BEARER_REF) return 'RESOLVED_BEARER';
+        throw new Error(`unknown ref ${ref}`);
+      },
+      cleanupByTag: async () => {},
+    };
+
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(input), init: init! });
+      return new Response('ok', { status: 200 });
+    }) as typeof fetch;
+
+    const code = await runWorker(h.env, makeDeps(h, { fetchImpl, secretStore }));
+
+    expect(code).toBe(0);
+    const callbackPost = calls.find((c) => c.url === 'https://example.test/callback');
+    expect(callbackPost).toBeDefined();
+    expect((callbackPost!.init.headers as Record<string, string>)['Authorization']).toBe(
+      'Bearer RESOLVED_BEARER',
+    );
+  });
+
+  it('registers the resolved bearer token for redaction (positive control — asserts the CALL)', async () => {
+    const h = await setupHarness();
+    cleanupDirs.push(h.workDir, h.adaptersRoot);
+    h.env.PANGOLIN_CALLBACK_URL = 'https://example.test/callback';
+    h.env.PANGOLIN_CALLBACK_TOKEN_REF = 'arn:aws:secretsmanager:us-east-1:1:secret:hmac';
+    h.env.PANGOLIN_CALLBACK_BEARER_REF = 'arn:aws:secretsmanager:us-east-1:1:secret:bearer';
+
+    const secretStore = {
+      name: 'fake',
+      stage: async () => ({ ref: 'unused', ttlSeconds: 1 }),
+      resolve: async (ref: string) => {
+        if (ref === h.env.PANGOLIN_CALLBACK_TOKEN_REF) return 'HMAC_KEY';
+        if (ref === h.env.PANGOLIN_CALLBACK_BEARER_REF) return 'RESOLVED_BEARER';
+        throw new Error(`unknown ref ${ref}`);
+      },
+      cleanupByTag: async () => {},
+    };
+
+    const fetchImpl = (async () => new Response('ok', { status: 200 })) as typeof fetch;
+
+    const registerSpy = vi.spyOn(StructuredLogger.prototype, 'registerSecret');
+    let calledWith: unknown[];
+    try {
+      await runWorker(h.env, makeDeps(h, { fetchImpl, secretStore }));
+      // Capture before mockRestore(): vitest's mockRestore() also resets the
+      // recorded call history, so asserting after restore would vacuously see
+      // zero calls regardless of whether registerSecret was actually invoked.
+      calledWith = registerSpy.mock.calls.map((c) => c[0]);
+    } finally {
+      registerSpy.mockRestore();
+    }
+
+    expect(calledWith).toContain('RESOLVED_BEARER');
+  });
+
+  it('with no callbackBearerRef configured, resolves no bearer and sends no Authorization header', async () => {
+    const h = await setupHarness();
+    cleanupDirs.push(h.workDir, h.adaptersRoot);
+    h.env.PANGOLIN_CALLBACK_URL = 'https://example.test/callback';
+    h.env.PANGOLIN_CALLBACK_TOKEN_REF = 'arn:aws:secretsmanager:us-east-1:1:secret:hmac';
+
+    const resolvedRefs: string[] = [];
+    const secretStore = {
+      name: 'fake',
+      stage: async () => ({ ref: 'unused', ttlSeconds: 1 }),
+      resolve: async (ref: string) => {
+        resolvedRefs.push(ref);
+        if (ref === h.env.PANGOLIN_CALLBACK_TOKEN_REF) return 'HMAC_KEY';
+        throw new Error(`unknown ref ${ref}`);
+      },
+      cleanupByTag: async () => {},
+    };
+
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(input), init: init! });
+      return new Response('ok', { status: 200 });
+    }) as typeof fetch;
+
+    const code = await runWorker(h.env, makeDeps(h, { fetchImpl, secretStore }));
+
+    expect(code).toBe(0);
+    expect(resolvedRefs).toEqual([h.env.PANGOLIN_CALLBACK_TOKEN_REF]);
+    const callbackPost = calls.find((c) => c.url === 'https://example.test/callback');
+    expect(callbackPost).toBeDefined();
+    expect(callbackPost!.init.headers).not.toHaveProperty('Authorization');
   });
 
   it('runs the happy path: overlays bundles, invokes the adapter, emits started+finished, returns 0', async () => {

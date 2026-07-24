@@ -223,10 +223,21 @@ export async function runWorker(
     }
     logger.registerSecret(key);
     hmacKeyForNotifications = key;
+
+    // Bearer admission is optional and independent of the mandatory HMAC key
+    // above — resolve it only when configured, so the resolve() call and the
+    // Authorization header are both fully gated on PANGOLIN_CALLBACK_BEARER_REF.
+    let bearerToken: string | undefined;
+    if (cfg.callbackBearerRef) {
+      bearerToken = await secretStore.resolve(cfg.callbackBearerRef);
+      logger.registerSecret(bearerToken);
+    }
+
     lifecycleEmitter = new LifecycleEmitter({
       callbackUrl: cfg.callbackUrl,
       hmacKey: key,
       fetchImpl: deps.fetchImpl,
+      bearerToken,
     });
   }
 
