@@ -569,6 +569,41 @@ describe('runWorker', () => {
     expect(kinds).not.toContain('dispatch.failed');
   });
 
+  it('does not log the callback URL when a lifecycle delivery fails on the network', async () => {
+    const h = await setupHarness();
+    cleanupDirs.push(h.workDir, h.adaptersRoot);
+    h.env.PANGOLIN_CALLBACK_URL = 'https://example.test/secret-path-token';
+    h.env.PANGOLIN_CALLBACK_TOKEN_REF = 'arn:aws:secretsmanager:us-east-1:1:secret:hmac';
+
+    // Force a network failure by injecting a fetchImpl that throws an error
+    // embedding the callback URL — the delivery path must never surface it.
+    const fetchImpl = (async () => {
+      throw new Error(`connect ECONNREFUSED ${h.env.PANGOLIN_CALLBACK_URL}`);
+    }) as typeof fetch;
+
+    const writes: string[] = [];
+    const spy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation((chunk: string | Uint8Array): boolean => {
+        writes.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString());
+        return true;
+      });
+
+    let code: number;
+    try {
+      code = await runWorker(h.env, makeDeps(h, { fetchImpl }));
+    } finally {
+      spy.mockRestore();
+    }
+
+    expect(code).toBe(0);
+    const allLogs = writes.join('');
+    // A delivery-failure log line for the lifecycle event must have been written...
+    expect(allLogs).toContain('lifecycle.delivery');
+    // ...but it must never contain the raw callback URL.
+    expect(allLogs).not.toContain(h.env.PANGOLIN_CALLBACK_URL);
+  });
+
   it('emits dispatch.failed (worker-failed) when sentinel is malformed', async () => {
     const h = await setupHarness();
     cleanupDirs.push(h.workDir, h.adaptersRoot);

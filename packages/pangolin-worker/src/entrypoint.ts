@@ -63,8 +63,9 @@ import { filterRuntimeEnv } from './runtime-env-filter.js';
 import { runSetupScriptIfPresent, SetupScriptError } from './setup-script.js';
 import { loadChannelIfPresent, type ChannelHandle } from './channel-loader.js';
 import { resolveNeedsInputSentinel } from './needs-input.js';
-import { loadCapabilityNotifications, fireNotifications } from './notifications.js';
+import { loadCapabilityNotifications } from './notifications.js';
 import { LifecycleEmitter } from './lifecycle.js';
+import { deliverLifecycle, deliverNotifications, type DeliverContext } from './deliver.js';
 import { StructuredLogger } from './logger.js';
 import { captureBaseline, type WorkspaceBaseline } from './patch-capture.js';
 import type { VerifyConfig } from '@quarry-systems/pangolin-core';
@@ -146,24 +147,31 @@ export async function runWorker(
   const dispatchLevelNotifications: NotificationConfig[] = [];
   let hmacKeyForNotifications = '';
 
+  // Declared here (ahead of Step 1b's construction) so the `emit` closure
+  // below can reference it — `storage` is undefined on the storage-
+  // construction failure path, which DeliverContext models as optional.
+  let storage: StorageProvider | undefined;
+
   const emit = async (event: LifecycleEvent): Promise<void> => {
     deps.onLifecycleEvent?.(event);
-    try {
-      await lifecycleEmitter.emit(event);
-    } catch (err) {
-      logger.log({
-        kind: 'lifecycle.emit.failed',
-        detail: (err as Error).message,
-      });
-    }
-    if (capabilityNotifications.length > 0 || dispatchLevelNotifications.length > 0) {
-      await fireNotifications({
-        event,
-        sources: [capabilityNotifications, dispatchLevelNotifications],
-        hmacKey: hmacKeyForNotifications,
-        fetchImpl: deps.fetchImpl,
-      });
-    }
+    const ctx: DeliverContext = {
+      emitter: lifecycleEmitter,
+      storage,
+      logger,
+      namespace: cfg.namespace,
+      dispatchId: cfg.dispatchId,
+      notifications:
+        capabilityNotifications.length > 0 || dispatchLevelNotifications.length > 0
+          ? {
+              sources: [capabilityNotifications, dispatchLevelNotifications],
+              hmacKey: hmacKeyForNotifications,
+              fetchImpl: deps.fetchImpl,
+            }
+          : undefined,
+    };
+    // deliverLifecycle/deliverNotifications never throw — no try/catch needed.
+    await deliverLifecycle(event, ctx);
+    await deliverNotifications(event, ctx);
   };
 
   const failWith = async (
@@ -223,7 +231,6 @@ export async function runWorker(
   }
 
   // Step 1b: construct StorageProvider.
-  let storage: StorageProvider;
   try {
     storage = deps.storage ?? (await constructStorageProvider(cfg.storageUri));
   } catch (err) {
