@@ -83,6 +83,31 @@ describe('deliverLifecycle', () => {
     });
   });
 
+  it('does not persist or log when nothing was attempted (delivered:false, no reason) even with storage present', async () => {
+    const puts: string[] = [];
+    const storage = {
+      put: async (uri: string) => {
+        puts.push(uri);
+        return { contentHash: 'h' };
+      },
+    } as unknown as StorageProvider;
+    const emitter = {
+      emit: async () => ({ delivered: false }) as DeliveryOutcome,
+    } as unknown as LifecycleEmitter;
+    const logs: unknown[] = [];
+
+    await deliverLifecycle({ kind: 'dispatch.failed', dispatchId: 'D1' } as LifecycleEvent, {
+      emitter,
+      storage,
+      logger: { log: (l: unknown) => logs.push(l) } as unknown as StructuredLogger,
+      namespace: 'ns',
+      dispatchId: 'D1',
+    });
+
+    expect(puts).toHaveLength(0);
+    expect(logs).toHaveLength(0);
+  });
+
   it('emits but does not persist (and does not throw) when storage is undefined', async () => {
     const emitter = {
       emit: async () => ({ delivered: false, reason: 'network' }) as DeliveryOutcome,

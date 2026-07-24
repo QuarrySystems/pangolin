@@ -50,6 +50,12 @@ export async function persistUndelivered(
 export async function deliverLifecycle(event: LifecycleEvent, ctx: DeliverContext): Promise<void> {
   const outcome: DeliveryOutcome = await ctx.emitter.emit(event);
   if (outcome.delivered) return;
+  // No `reason` means "not configured — nothing attempted" (see lifecycle.ts's
+  // `emit`), distinct from a real failed attempt (which always sets `reason`).
+  // Every lifecycle event is routed through here regardless of whether a
+  // callback is configured, so this must be a silent no-op — otherwise every
+  // no-callback dispatch would persist a spurious undelivered record.
+  if (outcome.reason === undefined) return;
   if (ctx.storage) {
     await persistUndelivered(ctx.storage, ctx.namespace, ctx.dispatchId, event, outcome);
     ctx.logger.log({
