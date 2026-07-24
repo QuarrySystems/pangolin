@@ -59,7 +59,13 @@ export interface DispatchWork {
   /** Correlation context for the telemetry stream. The orchestrator sets `{ traceId: runId, runId,
    *  itemId }`; a standalone caller may omit it (the client defaults `{ traceId: dispatchId }`). */
   trace?: TraceContext;
-  callback?: { url: string; signatureAlgorithm?: 'sha256' };
+  callback?: {
+    url: string;
+    signatureAlgorithm?: 'sha256';
+    /** SecretStore ref the consumer supplies; the worker sends its resolved value as
+     *  `Authorization: Bearer` for ingress admission (distinct from the HMAC integrity header). */
+    bearerRef?: string;
+  };
   notifications?: NotificationConfig[];
   secrets?: Record<string, SecretRef | InlineSecret>;
   retentionDays?: number;
@@ -74,6 +80,9 @@ export interface DispatchWork {
    *  Recorded in bundleRefs.pipeline and the audit manifest so every dispatch is
    *  traceable back to the exact pipeline version that produced it. */
   pipelineRef?: string;
+  /** Opt-in: fireWork checks for a `dispatches/<id>/fired.json` marker before provider.run()
+   *  and throws DispatchAlreadyExistsError if present. Best-effort dedupe, not a mutex. */
+  dedupeOnDispatchId?: boolean;
 }
 
 /**
