@@ -9,11 +9,11 @@ default_review_mode: split
 
 ```mermaid
 flowchart TD
-    task-aborted-classification["task-aborted-classification: DeliveryFailureReason += aborted<br/>files: packages/pangolin-worker/src/lifecycle.ts +1 more"]
-    task-signal-threading["task-signal-threading: thread abort signal to lifecycle only<br/>files: packages/pangolin-worker/src/deliver.ts +2 more"]
-    task-handler["task-handler: SIGTERM handler + claimTerminal guard<br/>files: packages/pangolin-worker/src/entrypoint.ts +1 more"]
-    task-entry-sigterm["task-entry-sigterm: process.on SIGTERM in container entry<br/>files: docker/pangolin-worker/bin/pangolin-worker-entry.mjs"]
-    task-mvp-doc["task-mvp-doc: correct MVP §7.6<br/>files: docs/superpowers/specs/2026-05-21-agora-mvp-design.md"]
+    task-aborted-classification["task-aborted-classification: DeliveryFailureReason += aborted<br/>files: packages/pangolin-worker/src/lifecycle.ts +1 more"]:::done
+    task-signal-threading["task-signal-threading: thread abort signal to lifecycle only<br/>files: packages/pangolin-worker/src/deliver.ts +2 more"]:::done
+    task-handler["task-handler: SIGTERM handler + claimTerminal guard<br/>files: packages/pangolin-worker/src/entrypoint.ts +1 more"]:::done
+    task-entry-sigterm["task-entry-sigterm: process.on SIGTERM in container entry<br/>files: docker/pangolin-worker/bin/pangolin-worker-entry.mjs"]:::done
+    task-mvp-doc["task-mvp-doc: correct MVP §7.6<br/>files: docs/superpowers/specs/2026-05-21-agora-mvp-design.md"]:::done
 
     task-signal-threading --> task-handler
     task-aborted-classification --> task-handler
@@ -61,7 +61,7 @@ depends_on: []
 files:
   - packages/pangolin-worker/src/lifecycle.ts
   - packages/pangolin-worker/test/lifecycle.test.ts
-status: pending
+status: done
 ```
 
 Add the `'aborted'` member to `DeliveryFailureReason` and classify an external-signal abort distinctly from
@@ -125,7 +125,7 @@ files:
   - packages/pangolin-worker/src/deliver.ts
   - packages/pangolin-worker/src/entrypoint.ts
   - packages/pangolin-worker/test/deliver.test.ts
-status: pending
+status: done
 ```
 
 Thread an optional `AbortSignal` from the worker's `emit` closure through `deliverLifecycle` to
@@ -190,7 +190,7 @@ depends_on: [task-signal-threading, task-aborted-classification]
 files:
   - packages/pangolin-worker/src/entrypoint.ts
   - packages/pangolin-worker/test/entrypoint.test.ts
-status: pending
+status: done
 model_hint: opus
 quality_reviewer_hint: opus
 ```
@@ -289,7 +289,7 @@ id: task-entry-sigterm
 depends_on: [task-handler]
 files:
   - docker/pangolin-worker/bin/pangolin-worker-entry.mjs
-status: pending
+status: done
 is_wiring_task: true
 review_mode: merged
 ```
@@ -331,7 +331,7 @@ id: task-mvp-doc
 depends_on: []
 files:
   - docs/superpowers/specs/2026-05-21-agora-mvp-design.md
-status: pending
+status: done
 model_hint: cheap
 review_mode: merged
 ```
