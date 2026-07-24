@@ -200,6 +200,22 @@ export async function runWorker(
   // leaving room for the storage.put backstop on a hung callback.
   const CANCEL_BUDGET_MS = 2000;
 
+  // Every `mainFlow` terminal-emit site funnels through this one guard: claim
+  // the single terminal slot and, if won, deliver `event` and record the
+  // in-flight promise so the termination flush branch can await it. A caller
+  // that loses the claim (e.g. a late completion after the handler already
+  // emitted `cancelled`) emits nothing. One shared path on purpose — a divergent
+  // hand-rolled copy is exactly how the direct provider-failed site was
+  // originally left unguarded. (The handler's own `cancelled` emit stays inline
+  // in `terminationOutcome` — it carries the budget signal and drives the
+  // else-flush branch, so it does not fit this shape.)
+  const emitTerminal = async (event: LifecycleEvent): Promise<void> => {
+    if (claimTerminal()) {
+      terminalDelivery = emit(event);
+      await terminalDelivery;
+    }
+  };
+
   const failWith = async (
     reason: 'integrity-failed' | 'fetch-failed' | 'worker-failed',
     detail: string,
@@ -211,15 +227,12 @@ export async function runWorker(
     // secrets in `detail` never get POSTed to a webhook.
     logger.log({ kind: 'dispatch.failed', dispatchId: cfg.dispatchId, reason, detail });
     // Terminal-emit site 1 of 4 (covers all failWith call sites in one guard).
-    if (claimTerminal()) {
-      terminalDelivery = emit({
-        kind: 'dispatch.failed',
-        dispatchId: cfg.dispatchId,
-        reason,
-        at: new Date().toISOString(),
-      });
-      await terminalDelivery;
-    }
+    await emitTerminal({
+      kind: 'dispatch.failed',
+      dispatchId: cfg.dispatchId,
+      reason,
+      at: new Date().toISOString(),
+    });
     return exitCode;
   };
 
@@ -586,15 +599,12 @@ export async function runWorker(
         );
       }
       // Valid needs_input: emit and exit 0. Terminal-emit site 2 of 4.
-      if (claimTerminal()) {
-        terminalDelivery = emit({
-          kind: 'dispatch.needs_input',
-          dispatchId: cfg.dispatchId,
-          durationMs: Date.now() - startTime,
-          at: new Date().toISOString(),
-        });
-        await terminalDelivery;
-      }
+      await emitTerminal({
+        kind: 'dispatch.needs_input',
+        dispatchId: cfg.dispatchId,
+        durationMs: Date.now() - startTime,
+        at: new Date().toISOString(),
+      });
       logger.log({
         kind: 'dispatch.needs_input',
         dispatchId: cfg.dispatchId,
@@ -612,31 +622,25 @@ export async function runWorker(
         detail: `runtime exited with code ${result.exitCode}`,
       });
       // Terminal-emit site 3 of 4. This is the DIRECT provider-failed path (it
-      // does NOT go through failWith), so it needs its own claim guard.
-      if (claimTerminal()) {
-        terminalDelivery = emit({
-          kind: 'dispatch.failed',
-          dispatchId: cfg.dispatchId,
-          reason: 'provider-failed',
-          at: new Date().toISOString(),
-        });
-        await terminalDelivery;
-      }
+      // does NOT go through failWith), so it needs its own guarded emit.
+      await emitTerminal({
+        kind: 'dispatch.failed',
+        dispatchId: cfg.dispatchId,
+        reason: 'provider-failed',
+        at: new Date().toISOString(),
+      });
       return result.exitCode;
     }
 
     // completed: runner already sealed the sentinel (best-effort). Emit finished.
     // Terminal-emit site 4 of 4.
-    if (claimTerminal()) {
-      terminalDelivery = emit({
-        kind: 'dispatch.finished',
-        dispatchId: cfg.dispatchId,
-        exitCode: 0,
-        durationMs: Date.now() - startTime,
-        at: new Date().toISOString(),
-      });
-      await terminalDelivery;
-    }
+    await emitTerminal({
+      kind: 'dispatch.finished',
+      dispatchId: cfg.dispatchId,
+      exitCode: 0,
+      durationMs: Date.now() - startTime,
+      at: new Date().toISOString(),
+    });
     return 0;
   };
 
