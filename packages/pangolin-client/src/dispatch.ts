@@ -88,6 +88,8 @@ export interface InFlightDispatch {
     /** for the audit manifest — the pinned pipeline definition URI that triggered this dispatch */
     pipelineRef?: string;
   };
+  /** SecretStore ref for the per-dispatch callback HMAC key, when a callback was configured. */
+  readonly callbackTokenRef?: string;
   awaitExit(): Promise<TaskExit>;
   reconcile(exit: TaskExit): Promise<DispatchResult>;
   cleanup(): void;
@@ -451,6 +453,7 @@ export async function fireWork(
       inputRefs: work.inputRefs ?? {},
       ...(resolvedPipelineRef !== undefined ? { pipelineRef: resolvedPipelineRef.uri } : {}),
     },
+    callbackTokenRef,
     awaitExit,
     reconcile,
     cleanup,

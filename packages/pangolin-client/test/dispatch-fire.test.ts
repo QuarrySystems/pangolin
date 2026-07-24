@@ -23,7 +23,13 @@ function makeMemoryStorage(): StorageProvider & {
   let monotonic = 0;
   const storage: StorageProvider & {
     blobs: Map<string, Uint8Array>;
-    seed(name: string, type: string, namespace: string, contentHash: string, payload: unknown): void;
+    seed(
+      name: string,
+      type: string,
+      namespace: string,
+      contentHash: string,
+      payload: unknown,
+    ): void;
   } = {
     name: 'memory',
     blobs,
@@ -64,7 +70,11 @@ function makeMemoryStorage(): StorageProvider & {
       const list = registry.get(uri);
       if (!list || list.length === 0) return null;
       const last = list[list.length - 1];
-      return { uri: last.pinnedUri, contentHash: last.contentHash, registeredAt: last.registeredAt };
+      return {
+        uri: last.pinnedUri,
+        contentHash: last.contentHash,
+        registeredAt: last.registeredAt,
+      };
     },
     async list(uri: string) {
       return (registry.get(uri) ?? []).map((e) => ({
@@ -234,7 +244,13 @@ describe('client.dispatch.fire', () => {
         return { providerTaskId: 'prov-inputrefs-test' };
       },
       async awaitExit(_handle, _ctx): Promise<TaskExit> {
-        return { exitCode: 0, startedAt: new Date(0), finishedAt: new Date(1000), stdout: 'done', stderr: '' };
+        return {
+          exitCode: 0,
+          startedAt: new Date(0),
+          finishedAt: new Date(1000),
+          stdout: 'done',
+          stderr: '',
+        };
       },
     };
 
@@ -256,7 +272,9 @@ describe('client.dispatch.fire', () => {
 
     expect(capturedSpec).toBeDefined();
     const bundleRefs = JSON.parse(capturedSpec!.env.PANGOLIN_BUNDLE_REFS_JSON);
-    expect(bundleRefs.inputs).toEqual([{ key: 'patch', uri, contentHash: 'sha256:' + 'a'.repeat(64) }]);
+    expect(bundleRefs.inputs).toEqual([
+      { key: 'patch', uri, contentHash: 'sha256:' + 'a'.repeat(64) },
+    ]);
     expect(inflight.resolved.inputRefs).toEqual({ patch: uri });
   });
 
@@ -270,7 +288,13 @@ describe('client.dispatch.fire', () => {
         return { providerTaskId: 'never' };
       },
       async awaitExit(_handle, _ctx): Promise<TaskExit> {
-        return { exitCode: 0, startedAt: new Date(0), finishedAt: new Date(0), stdout: '', stderr: '' };
+        return {
+          exitCode: 0,
+          startedAt: new Date(0),
+          finishedAt: new Date(0),
+          stdout: '',
+          stderr: '',
+        };
       },
     };
 
@@ -303,7 +327,13 @@ describe('client.dispatch.fire', () => {
         return { providerTaskId: 'never' };
       },
       async awaitExit(_handle, _ctx): Promise<TaskExit> {
-        return { exitCode: 0, startedAt: new Date(0), finishedAt: new Date(0), stdout: '', stderr: '' };
+        return {
+          exitCode: 0,
+          startedAt: new Date(0),
+          finishedAt: new Date(0),
+          stdout: '',
+          stderr: '',
+        };
       },
     };
 
@@ -338,7 +368,13 @@ describe('client.dispatch.fire', () => {
         return { providerTaskId: 'prov-no-inputs-test' };
       },
       async awaitExit(_handle, _ctx): Promise<TaskExit> {
-        return { exitCode: 0, startedAt: new Date(0), finishedAt: new Date(1000), stdout: 'done', stderr: '' };
+        return {
+          exitCode: 0,
+          startedAt: new Date(0),
+          finishedAt: new Date(1000),
+          stdout: 'done',
+          stderr: '',
+        };
       },
     };
 
@@ -362,6 +398,88 @@ describe('client.dispatch.fire', () => {
     expect(bundleRefs.inputs).toEqual([]);
   });
 
+  it('exposes callbackTokenRef equal to the staged ref when a callback is configured', async () => {
+    const storage = makeMemoryStorage();
+    storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
+
+    const compute: ComputeProvider = {
+      name: 'fake-compute',
+      async run(_spec, _ctx) {
+        return { providerTaskId: 'prov-callback-ref-test' };
+      },
+      async awaitExit(_handle, _ctx): Promise<TaskExit> {
+        return {
+          exitCode: 0,
+          startedAt: new Date(0),
+          finishedAt: new Date(1000),
+          stdout: 'done',
+          stderr: '',
+        };
+      },
+    };
+
+    const { store, staged } = makeStore({ name: 'test-store' });
+
+    const client = new PangolinClient({
+      namespace: 'ns',
+      compute: { default: compute },
+      credentials: { default: makeCredentials() },
+      storage,
+      targets: { prod: { compute: 'default', credentials: 'default', secretStore: 's' } },
+      secretStores: { s: store },
+    });
+
+    const inflight = await client.dispatch.fire({
+      subagent: 's',
+      target: 'prod',
+      workerImage: 'img',
+      callback: { url: 'https://example.com/callback' },
+    });
+
+    // Exactly one secret was staged (the callback HMAC key); its recorded ref
+    // is the ground truth `stagedCallbackRef` per the injected store.
+    expect(staged).toHaveLength(1);
+    const stagedCallbackRef = `store-ref://${staged[0]!.name}`;
+    expect(inflight.callbackTokenRef).toBe(stagedCallbackRef);
+  });
+
+  it('callbackTokenRef is undefined when no callback is configured', async () => {
+    const storage = makeMemoryStorage();
+    storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
+
+    const compute: ComputeProvider = {
+      name: 'fake-compute',
+      async run(_spec, _ctx) {
+        return { providerTaskId: 'prov-no-callback-ref-test' };
+      },
+      async awaitExit(_handle, _ctx): Promise<TaskExit> {
+        return {
+          exitCode: 0,
+          startedAt: new Date(0),
+          finishedAt: new Date(1000),
+          stdout: 'done',
+          stderr: '',
+        };
+      },
+    };
+
+    const client = new PangolinClient({
+      namespace: 'ns',
+      compute: { default: compute },
+      credentials: { default: makeCredentials() },
+      storage,
+      targets: { prod: { compute: 'default', credentials: 'default' } },
+    });
+
+    const inflight = await client.dispatch.fire({
+      subagent: 's',
+      target: 'prod',
+      workerImage: 'img',
+    });
+
+    expect(inflight.callbackTokenRef).toBeUndefined();
+  });
+
   it('client.dispatch.fire is a method on the dispatch callable (not a standalone fn)', () => {
     const storage = makeMemoryStorage();
     const compute: ComputeProvider = {
@@ -370,7 +488,13 @@ describe('client.dispatch.fire', () => {
         return { providerTaskId: 'x' };
       },
       async awaitExit(): Promise<TaskExit> {
-        return { exitCode: 0, startedAt: new Date(0), finishedAt: new Date(0), stdout: '', stderr: '' };
+        return {
+          exitCode: 0,
+          startedAt: new Date(0),
+          finishedAt: new Date(0),
+          stdout: '',
+          stderr: '',
+        };
       },
     };
     const client = new PangolinClient({
