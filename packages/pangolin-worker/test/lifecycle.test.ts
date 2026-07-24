@@ -187,6 +187,97 @@ describe('LifecycleEmitter', () => {
       ]);
     });
 
+    it('adds Authorization: Bearer when bearerToken is configured', async () => {
+      const mockFetch = vi.fn().mockResolvedValue(new Response('ok', { status: 200 }));
+      const emitter = new LifecycleEmitter({
+        callbackUrl: 'https://example.com/callback',
+        hmacKey: 'k',
+        fetchImpl: mockFetch as unknown as typeof fetch,
+        bearerToken: 'T0KEN',
+      });
+      const event: LifecycleEvent = {
+        kind: 'dispatch.started',
+        dispatchId: 'd-1',
+        providerTaskId: 'p-1',
+        at: '2026-05-21T12:00:00Z',
+      };
+      await emitter.emit(event);
+
+      const [, init] = mockFetch.mock.calls[0]!;
+      const headers = init.headers as Record<string, string>;
+      expect(headers['Authorization']).toBe('Bearer T0KEN');
+    });
+
+    it('omits Authorization when no bearerToken is configured', async () => {
+      const mockFetch = vi.fn().mockResolvedValue(new Response('ok', { status: 200 }));
+      const emitter = new LifecycleEmitter({
+        callbackUrl: 'https://example.com/callback',
+        hmacKey: 'k',
+        fetchImpl: mockFetch as unknown as typeof fetch,
+      });
+      const event: LifecycleEvent = {
+        kind: 'dispatch.started',
+        dispatchId: 'd-1',
+        providerTaskId: 'p-1',
+        at: '2026-05-21T12:00:00Z',
+      };
+      await emitter.emit(event);
+
+      const [, init] = mockFetch.mock.calls[0]!;
+      const headers = init.headers as Record<string, string>;
+      expect(headers['Authorization']).toBeUndefined();
+    });
+
+    it('computes the HMAC signature identically whether or not bearerToken is set (bearer is admission, HMAC is integrity — independent)', async () => {
+      const hmacKey = 'shared-key';
+      const dispatchId = 'd-independent';
+      const event: LifecycleEvent = {
+        kind: 'dispatch.started',
+        dispatchId,
+        providerTaskId: 'p-1',
+        at: '2026-05-21T12:00:00Z',
+      };
+
+      const withBearerFetch = vi.fn().mockResolvedValue(new Response('ok', { status: 200 }));
+      const withBearerEmitter = new LifecycleEmitter({
+        callbackUrl: 'https://example.com/callback',
+        hmacKey,
+        fetchImpl: withBearerFetch as unknown as typeof fetch,
+        bearerToken: 'T0KEN',
+      });
+      await withBearerEmitter.emit(event);
+      const [, withBearerInit] = withBearerFetch.mock.calls[0]!;
+      const withBearerHeaders = withBearerInit.headers as Record<string, string>;
+
+      const withoutBearerFetch = vi.fn().mockResolvedValue(new Response('ok', { status: 200 }));
+      const withoutBearerEmitter = new LifecycleEmitter({
+        callbackUrl: 'https://example.com/callback',
+        hmacKey,
+        fetchImpl: withoutBearerFetch as unknown as typeof fetch,
+      });
+      await withoutBearerEmitter.emit(event);
+      const [, withoutBearerInit] = withoutBearerFetch.mock.calls[0]!;
+      const withoutBearerHeaders = withoutBearerInit.headers as Record<string, string>;
+
+      // Recompute each signature locally from its own request's timestamp/payload/dispatchId,
+      // proving the presence of bearerToken does not perturb the HMAC — not just that the two
+      // captured signatures happen to match (which a shared-clock coincidence could also produce).
+      const withBearerExpected = `sha256=${computeSignature(
+        hmacKey,
+        dispatchId,
+        withBearerHeaders['X-Pangolin-Timestamp'],
+        withBearerInit.body as string,
+      )}`;
+      const withoutBearerExpected = `sha256=${computeSignature(
+        hmacKey,
+        dispatchId,
+        withoutBearerHeaders['X-Pangolin-Timestamp'],
+        withoutBearerInit.body as string,
+      )}`;
+      expect(withBearerHeaders['X-Pangolin-Signature']).toBe(withBearerExpected);
+      expect(withoutBearerHeaders['X-Pangolin-Signature']).toBe(withoutBearerExpected);
+    });
+
     it('reports a non-2xx (500) as an http-status failure', async () => {
       const mockFetch = vi.fn().mockResolvedValue(new Response('nope', { status: 500 }));
       const emitter = new LifecycleEmitter({

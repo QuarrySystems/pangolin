@@ -24,6 +24,10 @@ export class LifecycleEmitter {
        *  NOT an env var: the worker's env is minted by the client
        *  (pangolin-client/src/dispatch.ts:255-296), so a PANGOLIN_* knob is dead on arrival. */
       attemptTimeoutMs?: number;
+      /** When set, adds `Authorization: Bearer <token>` to the callback POST. Coexists with the
+       *  HMAC signature header — bearer is ADMISSION, HMAC is INTEGRITY; they are independent
+       *  (bearer presence must never perturb the HMAC value). */
+      bearerToken?: string;
     },
   ) {}
 
@@ -47,11 +51,12 @@ export class LifecycleEmitter {
     // header VALUES too, and a caller-supplied dispatchId containing '\n' would throw out of
     // emit instead of returning an outcome. The real Headers is constructed in the TEST,
     // from whatever is passed here, which is what keeps that assertion live forever.
-    const headers = {
+    const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'X-Pangolin-Signature': `sha256=${signature}`,
       'X-Pangolin-Dispatch-Id': event.dispatchId,
       'X-Pangolin-Timestamp': timestamp,
+      ...(this.opts.bearerToken ? { Authorization: `Bearer ${this.opts.bearerToken}` } : {}),
     };
 
     // Clamp before constructing: AbortSignal.timeout throws a RangeError on a delay that is
