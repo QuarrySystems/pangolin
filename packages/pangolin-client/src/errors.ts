@@ -10,3 +10,16 @@ export class SecretStoreMismatchError extends Error {
     this.name = 'SecretStoreMismatchError';
   }
 }
+
+/**
+ * Thrown by `fireWork` when `work.dedupeOnDispatchId` is set and a
+ * `dispatches/<id>/fired.json` marker already exists for `dispatchId` —
+ * i.e. this dispatch id was already fired once. Best-effort dedupe, not a
+ * mutex (see the `dedupeOnDispatchId` doc on `DispatchWork`).
+ */
+export class DispatchAlreadyExistsError extends Error {
+  constructor(public readonly dispatchId: string) {
+    super(`dispatch "${dispatchId}" was already fired (dedupeOnDispatchId)`);
+    this.name = 'DispatchAlreadyExistsError';
+  }
+}
