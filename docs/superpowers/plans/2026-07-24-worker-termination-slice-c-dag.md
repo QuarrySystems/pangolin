@@ -196,8 +196,9 @@ quality_reviewer_hint: opus
 ```
 
 The core mechanism (spec §4.1–4.2, §5). Add `RunWorkerDeps.terminationSignal?: AbortSignal`; hoist
-`runWorker`'s body into an inner `mainFlow()` and lift the shared state (`terminalClaimed`,
-`terminalDelivery`, the `emit` closure, `failWith`) to the outer scope; add a `claimTerminal()` read+set
+`runWorker`'s body into an inner `mainFlow()`. The state the handler reads — `terminalClaimed`,
+`terminalDelivery`, and the already-`runWorker`-scoped `emit` closure and `failWith` (`:155`/`:177`) — sits at
+`runWorker` scope, above `mainFlow()`; only the ~470-line body moves inside. Add a `claimTerminal()` read+set
 guard on **all four** terminal-emit sites; and race `mainFlow()` against an inner `terminationOutcome()` that
 flushes (claim already taken) or emits `dispatch.cancelled` under a 2 s budget (claim won). Depends on
 task-signal-threading (shares `entrypoint.ts`; needs the threaded signal for the budget emit) and
@@ -261,7 +262,10 @@ it("suppresses a trailing provider-failed terminal after the handler emits cance
   });
   ctrl.abort();
   const code = await runWorkerP;
-  expect(events.filter((k) => k.startsWith('dispatch.'))).toEqual(['dispatch.cancelled']); // NOT ...,'dispatch.failed'
+  // dispatch.started (:295) is non-terminal and DOES appear — assert on the TERMINAL set, not all dispatch.* events:
+  const terminals = events.filter((k) => ['dispatch.finished', 'dispatch.failed', 'dispatch.needs_input'].includes(k));
+  expect(terminals).toEqual([]);                  // the trailing provider-failed terminal is suppressed
+  expect(events).toContain('dispatch.cancelled'); // the handler's cancel stands
   expect(code).toBe(0);
 });
 ```
@@ -274,7 +278,7 @@ it("suppresses a trailing provider-failed terminal after the handler emits cance
 - Flush path: the run reaches `dispatch.finished`, then SIGTERM → no `dispatch.cancelled` observed, resolves `0`.
 - Main-first race: SIGTERM during a terminal emit → flush branch taken (`finished` observed, `cancelled` not); mutating the claim to set-on-complete flips the outcome (positive control).
 - Handler-first race, driven specifically through the `provider-failed` `:570` tail AND through an early `failWith`: adapter completes within budget → `cancelled` delivered, the trailing terminal suppressed (not observed); dropping the `claimTerminal` read-guard (bare set) flips the outcome (positive control).
-- The cancel `emit` is passed `AbortSignal.timeout(2000)`; a callback endpoint that hangs aborts at ~2 s and the delivery outcome reason is `'aborted'` (end-to-end proof of task-signal-threading + task-aborted-classification).
+- The cancel `emit` is passed `AbortSignal.timeout(2000)`; a callback endpoint that hangs aborts at ~2 s, the delivery outcome reason is `'aborted'`, AND the durable record `dispatches/<dispatchId>/undelivered/dispatch.cancelled.json` is persisted (assert the storage write, not just the reason — spec §6 case 5; this is the end-to-end proof that slice B's backstop is wired to the cancel emit).
 
 Test file: `packages/pangolin-worker/test/entrypoint.test.ts`.
 
