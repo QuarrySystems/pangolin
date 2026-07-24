@@ -13,7 +13,10 @@
 
 import { runWorker } from '../dist/index.js';
 
-runWorker(process.env)
+const controller = new AbortController();
+process.on('SIGTERM', () => controller.abort());
+
+runWorker(process.env, { terminationSignal: controller.signal })
   .then((code) => process.exit(code))
   .catch((err) => {
     console.error('[pangolin-worker-entry] uncaught:', err);
