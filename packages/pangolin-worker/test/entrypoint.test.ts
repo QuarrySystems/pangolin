@@ -264,12 +264,34 @@ function makeDeps(h: Harness, overrides?: Partial<RunWorkerDeps>): RunWorkerDeps
   };
 }
 
+// The SIGTERM cancel / handler-first / budget tests deliberately leave a
+// `mainFlow` running after `runWorker` resolves — `Promise.race` does not cancel
+// the loser, and production reaps the orphan via `process.exit`. In-process that
+// orphan keeps writing into the workspace, so a plain recursive `rm` can race it
+// and throw ENOTEMPTY (a fresh entry appears mid-walk). Retry until the orphan
+// stops writing; it settles within tens of ms, so the bounded loop resolves as
+// soon as the tree is quiescent (not on a fixed timer) and fails loudly if not.
+async function rmWithRetry(dir: string, attempts = 40): Promise<void> {
+  for (let i = 0; ; i++) {
+    try {
+      await rm(dir, { recursive: true, force: true });
+      return;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOTEMPTY' && i < attempts) {
+        await new Promise((r) => setTimeout(r, 25));
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
 describe('runWorker', () => {
   let cleanupDirs: string[] = [];
 
   afterEach(async () => {
     for (const d of cleanupDirs) {
-      await rm(d, { recursive: true, force: true });
+      await rmWithRetry(d);
     }
     cleanupDirs = [];
   });
