@@ -21,10 +21,17 @@
 import { readFile, access } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createHmac } from 'node:crypto';
-import type {
-  LifecycleEvent,
-  NotificationConfig,
-} from '@quarry-systems/pangolin-core';
+import type { LifecycleEvent, NotificationConfig } from '@quarry-systems/pangolin-core';
+import { safeEndpointLabel } from './safe-endpoint-label.js';
+import type { DeliveryFailureReason } from './lifecycle.js';
+
+export interface NotificationOutcome {
+  /** safeEndpointLabel output — NEVER the raw webhook URL, which can carry credentials. */
+  label: string;
+  delivered: boolean;
+  status?: number;
+  reason?: DeliveryFailureReason;
+}
 
 /**
  * Load the capability-content notification configs from the post-overlay
@@ -61,7 +68,9 @@ export async function fireNotifications(opts: {
   sources: NotificationConfig[][];
   hmacKey: string;
   fetchImpl?: typeof fetch;
-}): Promise<void> {
+  /** Default 5_000, clamped per the shared shape (see lifecycle.ts). */
+  attemptTimeoutMs?: number;
+}): Promise<NotificationOutcome[]> {
   const fetchFn = opts.fetchImpl ?? fetch;
 
   const matches: NotificationConfig[] = [];
@@ -73,7 +82,7 @@ export async function fireNotifications(opts: {
     }
   }
 
-  if (matches.length === 0) return;
+  if (matches.length === 0) return [];
 
   const timestamp = new Date().toISOString();
   const payload = JSON.stringify(opts.event);
@@ -81,20 +90,62 @@ export async function fireNotifications(opts: {
     .update(`${opts.event.dispatchId}.${timestamp}.${payload}`)
     .digest('hex');
 
+  // A PLAIN OBJECT, deliberately — see the identical invariant in lifecycle.ts:46-49.
+  // `new Headers({...})` here would validate header VALUES too, and a caller-supplied
+  // dispatchId containing '\n' would throw out of fireNotifications instead of returning
+  // an outcome array.
   const headers = {
     'Content-Type': 'application/json',
-    'X-Pangolin Scale-Signature': `sha256=${signature}`,
-    'X-Pangolin Scale-Dispatch-Id': opts.event.dispatchId,
-    'X-Pangolin Scale-Timestamp': timestamp,
+    'X-Pangolin-Signature': `sha256=${signature}`,
+    'X-Pangolin-Dispatch-Id': opts.event.dispatchId,
+    'X-Pangolin-Timestamp': timestamp,
   };
 
-  await Promise.allSettled(
-    matches.map((cfg) =>
-      fetchFn(cfg.webhook, {
+  // Clamp once, outside the map — see the identical shape in lifecycle.ts:57-75. Each
+  // fetch below gets its OWN AbortSignal.timeout(delayMs); a signal shared across N
+  // fetches would register N abort listeners on one object, which is semantically wrong
+  // even though it can't be observed by wall-clock timing (see notifications.test.ts).
+  const DEFAULT_ATTEMPT_TIMEOUT_MS = 5_000;
+  const MAX_ATTEMPT_TIMEOUT_MS = 2_147_483_647; // Node's TIMEOUT_MAX
+  const requested = opts.attemptTimeoutMs;
+  const delayMs =
+    Number.isFinite(requested) && (requested as number) > 0
+      ? Math.trunc(Math.min(requested as number, MAX_ATTEMPT_TIMEOUT_MS))
+      : DEFAULT_ATTEMPT_TIMEOUT_MS;
+
+  const settled = await Promise.allSettled(
+    matches.map((cfg) => {
+      const signal = AbortSignal.timeout(delayMs);
+      return fetchFn(cfg.webhook, {
         method: 'POST',
         headers,
         body: payload,
-      }),
-    ),
+        signal,
+      }).then(
+        (res) => ({ res }),
+        (err: unknown) => {
+          // Classify on the SIGNAL, not on the error's name or message: a hand-rolled
+          // mock rejecting with new Error('aborted') must not be able to pin the wrong
+          // branch (mirrors lifecycle.ts:88-90).
+          throw { aborted: signal.aborted, err };
+        },
+      );
+    }),
   );
+
+  return settled.map((result, i) => {
+    const label = safeEndpointLabel(matches[i]!.webhook, i);
+    if (result.status === 'fulfilled') {
+      const { status } = result.value.res;
+      return status >= 200 && status < 300
+        ? { label, delivered: true, status }
+        : { label, delivered: false, status, reason: 'http-status' as DeliveryFailureReason };
+    }
+    const rejection = result.reason as { aborted: boolean };
+    return {
+      label,
+      delivered: false,
+      reason: (rejection.aborted ? 'timeout' : 'network') as DeliveryFailureReason,
+    };
+  });
 }
