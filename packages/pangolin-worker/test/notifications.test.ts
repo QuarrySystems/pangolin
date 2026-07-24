@@ -385,6 +385,23 @@ describe('fireNotifications', () => {
     },
   );
 
+  it('does not throw out of fireNotifications when fetchImpl throws synchronously', async () => {
+    const fetchImpl = (() => {
+      throw new Error('sync boom');
+    }) as unknown as typeof fetch;
+
+    const outcomes = await fireNotifications({
+      event: makeFinishedEvent(),
+      sources: [[{ when: ['dispatch.finished'], webhook: 'https://a.example.com/x' }]],
+      hmacKey: 'k',
+      fetchImpl,
+    });
+
+    expect(outcomes).toEqual([
+      { label: 'https://a.example.com', delivered: false, reason: 'network' },
+    ]);
+  });
+
   it('label never contains the raw webhook URL, even when it carries userinfo and a query token', async () => {
     const fetchImpl = (async () => new Response('ok', { status: 200 })) as unknown as typeof fetch;
 

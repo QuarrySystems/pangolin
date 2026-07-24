@@ -85,6 +85,12 @@ export async function fireNotifications(opts: {
   if (matches.length === 0) return [];
 
   const timestamp = new Date().toISOString();
+  // These two calls sit OUTSIDE the guarded region below (deliberately — see
+  // lifecycle.ts's equivalent invariant note): JSON.stringify can throw on a circular
+  // or BigInt-bearing event, and createHmac can throw on a non-string key. Both are
+  // unreachable from typed callers, so we let them throw rather than widening the
+  // fetch try/catch to swallow them — a serialization failure mis-classified as
+  // 'network' would be worse than throwing.
   const payload = JSON.stringify(opts.event);
   const signature = createHmac('sha256', opts.hmacKey)
     .update(`${opts.event.dispatchId}.${timestamp}.${payload}`)
@@ -114,22 +120,28 @@ export async function fireNotifications(opts: {
       : DEFAULT_ATTEMPT_TIMEOUT_MS;
 
   const settled = await Promise.allSettled(
-    matches.map((cfg) => {
+    matches.map(async (cfg) => {
       const signal = AbortSignal.timeout(delayMs);
-      return fetchFn(cfg.webhook, {
-        method: 'POST',
-        headers,
-        body: payload,
-        signal,
-      }).then(
-        (res) => ({ res }),
-        (err: unknown) => {
-          // Classify on the SIGNAL, not on the error's name or message: a hand-rolled
-          // mock rejecting with new Error('aborted') must not be able to pin the wrong
-          // branch (mirrors lifecycle.ts:88-90).
-          throw { aborted: signal.aborted, err };
-        },
-      );
+      // `await` inside this `try` block is load-bearing: it turns a synchronous throw
+      // from fetchFn(...) itself (not just a rejected promise it returns) into a
+      // rejected promise of this async function, which Promise.allSettled can capture.
+      // Without it, a fetchImpl that throws synchronously escapes .map() before
+      // allSettled ever sees the array, and the throw propagates out of
+      // fireNotifications — violating the contract at notifications.ts:17-19.
+      try {
+        const res = await fetchFn(cfg.webhook, {
+          method: 'POST',
+          headers,
+          body: payload,
+          signal,
+        });
+        return { res };
+      } catch (err: unknown) {
+        // Classify on the SIGNAL, not on the error's name or message: a hand-rolled
+        // mock rejecting with new Error('aborted') must not be able to pin the wrong
+        // branch (mirrors lifecycle.ts:88-90).
+        throw { aborted: signal.aborted, err };
+      }
     }),
   );
 
