@@ -94,6 +94,30 @@ function asJsonBytes(obj: unknown): Uint8Array {
   return new TextEncoder().encode(JSON.stringify(obj));
 }
 
+/** An externally-resolvable promise — used to hold an adapter mid-invoke. */
+function deferred<T = void>(): {
+  promise: Promise<T>;
+  resolve: (v: T) => void;
+  reject: (e: unknown) => void;
+} {
+  let resolve!: (v: T) => void;
+  let reject!: (e: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+/** Poll `pred` until it is true (or time out). Deterministic latch for async worker steps. */
+async function waitFor(pred: () => boolean, timeoutMs = 4000): Promise<void> {
+  const start = Date.now();
+  while (!pred()) {
+    if (Date.now() - start > timeoutMs) throw new Error('waitFor timed out');
+    await new Promise((r) => setTimeout(r, 5));
+  }
+}
+
 interface Harness {
   workDir: string;
   adaptersRoot: string;
@@ -1087,4 +1111,223 @@ describe('runWorker', () => {
     const sentinelUri = buildDispatchRecordUri('ns', 'd-1', 'output.json');
     expect(h.storage.has(sentinelUri)).toBe(false);
   });
+
+  // ── Slice C: SIGTERM-driven graceful cancellation (spec §4.1–4.2, §5, §6) ──
+
+  it('regression: a terminationSignal that never aborts leaves the run byte-identical (finished, 0)', async () => {
+    const h = await setupHarness();
+    cleanupDirs.push(h.workDir, h.adaptersRoot);
+    h.setRuntimeExit({ exitCode: 0, stdout: '', stderr: '' });
+
+    const ctrl = new AbortController(); // signal present but never fired
+    const code = await runWorker(h.env, makeDeps(h, { terminationSignal: ctrl.signal }));
+
+    expect(code).toBe(0);
+    const kinds = h.events.map((e) => e.kind);
+    expect(kinds).toContain('dispatch.finished');
+    expect(kinds).not.toContain('dispatch.cancelled');
+  });
+
+  it('cancel path: SIGTERM while the adapter runs (no terminal produced) emits exactly one dispatch.cancelled and resolves 0', async () => {
+    const gate = deferred(); // holds the adapter mid-invoke so no terminal is produced
+    const h = await setupHarness({ onInvoke: async () => gate.promise });
+    cleanupDirs.push(h.workDir, h.adaptersRoot);
+
+    const ctrl = new AbortController();
+    const runP = runWorker(h.env, makeDeps(h, { terminationSignal: ctrl.signal }));
+
+    // Abort only once the adapter is actually running (past dispatch.started).
+    await waitFor(() => h.invokeCalls === 1);
+    ctrl.abort();
+    const code = await runP;
+    gate.resolve(); // let the (now-suppressed) mainFlow unwind
+
+    expect(code).toBe(0);
+    const kinds = h.events.map((e) => e.kind);
+    // dispatch.started is NON-terminal and DOES appear; assert on the terminal set.
+    const terminals = kinds.filter((k) =>
+      ['dispatch.finished', 'dispatch.failed', 'dispatch.needs_input'].includes(k),
+    );
+    expect(terminals).toEqual([]);
+    expect(kinds.filter((k) => k === 'dispatch.cancelled')).toHaveLength(1);
+  });
+
+  it('main-first flush: SIGTERM as the dispatch.finished terminal is emitted takes the flush branch — finished stands, no cancelled', async () => {
+    const h = await setupHarness();
+    cleanupDirs.push(h.workDir, h.adaptersRoot);
+    h.setRuntimeExit({ exitCode: 0, stdout: '', stderr: '' });
+
+    const ctrl = new AbortController();
+    const deps = makeDeps(h, {
+      terminationSignal: ctrl.signal,
+      onLifecycleEvent: (e) => {
+        h.events.push(e);
+        // SIGTERM arrives exactly as the terminal begins emitting: the claim is
+        // already taken, so the handler must flush rather than emit cancelled.
+        if (e.kind === 'dispatch.finished') ctrl.abort();
+      },
+    });
+
+    const code = await runWorker(h.env, deps);
+
+    expect(code).toBe(0);
+    const kinds = h.events.map((e) => e.kind);
+    expect(kinds).toContain('dispatch.finished');
+    expect(kinds).not.toContain('dispatch.cancelled');
+  });
+
+  it('handler-first: a trailing provider-failed terminal (adapter exits non-zero after cancel) is suppressed', async () => {
+    const gate = deferred();
+    const h = await setupHarness({ onInvoke: async () => gate.promise });
+    cleanupDirs.push(h.workDir, h.adaptersRoot);
+    // Non-zero exit → the DIRECT provider-failed tail (entrypoint :570), which
+    // does NOT go through failWith. It only fires AFTER cancel releases the adapter.
+    h.setRuntimeExit({ exitCode: 9, stdout: '', stderr: 'boom' });
+
+    const ctrl = new AbortController();
+    const writes: string[] = [];
+    const spy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation((chunk: string | Uint8Array): boolean => {
+        writes.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString());
+        return true;
+      });
+
+    let code: number;
+    try {
+      const deps = makeDeps(h, {
+        terminationSignal: ctrl.signal,
+        onLifecycleEvent: (e) => {
+          h.events.push(e);
+          // Once the handler's cancel lands, let the adapter finish non-zero.
+          if (e.kind === 'dispatch.cancelled') gate.resolve();
+        },
+      });
+      const runP = runWorker(h.env, deps);
+      await waitFor(() => h.invokeCalls === 1);
+      ctrl.abort();
+      code = await runP;
+      // The provider-failed branch logs to the worker stream BEFORE the claim
+      // guard (with no await between) — so once that log appears, the guard has
+      // already run and suppressed the emit. This makes the assertion below a
+      // real suppression check, not a "hasn't happened yet" false pass.
+      await waitFor(() => writes.join('').includes('provider-failed'));
+    } finally {
+      spy.mockRestore();
+    }
+
+    const kinds = h.events.map((e) => e.kind);
+    expect(kinds).toContain('dispatch.cancelled');
+    // The trailing provider-failed terminal was suppressed (never emitted).
+    const terminals = kinds.filter((k) =>
+      ['dispatch.finished', 'dispatch.failed', 'dispatch.needs_input'].includes(k),
+    );
+    expect(terminals).toEqual([]);
+    expect(code!).toBe(0);
+  });
+
+  it('handler-first: a trailing failWith terminal (adapter throws after cancel) is suppressed', async () => {
+    const gate = deferred();
+    const h = await setupHarness({
+      // Block, then throw once released → mainFlow's catch → failWith('worker-failed').
+      onInvoke: async () => {
+        await gate.promise;
+        throw new Error('adapter blew up post-cancel');
+      },
+    });
+    cleanupDirs.push(h.workDir, h.adaptersRoot);
+
+    const ctrl = new AbortController();
+    const writes: string[] = [];
+    const spy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation((chunk: string | Uint8Array): boolean => {
+        writes.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString());
+        return true;
+      });
+
+    let code: number;
+    try {
+      const deps = makeDeps(h, {
+        terminationSignal: ctrl.signal,
+        onLifecycleEvent: (e) => {
+          h.events.push(e);
+          if (e.kind === 'dispatch.cancelled') gate.resolve();
+        },
+      });
+      const runP = runWorker(h.env, deps);
+      await waitFor(() => h.invokeCalls === 1);
+      ctrl.abort();
+      code = await runP;
+      // failWith logs the reason before its claim guard — same rationale as above.
+      await waitFor(() => writes.join('').includes('worker-failed'));
+    } finally {
+      spy.mockRestore();
+    }
+
+    const kinds = h.events.map((e) => e.kind);
+    expect(kinds).toContain('dispatch.cancelled');
+    const terminals = kinds.filter((k) =>
+      ['dispatch.finished', 'dispatch.failed', 'dispatch.needs_input'].includes(k),
+    );
+    expect(terminals).toEqual([]);
+    expect(code!).toBe(0);
+  });
+
+  it('budget + backstop: a hung callback aborts the cancel emit at ~2 s (reason aborted) and persists the undelivered record', async () => {
+    const gate = deferred(); // adapter stays in-flight so mainFlow produces no terminal
+    const h = await setupHarness({ onInvoke: async () => gate.promise });
+    cleanupDirs.push(h.workDir, h.adaptersRoot);
+    h.env.PANGOLIN_CALLBACK_URL = 'https://example.test/callback';
+    h.env.PANGOLIN_CALLBACK_TOKEN_REF = 'arn:aws:secretsmanager:us-east-1:1:secret:hmac';
+
+    const secretStore = {
+      name: 'fake',
+      stage: async () => ({ ref: 'unused', ttlSeconds: 1 }),
+      resolve: async () => 'HMAC_KEY',
+      cleanupByTag: async () => {},
+    };
+
+    // Only the cancel callback hangs (settling on its signal's abort); every
+    // earlier lifecycle POST — notably dispatch.started — responds 200 so the
+    // orchestration reaches the adapter. The event kind is in the POST body.
+    const fetchImpl = ((_input: string | URL | Request, init?: RequestInit) => {
+      const body = typeof init?.body === 'string' ? init.body : '';
+      if (body.includes('dispatch.cancelled')) {
+        return new Promise((_res, reject) => {
+          const sig = init?.signal;
+          if (sig)
+            sig.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+        });
+      }
+      return Promise.resolve(new Response('ok', { status: 200 }));
+    }) as typeof fetch;
+
+    const ctrl = new AbortController();
+    const runP = runWorker(
+      h.env,
+      makeDeps(h, { terminationSignal: ctrl.signal, fetchImpl, secretStore }),
+    );
+
+    // Abort once the adapter is running so storage is constructed and mainFlow
+    // holds no terminal — the handler wins the claim and emits cancelled.
+    await waitFor(() => h.invokeCalls === 1);
+    ctrl.abort();
+    const code = await runP; // resolves after the ~2 s budget aborts the hung fetch
+    gate.resolve();
+
+    expect(code).toBe(0);
+
+    // The durable backstop (slice B) persisted the undelivered cancel record...
+    const undeliveredUri = buildDispatchRecordUri(
+      'ns',
+      'd-1',
+      'undelivered/dispatch.cancelled.json',
+    );
+    expect(h.storage.has(undeliveredUri)).toBe(true);
+    const record = JSON.parse(new TextDecoder().decode(await h.storage.get(undeliveredUri)));
+    expect(record.event.kind).toBe('dispatch.cancelled');
+    // ...and the delivery outcome reason is the external-abort classification.
+    expect(record.outcome.reason).toBe('aborted');
+  }, 10000);
 });
