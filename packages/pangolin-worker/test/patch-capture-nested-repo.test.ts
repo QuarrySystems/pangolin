@@ -16,8 +16,20 @@ describe('patch-capture with a nested repository', () => {
     const inner = join(dir, 'repo');
     await mkdir(inner);
     await writeFile(join(inner, 'src.txt'), 'original\n');
+    const HERMETIC_GIT_ENV = {
+      PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin',
+      HOME: '/nonexistent',
+      GIT_CONFIG_GLOBAL: '/dev/null',
+      GIT_CONFIG_NOSYSTEM: '1',
+      GIT_TERMINAL_PROMPT: '0',
+      LC_ALL: 'C',
+    };
     const g = (args: string[], cwd: string) =>
-      execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], { cwd });
+      execFileSync(
+        'git',
+        ['-c', 'user.email=t@t', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', ...args],
+        { cwd, env: HERMETIC_GIT_ENV },
+      );
     g(['init', '-q', '.'], inner);
     g(['add', '-A'], inner);
     g(['commit', '-qm', 'init'], inner);
