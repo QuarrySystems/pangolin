@@ -1,15 +1,15 @@
 import { createHmac } from 'node:crypto';
 import type { LifecycleEvent } from '@quarry-systems/pangolin-core';
 
-export type DeliveryFailureReason = 'http-status' | 'network' | 'timeout';
+export type DeliveryFailureReason = 'http-status' | 'network' | 'timeout' | 'aborted';
 
 export interface DeliveryOutcome {
   delivered: boolean;
   status?: number;
   /** Closed enum — never a fetch error string, which can embed the callback URL (§3).
-   *  'aborted' is deliberately absent: nothing in this slice produces it (slice C owns
-   *  cancellation), and shipping an unreachable member from a published package is
-   *  building ahead of demand. */
+   *  'aborted' distinguishes an external-signal abort (caller-initiated, e.g. slice C
+   *  cancellation) from the internal attempt-timeout ('timeout') and a generic fetch
+   *  rejection ('network'), per spec §4.3. */
   reason?: DeliveryFailureReason;
 }
 
@@ -95,10 +95,17 @@ export class LifecycleEmitter {
         ? { delivered: true, status: res.status }
         : { delivered: false, status: res.status, reason: 'http-status' };
     } catch {
-      // Classify on the INTERNAL timeout signal, not the composed one: an external abort
-      // (slice C) must not read as 'timeout'. A hand-rolled mock rejecting with
-      // new Error('aborted') must not be able to pin the wrong branch either.
-      return { delivered: false, reason: timeout.aborted ? 'timeout' : 'network' };
+      // Classify on the INTERNAL timeout signal FIRST, not the composed one: an external
+      // abort (slice C) must not read as 'timeout'. A hand-rolled mock rejecting with
+      // new Error('aborted') must not be able to pin the wrong branch either. Only after
+      // ruling out the internal timeout do we check the caller-supplied signal, so a
+      // genuine external abort is distinguishable from a generic network failure (§4.3).
+      const reason: DeliveryFailureReason = timeout.aborted
+        ? 'timeout'
+        : (opts?.signal?.aborted ?? false)
+          ? 'aborted'
+          : 'network';
+      return { delivered: false, reason };
     }
   }
 }

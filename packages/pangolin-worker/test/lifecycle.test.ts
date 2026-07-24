@@ -521,7 +521,9 @@ describe('LifecycleEmitter', () => {
 
       const outcome = await emitter.emit(event, { signal: ac.signal });
 
-      expect(outcome).toEqual({ delivered: false, reason: 'network' });
+      // Reason is now 'aborted': this exercises the external-signal-abort path directly
+      // (see the dedicated 'aborted' classification test below).
+      expect(outcome).toEqual({ delivered: false, reason: 'aborted' });
     });
 
     it('still classifies the internal deadline as timeout when no external signal is passed', async () => {
@@ -548,6 +550,55 @@ describe('LifecycleEmitter', () => {
       const outcome = await emitter.emit(event);
 
       expect(outcome.reason).toBe('timeout');
+    });
+
+    it("classifies an external-signal abort as 'aborted', not 'timeout'/'network'", async () => {
+      const ctrl = new AbortController();
+      const emitter = new LifecycleEmitter({
+        callbackUrl: 'https://x',
+        hmacKey: 'k',
+        fetchImpl: ((_u: string, init: RequestInit) =>
+          new Promise((_res, rej) =>
+            (init!.signal as AbortSignal).addEventListener('abort', () =>
+              rej(new DOMException('aborted', 'AbortError')),
+            ),
+          )) as unknown as typeof fetch,
+      });
+      const p = emitter.emit(
+        { kind: 'dispatch.cancelled', dispatchId: 'd1', at: '2026-01-01T00:00:00Z' },
+        { signal: ctrl.signal },
+      );
+      ctrl.abort();
+      expect(await p).toEqual({ delivered: false, reason: 'aborted' });
+    });
+
+    it("still classifies as 'timeout' when the internal deadline fires, even with an opts.signal present that never aborts (positive control)", async () => {
+      const ctrl = new AbortController();
+      const mockFetch = vi.fn((_url: string, init: RequestInit) => {
+        return new Promise((_resolve, reject) => {
+          (init.signal as AbortSignal).addEventListener('abort', () => {
+            reject(new Error('t'));
+          });
+        });
+      });
+      const emitter = new LifecycleEmitter({
+        callbackUrl: 'https://example.com/callback',
+        hmacKey: 'k',
+        fetchImpl: mockFetch as unknown as typeof fetch,
+        attemptTimeoutMs: 10,
+      });
+      const event: LifecycleEvent = {
+        kind: 'dispatch.started',
+        dispatchId: 'd-1',
+        providerTaskId: 'p-1',
+        at: '2026-05-21T12:00:00Z',
+      };
+
+      const outcome = await emitter.emit(event, { signal: ctrl.signal });
+
+      // ctrl.signal never aborts — the internal AbortSignal.timeout does. The presence of
+      // opts.signal must not perturb the timeout branch.
+      expect(outcome).toEqual({ delivered: false, reason: 'timeout' });
     });
   });
 });
