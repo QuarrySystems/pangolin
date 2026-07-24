@@ -600,5 +600,43 @@ describe('LifecycleEmitter', () => {
       // opts.signal must not perturb the timeout branch.
       expect(outcome).toEqual({ delivered: false, reason: 'timeout' });
     });
+
+    it("classifies as 'timeout' (not 'aborted') when both the internal deadline and the external signal are aborted by catch-time", async () => {
+      const ctrl = new AbortController();
+      const mockFetch = vi.fn((_url: string, init: RequestInit) => {
+        return new Promise((_resolve, reject) => {
+          (init.signal as AbortSignal).addEventListener('abort', () => {
+            // Real timers only, deliberately: the composed signal aborts as soon as EITHER
+            // underlying signal aborts, so if we rejected immediately here only the
+            // external signal would necessarily be aborted yet. Deferring the rejection by
+            // a real macrotask (5ms) — well past the 1ms internal attemptTimeoutMs — lets
+            // AbortSignal.timeout(1) actually elapse first, so by the time this promise
+            // rejects and lifecycle.ts's catch block runs, BOTH timeout.aborted and
+            // opts.signal.aborted are true. That's what actually exercises the "internal
+            // timeout wins" branch order (lifecycle.ts:103-107); flipping the ternary to
+            // check opts?.signal?.aborted first would make this test fail.
+            setTimeout(() => reject(new Error('both aborted')), 5);
+          });
+        });
+      });
+      const emitter = new LifecycleEmitter({
+        callbackUrl: 'https://example.com/callback',
+        hmacKey: 'k',
+        fetchImpl: mockFetch as unknown as typeof fetch,
+        attemptTimeoutMs: 1,
+      });
+      const event: LifecycleEvent = {
+        kind: 'dispatch.started',
+        dispatchId: 'd-1',
+        providerTaskId: 'p-1',
+        at: '2026-05-21T12:00:00Z',
+      };
+
+      const p = emitter.emit(event, { signal: ctrl.signal });
+      ctrl.abort();
+
+      const outcome = await p;
+      expect(outcome).toEqual({ delivered: false, reason: 'timeout' });
+    });
   });
 });
