@@ -227,9 +227,17 @@ export async function runWorker(
     // Bearer admission is optional and independent of the mandatory HMAC key
     // above — resolve it only when configured, so the resolve() call and the
     // Authorization header are both fully gated on PANGOLIN_CALLBACK_BEARER_REF.
+    // This whole block is itself subordinate to the mandatory HMAC block
+    // (`cfg.callbackUrl && cfg.callbackTokenRef`): a config with a callback
+    // URL and a bearer ref but no token ref never reaches here, so the
+    // bearer is silently ignored in that case — deliberate, not a bug.
     let bearerToken: string | undefined;
     if (cfg.callbackBearerRef) {
-      bearerToken = await secretStore.resolve(cfg.callbackBearerRef);
+      try {
+        bearerToken = await secretStore.resolve(cfg.callbackBearerRef);
+      } catch (err) {
+        return failWith('fetch-failed', `callback bearer fetch failed: ${(err as Error).message}`);
+      }
       logger.registerSecret(bearerToken);
     }
 

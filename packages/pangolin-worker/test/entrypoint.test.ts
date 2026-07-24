@@ -355,6 +355,39 @@ describe('runWorker', () => {
     expect(calledWith).toContain('RESOLVED_BEARER');
   });
 
+  it('fails with fetch-failed when the bearer secretStore.resolve throws (mirrors the HMAC resolve-failure path)', async () => {
+    const h = await setupHarness();
+    cleanupDirs.push(h.workDir, h.adaptersRoot);
+    h.env.PANGOLIN_CALLBACK_URL = 'https://example.test/callback';
+    h.env.PANGOLIN_CALLBACK_TOKEN_REF = 'arn:aws:secretsmanager:us-east-1:1:secret:hmac';
+    h.env.PANGOLIN_CALLBACK_BEARER_REF = 'arn:aws:secretsmanager:us-east-1:1:secret:bearer';
+
+    const secretStore = {
+      name: 'fake',
+      stage: async () => ({ ref: 'unused', ttlSeconds: 1 }),
+      resolve: async (ref: string) => {
+        if (ref === h.env.PANGOLIN_CALLBACK_TOKEN_REF) return 'HMAC_KEY';
+        if (ref === h.env.PANGOLIN_CALLBACK_BEARER_REF) {
+          throw new Error('bearer secret not found');
+        }
+        throw new Error(`unknown ref ${ref}`);
+      },
+      cleanupByTag: async () => {},
+    };
+
+    const fetchImpl = (async () => new Response('ok', { status: 200 })) as typeof fetch;
+
+    // Must resolve cleanly to a failWith exit — NOT throw out of runWorker —
+    // so the caller always gets an exit code and a dispatch.failed event,
+    // mirroring the mandatory HMAC resolve-failure path above.
+    const code = await runWorker(h.env, makeDeps(h, { fetchImpl, secretStore }));
+
+    expect(code).not.toBe(0);
+    const failed = h.events.find((e) => e.kind === 'dispatch.failed');
+    expect(failed).toBeDefined();
+    expect(failed && 'reason' in failed && failed.reason).toBe('fetch-failed');
+  });
+
   it('with no callbackBearerRef configured, resolves no bearer and sends no Authorization header', async () => {
     const h = await setupHarness();
     cleanupDirs.push(h.workDir, h.adaptersRoot);
