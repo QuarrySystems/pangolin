@@ -1106,7 +1106,10 @@ Cross-account scenarios are deferred to v0.2 along with cross-namespace addressi
 
 ### 7.6 Cancellation and TTL
 
-`AgoraClient.cancel(dispatchId)` is best-effort. The provider's stop semantics apply; for Fargate that's `StopTask` with a SIGTERM grace period. The worker traps SIGTERM, attempts to emit `dispatch.cancelled`, releases channel subscriptions, and exits.
+`AgoraClient.cancel(dispatchId)` is best-effort. The provider's stop semantics apply; for Fargate that's `StopTask` with a SIGTERM grace period. The worker traps SIGTERM and, if no terminal event has yet been produced for the dispatch, emits
+`dispatch.cancelled` (a run that already produced a terminal outcome is flushed, not re-cancelled), then
+exits. It does not separately release channel subscriptions — the subscription is an in-container background
+loop that ends when the container is torn down.
 
 Inline secrets are deleted after `awaitExit` returns regardless of cancellation, via the `SecretStore` (§5.9): `cleanupByTag('agora:dispatchId', <id>)` for AWS, or removal of the per-dispatch scratch dir for the local store. The TTL is auto-computed by the SDK from the dispatch's timeout (`(dispatch.timeoutSeconds ?? 7200) + 300` seconds cleanup grace), so integrators don't size it themselves. If the client fails catastrophically before it can clean up, the recorded TTL is the backstop (Secrets Manager auto-deletes the staged secret; the local store's files are short-lived scratch). Explicit `ttlSeconds` overrides apply only when integrators need a shorter compliance-driven lifetime.
 
