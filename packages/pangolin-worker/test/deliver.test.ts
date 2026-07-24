@@ -1,8 +1,15 @@
 import { describe, it, expect } from 'vitest';
 import type { StorageProvider, LifecycleEvent } from '@quarry-systems/pangolin-core';
-import { persistUndelivered, deliverLifecycle, deliverNotifications } from '../src/deliver.js';
+import {
+  persistUndelivered,
+  deliverLifecycle,
+  deliverNotifications,
+  type DeliverContext,
+} from '../src/deliver.js';
 import type { LifecycleEmitter, DeliveryOutcome } from '../src/lifecycle.js';
 import type { StructuredLogger } from '../src/logger.js';
+
+const fakeLogger = { log: () => {} } as unknown as StructuredLogger;
 
 describe('persistUndelivered', () => {
   it('writes {event, outcome} to the per-kind undelivered URI', async () => {
@@ -180,6 +187,59 @@ describe('deliverLifecycle', () => {
 
     expect(puts).toHaveLength(0);
     expect(logs).toHaveLength(0);
+  });
+
+  it('forwards opts.signal to emitter.emit and never to notifications', async () => {
+    let seen: AbortSignal | undefined = undefined;
+    const emitter = {
+      emit: (_e: unknown, o?: { signal?: AbortSignal }) => {
+        seen = o?.signal;
+        return Promise.resolve({ delivered: true, status: 200 });
+      },
+    } as unknown as LifecycleEmitter;
+    const sig = new AbortController().signal;
+
+    await deliverLifecycle(
+      {
+        kind: 'dispatch.cancelled',
+        dispatchId: 'd1',
+        at: '2026-01-01T00:00:00Z',
+      } as unknown as LifecycleEvent,
+      {
+        emitter,
+        logger: fakeLogger,
+        namespace: 'n',
+        dispatchId: 'd1',
+      } as unknown as DeliverContext,
+      { signal: sig },
+    );
+
+    expect(seen).toBe(sig);
+  });
+
+  it('forwards no signal when opts is omitted (existing no-opts callers unaffected)', async () => {
+    let sawOpts: { signal?: AbortSignal } | undefined;
+    let called = false;
+    const emitter = {
+      emit: (_e: unknown, o?: { signal?: AbortSignal }) => {
+        called = true;
+        sawOpts = o;
+        return Promise.resolve({ delivered: true, status: 200 });
+      },
+    } as unknown as LifecycleEmitter;
+
+    await deliverLifecycle(
+      { kind: 'dispatch.finished', dispatchId: 'd1' } as unknown as LifecycleEvent,
+      {
+        emitter,
+        logger: fakeLogger,
+        namespace: 'n',
+        dispatchId: 'd1',
+      } as unknown as DeliverContext,
+    );
+
+    expect(called).toBe(true);
+    expect(sawOpts?.signal).toBeUndefined();
   });
 });
 

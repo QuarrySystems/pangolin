@@ -152,7 +152,7 @@ export async function runWorker(
   // construction failure path, which DeliverContext models as optional.
   let storage: StorageProvider | undefined;
 
-  const emit = async (event: LifecycleEvent): Promise<void> => {
+  const emit = async (event: LifecycleEvent, opts?: { signal?: AbortSignal }): Promise<void> => {
     deps.onLifecycleEvent?.(event);
     const ctx: DeliverContext = {
       emitter: lifecycleEmitter,
@@ -170,7 +170,9 @@ export async function runWorker(
           : undefined,
     };
     // deliverLifecycle/deliverNotifications never throw — no try/catch needed.
-    await deliverLifecycle(event, ctx);
+    // The signal is routed to the lifecycle callback only — notifications
+    // deliberately never receive it (§4.3).
+    await deliverLifecycle(event, ctx, { signal: opts?.signal });
     await deliverNotifications(event, ctx);
   };
 
