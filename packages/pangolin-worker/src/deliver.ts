@@ -57,13 +57,26 @@ export async function deliverLifecycle(event: LifecycleEvent, ctx: DeliverContex
   // no-callback dispatch would persist a spurious undelivered record.
   if (outcome.reason === undefined) return;
   if (ctx.storage) {
-    await persistUndelivered(ctx.storage, ctx.namespace, ctx.dispatchId, event, outcome);
-    ctx.logger.log({
-      kind: 'lifecycle.delivery.failed',
-      dispatchId: ctx.dispatchId,
-      eventKind: event.kind,
-      reason: outcome.reason,
-    });
+    try {
+      await persistUndelivered(ctx.storage, ctx.namespace, ctx.dispatchId, event, outcome);
+      ctx.logger.log({
+        kind: 'lifecycle.delivery.failed',
+        dispatchId: ctx.dispatchId,
+        eventKind: event.kind,
+        reason: outcome.reason,
+      });
+    } catch {
+      // Persistence is best-effort — a storage-write failure must not abort
+      // the dispatch lifecycle (mirrors notifications.ts:17-19's never-throw
+      // contract). The caught error is NOT logged: it could embed a
+      // path/URL from the storage backend.
+      ctx.logger.log({
+        kind: 'lifecycle.delivery.persist_failed',
+        dispatchId: ctx.dispatchId,
+        eventKind: event.kind,
+        reason: outcome.reason,
+      });
+    }
   } else {
     ctx.logger.log({
       kind: 'lifecycle.delivery.unpersisted',

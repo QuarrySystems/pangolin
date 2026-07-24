@@ -83,6 +83,36 @@ describe('deliverLifecycle', () => {
     });
   });
 
+  it('does not throw and logs lifecycle.delivery.persist_failed when storage.put rejects', async () => {
+    const storage = {
+      put: async () => {
+        throw new Error('storage unavailable at /some/secret/path');
+      },
+    } as unknown as StorageProvider;
+    const emitter = {
+      emit: async () => ({ delivered: false, reason: 'network' }) as DeliveryOutcome,
+    } as unknown as LifecycleEmitter;
+    const logs: unknown[] = [];
+
+    await expect(
+      deliverLifecycle({ kind: 'dispatch.failed', dispatchId: 'D1' } as LifecycleEvent, {
+        emitter,
+        storage,
+        logger: { log: (l: unknown) => logs.push(l) } as unknown as StructuredLogger,
+        namespace: 'ns',
+        dispatchId: 'D1',
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toMatchObject({
+      kind: 'lifecycle.delivery.persist_failed',
+      dispatchId: 'D1',
+      eventKind: 'dispatch.failed',
+      reason: 'network',
+    });
+  });
+
   it('does not persist or log when nothing was attempted (delivered:false, no reason) even with storage present', async () => {
     const puts: string[] = [];
     const storage = {
