@@ -7,7 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 All packages are versioned in lockstep; this file is the changelog for the whole
 workspace. See [RELEASING.md](./RELEASING.md) for how a release is cut.
 
-## [Unreleased] — Renamed Agora → Pangolin Scale
+## [Unreleased]
+
+## [0.3.0] - 2026-07-24 — Renamed Agora → Pangolin Scale
 
 ### Changed
 
@@ -21,9 +23,33 @@ workspace. See [RELEASING.md](./RELEASING.md) for how a release is cut.
   changelog entries below this line retain their original "agora" text as
   intentional residue.
 
-## [Unreleased] — Pre-rename
-
 ### Added
+
+- **Callback-delivery reliability — correctness, durability, and worker termination (#93, #94).**
+  Three slices harden the lifecycle-callback path Pangolin uses to report dispatch outcomes.
+  **Correctness (slice A):** the callback HMAC/header contract is fixed so a receiver can verify and parse
+  it, and delivery is now honest **at-most-once** (the retry loop and its `(dispatchId, kind)` dedupe key were
+  withdrawn). **Durability (slice B):** a failed callback writes a durable
+  `dispatches/<id>/undelivered/<kind>.json` record, so a consumer reconciles by polling — no silent drops.
+  **Termination (slice C, #94):** the worker (running as PID 1) now traps SIGTERM and mints
+  `dispatch.cancelled` through the same `emit()` path when no terminal was produced (flushing an in-flight
+  terminal otherwise), guarded by a single-winner claim so a cancel and a late completion can never both be
+  delivered; adds an `'aborted'` `DeliveryFailureReason` distinguishing a grace-budget abort from a timeout.
+  MVP §7.6 (which documented a SIGTERM handler that never existed) is corrected.
+
+- **Direct-dispatch consumer seam (#93).** The seams an external orchestrator (e.g. ai-os) needs to drive
+  Pangolin as an execution + audit substrate without hosting the orchestrator: dispatch de-duplication via
+  `DispatchWork.dedupeOnDispatchId` and per-dispatch callback auth via `callbackTokenRef`, plus the
+  `emit(event, { signal })` abort seam composed with the internal attempt timeout via `AbortSignal.any`.
+
+- **Engine-free `sealApproval()` pure function (#92)** — the green-lighting primitive extracted so approval
+  can be sealed independently of the run engine.
+
+- **Append-able submission — push-then-close open-ended runs (#89).** Opt-in runs that stay open for
+  additional items until explicitly closed.
+
+- **`examples/langgraph-changeorder` (#90)** — an external-orchestrator provenance seam demonstrating the
+  direct-dispatch pattern end-to-end.
 
 - **Pattern-aware CLI run view — `agora orch render` + live `agora orch watch` (spec: docs/superpowers/specs/2026-06-07-agora-run-view-design.md).**
   Four surfaces landed: **(1) Pre-run view** — `agora orch render <plan.json> [--pattern]` shows the expected DAG incl. dotted ghost respawn arcs under spawn-fix gates; works without a config file. 
@@ -172,5 +198,6 @@ published to npm under `@quarry-systems/agora-*`.
 - **Effect-tier policy** is computed but not yet enforced.
 - **Pre-1.0 (`0.x`):** interfaces may change between minor versions.
 
-[Unreleased]: https://github.com/QuarrySystems/pangolin/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/QuarrySystems/pangolin/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/QuarrySystems/pangolin/compare/v0.2.0...v0.3.0
 [0.1.0]: https://github.com/QuarrySystems/pangolin/releases/tag/v0.1.0
