@@ -48,6 +48,23 @@ export async function computeWorkspacePatch(
   }
 }
 
+/** The complete environment `git` runs with. Exported so the allow-list is assertable as a set.
+ *  Everything absent is the point: no AWS_*, no PANGOLIN_*, nothing a future deploy adds. */
+export function buildGitEnv(): Record<string, string> {
+  return {
+    // Node resolves the `git` binary through the PASSED env; omitting this risks ENOENT.
+    PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin',
+    // A fixed value with no directory to create, own, or clean up. ~/.gitconfig is a live
+    // attack vector (HOME is in runtime-env-filter's BUILTIN_ALLOW), and GIT_CONFIG_GLOBAL
+    // below neutralises it regardless.
+    HOME: '/nonexistent',
+    GIT_CONFIG_GLOBAL: '/dev/null', // kills ~/.gitconfig and $XDG_CONFIG_HOME/git/config
+    GIT_CONFIG_NOSYSTEM: '1', // kills /etc/gitconfig
+    GIT_TERMINAL_PROMPT: '0', // capture must never block on a credential prompt
+    LC_ALL: 'C', // deterministic stdout; capture parses it
+  };
+}
+
 /**
  * Spawn `git -C <dir>` with fixed config for a clean/non-interactive container
  * context:
@@ -60,14 +77,18 @@ export async function computeWorkspacePatch(
  */
 function git(dir: string, args: string[]): Promise<string> {
   return new Promise<string>((resolve, reject) => {
-    const child = spawn('git', [
-      '-C', dir,
-      '-c', 'safe.directory=*',
-      '-c', 'user.email=pangolin@local',
-      '-c', 'user.name=pangolin',
-      '-c', 'commit.gpgsign=false',
-      ...args,
-    ]);
+    const child = spawn(
+      'git',
+      [
+        '-C', dir,
+        '-c', 'safe.directory=*',
+        '-c', 'user.email=pangolin@local',
+        '-c', 'user.name=pangolin',
+        '-c', 'commit.gpgsign=false',
+        ...args,
+      ],
+      { env: buildGitEnv() },
+    );
 
     const stdoutChunks: Buffer[] = [];
     const stderrChunks: Buffer[] = [];

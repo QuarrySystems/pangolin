@@ -16,8 +16,9 @@
 // Migration notes:
 //   - Proxy vars (NODE_EXTRA_CA_CERTS, HTTP_PROXY, HTTPS_PROXY, NO_PROXY):
 //     add them to PANGOLIN_RUNTIME_ENV_ALLOW if the sub-agent needs them.
-//   - git is unaffected: patch-capture spawns git with the worker's own
-//     unfiltered process.env, not the filtered baseEnv.
+//   - git does not use this filter at all: patch-capture spawns git with its
+//     own fixed six-key environment (`buildGitEnv` in patch-capture.ts), which
+//     is narrower than baseEnv and carries no credential of any kind.
 //   - Agent-needed credentials (ANTHROPIC_API_KEY etc.) already arrive via
 //     env bundle / per-dispatch secret merged on top of baseEnv — they do
 //     NOT need to be in BUILTIN_ALLOW.
