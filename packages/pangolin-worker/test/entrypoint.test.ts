@@ -73,18 +73,11 @@ class FakeStorage implements StorageProvider {
  * `pangolin-client.registerCapability` (the worker's `unpackBundle` is its
  * inverse). Kept in sync by convention.
  */
-function packBundle(
-  name: string,
-  files: Record<string, Uint8Array>,
-): Uint8Array {
+function packBundle(name: string, files: Record<string, Uint8Array>): Uint8Array {
   const paths = Object.keys(files).sort();
   const entries = paths.map((path) => ({ path, size: files[path]!.byteLength }));
-  const headerBytes = new TextEncoder().encode(
-    JSON.stringify({ name, entries }) + '\n',
-  );
-  const total =
-    headerBytes.byteLength +
-    paths.reduce((acc, p) => acc + files[p]!.byteLength, 0);
+  const headerBytes = new TextEncoder().encode(JSON.stringify({ name, entries }) + '\n');
+  const total = headerBytes.byteLength + paths.reduce((acc, p) => acc + files[p]!.byteLength, 0);
   const out = new Uint8Array(total);
   let offset = 0;
   out.set(headerBytes, 0);
@@ -184,10 +177,7 @@ async function setupHarness(opts?: {
     capabilities: [
       {
         uri: capUri,
-        contentHash:
-          opts?.capabilityHashCorrect === false
-            ? 'sha256:wrong'
-            : correctCapHash,
+        contentHash: opts?.capabilityHashCorrect === false ? 'sha256:wrong' : correctCapHash,
       },
     ],
     env: [],
@@ -233,7 +223,7 @@ async function setupHarness(opts?: {
   };
 }
 
-function makeDeps(h: Harness): RunWorkerDeps {
+function makeDeps(h: Harness, overrides?: Partial<RunWorkerDeps>): RunWorkerDeps {
   return {
     storage: h.storage,
     adapter: h.adapter,
@@ -245,6 +235,7 @@ function makeDeps(h: Harness): RunWorkerDeps {
     onLifecycleEvent: (e) => {
       h.events.push(e);
     },
+    ...overrides,
   };
 }
 
@@ -267,11 +258,31 @@ describe('runWorker', () => {
     expect(code).not.toBe(0);
     const failed = h.events.find((e) => e.kind === 'dispatch.failed');
     expect(failed).toBeDefined();
-    expect(failed && 'reason' in failed && failed.reason).toBe(
-      'integrity-failed',
-    );
+    expect(failed && 'reason' in failed && failed.reason).toBe('integrity-failed');
     // The adapter must NOT have been invoked once integrity failed.
     expect(h.invokeCalls).toBe(0);
+  });
+
+  it('emits dispatch.failed on an early bundle-integrity failure when a callback is configured', async () => {
+    const h = await setupHarness({ capabilityHashCorrect: false });
+    cleanupDirs.push(h.workDir, h.adaptersRoot);
+    h.env.PANGOLIN_CALLBACK_URL = 'https://example.test/callback';
+    h.env.PANGOLIN_CALLBACK_TOKEN_REF = 'arn:aws:secretsmanager:us-east-1:1:secret:hmac';
+
+    const fetchCalls: string[] = [];
+    const fetchImpl = (async (input: string | URL | Request) => {
+      fetchCalls.push(String(input));
+      return new Response('ok', { status: 200 });
+    }) as typeof fetch;
+
+    const code = await runWorker(h.env, makeDeps(h, { fetchImpl }));
+
+    expect(code).not.toBe(0);
+    // On main the integrity failure returns before the HMAC key is resolved
+    // (the emitter is keyless), so zero POST attempts are made. After the
+    // fix, the SecretStore + emitter rebuild happens before bundle fetch, so
+    // the callback URL is hit exactly once for the dispatch.failed event.
+    expect(fetchCalls).toContain('https://example.test/callback');
   });
 
   it('runs the happy path: overlays bundles, invokes the adapter, emits started+finished, returns 0', async () => {
@@ -314,9 +325,7 @@ describe('runWorker', () => {
     expect(code).toBe(0);
 
     const sentinelUri = buildDispatchRecordUri('ns', 'd-1', 'output.json');
-    const parsed = JSON.parse(
-      new TextDecoder().decode(await h.storage.get(sentinelUri)),
-    );
+    const parsed = JSON.parse(new TextDecoder().decode(await h.storage.get(sentinelUri)));
     expect(parsed.verify).toBeDefined();
     expect(parsed.verify.passed).toBe(true);
   });
@@ -330,9 +339,7 @@ describe('runWorker', () => {
     expect(code).toBe(0);
 
     const sentinelUri = buildDispatchRecordUri('ns', 'd-1', 'output.json');
-    const parsed = JSON.parse(
-      new TextDecoder().decode(await h.storage.get(sentinelUri)),
-    );
+    const parsed = JSON.parse(new TextDecoder().decode(await h.storage.get(sentinelUri)));
     // Before the guard, timeout:0 → setTimeout(0) → instant SIGKILL → passed:false.
     expect(parsed.verify.passed).toBe(true);
   });
@@ -351,9 +358,7 @@ describe('runWorker', () => {
     expect(kinds).not.toContain('dispatch.failed');
 
     const sentinelUri = buildDispatchRecordUri('ns', 'd-1', 'output.json');
-    const parsed = JSON.parse(
-      new TextDecoder().decode(await h.storage.get(sentinelUri)),
-    );
+    const parsed = JSON.parse(new TextDecoder().decode(await h.storage.get(sentinelUri)));
     expect(parsed.verify.passed).toBe(false);
   });
 
@@ -448,7 +453,11 @@ describe('runWorker', () => {
       name: 'fake',
       stage: async () => ({ ref: 'ref-1', ttlSeconds: 1 }),
       resolve: async (ref: string) =>
-        ref === 'ref-1' ? SECRET_VALUE : (() => { throw new Error('unknown ref'); })(),
+        ref === 'ref-1'
+          ? SECRET_VALUE
+          : (() => {
+              throw new Error('unknown ref');
+            })(),
       cleanupByTag: async () => {},
     };
 
@@ -578,9 +587,7 @@ describe('runWorker', () => {
     expect(code).not.toBe(0);
     const failed = h.events.find((e) => e.kind === 'dispatch.failed');
     expect(failed).toBeDefined();
-    expect(failed && 'reason' in failed && failed.reason).toBe(
-      'worker-failed',
-    );
+    expect(failed && 'reason' in failed && failed.reason).toBe('worker-failed');
   });
 
   it('emits dispatch.failed with runtime exit code when adapter exits non-zero without sentinel', async () => {
@@ -621,7 +628,9 @@ describe('runWorker', () => {
 
     const sentinelUri = buildDispatchRecordUri('ns', 'd-1', 'output.json');
     const parsed = JSON.parse(new TextDecoder().decode(await h.storage.get(sentinelUri)));
-    expect(parsed.outputs).toEqual([{ path: 'report.txt', ref: expect.stringMatching(/^pangolin:\/\//) }]);
+    expect(parsed.outputs).toEqual([
+      { path: 'report.txt', ref: expect.stringMatching(/^pangolin:\/\//) },
+    ]);
     const refBytes = await h.storage.get(parsed.outputs[0].ref);
     expect(new TextDecoder().decode(refBytes)).toBe('done');
   });
@@ -693,7 +702,8 @@ describe('runWorker', () => {
       inputs: [{ key: 'patch.diff', bytes: inputBytes }],
       onInvoke: async (spec) => {
         const staged = await readFile(join(spec.workspaceDir, 'inputs', 'patch.diff'), 'utf8');
-        if (!staged.startsWith('diff --git')) throw new Error('input not materialized before invoke');
+        if (!staged.startsWith('diff --git'))
+          throw new Error('input not materialized before invoke');
       },
     });
     cleanupDirs.push(h.workDir, h.adaptersRoot);
