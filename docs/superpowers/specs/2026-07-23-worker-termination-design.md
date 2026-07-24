@@ -1,13 +1,14 @@
 ---
 title: Worker Termination on SIGTERM — Finding and Open Questions (slice C of 3)
 date: 2026-07-23
-status: draft — defect verified; NOT designed. Three blocking questions unanswered. Not ready for a plan.
+status: draft — defect verified; NOT designed. Q3 resolved; Q1 and Q2 still blocking. Not ready for a plan.
 branch: fix/callback-delivery-reliability
 authors: [human:Brett, agent:claude-opus-4-8]
 severity: medium-high (a cancelled dispatch loses its terminal event; a documented behaviour has never existed)
 related:
   - ./2026-07-23-callback-delivery-correctness-design.md # slice A
   - ./2026-07-23-callback-delivery-durability-design.md # slice B — shares entrypoint.ts; must land first
+  - ./2026-07-23-callback-consumer-seam-design.md # §5 supplies the emit() signal seam (Q3); §6.1 corrects this file's stale at-least-once assumption
   - ./2026-07-23-worker-env-block-exposure-design.md # its C1 candidate rewrites the same entry script
   - ./2026-05-21-agora-mvp-design.md # §7.6 claims a SIGTERM handler that has never existed
 ---
@@ -60,24 +61,32 @@ worth correcting independently of whether this slice is built.
    (`docker/pangolin-worker/bin/pangolin-worker-entry.mjs:16-21`) is the right place for `process.on` and
    `process.exit` — it is the only such site on the worker container path — but it has no access to the
    emitter, storage, or namespace.
-2. **There is no abort surface.** `LifecycleEmitter` is
-   `constructor(opts: { callbackUrl?, hmacKey?, fetchImpl? })` and `emit(event)`
-   (`lifecycle.ts:4-31`). Slice A adds a `DeliveryOutcome` return and injectable timing — **nothing that
-   can interrupt an in-flight retry schedule**, which lives inside `emit`.
+2. **The abort surface — now decided, not open.** `LifecycleEmitter` was
+   `constructor(opts: { callbackUrl?, hmacKey?, fetchImpl? })` and `emit(event)` with no way in. **There
+   is no "in-flight retry schedule" to interrupt** — slice A is at-most-once (§2.2.1), so `emit` makes one
+   bounded attempt, and the only thing SIGTERM needs to interrupt is a single in-flight `fetch`. The
+   abort surface is supplied by `2026-07-23-callback-consumer-seam-design.md` §5: `emit` gains
+   `opts?: { signal?: AbortSignal }`, composed with the internal timeout via `AbortSignal.any`. The
+   handler holds an `AbortController`, passes `controller.signal` to the flushing `emit`, and aborts when
+   grace is nearly spent. See Q3.
 3. **`entrypoint.ts` is shared with slice B**, so this must land after it.
 4. **`bin/pangolin-worker-entry.mjs` is contested.** The sibling
    `worker-env-block-exposure` spec's candidate C1 — re-exec the worker from a thin launcher — would
    rewrite that same file and insert a process between PID 1 and `runWorker`, changing **which process
    receives SIGTERM**. Not merely a placement invalidation: a same-file collision.
-5. **Whatever is emitted must respect the dedupe contract.** Slice A establishes at-least-once delivery
-   keyed on `(dispatchId, kind)`. `dispatch.cancelled` is admitted by the union
-   (`pangolin-core/src/lifecycle.ts:71-76`) and is a legal `NotificationConfig.when` value — but it may
-   *also* be emitted client-side (`lifecycle.ts:6-8` header, MVP `:1109`), so a receiver can see that kind
-   from two producers.
+5. **A receiver may see `dispatch.cancelled` from two producers.** *(Corrected: an earlier draft of this
+   constraint cited "Slice A establishes at-least-once delivery keyed on `(dispatchId, kind)`." That is
+   wrong — slice A §2.2.1 establishes **at-most-once**, and the `(dispatchId, kind)` dedupe key was
+   **withdrawn along with the retry loop**. There is no Pangolin-side dedupe contract to respect.)* What
+   survives on its own merit: `dispatch.cancelled` is admitted by the union
+   (`pangolin-core/src/lifecycle.ts:71-76`), is a legal `NotificationConfig.when` value, and may *also* be
+   emitted client-side (`lifecycle.ts:6-8` header, MVP `:1109`) — so a receiver can see that kind from two
+   producers and must be **idempotent on `(dispatchId, kind)` itself**. That is a receiver obligation, not
+   a delivery guarantee Pangolin makes.
 
 ---
 
-## 3. The three blocking questions
+## 3. The blocking questions (Q1, Q2 open; Q3 resolved above)
 
 ### Q1 — when a terminal event is in flight, does the handler emit `cancelled`?
 
@@ -87,8 +96,10 @@ An earlier draft wrote both of these, and they contradict:
 > *"…if the main path has already emitted `finished` or `failed`, the handler emits nothing."*
 
 If a `dispatch.finished` delivery is in flight when SIGTERM lands, rule 1 orders *finish it, then emit
-`cancelled`* — **two different terminal kinds for one `dispatchId`**, which `(dispatchId, kind)` cannot
-collapse by construction. Rule 2 forbids exactly what rule 1 mandates.
+`cancelled`* — **two contradictory terminal kinds for one `dispatchId`**. A receiver made idempotent on
+`(dispatchId, kind)` (corrected constraint 5) stores *both* as distinct terminal states rather than
+collapsing them, so this is a real semantic conflict, not one a dedupe key resolves. Rule 2 forbids
+exactly what rule 1 mandates.
 
 The likely answer is that a run which produced a terminal outcome is not cancelled, and the handler's job
 is only to flush — but that must be decided, not inferred.
@@ -102,20 +113,24 @@ that window.
 
 Any test for the handler asserts on this flag, so it is load-bearing rather than incidental.
 
-### Q3 — what is the abort surface?
+### Q3 — what is the abort surface? — **RESOLVED**
 
-Does `emit` accept an `AbortSignal`, or does the emitter own a shared `AbortController` with an
-`abort()` method? Constraint 2 says neither exists. Without a decision here the handler cannot
-"abort any in-flight retry schedule", and its test has no seam.
+**Decided:** `emit` takes `opts?: { signal?: AbortSignal }`, composed with the internal per-attempt
+timeout via `AbortSignal.any` — specified in `2026-07-23-callback-consumer-seam-design.md` §5 and folded
+into `lifecycle.ts` **before slice A is committed**, so the signature is fixed once rather than re-edited
+here. There is no "in-flight retry schedule"; the handler aborts a single in-flight `fetch`.
 
-Note the interaction with slice A: if `emit` takes an `AbortSignal`, that is an A-shaped API change and
-should be pulled into A rather than bolted on later.
+What remains **slice C's** to add (the caller that produces it): the `'aborted'` member of
+`DeliveryFailureReason` and its classification (`opts.signal.aborted && !timeout.aborted ⇒ 'aborted'`).
+Slice A deliberately omits it as unreachable until a caller passes a signal; this slice is that caller. The
+handler's test seam is `opts.signal`.
 
 ---
 
 ## 4. Gate before this becomes a design
 
-1. Answer Q1, Q2, Q3 **in this document**, with the code sites they land on.
+1. Answer Q1 and Q2 **in this document**, with the code sites they land on. (Q3 is resolved — the
+   `emit()` signal seam is specified in `2026-07-23-callback-consumer-seam-design.md` §5.)
 2. Confirm the sibling C1 decision (constraint 4). If a launcher is going to own PID 1, the handler
    belongs there, and designing it against today's entry script wastes the work.
 3. Re-derive the budget arithmetic from the answers. An earlier draft claimed "≈2 s, self-bounded" while
