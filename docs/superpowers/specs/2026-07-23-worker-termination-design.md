@@ -92,9 +92,10 @@ distinct terminal states rather than collapse. (Resolves the earlier draft's sel
 
 A single function-scoped `let terminalClaimed = false` in `runWorker`. Every terminal emit sets it `true`
 **immediately before** calling `emit(...)` (set-on-start), not after it returns. The realistic race is
-SIGTERM arriving between `await emit({kind:'dispatch.finished'})` (`entrypoint.ts:577`) **beginning** and
+SIGTERM arriving between `await emit({kind:'dispatch.finished'})` (`entrypoint.ts:580`) **beginning** and
 **returning**; set-on-start makes the flag already `true` in that window, so the handler takes the flush
-branch. This flag is load-bearing — every handler test asserts on it (§6).
+branch. This flag is load-bearing — every handler test asserts on it (§6). (§4.2 makes the flag a
+read+set `claimTerminal()` guard, not a bare set, and enumerates every emit site it must cover.)
 
 ### Q3 — what is the abort surface? — **RESOLVED (shipped #93).**
 
@@ -154,9 +155,21 @@ function claimTerminal(): boolean {   // flips synchronously, before any await
 **Every terminal emit is guarded by the claim — a read AND a set, not a bare set** (this is the correction
 the spec audit forced: a bare set lets a late main-flow completion emit a second terminal kind *after* the
 handler's `cancelled`). The first caller to claim wins and emits; any later caller sees `false` and emits
-nothing. The terminal-emit sites are the tail `finished`/`needs_input` emits, **`failWith` — which emits
-`dispatch.failed` from 14 call sites (`entrypoint.ts:177`); guarding inside `failWith` covers all of them in
-one edit** — and the handler's own `cancelled` emit:
+nothing. **The worker has four terminal-emit sites, and the guard goes on each** — enumerate them exactly,
+because the second audit caught one missing:
+
+- `finished` (`entrypoint.ts:580`) and `needs_input` (`:548`) — the tail success emits.
+- **the direct `provider-failed` `dispatch.failed`** on the adapter-non-zero-exit path (`:570`) — this
+  does **NOT** route through `failWith` (whose signature takes only the worker-side reasons
+  `integrity-failed | fetch-failed | worker-failed`), so it needs its own guard. Missing this site was the
+  gap the second audit found; unguarded, it re-opens the double-terminal defect on exactly the
+  adapter-failure path.
+- **`failWith`** (`:187`) — its **15** call sites all funnel through one emit, so a single guard inside
+  `failWith` covers them all.
+
+Plus the handler's own `cancelled` emit. (The fifth `emit(` in the file — `dispatch.started` at `:295` — is
+**non-terminal** and must **not** be guarded; the claim is for terminal kinds only. These four + `started`
+are the complete `emit(` set, verified by grep.) The uniform wrap at each site:
 
 ```
 if (claimTerminal()) {
@@ -240,12 +253,21 @@ write:
 - `B` is a **named constant with the derivation in a comment**, not a magic number. **No new env var** to
   pass grace in (YAGNI until an operator actually tightens `stopTimeout`; the durable record covers the
   loss). If that need materialises, the seam is: read grace from env, `B = grace − margin`.
-- **`B` bounds the `fetch`, not the follow-on `storage.put`.** `persistUndelivered` (`deliver.ts:42`) has no
-  timeout, so under a hung storage backend the durable write itself can miss the grace window and be
-  SIGKILLed with neither the callback delivered nor the record written. The backstop is therefore
-  **best-effort, not guaranteed** — the same at-most-once ceiling slice B already accepts. This slice does
-  not promise the record always lands; it promises the `cancelled` event is *minted and attempted* through
-  the durable path.
+- **`B` bounds the lifecycle `fetch`, not the follow-on `storage.put`.** `persistUndelivered`
+  (`deliver.ts:42`) has no timeout, so under a hung storage backend the durable write itself can miss the
+  grace window and be SIGKILLed with neither the callback delivered nor the record written. The backstop is
+  therefore **best-effort, not guaranteed** — the same at-most-once ceiling slice B already accepts. This
+  slice does not promise the record always lands; it promises the `cancelled` event is *minted and attempted*
+  through the durable path.
+- **`B` also does not bound the notification fan-out.** The `emit` closure awaits `deliverNotifications`
+  *after* `deliverLifecycle` (`entrypoint.ts:173-174`), and B2 threads the budget signal to lifecycle only
+  (§4.3). So the handler's `await emit(cancelled, { signal })` still awaits any
+  `NotificationConfig.when === 'dispatch.cancelled'` fan-out, bounded only by its own per-endpoint internal
+  timeout. **Decision:** the cancel emit goes through the normal closure (lifecycle + notifications), exactly
+  like every other terminal kind — a `dispatch.cancelled` notification is legitimately useful — so worst-case
+  handler cost is one budgeted lifecycle `fetch` + the (internally-timed, unbudgeted) notification fan-out +
+  one `storage.put`. Do **not** thread `B` into notifications (they stay out of scope, §4.3); accept the
+  fan-out as best-effort within grace.
 
 ---
 
@@ -265,11 +287,13 @@ call counts alone (green-on-main = vacuous). Cases:
    **not** observed. Mutate the claim to set-on-complete and it must fail (positive control).
 4. **Handler-first race (the audit's B1 — the one the first draft missed)** — abort while the adapter runs,
    then release the adapter latch so it completes **within** the cancel budget (after the handler's
-   `cancelled` emit has begun). Assert `dispatch.cancelled` is delivered and the trailing `finished`/`failed`
-   is **suppressed** (not observed), exit 0. Mutate the terminal wrap to a bare set (drop the `claimTerminal`
-   read-guard) and it must fail (positive control on the guard). Also exercise the same race through an early
-   `failWith` (setup failure concurrent with SIGTERM) to prove the guard covers all 14 `failWith` sites, not
-   just the tail emits.
+   `cancelled` emit has begun). Assert `dispatch.cancelled` is delivered and the trailing terminal is
+   **suppressed** (not observed), exit 0. Mutate the terminal wrap to a bare set (drop the `claimTerminal`
+   read-guard) and it must fail (positive control on the guard). **Drive this race through each tail terminal
+   path** — a clean `finished`, the **direct `provider-failed`** adapter-non-zero-exit emit (`:570`), and an
+   early `failWith` (setup failure concurrent with SIGTERM) — so the guard is proven on the `provider-failed`
+   site specifically (the one the first revision left unguarded), not only on `failWith`'s 15 sites and the
+   tail successes.
 5. **`'aborted'` classification** — a `fetchImpl` that hangs until the budget signal fires; assert the
    delivery outcome reason is `'aborted'`, not `'timeout'`/`'network'`, and that
    `undelivered/dispatch.cancelled.json` is persisted (assert the storage write, not just the reason). This
@@ -315,8 +339,9 @@ Build order (all in `packages/pangolin-worker` + the entry script + MVP doc):
    **only**, never to `deliverNotifications` (§4.3).
 3. **Restructure (N4).** Hoist `runWorker`'s body into an inner `mainFlow()`; lift `terminalClaimed`,
    `terminalDelivery`, the `emit` closure, and `failWith` into the outer scope. Add the `claimTerminal()`
-   helper (§4.2) and guard **every** terminal emit with it — the tail `finished`/`needs_input` emits **and
-   inside `failWith`** (covers all 14 `dispatch.failed` sites, `entrypoint.ts:177`).
+   helper (§4.2) and guard **all four** worker terminal-emit sites: `finished` (`:580`), `needs_input`
+   (`:548`), the **direct `provider-failed` `dispatch.failed`** (`:570`, which does NOT go through
+   `failWith`), and inside `failWith` (`:187`, one edit for its 15 call sites).
 4. `RunWorkerDeps.terminationSignal?: AbortSignal` (`entrypoint.ts:79`); the
    `Promise.race([mainFlow(), terminationOutcome()])` wrapper with `terminationOutcome` as an inner closure
    over the lifted state; the flush/cancel branches (§4.2) with the `B = 2000 ms` budget signal on the cancel
