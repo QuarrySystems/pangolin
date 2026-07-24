@@ -3,14 +3,8 @@ import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHmac } from 'node:crypto';
-import {
-  loadCapabilityNotifications,
-  fireNotifications,
-} from '../src/notifications.js';
-import type {
-  LifecycleEvent,
-  NotificationConfig,
-} from '@quarry-systems/pangolin-core';
+import { loadCapabilityNotifications, fireNotifications } from '../src/notifications.js';
+import type { LifecycleEvent, NotificationConfig } from '@quarry-systems/pangolin-core';
 
 function computeSignature(
   hmacKey: string,
@@ -46,11 +40,7 @@ describe('loadCapabilityNotifications', () => {
         webhook: 'https://example.com/b',
       },
     ];
-    await writeFile(
-      join(workDir, 'pangolin-notifications.json'),
-      JSON.stringify(configs),
-      'utf-8',
-    );
+    await writeFile(join(workDir, 'pangolin-notifications.json'), JSON.stringify(configs), 'utf-8');
 
     const result = await loadCapabilityNotifications(workDir);
     expect(result).toEqual(configs);
@@ -79,7 +69,7 @@ describe('fireNotifications', () => {
       [{ when: ['dispatch.failed'], webhook: 'https://example.com/x' }],
     ];
 
-    await fireNotifications({
+    const outcomes = await fireNotifications({
       event: makeFinishedEvent(),
       sources,
       hmacKey: 'k',
@@ -87,6 +77,7 @@ describe('fireNotifications', () => {
     });
 
     expect(calls).toHaveLength(0);
+    expect(outcomes).toEqual([]);
   });
 
   it('POSTs to every matching webhook across all sources', async () => {
@@ -106,7 +97,7 @@ describe('fireNotifications', () => {
       ],
     ];
 
-    await fireNotifications({
+    const outcomes = await fireNotifications({
       event: makeFinishedEvent(),
       sources,
       hmacKey: 'k',
@@ -115,9 +106,10 @@ describe('fireNotifications', () => {
 
     expect(calls).toHaveLength(2);
     const urls = calls.map(([url]) => url).sort();
-    expect(urls).toEqual([
-      'https://example.com/cap',
-      'https://example.com/dispatch',
+    expect(urls).toEqual(['https://example.com/cap', 'https://example.com/dispatch']);
+    expect(outcomes).toEqual([
+      { label: 'https://example.com', delivered: true, status: 200 },
+      { label: 'https://example.com', delivered: true, status: 200 },
     ]);
   });
 
@@ -146,7 +138,7 @@ describe('fireNotifications', () => {
     expect(calls[0]![0]).toBe('https://example.com/multi');
   });
 
-  it('signs the POST with HMAC matching signCallback scheme', async () => {
+  it('signs the POST with HMAC matching signCallback scheme, using corrected header names as a plain object', async () => {
     const calls: Array<[string, RequestInit]> = [];
     const fetchImpl = (async (url: string, init: RequestInit) => {
       calls.push([url, init]);
@@ -163,16 +155,30 @@ describe('fireNotifications', () => {
 
     expect(calls).toHaveLength(1);
     const [, init] = calls[0]!;
-    const headers = init.headers as Record<string, string>;
-    expect(init.method).toBe('POST');
-    expect(headers['Content-Type']).toBe('application/json');
-    expect(headers['X-Pangolin Scale-Dispatch-Id']).toBe(event.dispatchId);
-    expect(headers['X-Pangolin Scale-Timestamp']).toBeDefined();
 
-    const timestamp = headers['X-Pangolin Scale-Timestamp']!;
+    // Plain object invariant: constructing a real Headers from whatever production passed
+    // must not throw, and the key set (once normalized by Headers) is exactly the four
+    // expected names.
+    let headers!: Headers;
+    expect(() => {
+      headers = new Headers(init.headers as HeadersInit);
+    }).not.toThrow();
+    expect([...headers.keys()].sort()).toEqual([
+      'content-type',
+      'x-pangolin-dispatch-id',
+      'x-pangolin-signature',
+      'x-pangolin-timestamp',
+    ]);
+
+    expect(init.method).toBe('POST');
+    expect(headers.get('Content-Type')).toBe('application/json');
+    expect(headers.get('X-Pangolin-Dispatch-Id')).toBe(event.dispatchId);
+    expect(headers.get('X-Pangolin-Timestamp')).toBeDefined();
+
+    const timestamp = headers.get('X-Pangolin-Timestamp')!;
     const payload = init.body as string;
     const expectedSig = `sha256=${computeSignature(hmacKey, event.dispatchId, timestamp, payload)}`;
-    expect(headers['X-Pangolin Scale-Signature']).toBe(expectedSig);
+    expect(headers.get('X-Pangolin-Signature')).toBe(expectedSig);
 
     // Body is the full event as JSON
     expect(JSON.parse(payload)).toEqual(event);
@@ -199,30 +205,32 @@ describe('fireNotifications', () => {
     ];
 
     // Must not throw, even though one webhook fails
-    await fireNotifications({
+    const outcomes = await fireNotifications({
       event: makeFinishedEvent(),
       sources,
       hmacKey: 'k',
       fetchImpl,
     });
 
-    expect(completed.sort()).toEqual([
-      'https://example.com/ok1',
-      'https://example.com/ok2',
+    expect(completed.sort()).toEqual(['https://example.com/ok1', 'https://example.com/ok2']);
+    expect(outcomes).toEqual([
+      { label: 'https://example.com', delivered: false, reason: 'network' },
+      { label: 'https://example.com', delivered: true, status: 200 },
+      { label: 'https://example.com', delivered: true, status: 200 },
     ]);
   });
 
-  it('uses the global fetch when fetchImpl is not supplied', async () => {
-    // We can't easily call real network; instead verify the function accepts
-    // omitted fetchImpl without throwing at type-time / call-time when there
-    // are no matching configs (so no network actually happens).
+  it('returns [] and never reaches fetch when fetchImpl is omitted and no config matches', async () => {
+    // Retitled from "uses the global fetch when fetchImpl is not supplied": with zero
+    // matching configs, fetch (global or injected) is never called — this test only
+    // proves the omitted-fetchImpl call shape resolves to [] without throwing.
     await expect(
       fireNotifications({
         event: makeFinishedEvent(),
         sources: [[{ when: ['dispatch.failed'], webhook: 'https://example.com/x' }]],
         hmacKey: 'k',
       }),
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual([]);
   });
 
   it('handles empty sources array', async () => {
@@ -232,7 +240,7 @@ describe('fireNotifications', () => {
       return new Response('ok');
     }) as unknown as typeof fetch;
 
-    await fireNotifications({
+    const outcomes = await fireNotifications({
       event: makeFinishedEvent(),
       sources: [],
       hmacKey: 'k',
@@ -240,5 +248,175 @@ describe('fireNotifications', () => {
     });
 
     expect(calls).toHaveLength(0);
+    expect(outcomes).toEqual([]);
+  });
+
+  it('reports a 500-returning endpoint as failed rather than settled-ok', async () => {
+    const fetchImpl = (async (url: string) =>
+      url.endsWith('/dead')
+        ? new Response('nope', { status: 500 })
+        : new Response('ok', { status: 200 })) as unknown as typeof fetch;
+
+    const outcomes = await fireNotifications({
+      event: makeFinishedEvent(),
+      sources: [
+        [
+          { when: ['dispatch.finished'], webhook: 'https://a.example.com/dead' },
+          { when: ['dispatch.finished'], webhook: 'https://b.example.com/ok' },
+        ],
+      ],
+      hmacKey: 'k',
+      fetchImpl,
+    });
+
+    expect(outcomes).toEqual([
+      { label: 'https://a.example.com', delivered: false, status: 500, reason: 'http-status' },
+      { label: 'https://b.example.com', delivered: true, status: 200 },
+    ]);
+  });
+
+  it('reports a rejecting fetch as a network failure', async () => {
+    const fetchImpl = (async () => {
+      throw new Error('connection refused');
+    }) as unknown as typeof fetch;
+
+    const outcomes = await fireNotifications({
+      event: makeFinishedEvent(),
+      sources: [[{ when: ['dispatch.finished'], webhook: 'https://example.com/x' }]],
+      hmacKey: 'k',
+      fetchImpl,
+    });
+
+    expect(outcomes).toEqual([
+      { label: 'https://example.com', delivered: false, reason: 'network' },
+    ]);
+  });
+
+  it('hands each fetch its own AbortSignal, proved by identity not timing', async () => {
+    const signals: unknown[] = [];
+    const fetchImpl = (async (_url: string, init: RequestInit) => {
+      signals.push(init.signal);
+      return new Response('ok', { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await fireNotifications({
+      event: makeFinishedEvent(),
+      sources: [
+        [
+          { when: ['dispatch.finished'], webhook: 'https://a.example.com/x' },
+          { when: ['dispatch.finished'], webhook: 'https://b.example.com/y' },
+        ],
+      ],
+      hmacKey: 'k',
+      fetchImpl,
+    });
+
+    expect(signals).toHaveLength(2);
+    expect(signals[0]).toBeInstanceOf(AbortSignal);
+    expect(signals[1]).toBeInstanceOf(AbortSignal);
+    expect(signals[0]).not.toBe(signals[1]);
+  });
+
+  it('classifies a timeout on abort, distinct from an immediately-resolving sibling', async () => {
+    const fetchImpl = (async (url: string, init: RequestInit) => {
+      if (url.endsWith('/slow')) {
+        const signal = init.signal as AbortSignal;
+        return new Promise((_resolve, reject) => {
+          signal.addEventListener('abort', () => {
+            reject(new Error('the operation was aborted'));
+          });
+        });
+      }
+      return new Response('ok', { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const outcomes = await fireNotifications({
+      event: makeFinishedEvent(),
+      sources: [
+        [
+          { when: ['dispatch.finished'], webhook: 'https://a.example.com/slow' },
+          { when: ['dispatch.finished'], webhook: 'https://b.example.com/fast' },
+        ],
+      ],
+      hmacKey: 'k',
+      fetchImpl,
+      attemptTimeoutMs: 20,
+    });
+
+    expect(outcomes).toEqual([
+      { label: 'https://a.example.com', delivered: false, reason: 'timeout' },
+      { label: 'https://b.example.com', delivered: true, status: 200 },
+    ]);
+  });
+
+  it('classifies on the signal, not the error message: an abort-worded rejection with no abort is a network failure', async () => {
+    const fetchImpl = (async () => {
+      throw new Error('The operation was aborted');
+    }) as unknown as typeof fetch;
+
+    const outcomes = await fireNotifications({
+      event: makeFinishedEvent(),
+      sources: [[{ when: ['dispatch.finished'], webhook: 'https://example.com/x' }]],
+      hmacKey: 'k',
+      fetchImpl,
+      attemptTimeoutMs: 5_000, // long enough that the signal cannot have fired
+    });
+
+    expect(outcomes).toEqual([
+      { label: 'https://example.com', delivered: false, reason: 'network' },
+    ]);
+  });
+
+  it.each([NaN, 5.5, Infinity, 2 ** 32, Number.MAX_SAFE_INTEGER, -1, 0, 'garbage'])(
+    'does not throw for attemptTimeoutMs = %s',
+    async (attemptTimeoutMs) => {
+      const fetchImpl = (async () =>
+        new Response('ok', { status: 200 })) as unknown as typeof fetch;
+
+      await expect(
+        fireNotifications({
+          event: makeFinishedEvent(),
+          sources: [[{ when: ['dispatch.finished'], webhook: 'https://example.com/x' }]],
+          hmacKey: 'k',
+          fetchImpl,
+          attemptTimeoutMs: attemptTimeoutMs as unknown as number,
+        }),
+      ).resolves.toEqual([{ label: 'https://example.com', delivered: true, status: 200 }]);
+    },
+  );
+
+  it('does not throw out of fireNotifications when fetchImpl throws synchronously', async () => {
+    const fetchImpl = (() => {
+      throw new Error('sync boom');
+    }) as unknown as typeof fetch;
+
+    const outcomes = await fireNotifications({
+      event: makeFinishedEvent(),
+      sources: [[{ when: ['dispatch.finished'], webhook: 'https://a.example.com/x' }]],
+      hmacKey: 'k',
+      fetchImpl,
+    });
+
+    expect(outcomes).toEqual([
+      { label: 'https://a.example.com', delivered: false, reason: 'network' },
+    ]);
+  });
+
+  it('label never contains the raw webhook URL, even when it carries userinfo and a query token', async () => {
+    const fetchImpl = (async () => new Response('ok', { status: 200 })) as unknown as typeof fetch;
+
+    const rawWebhook = 'https://user:secret@example.com/hook?token=abc123';
+    const outcomes = await fireNotifications({
+      event: makeFinishedEvent(),
+      sources: [[{ when: ['dispatch.finished'], webhook: rawWebhook }]],
+      hmacKey: 'k',
+      fetchImpl,
+    });
+
+    expect(outcomes).toHaveLength(1);
+    const [outcome] = outcomes;
+    expect(outcome!.label).not.toContain('secret');
+    expect(outcome!.label).not.toContain('abc123');
+    expect(outcome!.label).toBe('https://example.com');
   });
 });

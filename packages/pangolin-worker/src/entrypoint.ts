@@ -57,26 +57,15 @@ import {
   type FetchedBundles,
   type FetchedCapability,
 } from './bundle-fetcher.js';
-import {
-  overlayCapabilities,
-  type CapabilityBundle,
-} from './overlay-engine.js';
+import { overlayCapabilities, type CapabilityBundle } from './overlay-engine.js';
 import { mergeEnv, type EnvBundle } from './env-merger.js';
 import { filterRuntimeEnv } from './runtime-env-filter.js';
-import {
-  runSetupScriptIfPresent,
-  SetupScriptError,
-} from './setup-script.js';
-import {
-  loadChannelIfPresent,
-  type ChannelHandle,
-} from './channel-loader.js';
+import { runSetupScriptIfPresent, SetupScriptError } from './setup-script.js';
+import { loadChannelIfPresent, type ChannelHandle } from './channel-loader.js';
 import { resolveNeedsInputSentinel } from './needs-input.js';
-import {
-  loadCapabilityNotifications,
-  fireNotifications,
-} from './notifications.js';
+import { loadCapabilityNotifications } from './notifications.js';
 import { LifecycleEmitter } from './lifecycle.js';
+import { deliverLifecycle, deliverNotifications, type DeliverContext } from './deliver.js';
 import { StructuredLogger } from './logger.js';
 import { captureBaseline, type WorkspaceBaseline } from './patch-capture.js';
 import type { VerifyConfig } from '@quarry-systems/pangolin-core';
@@ -158,24 +147,31 @@ export async function runWorker(
   const dispatchLevelNotifications: NotificationConfig[] = [];
   let hmacKeyForNotifications = '';
 
+  // Declared here (ahead of Step 1b's construction) so the `emit` closure
+  // below can reference it — `storage` is undefined on the storage-
+  // construction failure path, which DeliverContext models as optional.
+  let storage: StorageProvider | undefined;
+
   const emit = async (event: LifecycleEvent): Promise<void> => {
     deps.onLifecycleEvent?.(event);
-    try {
-      await lifecycleEmitter.emit(event);
-    } catch (err) {
-      logger.log({
-        kind: 'lifecycle.emit.failed',
-        detail: (err as Error).message,
-      });
-    }
-    if (capabilityNotifications.length > 0 || dispatchLevelNotifications.length > 0) {
-      await fireNotifications({
-        event,
-        sources: [capabilityNotifications, dispatchLevelNotifications],
-        hmacKey: hmacKeyForNotifications,
-        fetchImpl: deps.fetchImpl,
-      });
-    }
+    const ctx: DeliverContext = {
+      emitter: lifecycleEmitter,
+      storage,
+      logger,
+      namespace: cfg.namespace,
+      dispatchId: cfg.dispatchId,
+      notifications:
+        capabilityNotifications.length > 0 || dispatchLevelNotifications.length > 0
+          ? {
+              sources: [capabilityNotifications, dispatchLevelNotifications],
+              hmacKey: hmacKeyForNotifications,
+              fetchImpl: deps.fetchImpl,
+            }
+          : undefined,
+    };
+    // deliverLifecycle/deliverNotifications never throw — no try/catch needed.
+    await deliverLifecycle(event, ctx);
+    await deliverNotifications(event, ctx);
   };
 
   const failWith = async (
@@ -197,8 +193,63 @@ export async function runWorker(
     return exitCode;
   };
 
+  // Construct the SecretStore ONCE — before StorageProvider construction,
+  // bundle fetch, and pipeline-spec validation — so it can serve all three
+  // resolution paths: the callback HMAC key, env-bundle secrets, and
+  // per-dispatch secrets. The secretsClient is threaded in as the AWS test seam.
+  // Moved ahead of those early failure sites (D5) so a callback configured for
+  // the dispatch is actually keyed in time to report an early integrity/setup
+  // failure — previously the emitter stayed keyless until after bundle fetch
+  // and pipeline validation, so those early `failWith` calls emitted nothing.
+  const secretsClient = deps.secretsManagerClient ?? new SecretsManagerClient({});
+  // Build the SecretStore directly from the configured kind. The dispatcher
+  // always emits PANGOLIN_SECRET_STORE_KIND, so no auto-detect is needed here.
+  const secretStore =
+    deps.secretStore ??
+    storeFromConfig({
+      kind: cfg.secretStoreKind,
+      dir: cfg.secretStoreDir,
+      client: secretsClient,
+    });
+
+  // Resolve the callback HMAC key (if a callback is configured) and rebuild
+  // the emitter so it is keyed before any later failure path can fire.
+  if (cfg.callbackUrl && cfg.callbackTokenRef) {
+    let key: string;
+    try {
+      key = await secretStore.resolve(cfg.callbackTokenRef);
+    } catch (err) {
+      return failWith('fetch-failed', `callback HMAC key fetch failed: ${(err as Error).message}`);
+    }
+    logger.registerSecret(key);
+    hmacKeyForNotifications = key;
+
+    // Bearer admission is optional and independent of the mandatory HMAC key
+    // above — resolve it only when configured, so the resolve() call and the
+    // Authorization header are both fully gated on PANGOLIN_CALLBACK_BEARER_REF.
+    // This whole block is itself subordinate to the mandatory HMAC block
+    // (`cfg.callbackUrl && cfg.callbackTokenRef`): a config with a callback
+    // URL and a bearer ref but no token ref never reaches here, so the
+    // bearer is silently ignored in that case — deliberate, not a bug.
+    let bearerToken: string | undefined;
+    if (cfg.callbackBearerRef) {
+      try {
+        bearerToken = await secretStore.resolve(cfg.callbackBearerRef);
+      } catch (err) {
+        return failWith('fetch-failed', `callback bearer fetch failed: ${(err as Error).message}`);
+      }
+      logger.registerSecret(bearerToken);
+    }
+
+    lifecycleEmitter = new LifecycleEmitter({
+      callbackUrl: cfg.callbackUrl,
+      hmacKey: key,
+      fetchImpl: deps.fetchImpl,
+      bearerToken,
+    });
+  }
+
   // Step 1b: construct StorageProvider.
-  let storage: StorageProvider;
   try {
     storage = deps.storage ?? (await constructStorageProvider(cfg.storageUri));
   } catch (err) {
@@ -208,8 +259,9 @@ export async function runWorker(
   // Step 2: load runtime adapter.
   let adapter: RuntimeAdapter;
   try {
-    adapter = deps.adapter
-      ?? (await loadRuntimeAdapter(cfg.runtimeAdapter, {
+    adapter =
+      deps.adapter ??
+      (await loadRuntimeAdapter(cfg.runtimeAdapter, {
         adaptersRoot: deps.adaptersRoot,
       }));
   } catch (err) {
@@ -221,10 +273,7 @@ export async function runWorker(
   try {
     bundles = await fetchBundles(cfg.bundleRefs, storage);
   } catch (err) {
-    return failWith(
-      'integrity-failed',
-      `bundle fetch/verify failed: ${(err as Error).message}`,
-    );
+    return failWith('integrity-failed', `bundle fetch/verify failed: ${(err as Error).message}`);
   }
 
   // Step 3b: if a declared pipeline spec was fetched, validate it structurally
@@ -242,39 +291,6 @@ export async function runWorker(
     }
   }
 
-  // Construct the SecretStore ONCE before Step 4 so it can serve all three
-  // resolution paths: the callback HMAC key, env-bundle secrets, and
-  // per-dispatch secrets. The secretsClient is threaded in as the AWS test seam.
-  const secretsClient =
-    deps.secretsManagerClient ?? new SecretsManagerClient({});
-  // Build the SecretStore directly from the configured kind. The dispatcher
-  // always emits PANGOLIN_SECRET_STORE_KIND, so no auto-detect is needed here.
-  const secretStore = deps.secretStore ?? storeFromConfig({
-    kind: cfg.secretStoreKind,
-    dir: cfg.secretStoreDir,
-    client: secretsClient,
-  });
-
-  // Step 4: resolve the callback HMAC key (if a callback is configured).
-  if (cfg.callbackUrl && cfg.callbackTokenRef) {
-    let key: string;
-    try {
-      key = await secretStore.resolve(cfg.callbackTokenRef);
-    } catch (err) {
-      return failWith(
-        'fetch-failed',
-        `callback HMAC key fetch failed: ${(err as Error).message}`,
-      );
-    }
-    logger.registerSecret(key);
-    hmacKeyForNotifications = key;
-    lifecycleEmitter = new LifecycleEmitter({
-      callbackUrl: cfg.callbackUrl,
-      hmacKey: key,
-      fetchImpl: deps.fetchImpl,
-    });
-  }
-
   // Step 5: emit dispatch.started.
   await emit({
     kind: 'dispatch.started',
@@ -284,8 +300,7 @@ export async function runWorker(
   });
 
   // Step 6: overlay capabilities to a fresh workspace.
-  const workspaceDir =
-    deps.workspaceDir ?? (await mkdtemp(join(tmpdir(), 'pangolin-workspace-')));
+  const workspaceDir = deps.workspaceDir ?? (await mkdtemp(join(tmpdir(), 'pangolin-workspace-')));
   try {
     const capabilityBundles: CapabilityBundle[] = bundles.capabilities.map(
       (c: FetchedCapability) => ({
@@ -313,9 +328,7 @@ export async function runWorker(
       }
       overlayBundles.push({
         name: 'inputs',
-        files: Object.fromEntries(
-          bundles.inputs.map((i) => [`inputs/${i.key}`, i.bytes]),
-        ),
+        files: Object.fromEntries(bundles.inputs.map((i) => [`inputs/${i.key}`, i.bytes])),
       });
     }
     await overlayCapabilities({
@@ -324,10 +337,7 @@ export async function runWorker(
       adapter,
     });
   } catch (err) {
-    return failWith(
-      'integrity-failed',
-      `overlay failed: ${(err as Error).message}`,
-    );
+    return failWith('integrity-failed', `overlay failed: ${(err as Error).message}`);
   }
 
   // Post-overlay: load capability-content notifications so failure paths
@@ -441,10 +451,7 @@ export async function runWorker(
         `setup-script exit ${err.result.exitCode}: ${err.result.stderr.slice(0, 500)}`,
       );
     }
-    return failWith(
-      'worker-failed',
-      `setup-script failed: ${(err as Error).message}`,
-    );
+    return failWith('worker-failed', `setup-script failed: ${(err as Error).message}`);
   }
 
   // Capture workspace baseline BEFORE the adapter runs (post-overlay, post-setup).
@@ -516,10 +523,7 @@ export async function runWorker(
   } catch (err) {
     // The runtime adapter itself blew up — that is a worker failure, not a
     // dispatch failure: the adapter is part of the worker image.
-    return failWith(
-      'worker-failed',
-      `runtime adapter threw: ${(err as Error).message}`,
-    );
+    return failWith('worker-failed', `runtime adapter threw: ${(err as Error).message}`);
   } finally {
     // Step 12: stop the channel subscription. Always runs — even on the
     // catch above's early return — so the background loop never leaks.
@@ -611,9 +615,7 @@ function unpackBundle(bytes: Uint8Array): Record<string, Uint8Array> {
   try {
     header = JSON.parse(headerText);
   } catch (err) {
-    throw new Error(
-      `capability bundle header is not valid JSON: ${(err as Error).message}`,
-    );
+    throw new Error(`capability bundle header is not valid JSON: ${(err as Error).message}`);
   }
   if (!header.entries || !Array.isArray(header.entries)) {
     throw new Error('capability bundle header missing entries[]');

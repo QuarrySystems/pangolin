@@ -157,6 +157,29 @@ describe("parseWorkerEnv", () => {
       expect(cfg.callbackUrl).toBeUndefined();
       expect(cfg.callbackTokenRef).toBeUndefined();
     });
+
+    it("parses PANGOLIN_CALLBACK_BEARER_REF as an optional field", () => {
+      const env = baseEnv();
+      env.PANGOLIN_CALLBACK_URL = "https://example.com/cb";
+      env.PANGOLIN_CALLBACK_TOKEN_REF = "secret://cb-token";
+      env.PANGOLIN_CALLBACK_BEARER_REF = "secretref://b";
+      const cfg = parseWorkerEnv(env);
+      expect(cfg.callbackBearerRef).toBe("secretref://b");
+    });
+
+    it("does not require the bearer ref when a callback URL is set", () => {
+      const env = baseEnv();
+      env.PANGOLIN_CALLBACK_URL = "https://example.com/cb";
+      env.PANGOLIN_CALLBACK_TOKEN_REF = "secret://cb-token";
+      expect(() => parseWorkerEnv(env)).not.toThrow();
+      const cfg = parseWorkerEnv(env);
+      expect(cfg.callbackBearerRef).toBeUndefined();
+    });
+
+    it("leaves callbackBearerRef undefined when no callback fields are set", () => {
+      const cfg = parseWorkerEnv(baseEnv());
+      expect(cfg.callbackBearerRef).toBeUndefined();
+    });
   });
 
   describe("defaults", () => {

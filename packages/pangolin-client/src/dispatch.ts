@@ -32,6 +32,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   buildPangolinUri,
+  buildDispatchRecordUri,
   parsePangolinUri,
   type DispatchWork,
   type DispatchResult,
@@ -44,13 +45,14 @@ import {
   type TaskHandle,
   type TaskExit,
   type SecretStore,
+  type StorageProvider,
   type TraceContext,
 } from '@quarry-systems/pangolin-core';
 import type { PangolinClient } from './client.js';
 import { computeInlineSecretTtl } from './secret-ttl.js';
 import { mintCallbackHmac } from './callback-hmac.js';
 import { writeDispatchRecord } from './retention.js';
-import { SecretStoreMismatchError } from './errors.js';
+import { SecretStoreMismatchError, DispatchAlreadyExistsError } from './errors.js';
 import { emitLifecycleEvent } from './lifecycle-emit.js';
 import { boundedAwaitExit } from './bounded-await-exit.js';
 
@@ -88,6 +90,8 @@ export interface InFlightDispatch {
     /** for the audit manifest — the pinned pipeline definition URI that triggered this dispatch */
     pipelineRef?: string;
   };
+  /** SecretStore ref for the per-dispatch callback HMAC key, when a callback was configured. */
+  readonly callbackTokenRef?: string;
   awaitExit(): Promise<TaskExit>;
   reconcile(exit: TaskExit): Promise<DispatchResult>;
   cleanup(): void;
@@ -116,6 +120,26 @@ export async function fireWork(
   // supplied trace) is a single-dispatch trace keyed by its own dispatchId.
   const trace: TraceContext = work.trace ?? { traceId: dispatchId };
   const effectiveTimeoutSeconds = work.timeoutSeconds ?? opts.defaultDispatchTimeoutSeconds;
+
+  // 0. Dedupe guard (opt-in via `work.dedupeOnDispatchId`). MUST run before any
+  //    staging or minting below: a re-fire of the same dispatchId would otherwise
+  //    re-stage the per-dispatch secrets / callback HMAC key under the same name,
+  //    replacing the first container's key mid-run. The marker records identity
+  //    only (dispatchId/firedAt/traceId) — no secret, no URL — and is written
+  //    with the target-independent `client.storage` (no target/store resolution
+  //    needed to check or write it).
+  if (work.dedupeOnDispatchId) {
+    const markerUri = buildDispatchRecordUri(client.namespace, dispatchId, 'fired.json');
+    if (await markerPresent(client.storage, markerUri)) {
+      throw new DispatchAlreadyExistsError(dispatchId);
+    }
+    await client.storage.put(
+      markerUri,
+      new TextEncoder().encode(
+        JSON.stringify({ dispatchId, firedAt: new Date().toISOString(), traceId: trace.traceId }),
+      ),
+    );
+  }
 
   // 1. Resolve refs.
   const resolvedSubagent = await resolveSubagent(client, work.subagent);
@@ -282,6 +306,10 @@ export async function fireWork(
     // mintCallbackHmac ran above iff work.callback was set, so callbackTokenRef
     // is non-undefined here by construction.
     envVars.PANGOLIN_CALLBACK_TOKEN_REF = callbackTokenRef!;
+    if (work.callback.bearerRef) {
+      // Pure pass-through of the caller-supplied ref — never resolved here.
+      envVars.PANGOLIN_CALLBACK_BEARER_REF = work.callback.bearerRef;
+    }
   }
   // Emit derived worker-side timeout bounds (R4). With the 7200s floor always
   // defined, these are always emitted. The adapter's envSecondsOr defaults
@@ -451,6 +479,7 @@ export async function fireWork(
       inputRefs: work.inputRefs ?? {},
       ...(resolvedPipelineRef !== undefined ? { pipelineRef: resolvedPipelineRef.uri } : {}),
     },
+    callbackTokenRef,
     awaitExit,
     reconcile,
     cleanup,
@@ -480,6 +509,21 @@ export async function dispatchWork(
 /** Type guard for the `SecretRef | InlineSecret` discriminated union. */
 function isSecretRef(v: SecretRef | InlineSecret): v is SecretRef {
   return 'ref' in v;
+}
+
+/**
+ * Reliable existence check for a URI-addressed overwrite `put()`: `StorageProvider`
+ * has no dedicated `exists()`, so this probes via `get()` and treats any throw as
+ * "not present" (mirrors every other not-found convention in this file, e.g.
+ * `readSubagentCapabilities`).
+ */
+async function markerPresent(storage: StorageProvider, uri: string): Promise<boolean> {
+  try {
+    await storage.get(uri);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Narrowing guard: storage implementations may optionally expose a `rootUri`
