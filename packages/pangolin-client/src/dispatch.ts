@@ -306,6 +306,10 @@ export async function fireWork(
     // mintCallbackHmac ran above iff work.callback was set, so callbackTokenRef
     // is non-undefined here by construction.
     envVars.PANGOLIN_CALLBACK_TOKEN_REF = callbackTokenRef!;
+    if (work.callback.bearerRef) {
+      // Pure pass-through of the caller-supplied ref — never resolved here.
+      envVars.PANGOLIN_CALLBACK_BEARER_REF = work.callback.bearerRef;
+    }
   }
   // Emit derived worker-side timeout bounds (R4). With the 7200s floor always
   // defined, these are always emitted. The adapter's envSecondsOr defaults
