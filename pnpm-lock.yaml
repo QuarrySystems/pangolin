@@ -598,6 +598,12 @@ importers:
         specifier: ^7.6.0
         version: 7.6.13
 
+  packages/pangolin-product:
+    dependencies:
+      '@quarry-systems/pangolin-core':
+        specifier: workspace:*
+        version: link:../pangolin-core
+
   packages/pangolin-providers-aws-creds:
     dependencies:
       '@aws-sdk/credential-providers':

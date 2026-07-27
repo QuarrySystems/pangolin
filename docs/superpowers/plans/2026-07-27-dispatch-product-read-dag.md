@@ -5,11 +5,11 @@ created: 2026-07-27
 
 ```mermaid
 flowchart TD
-    task-core-types["task-core-types: core product types<br/>files: packages/pangolin-core/src/product.ts +2 more"]
-    task-worker-reexport["task-worker-reexport: worker re-export<br/>files: packages/pangolin-worker/src/output-sentinel.ts +1 more"]
-    task-pkg-scaffold["task-pkg-scaffold: scaffold pangolin-product<br/>files: packages/pangolin-product/package.json +4 more"]
-    task-sentinel-parse["task-sentinel-parse: parseOutputSentinel<br/>files: packages/pangolin-product/src/sentinel-parse.ts +1 more"]
-    task-artifact-ref["task-artifact-ref: assertArtifactRef<br/>files: packages/pangolin-product/src/artifact-ref.ts +1 more"]
+    task-core-types["task-core-types: core product types<br/>files: packages/pangolin-core/src/product.ts +2 more"]:::done
+    task-worker-reexport["task-worker-reexport: worker re-export<br/>files: packages/pangolin-worker/src/output-sentinel.ts +1 more"]:::done
+    task-pkg-scaffold["task-pkg-scaffold: scaffold pangolin-product<br/>files: packages/pangolin-product/package.json +4 more"]:::done
+    task-sentinel-parse["task-sentinel-parse: parseOutputSentinel<br/>files: packages/pangolin-product/src/sentinel-parse.ts +1 more"]:::done
+    task-artifact-ref["task-artifact-ref: assertArtifactRef<br/>files: packages/pangolin-product/src/artifact-ref.ts +1 more"]:::done
     task-sentinel-read["task-sentinel-read: readOutputSentinel<br/>files: packages/pangolin-product/src/sentinel-read.ts +1 more"]
     task-artifact-fetch["task-artifact-fetch: fetchDispatchArtifact<br/>files: packages/pangolin-product/src/artifact-fetch.ts +1 more"]
     task-pkg-barrel["task-pkg-barrel: package barrel<br/>files: packages/pangolin-product/src/index.ts +1 more"]
@@ -109,7 +109,8 @@ files:
   - packages/pangolin-core/src/product.ts
   - packages/pangolin-core/src/index.ts
   - packages/pangolin-core/test/product.test.ts
-status: pending
+status: done
+commit: 43da668
 ```
 
 Move the sentinel wire shape into core as types-only. These are contract — the
@@ -192,7 +193,8 @@ depends_on: [task-core-types]
 files:
   - packages/pangolin-worker/src/output-sentinel.ts
   - packages/pangolin-worker/test/output-sentinel.test.ts
-status: pending
+status: done
+commit: f05166a
 quality_reviewer_hint: opus
 ```
 
@@ -269,7 +271,8 @@ files:
   - packages/pangolin-product/README.md
   - packages/pangolin-product/LICENSE
   - packages/pangolin-product/test/package-shape.test.ts
-status: pending
+status: done
+commit: f5342ad
 is_wiring_task: true
 ```
 
@@ -334,7 +337,8 @@ depends_on: [task-core-types, task-pkg-scaffold]
 files:
   - packages/pangolin-product/src/sentinel-parse.ts
   - packages/pangolin-product/test/sentinel-parse.test.ts
-status: pending
+status: done
+commit: 82df84e
 ```
 
 Pure validation and defensive reconstruction of sentinel bytes, lifted from the
@@ -445,7 +449,8 @@ depends_on: [task-pkg-scaffold]
 files:
   - packages/pangolin-product/src/artifact-ref.ts
   - packages/pangolin-product/test/artifact-ref.test.ts
-status: pending
+status: done
+commit: 8a1c2a9
 quality_reviewer_hint: opus
 ```
 
