@@ -20,6 +20,9 @@ export type SentinelMalformedReason = 'not-json' | 'not-an-object' | 'bad-schema
 
 export type SentinelReadResult =
   | { status: 'ok'; sentinel: OutputSentinel }
+  // 'absent' is never constructed by parseOutputSentinel below — a sibling
+  // I/O module (the one that reads the sentinel file off disk) synthesizes
+  // it when the file doesn't exist.
   | { status: 'absent' }
   | { status: 'malformed'; reason: SentinelMalformedReason };
 
@@ -68,10 +71,10 @@ function buildUsage(raw: unknown): RuntimeUsage | undefined {
   return usage;
 }
 
-function buildBlocks(raw: unknown): BlockOutcome[] | undefined {
+function buildBlocks(raw: unknown, max: number): BlockOutcome[] | undefined {
   if (!Array.isArray(raw)) return undefined;
   const blocks: BlockOutcome[] = [];
-  for (const b of raw) {
+  for (const b of raw.slice(0, max)) {
     if (!b || typeof b !== 'object') continue;
     const bo = b as Record<string, unknown>;
     if (typeof bo.kind !== 'string') continue;
@@ -130,7 +133,7 @@ export function parseOutputSentinel(bytes: Uint8Array): SentinelReadResult {
   const usage = buildUsage(src.usage);
   if (usage) sentinel.usage = usage;
 
-  const blocks = buildBlocks(src.blocks);
+  const blocks = buildBlocks(src.blocks, MAX_OUTPUT_ENTRIES);
   if (blocks) sentinel.blocks = blocks;
 
   return { status: 'ok', sentinel };
