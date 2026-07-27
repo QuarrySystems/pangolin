@@ -71,11 +71,16 @@ async function initGitRepo(dir: string): Promise<void> {
   const run = (args: string[]) =>
     new Promise<void>((resolve, reject) => {
       const child = spawn('git', [
-        '-C', dir,
-        '-c', 'safe.directory=*',
-        '-c', 'user.email=test@local',
-        '-c', 'user.name=test',
-        '-c', 'commit.gpgsign=false',
+        '-C',
+        dir,
+        '-c',
+        'safe.directory=*',
+        '-c',
+        'user.email=test@local',
+        '-c',
+        'user.name=test',
+        '-c',
+        'commit.gpgsign=false',
         ...args,
       ]);
       child.on('exit', (code) =>
@@ -180,9 +185,7 @@ describe('escapeWorkspace', () => {
 
     // Read the on-disk sentinel
     const { readFile } = await import('node:fs/promises');
-    const onDisk = JSON.parse(
-      await readFile(join(dir, '.pangolin', 'output.json'), 'utf-8'),
-    );
+    const onDisk = JSON.parse(await readFile(join(dir, '.pangolin', 'output.json'), 'utf-8'));
     expect(onDisk.schemaVersion).toBe(1);
   });
 
@@ -201,9 +204,7 @@ describe('escapeWorkspace', () => {
 
     expect(sentinel.summary).toBe('task finished successfully');
     const dispatchUri = buildDispatchRecordUri('ns', 'd4', 'output.json');
-    const parsed = JSON.parse(
-      new TextDecoder().decode(await storage.get(dispatchUri)),
-    );
+    const parsed = JSON.parse(new TextDecoder().decode(await storage.get(dispatchUri)));
     expect(parsed.summary).toBe('task finished successfully');
   });
 
@@ -226,9 +227,7 @@ describe('escapeWorkspace', () => {
       durationMs: 42,
     });
     const dispatchUri = buildDispatchRecordUri('ns', 'd6', 'output.json');
-    const parsed = JSON.parse(
-      new TextDecoder().decode(await storage.get(dispatchUri)),
-    );
+    const parsed = JSON.parse(new TextDecoder().decode(await storage.get(dispatchUri)));
     expect(parsed.verify.passed).toBe(true);
     expect(parsed.verify.report).toBe('tsc --noEmit ok');
   });
@@ -247,9 +246,7 @@ describe('escapeWorkspace', () => {
 
     expect(sentinel.verify).toBeUndefined();
     const dispatchUri = buildDispatchRecordUri('ns', 'd7', 'output.json');
-    const parsed = JSON.parse(
-      new TextDecoder().decode(await storage.get(dispatchUri)),
-    );
+    const parsed = JSON.parse(new TextDecoder().decode(await storage.get(dispatchUri)));
     expect('verify' in parsed).toBe(false);
   });
 
@@ -330,22 +327,45 @@ describe('captureOutputs + writeSentinel outputs field', () => {
     await mkdir(join(dir, 'outputs', 'data'), { recursive: true });
     await writeFile(join(dir, 'outputs', 'report.txt'), 'hello');
     await writeFile(join(dir, 'outputs', 'data', 'x.bin'), Buffer.from([1, 2, 3]));
-    const outputs = await captureOutputs({ workspaceDir: dir, storage, namespace: 'ns', dispatchId: 'd1' });
+    const outputs = await captureOutputs({
+      workspaceDir: dir,
+      storage,
+      namespace: 'ns',
+      dispatchId: 'd1',
+    });
     expect(outputs!.map((o) => o.path)).toEqual(['data/x.bin', 'report.txt']); // sorted, posix-relative
     for (const o of outputs!) await expect(storage.get(o.ref)).resolves.toBeInstanceOf(Uint8Array);
-    const sentinel = await writeSentinel({ workspaceDir: dir, storage, namespace: 'ns', dispatchId: 'd1', outputs });
+    const sentinel = await writeSentinel({
+      workspaceDir: dir,
+      storage,
+      namespace: 'ns',
+      dispatchId: 'd1',
+      outputs,
+    });
     expect(sentinel.outputs).toEqual(outputs);
   });
 
   it('returns undefined (and an outputs-free sentinel) when outputs/ is absent', async () => {
-    expect(await captureOutputs({ workspaceDir: dir, storage, namespace: 'ns', dispatchId: 'd2' })).toBeUndefined();
-    const sentinel = await writeSentinel({ workspaceDir: dir, storage, namespace: 'ns', dispatchId: 'd2' });
+    expect(
+      await captureOutputs({ workspaceDir: dir, storage, namespace: 'ns', dispatchId: 'd2' }),
+    ).toBeUndefined();
+    const sentinel = await writeSentinel({
+      workspaceDir: dir,
+      storage,
+      namespace: 'ns',
+      dispatchId: 'd2',
+    });
     expect('outputs' in sentinel).toBe(false); // hash-stable additive field, like verify
   });
 
   it('returns undefined when outputs/ is empty', async () => {
     await mkdir(join(dir, 'outputs'), { recursive: true });
-    const outputs = await captureOutputs({ workspaceDir: dir, storage, namespace: 'ns', dispatchId: 'd3' });
+    const outputs = await captureOutputs({
+      workspaceDir: dir,
+      storage,
+      namespace: 'ns',
+      dispatchId: 'd3',
+    });
     expect(outputs).toBeUndefined();
   });
 
@@ -359,7 +379,12 @@ describe('captureOutputs + writeSentinel outputs field', () => {
     const fh = await open(join(dir, 'outputs', 'huge.bin'), 'w');
     await fh.truncate(MAX_OUTPUT_FILE_BYTES + 1);
     await fh.close();
-    const outputs = await captureOutputs({ workspaceDir: dir, storage, namespace: 'ns', dispatchId: 'd4' });
+    const outputs = await captureOutputs({
+      workspaceDir: dir,
+      storage,
+      namespace: 'ns',
+      dispatchId: 'd4',
+    });
     expect(outputs).toBeDefined();
     expect(outputs!.map((o) => o.path)).toEqual(['small.txt']);
     expect(outputs!.every((o) => o.path !== 'huge.bin')).toBe(true);
@@ -371,7 +396,12 @@ describe('captureOutputs + writeSentinel outputs field', () => {
     for (let i = 0; i < MAX_OUTPUT_ENTRIES + 5; i++) {
       await writeFile(join(dir, 'outputs', `file-${String(i).padStart(4, '0')}.txt`), `data${i}`);
     }
-    const outputs = await captureOutputs({ workspaceDir: dir, storage, namespace: 'ns', dispatchId: 'd5' });
+    const outputs = await captureOutputs({
+      workspaceDir: dir,
+      storage,
+      namespace: 'ns',
+      dispatchId: 'd5',
+    });
     expect(outputs).toBeDefined();
     expect(outputs!.length).toBe(MAX_OUTPUT_ENTRIES);
   });
@@ -380,7 +410,12 @@ describe('captureOutputs + writeSentinel outputs field', () => {
     await mkdir(join(dir, 'outputs'), { recursive: true });
     const content = Buffer.from([0xde, 0xad, 0xbe, 0xef, 0x00, 0x01, 0x02]);
     await writeFile(join(dir, 'outputs', 'binary.bin'), content);
-    const outputs = await captureOutputs({ workspaceDir: dir, storage, namespace: 'ns', dispatchId: 'd6' });
+    const outputs = await captureOutputs({
+      workspaceDir: dir,
+      storage,
+      namespace: 'ns',
+      dispatchId: 'd6',
+    });
     expect(outputs).toHaveLength(1);
     const stored = await storage.get(outputs![0].ref);
     expect(Buffer.from(stored)).toEqual(content);
@@ -533,6 +568,38 @@ describe('blocks field on OutputSentinel / writeSentinel', () => {
 });
 
 // ---------------------------------------------------------------------------
+// byte-identical serialization after the core type move
+// ---------------------------------------------------------------------------
+
+describe('serialization after the type move to core', () => {
+  let dir: string;
+  let storage: MemoryStorage;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'reexport-test-'));
+    storage = new MemoryStorage();
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('serializes byte-identically after the type move', async () => {
+    const sentinel = await writeSentinel({
+      workspaceDir: dir,
+      storage,
+      namespace: 'ns',
+      dispatchId: 'd1',
+      patchRef: 'pangolin://ns/artifact/d1/sha256:abc',
+    });
+    const bytes = new TextEncoder().encode(JSON.stringify(sentinel));
+    expect(new TextDecoder().decode(bytes)).toBe(
+      '{"schemaVersion":1,"patchRef":"pangolin://ns/artifact/d1/sha256:abc"}',
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
 // usage field (wave: model-cost-evidence)
 // ---------------------------------------------------------------------------
 
@@ -551,7 +618,9 @@ describe('usage field on OutputSentinel / writeSentinel', () => {
 
   it('includes usage after outputs and before blocks in key order, and omits it entirely when absent', async () => {
     const usage: RuntimeUsage = { models: ['claude-opus-4-7'], costUsd: 0.05 };
-    const outputs = [{ path: 'report.txt', ref: 'pangolin://ns/artifact/u1/sha256:' + 'b'.repeat(64) }];
+    const outputs = [
+      { path: 'report.txt', ref: 'pangolin://ns/artifact/u1/sha256:' + 'b'.repeat(64) },
+    ];
     const blocks: BlockOutcome[] = [{ kind: 'script', ordinal: 0, status: 'ok', durationMs: 3 }];
 
     // With usage, outputs, and blocks: verify key ordering.
@@ -594,7 +663,12 @@ describe('usage field on OutputSentinel / writeSentinel', () => {
   });
 
   it('usage round-trips stably (stored bytes match in-memory shape)', async () => {
-    const usage: RuntimeUsage = { models: ['claude-haiku-3-5'], costUsd: 0.001, turns: 3, durationMs: 1200 };
+    const usage: RuntimeUsage = {
+      models: ['claude-haiku-3-5'],
+      costUsd: 0.001,
+      turns: 3,
+      durationMs: 1200,
+    };
     const sentinel = await writeSentinel({
       workspaceDir: dir,
       storage,
