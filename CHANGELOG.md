@@ -9,6 +9,22 @@ workspace. See [RELEASING.md](./RELEASING.md) for how a release is cut.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-07-24 — Security: patch-capture credential env-scoping
+
+### Fixed
+
+- **Worker credential-exfiltration path in `patch-capture` closed (verified
+  exploitable).** The worker's git diff-capture helper spawned `git` with no
+  `env` option, inheriting the worker's full `process.env` (`AWS_*`,
+  `PANGOLIN_CALLBACK_TOKEN_REF`, …). A workspace-controlled `.git/config` can name
+  arbitrary commands git runs as hooks/helpers (e.g. `core.fsmonitor`), so an
+  untrusted repo could exfiltrate those credentials during `git add -A`. The
+  git subprocess env is now a fixed six-key allow-list
+  (`PATH`/`HOME`/`GIT_CONFIG_GLOBAL`/`GIT_CONFIG_NOSYSTEM`/`GIT_TERMINAL_PROMPT`/`LC_ALL`)
+  with no credential of any kind. Adds a unit test, a nested-repo characterisation
+  test, an end-to-end escape test proving an `fsmonitor`-hook leak is blocked, and
+  an in-image verification script. No API change.
+
 ## [0.3.0] - 2026-07-24 — Renamed Agora → Pangolin Scale
 
 ### Changed
@@ -198,6 +214,7 @@ watch | cancel | audit` — a long-running driver runs a DAG of agent tasks
 - **Effect-tier policy** is computed but not yet enforced.
 - **Pre-1.0 (`0.x`):** interfaces may change between minor versions.
 
-[Unreleased]: https://github.com/QuarrySystems/pangolin/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/QuarrySystems/pangolin/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/QuarrySystems/pangolin/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/QuarrySystems/pangolin/compare/v0.2.0...v0.3.0
 [0.1.0]: https://github.com/QuarrySystems/pangolin/releases/tag/v0.1.0
