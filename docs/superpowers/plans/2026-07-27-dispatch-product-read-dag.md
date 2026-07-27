@@ -10,8 +10,8 @@ flowchart TD
     task-pkg-scaffold["task-pkg-scaffold: scaffold pangolin-product<br/>files: packages/pangolin-product/package.json +4 more"]:::done
     task-sentinel-parse["task-sentinel-parse: parseOutputSentinel<br/>files: packages/pangolin-product/src/sentinel-parse.ts +1 more"]:::done
     task-artifact-ref["task-artifact-ref: assertArtifactRef<br/>files: packages/pangolin-product/src/artifact-ref.ts +1 more"]:::done
-    task-sentinel-read["task-sentinel-read: readOutputSentinel<br/>files: packages/pangolin-product/src/sentinel-read.ts +1 more"]
-    task-artifact-fetch["task-artifact-fetch: fetchDispatchArtifact<br/>files: packages/pangolin-product/src/artifact-fetch.ts +1 more"]
+    task-sentinel-read["task-sentinel-read: readOutputSentinel<br/>files: packages/pangolin-product/src/sentinel-read.ts +1 more"]:::done
+    task-artifact-fetch["task-artifact-fetch: fetchDispatchArtifact<br/>files: packages/pangolin-product/src/artifact-fetch.ts +1 more"]:::done
     task-pkg-barrel["task-pkg-barrel: package barrel<br/>files: packages/pangolin-product/src/index.ts +1 more"]
     task-migrate-orch["task-migrate-orch: orchestrator migration<br/>files: packages/pangolin-orchestrator/src/executors/dispatch.ts +2 more"]
     task-migrate-cli["task-migrate-cli: CLI migration<br/>files: packages/pangolin-cli/src/cmd-orch.ts +2 more"]
@@ -564,7 +564,8 @@ depends_on: [task-sentinel-parse]
 files:
   - packages/pangolin-product/src/sentinel-read.ts
   - packages/pangolin-product/test/sentinel-read.test.ts
-status: pending
+status: done
+commit: 5c34370
 ```
 
 The I/O wrapper: build the dispatch-record URI, fetch, delegate to the pure
@@ -643,7 +644,8 @@ depends_on: [task-artifact-ref]
 files:
   - packages/pangolin-product/src/artifact-fetch.ts
   - packages/pangolin-product/test/artifact-fetch.test.ts
-status: pending
+status: done
+commit: 9fc1fe2
 quality_reviewer_hint: opus
 ```
 
