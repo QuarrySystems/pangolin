@@ -89,6 +89,15 @@ Release is 0.4.0 across the train, with `pangolin-product` published for the
 first time at that version. `pnpm-workspace.yaml` globs `packages/*`, so no
 workspace file needs editing.
 
+**Merge order.** Branch `docs/adr-0019-target-isolation-boundary` is open off
+`main` and touches two files this plan also touches:
+`docs-site/.../decisions/index.md` (it appends the 0019 bullet; `task-adr`
+appends 0020) and `docs-site/.../reference/pangolin-client-api.md` (it documents
+target semantics; `task-docs` adds the `describe` constraint). Both are
+append-adjacent edits, so land ADR-0019 first and rebase this branch on it —
+otherwise the PR carries two avoidable conflicts. Neither file conflict affects
+execution; it only affects the merge.
+
 ## Tasks
 
 ## Task: core product types
@@ -1030,8 +1039,9 @@ deciders: pangolin-consumer-roadmap-review
 ```
 
 ```markdown
-<!-- index.md — add alongside the existing 0019 row -->
-| [ADR-0020](/pangolin/explanation/decisions/0020-dispatch-product-read/) | The dispatch product read is a public, storage-keyed contract | accepted |
+<!-- index.md — the index is a BULLET LIST, not a table. Append after the last
+     entry, matching the existing one-line-per-ADR format exactly. -->
+- [0020](/pangolin/explanation/decisions/0020-dispatch-product-read/) — Reading a dispatch's product is a public contract keyed on storage + `dispatchId`, with no fire-side handle. The sentinel is an unverifiable overwrite-put record; the artifacts it names are content-addressed and self-verifying.
 ```
 
 ## Acceptance criteria
@@ -1048,8 +1058,10 @@ deciders: pangolin-consumer-roadmap-review
   reading an unhashed sentinel cannot guarantee.
 - Records lockstep pairing as the supported model and names backward-read (new
   reader, old bytes) as the surviving obligation.
-- `index.md` links the new ADR and the file count in that index matches the
-  number of `NNNN-*.md` files in the directory.
+- `index.md` links the new ADR as a **bullet-list entry** matching the format of
+  the surrounding lines — the index is a list, not a table.
+- The number of ADR bullets in `index.md` matches the number of `NNNN-*.md`
+  files in the directory.
 
 Test file: `docs-site/test/decisions-index.test.ts`.
 
