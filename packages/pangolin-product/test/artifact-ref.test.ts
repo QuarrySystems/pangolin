@@ -6,6 +6,9 @@ function expectRejection(
   expected: { namespace: string; dispatchId: string },
   reason: string,
 ) {
+  // Capture and inspect — `toThrow` matches message/class, not properties, so
+  // asserting `reason` (and the other fields below) requires the caught
+  // instance.
   let caught: unknown;
   try {
     assertArtifactRef(ref, expected);
@@ -44,19 +47,19 @@ it('rejects a too-short pangolin URI with reason malformed-uri', () => {
 });
 
 it('rejects a ref for the same dispatchId under a different namespace', () => {
-  // Capture and inspect — `toThrow` matches message/class, not properties, so
-  // asserting `reason` requires the caught instance.
-  let caught: unknown;
-  try {
-    assertArtifactRef('pangolin://other-ns/artifact/d1/sha256:abc', {
-      namespace: 'ns',
-      dispatchId: 'd1',
-    });
-  } catch (e) {
-    caught = e;
-  }
-  expect(caught).toBeInstanceOf(ArtifactRefRejectedError);
-  expect((caught as ArtifactRefRejectedError).reason).toBe('wrong-namespace');
+  expectRejection(
+    'pangolin://other-ns/artifact/d1/sha256:abc',
+    { namespace: 'ns', dispatchId: 'd1' },
+    'wrong-namespace',
+  );
+});
+
+it('rejects a ref whose namespace differs only in case from the expected namespace', () => {
+  expectRejection(
+    'pangolin://NS/artifact/d1/sha256:abc',
+    { namespace: 'ns', dispatchId: 'd1' },
+    'wrong-namespace',
+  );
 });
 
 it('rejects a ref for a different dispatchId under the matching namespace', () => {
@@ -69,4 +72,36 @@ it('rejects a ref for a different dispatchId under the matching namespace', () =
 
 it('rejects an unpinned ref with no content hash', () => {
   expectRejection('pangolin://ns/artifact/d1', { namespace: 'ns', dispatchId: 'd1' }, 'unpinned');
+});
+
+it('rejects an unpinned ref with a trailing slash instead of a content hash, never returning an empty hash', () => {
+  // Regresses a guard that must not depend on upstream `assertSegment`
+  // rejecting the empty trailing segment before this package ever sees it:
+  // whatever reason it fails with today, it must throw — never resolve to
+  // `{ contentHash: '' }`.
+  let caught: unknown;
+  let result: { contentHash: string } | undefined;
+  try {
+    result = assertArtifactRef('pangolin://ns/artifact/d1/', { namespace: 'ns', dispatchId: 'd1' });
+  } catch (e) {
+    caught = e;
+  }
+  expect(caught).toBeInstanceOf(ArtifactRefRejectedError);
+  expect(result).toBeUndefined();
+});
+
+it('rejects an over-long ref with an extra segment after the content hash', () => {
+  expectRejection(
+    'pangolin://ns/artifact/d1/hash/extra',
+    { namespace: 'ns', dispatchId: 'd1' },
+    'malformed-uri',
+  );
+});
+
+it('rejects a dispatch-record root URI with no suffix with reason not-a-blob', () => {
+  expectRejection(
+    'pangolin://ns/dispatches/d1',
+    { namespace: 'ns', dispatchId: 'd1' },
+    'not-a-blob',
+  );
 });
