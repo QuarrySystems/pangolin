@@ -245,6 +245,12 @@ it('clamps a 300-entry blocks array to exactly 256 entries', () => {
   expect(res.sentinel.blocks).toHaveLength(256);
 });
 
+// Note: JSON.parse defines "__proto__" as an own data property and never
+// triggers the Object.prototype accessor, so prototype pollution is
+// structurally unreachable via JSON input regardless of whether
+// parseOutputSentinel reconstructs or forwards raw objects. This test
+// guards the input path (nothing here pollutes the prototype); it does not
+// prove reconstruction correctness — see the hostileExtra test below for that.
 it('drops __proto__, constructor, and prototype keys without polluting Object.prototype', () => {
   const hostile = JSON.parse(
     '{"schemaVersion":1,"__proto__":{"polluted":true},"outputs":[{"path":"a.txt","ref":"pangolin://ns/artifact/a","__proto__":{"polluted":true}}],"blocks":[{"kind":"edit","ordinal":0,"status":"ok","durationMs":1,"__proto__":{"polluted":true},"constructor":{"prototype":{"polluted":true}}}]}',
@@ -265,48 +271,53 @@ it('clamps outputs to max entries before filtering, so 256 invalid entries follo
   expect(res).toEqual({ status: 'ok', sentinel: { schemaVersion: 1 } });
 });
 
-it('returns nested arrays and objects that are independent of a separate JSON.parse of the same bytes', () => {
-  const bytes = enc({
-    schemaVersion: 1,
-    outputs: [{ path: 'a.txt', ref: 'pangolin://ns/artifact/a' }],
-    blocks: [
-      {
-        kind: 'edit',
-        ordinal: 0,
-        status: 'ok',
-        durationMs: 10,
-        outputs: [{ path: 'b.txt', ref: 'pangolin://ns/artifact/b' }],
-      },
-    ],
-    usage: { models: ['claude-opus'] },
+it('drops unknown extra fields when reconstructing outputs, blocks, nested block outputs, and usage — catching a raw-object-forwarding bug', () => {
+  // Unlike comparing against a second, independent JSON.parse (which always
+  // produces a fresh object graph regardless of whether parseOutputSentinel
+  // aliases its own internal parse), this test is falsifiable: if any
+  // build* helper ever pushes the raw parsed entry instead of reconstructing
+  // `{ known: fields }` by hand, `hostileExtra` leaks through and toEqual
+  // fails. Covers every nesting depth that has an object-reconstruction
+  // step: outputs[], blocks[], blocks[].outputs[], and the usage block.
+  const res = parseOutputSentinel(
+    enc({
+      schemaVersion: 1,
+      outputs: [
+        { path: 'a.txt', ref: 'pangolin://ns/artifact/d1/sha256:abc', hostileExtra: 'leak' },
+      ],
+      blocks: [
+        {
+          kind: 'edit',
+          ordinal: 0,
+          status: 'ok',
+          durationMs: 10,
+          hostileExtra: 'leak',
+          outputs: [
+            { path: 'b.txt', ref: 'pangolin://ns/artifact/d1/sha256:def', hostileExtra: 'leak' },
+          ],
+        },
+      ],
+      usage: { models: ['claude-opus'], hostileExtra: 'leak' },
+    }),
+  );
+
+  expect(res).toEqual({
+    status: 'ok',
+    sentinel: {
+      schemaVersion: 1,
+      outputs: [{ path: 'a.txt', ref: 'pangolin://ns/artifact/d1/sha256:abc' }],
+      blocks: [
+        {
+          kind: 'edit',
+          ordinal: 0,
+          status: 'ok',
+          durationMs: 10,
+          outputs: [{ path: 'b.txt', ref: 'pangolin://ns/artifact/d1/sha256:def' }],
+        },
+      ],
+      usage: { models: ['claude-opus'] },
+    },
   });
-  const res = parseOutputSentinel(bytes);
-  expect(res.status).toBe('ok');
-  if (res.status !== 'ok') throw new Error('unreachable');
-
-  const independentlyParsed = JSON.parse(new TextDecoder().decode(bytes)) as {
-    outputs: unknown[];
-    blocks: Array<{ outputs: unknown[] }>;
-    usage: { models: unknown[] };
-  };
-
-  expect(res.sentinel.outputs).not.toBe(independentlyParsed.outputs);
-  expect(res.sentinel.outputs?.[0]).not.toBe(independentlyParsed.outputs[0]);
-  expect(res.sentinel.blocks).not.toBe(independentlyParsed.blocks);
-  expect(res.sentinel.blocks?.[0]).not.toBe(independentlyParsed.blocks[0]);
-  expect(res.sentinel.blocks?.[0]?.outputs).not.toBe(independentlyParsed.blocks[0].outputs);
-  expect(res.sentinel.blocks?.[0]?.outputs?.[0]).not.toBe(independentlyParsed.blocks[0].outputs[0]);
-  expect(res.sentinel.usage).not.toBe(independentlyParsed.usage);
-  expect(res.sentinel.usage?.models).not.toBe(independentlyParsed.usage.models);
-
-  // Mutating the returned structures must not affect a fresh parse of the same bytes.
-  (res.sentinel.outputs as Array<{ path: string }>)[0].path = 'mutated.txt';
-  (res.sentinel.blocks as Array<{ kind: string }>)[0].kind = 'mutated';
-  const rechecked = parseOutputSentinel(bytes);
-  expect(rechecked.status).toBe('ok');
-  if (rechecked.status !== 'ok') throw new Error('unreachable');
-  expect(rechecked.sentinel.outputs?.[0].path).toBe('a.txt');
-  expect(rechecked.sentinel.blocks?.[0].kind).toBe('edit');
 });
 
 it('malformed results carry only the reason enum, with no detail field', () => {
