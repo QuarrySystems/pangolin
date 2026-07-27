@@ -1,5 +1,6 @@
 import { it, expect } from 'vitest';
 import { readOutputSentinel } from '../src/sentinel-read.js';
+import type { StorageProvider } from '@quarry-systems/pangolin-core';
 
 it('propagates a non-not-found storage error instead of reporting absent', async () => {
   const storage = {
@@ -82,13 +83,13 @@ it('accepts a structural deps object shaped like a PangolinClient without adapta
   class FakeClient {
     readonly storage = {
       get: async () => new TextEncoder().encode(JSON.stringify({ schemaVersion: 1 })),
-    };
+    } as unknown as StorageProvider;
     readonly namespace = 'ns';
     someOtherMethod() {
       return 'irrelevant';
     }
   }
   const client = new FakeClient();
-  const res = await readOutputSentinel(client as never, 'd1');
+  const res = await readOutputSentinel(client, 'd1');
   expect(res).toEqual({ status: 'ok', sentinel: { schemaVersion: 1 } });
 });

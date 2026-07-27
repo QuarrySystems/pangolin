@@ -27,6 +27,10 @@ export async function readOutputSentinel(
 // into pangolin-core would put provider quirk-detection in the contract sink.
 // The real defect is that StorageProvider has no typed not-found signal, so
 // every caller sniffs. Tracked as follow-up; do not "fix" by adding a core dep.
+// Blast radius: /not found/i is a substring match on the error message, so an
+// unrelated failure (DNS, misconfiguration) whose text happens to contain that
+// phrase is silently reclassified as `absent`. If a caller hits a surprising
+// `absent`, check the original error message here first.
 function isNotFound(err: unknown): boolean {
   if (err === null || typeof err !== 'object') return false;
   if ((err as { code?: unknown }).code === 'ENOENT') return true;
