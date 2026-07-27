@@ -60,6 +60,23 @@ Shape: the wire types move to `pangolin-core`; all I/O lands in a new
 ("Owns the RFC 3161 / ASN.1 (pkijs) dependency so pangolin-core stays
 dependency-light"). Core takes no `StorageProvider` today and that stays true.
 
+Conventions every task must follow (verified against the repo, not assumed):
+
+- **Vitest is not configured with globals.** Every test file imports explicitly:
+  `import { it, expect } from 'vitest';` (see
+  `packages/pangolin-core/test/audit-canon-authorization.test.ts:1`). The test
+  blocks below include that import; do not drop it.
+- **Error classes assign `this.name` in the constructor**, matching
+  `packages/pangolin-core/src/errors.ts:75` — that file's header documents
+  `err.name === '...'` structural matching. The repo targets ES2022, so a class
+  field would be define-semantics; use constructor assignment.
+- **`toThrow` matches message or class, never properties.** Asserting an error's
+  `reason` requires catching the instance (`packages/pangolin-core/test/dispatch-uri.test.ts`
+  uses bare `.toThrow()` throughout).
+- **Tests import specific modules** (`../src/audit.js`), not the package barrel.
+  The one deliberate exception is `task-core-types`, whose assertion *is* that
+  the barrel re-export lands.
+
 Two invariants every task must respect:
 
 - **The worker's written bytes must not change.** The sentinel's additive-only
@@ -129,6 +146,10 @@ export const MAX_OUTPUT_ENTRIES = 256;
 
 ```typescript
 // packages/pangolin-core/test/product.test.ts
+import { it, expect } from 'vitest';
+// Imports the BARREL deliberately — the assertion is that the re-export lands.
+// Sibling core tests import specific modules (`../src/audit.js`); this one is
+// the exception on purpose.
 import { MAX_OUTPUT_ENTRIES } from '../src/index.js';
 
 it('exports MAX_OUTPUT_ENTRIES from the barrel at the worker-side value 256', () => {
@@ -193,6 +214,8 @@ export const MAX_OUTPUT_FILE_BYTES = 100 * 1024 * 1024;
 
 ```typescript
 // packages/pangolin-worker/test/output-sentinel.test.ts — add to the existing suite
+import { it, expect } from 'vitest';
+
 it('serializes byte-identically after the type move', async () => {
   const sentinel = await writeSentinel({
     workspaceDir, storage, namespace: 'ns', dispatchId: 'd1',
@@ -371,6 +394,7 @@ export function parseOutputSentinel(bytes: Uint8Array): SentinelReadResult {
 
 ```typescript
 // packages/pangolin-product/test/sentinel-parse.test.ts
+import { it, expect } from 'vitest';
 import { parseOutputSentinel } from '../src/sentinel-parse.js';
 
 const enc = (o: unknown) => new TextEncoder().encode(JSON.stringify(o));
@@ -427,13 +451,23 @@ separately exported so consumers can validate without fetching.
 // packages/pangolin-product/src/artifact-ref.ts
 import { parsePangolinUri, parseStorageUri } from '@quarry-systems/pangolin-core';
 
+export type ArtifactRefRejection =
+  | 'malformed-uri'
+  | 'not-a-blob'
+  | 'wrong-namespace'
+  | 'wrong-dispatch'
+  | 'unpinned';
+
 export class ArtifactRefRejectedError extends Error {
-  readonly name = 'ArtifactRefRejectedError';
   constructor(
-    readonly reason: 'not-a-blob' | 'wrong-namespace' | 'wrong-dispatch' | 'unpinned',
+    readonly reason: ArtifactRefRejection,
     readonly ref: string,
   ) {
     super(`artifact ref rejected (${reason}): ${ref}`);
+    // Assign in the constructor, matching pangolin-core/src/errors.ts:75 — that
+    // file's header documents `err.name === '...'` structural matching, and the
+    // repo targets ES2022 (class fields would be define-semantics own props).
+    this.name = 'ArtifactRefRejectedError';
   }
 }
 
@@ -441,13 +475,16 @@ export function assertArtifactRef(
   ref: string,
   expect: { namespace: string; dispatchId: string },
 ): { contentHash: string } {
-  // parseStorageUri FIRST: parsePangolinUri throws a bare Error on reserved
-  // 'dispatches' types, and we want a typed rejection.
+  // parseStorageUri FIRST: it RETURNS kind 'dispatch-record' for a dispatches/
+  // URI (uri.ts:152-157) whereas parsePangolinUri THROWS a bare Error on that
+  // reserved type — so this ordering buys a typed rejection.
   let kind: string;
   try {
     kind = parseStorageUri(ref).kind;
   } catch {
-    throw new ArtifactRefRejectedError('not-a-blob', ref);
+    // Not a well-formed pangolin URI at all — distinct from a well-formed
+    // non-blob, so it gets its own reason rather than being mislabelled.
+    throw new ArtifactRefRejectedError('malformed-uri', ref);
   }
   if (kind !== 'blob') throw new ArtifactRefRejectedError('not-a-blob', ref);
 
@@ -467,14 +504,20 @@ export function assertArtifactRef(
 
 ```typescript
 // packages/pangolin-product/test/artifact-ref.test.ts
+import { it, expect } from 'vitest';
 import { assertArtifactRef, ArtifactRefRejectedError } from '../src/artifact-ref.js';
 
 it('rejects a ref for the same dispatchId under a different namespace', () => {
-  expect(() =>
+  // Capture and inspect — `toThrow` matches message/class, not properties, so
+  // asserting `reason` requires the caught instance.
+  let caught: unknown;
+  try {
     assertArtifactRef('pangolin://other-ns/artifact/d1/sha256:abc', {
       namespace: 'ns', dispatchId: 'd1',
-    }),
-  ).toThrow(expect.objectContaining({ reason: 'wrong-namespace' }));
+    });
+  } catch (e) { caught = e; }
+  expect(caught).toBeInstanceOf(ArtifactRefRejectedError);
+  expect((caught as ArtifactRefRejectedError).reason).toBe('wrong-namespace');
 });
 ```
 
@@ -483,6 +526,9 @@ it('rejects a ref for the same dispatchId under a different namespace', () => {
 - Accepts `pangolin://ns/artifact/d1/sha256:abc` for `{namespace:'ns', dispatchId:'d1'}`
   and returns `{ contentHash: 'sha256:abc' }`.
 - Rejects `pangolin://ns/dispatches/d1/record.json` with reason `'not-a-blob'`.
+- Rejects a string that is not a well-formed pangolin URI (e.g. `"http://x"` or
+  `"pangolin://ns"`) with reason `'malformed-uri'` — distinct from `'not-a-blob'`,
+  so a garbage input is not mislabelled as a well-formed non-blob.
 - Rejects `pangolin://other-ns/artifact/d1/sha256:abc` with reason
   `'wrong-namespace'` — a matching dispatchId under a foreign namespace must not
   pass.
@@ -547,6 +593,7 @@ function isNotFound(err: unknown): boolean {
 
 ```typescript
 // packages/pangolin-product/test/sentinel-read.test.ts
+import { it, expect } from 'vitest';
 import { readOutputSentinel } from '../src/sentinel-read.js';
 
 it('propagates a non-not-found storage error instead of reporting absent', async () => {
@@ -620,6 +667,7 @@ export async function fetchDispatchArtifact(
 
 ```typescript
 // packages/pangolin-product/test/artifact-fetch.test.ts
+import { it, expect } from 'vitest';
 import { fetchDispatchArtifact } from '../src/artifact-fetch.js';
 
 it('never calls storage.get when the ref is rejected', async () => {
@@ -674,15 +722,16 @@ export { parseOutputSentinel } from './sentinel-parse.js';
 export type { SentinelReadResult, SentinelMalformedReason } from './sentinel-parse.js';
 export { readOutputSentinel } from './sentinel-read.js';
 export { assertArtifactRef, ArtifactRefRejectedError } from './artifact-ref.js';
+export type { ArtifactRefRejection } from './artifact-ref.js';
 export { fetchDispatchArtifact } from './artifact-fetch.js';
 ```
 
 ## Acceptance criteria
 
-- The barrel exports exactly six symbols: `parseOutputSentinel`,
+- The barrel exports exactly five values — `parseOutputSentinel`,
   `readOutputSentinel`, `assertArtifactRef`, `ArtifactRefRejectedError`,
-  `fetchDispatchArtifact`, and the `SentinelReadResult` / `SentinelMalformedReason`
-  types.
+  `fetchDispatchArtifact` — plus three types: `SentinelReadResult`,
+  `SentinelMalformedReason`, `ArtifactRefRejection`.
 - No sub-module is reachable to consumers except through this barrel.
 - `pnpm --filter @quarry-systems/pangolin-product build` emits
   `dist/index.js` and `dist/index.d.ts`.
@@ -706,6 +755,12 @@ status: pending
 Delete the 46-line private `readSentinel` and delegate. The projection to
 `ExecutionResult` stays here — it is orchestrator-specific and does not belong in
 the published package.
+
+**Naming trap to verify, not assume:** `reconcile` passes a variable called
+`dispatchHash` (`executors/dispatch.ts:177`), but `:162` returns
+`{ dispatchHash: flight.dispatchId }` — it *is* the dispatchId under a different
+name. No hash-to-id lookup is needed, and none should be added. Confirm this
+before wiring, because the published reader keys the storage URI on it.
 
 ## Implementation
 
@@ -738,6 +793,8 @@ private async readSentinel(dispatchId: string): Promise<{
 
 ```typescript
 // packages/pangolin-orchestrator/test/dispatch-sentinel-read.test.ts (new file)
+import { it, expect } from 'vitest';
+
 it('returns {} when the sentinel is absent, without throwing', async () => {
   const res = await executor['readSentinel']('missing-dispatch');
   expect(res).toEqual({});
@@ -754,6 +811,9 @@ it('returns {} when the sentinel is absent, without throwing', async () => {
   promise all yield `{}`.
 - The `outputs[] → Record<path, ref>` projection still produces a
   null-prototype object.
+- The value passed as the reader's `dispatchId` is the same value
+  `reconcile` receives — confirmed to be `flight.dispatchId` per `:162` — with no
+  new hash-to-id translation introduced.
 - `packages/pangolin-orchestrator/package.json` adds
   `"@quarry-systems/pangolin-product": "workspace:*"`.
 - The pre-existing orchestrator test suite passes **without edits to existing
@@ -795,7 +855,9 @@ try {
 ```
 
 ```typescript
-// packages/pangolin-cli/test/cmd-orch.test.ts — add
+// packages/pangolin-cli/test/cmd-orch.test.ts — add to the existing suite
+import { it, expect } from 'vitest';
+
 it('records no usage evidence when the sentinel is absent', async () => {
   const evidence = await collectEvidence({ storage: emptyStorage, items: [doneItem] });
   expect(evidence.size).toBe(0);
@@ -849,6 +911,8 @@ const outputs = res.status === 'ok' ? (res.sentinel.outputs ?? []) : [];
 
 ```typescript
 // examples/data-mapreduce/test/sentinel-read.test.ts
+import { it, expect } from 'vitest';
+
 it('reads zero outputs when the dispatch wrote no sentinel', async () => {
   const outputs = await collectOutputs(emptyStorage, 'no-such-dispatch');
   expect(outputs).toEqual([]);
@@ -902,6 +966,8 @@ const usage = res.status === 'ok' ? res.sentinel.usage : undefined;
 
 ```typescript
 // examples/dogfood-gated/test/usage-read.test.ts
+import { it, expect } from 'vitest';
+
 it('renders "(not captured)" when the sentinel carries no usage block', async () => {
   expect(renderUsage(undefined)).toBe('(not captured)');
 });
