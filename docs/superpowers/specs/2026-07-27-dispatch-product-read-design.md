@@ -118,7 +118,7 @@ construction. Neither property holds for a consumer reading an unhashed sentinel
 - One supported way to read a dispatch's product manifest, keyed on storage +
   `dispatchId`, with no fire-side handle and no client object.
 - One supported way to fetch a product artifact that cannot be called without
-  binding the ref to a dispatch.
+  binding the ref to a namespace **and** a dispatch.
 - Collapse the four in-repo sentinel readers onto the published one.
 - Leave Pangolin's security posture unchanged, and leave the worker's code path
   untouched (§6).
@@ -209,25 +209,41 @@ The reader does not attempt to distinguish them and says so in its docstring.
 ### D4 — One artifact fetch, always dispatch-bound; do **not** merge the worker's helper
 
 ```typescript
+export function assertArtifactRef(
+  ref: string,
+  expect: { namespace: string; dispatchId: string },
+): { contentHash: string };            // pure — throws ArtifactRefRejectedError
+
 export function fetchDispatchArtifact(
   storage: StorageProvider,
   ref: string,
-  opts: { dispatchId: string },
+  expect: { namespace: string; dispatchId: string },
 ): Promise<Uint8Array>;
 ```
 
-Invariants, all mandatory — there is no unguarded mode:
+Invariants, all mandatory — there is no unguarded mode. The first four are
+`assertArtifactRef`, which is pure and separately callable so a consumer can
+validate a ref without fetching, and so the matrix is unit-testable without I/O:
 
-1. `parseStorageUri(ref).kind` must be `'blob'`. A `'dispatch-record'` URI is
-   rejected. Without this, an attacker-written `patchRef` of
-   `pangolin://<ns>/dispatches/<other-id>/record.json` would read another
-   dispatch's captured stdout/stderr using the caller's credential.
-2. `parsePangolinUri(ref).contentHash` must be present. Unpinned refs are rejected.
-3. `parsePangolinUri(ref).name === opts.dispatchId`. This is the binding that
-   makes the untrusted manifest safe to follow; the worker writes the dispatchId
-   into that position (`output-sentinel.ts:111,187`).
-4. The hash is taken **from the URI only** — never accepted from the caller — and
-   compared against `computeContentHash(bytes)` over raw bytes.
+1. `parseStorageUri(ref).kind` must be `'blob'`; a `'dispatch-record'` URI is
+   rejected. **Accuracy note:** `parsePangolinUri` already refuses these —
+   `RESERVED_TYPES` contains `'dispatches'` (`uri.ts:48`) and
+   `assertTypeNotReserved` throws at `:61-65`, reached from `:89`. So this check
+   is not what makes it safe; it is what makes the refusal a *typed*
+   `ArtifactRefRejectedError('not-a-blob')` instead of a bare `Error`. Ordering
+   matters: run `parseStorageUri` first.
+2. `parsePangolinUri(ref).namespace === expect.namespace`. **Without this the
+   binding is incomplete**: a sentinel naming
+   `pangolin://other-ns/artifact/<same-dispatch-id>/<hash>` satisfies every other
+   invariant. Whether that is reachable depends on the breadth of the caller's
+   credential, which this package cannot know — so bind it here.
+3. `parsePangolinUri(ref).name === expect.dispatchId`. The worker writes the
+   dispatchId into that position (`output-sentinel.ts:111,187`).
+4. `parsePangolinUri(ref).contentHash` must be present. Unpinned refs are
+   rejected.
+5. `fetchDispatchArtifact` then takes the hash **from the URI only** — never
+   accepted from the caller — and compares it against
+   `computeContentHash(bytes)` over raw bytes.
 
 **Rejected: a dual-mode `expect: {contentHash} | {dispatchId}` fetcher that the
 worker could also use.** The `{contentHash}` branch is safe only when the hash
@@ -344,51 +360,74 @@ export const MAX_OUTPUT_ENTRIES = 256;
 `packages/pangolin-product`, `"dependencies": { "@quarry-systems/pangolin-core": "workspace:*" }`
 and nothing else.
 
+Imports `@quarry-systems/pangolin-core` — the barrel only, never a sub-file, per
+that package's own rule (`packages/pangolin-core/src/index.ts:3-5`).
+
 ```typescript
+export type SentinelMalformedReason =
+  | 'not-json'
+  | 'not-an-object'
+  | 'bad-schema-version';
+
 export type SentinelReadResult =
   | { status: 'ok'; sentinel: OutputSentinel }
   | { status: 'absent' }
-  | { status: 'malformed'; detail: string };
+  | { status: 'malformed'; reason: SentinelMalformedReason };
 
+/** Pure: validate + reconstruct. No I/O, no storage, fully unit-testable. */
+export function parseOutputSentinel(bytes: Uint8Array): SentinelReadResult;
+
+/** I/O wrapper: build the URI, get, delegate to parseOutputSentinel. */
 export function readOutputSentinel(
   deps: { storage: StorageProvider; namespace: string },
   dispatchId: string,
 ): Promise<SentinelReadResult>;
 
 export class ArtifactRefRejectedError extends Error {
-  readonly reason: 'not-a-blob' | 'unpinned' | 'wrong-dispatch';
+  readonly name = 'ArtifactRefRejectedError';
+  readonly reason: 'not-a-blob' | 'wrong-namespace' | 'wrong-dispatch' | 'unpinned';
   readonly ref: string;
 }
-
-export function fetchDispatchArtifact(
-  storage: StorageProvider,
-  ref: string,
-  opts: { dispatchId: string },
-): Promise<Uint8Array>;
 ```
+
+**`malformed` carries a fixed reason enum, not free text.** An earlier draft used
+`detail: string`; that string would be derived from worker-written bytes and
+would flow into consumer logs, making untrusted content a log-injection carrier.
+The enum is sufficient for the consumer's branch and carries no attacker-chosen
+characters.
+
+`ArtifactRefRejectedError` follows the repo's error convention — a fixed `name`
+plus the offending value as a readonly field, matching `DispatchRecordExpiredError`
+(`packages/pangolin-client/src/describe.ts:20-25`).
 
 Notes on shape:
 
 - `deps` is structural, so a `PangolinClient` satisfies it directly (it exposes
   readonly `storage` and `namespace` — `pangolin-client-api.md:44-46`). In-repo
   call sites pass `client` unchanged; a consumer passes a bare storage provider.
-- `readOutputSentinel` does not throw for missing objects. The not-found
-  detection currently private at
-  `packages/pangolin-client/src/retention.ts:90-97` is duplicated here rather
-  than moved: hoisting it to core would drag ENOENT/message sniffing — provider
-  behavior, not contract — into the contract sink, and it is eight lines.
-  `retention.ts` is left untouched.
+- `readOutputSentinel` does not throw for missing objects. It needs the
+  not-found detection currently private at
+  `packages/pangolin-client/src/retention.ts:90-97`, and this spec **duplicates
+  those eight lines rather than sharing them** — hoisting ENOENT/`/not found/i`
+  message-sniffing into core would put provider quirk-detection in the contract
+  sink. This is a knowing DRY violation with a real drift risk, and it points at
+  the actual defect: `StorageProvider.get` has no typed not-found signal, so
+  every caller sniffs. The principled fix is a `NotFoundError` in the
+  `StorageProvider` contract, which is an interface change and out of scope here
+  (§9.2). Filed as follow-up in §9.3 so the duplication is tracked, not
+  forgotten. `retention.ts` is left untouched.
 - `fetchDispatchArtifact` **throws** on integrity failure —
   `ArtifactRefRejectedError` for the three ref rejections, and the existing
   `IntegrityMismatchError` (core `errors.ts`, thrown today by
   `verifyContentHash`, `content-hash.ts:97-102`) for a hash mismatch. Throwing
   matches the established convention for integrity failures.
 
-Validation performed by `readOutputSentinel` is the orchestrator's existing
+Validation lives in `parseOutputSentinel` and is the orchestrator's existing
 defensive reconstruction (`executors/dispatch.ts:225-250`), lifted: type-guard
 each field, clamp `verify.report` to 16 KiB, bound `outputs` at
 `MAX_OUTPUT_ENTRIES`, and build a fresh object rather than forwarding the parsed
-one.
+one. Keeping it pure is deliberate — the whole hostile-input matrix in §7 is then
+testable with byte literals and no storage double.
 
 ---
 
@@ -446,6 +485,13 @@ lift. If it needs edits, the lift was wrong.
   consumers bypass the orchestrator-only authorizer already; this changes nothing
   there. The spec states it so the reader is not mistaken for a gate — the same
   trap ADR-0019 documented for `target`.
+- **Path traversal via `dispatchId` is already blocked twice**, and the reader
+  inherits both: `buildDispatchRecordUri` rejects an empty `dispatchId` or one
+  containing `/` (`uri.ts:216-221`), and `LocalStorageProvider` independently
+  rejects any segment equal to `.` or `..` or containing `..`
+  (`packages/pangolin-storage-local/src/index.ts:369`, guarding `rootDir` escape
+  per its comment at `:342`). No new defense is required; it is asserted here so
+  the property is not silently assumed.
 
 ### 6.2 What the byte leg genuinely changes
 
@@ -463,10 +509,13 @@ the status quo, in which a consumer hand-rolls a fetch with none of the four.
 | Threat | Mitigation | Where |
 |---|---|---|
 | Sentinel names another dispatch's artifact | `parsePangolinUri(ref).name === dispatchId` | D4.3 |
-| Sentinel names a dispatch-record path | reject `kind: 'dispatch-record'` | D4.1 |
-| Attacker supplies a matching hash for foreign bytes | hash taken from the URI only | D4.4 |
-| Tampered artifact bytes | re-hash over raw bytes | D4.4 |
-| Hash computed over parsed JSON instead of bytes | fetcher owns the hashing; callers never do it | D4.4 |
+| Sentinel names another **namespace's** artifact | `parsePangolinUri(ref).namespace === namespace` | D4.2 |
+| Sentinel names a dispatch-record path | reject `kind: 'dispatch-record'` (already refused by `assertTypeNotReserved`; this makes it typed) | D4.1 |
+| Attacker supplies a matching hash for foreign bytes | hash taken from the URI only | D4.5 |
+| Tampered artifact bytes | re-hash over raw bytes | D4.5 |
+| Hash computed over parsed JSON instead of bytes | fetcher owns the hashing; callers never do it | D4.5 |
+| Worker-written text reaching consumer logs via the read result | `malformed` carries a fixed reason enum, never free text | §4.2 |
+| Path traversal via `dispatchId` | URI builder + local provider both reject | §6.1 |
 | Malicious sentinel field values | defensive reconstruction + clamps | §4 |
 | Fan-out over attacker-controlled `outputs[]` | no batch helper | D5 |
 | Oversized artifact fetch | **not mitigated** | §9.1 |
@@ -475,19 +524,35 @@ the status quo, in which a consumer hand-rolls a fetch with none of the four.
 
 ## 7. Testing
 
-**Reader** — `ok`; `absent` (object missing); `malformed` (non-JSON bytes, and
-valid JSON that is not an object); oversized `verify.report` clamped to 16 KiB;
-`outputs` bounded at `MAX_OUTPUT_ENTRIES`; a hostile sentinel whose fields have
-wrong types yields `malformed` or drops the fields rather than propagating them.
+Tests live in `packages/pangolin-product/test/*.test.ts` with a per-package
+`tsconfig.json`, matching every sibling (e.g. `packages/pangolin-verify/test/`).
+Runner is `vitest run` via the standard `test` script.
+
+**`parseOutputSentinel` (pure — byte literals, no storage double)** — `ok`;
+`malformed('not-json')`; `malformed('not-an-object')` for valid JSON that is an
+array or a scalar; oversized `verify.report` clamped to 16 KiB; `outputs` bounded
+at `MAX_OUTPUT_ENTRIES`; a hostile sentinel whose fields have wrong types drops
+those fields rather than propagating them; the returned object is a fresh
+construction, not the parsed one (assert by mutating the source).
+
+**`readOutputSentinel` (I/O)** — `ok` end-to-end; `absent` when the provider
+reports missing; a non-not-found provider error propagates rather than being
+swallowed as `absent`.
 
 **Backward skew (D7)** — a bare `{"schemaVersion":1}` parses to `ok` with every
 optional field `undefined`; a sentinel carrying unknown future fields parses to
 `ok` and ignores them.
 
-**Fetcher** — happy path; tampered bytes → `IntegrityMismatchError`; ref naming a
-different dispatchId → `ArtifactRefRejectedError('wrong-dispatch')`; a
-`dispatches/...` URI → `('not-a-blob')`; an unpinned artifact URI →
-`('unpinned')`.
+**`assertArtifactRef` (pure)** — one case per rejection reason:
+`('not-a-blob')` for a `dispatches/...` URI, `('wrong-namespace')` for a matching
+dispatchId under a different namespace, `('wrong-dispatch')` for a foreign
+dispatchId, `('unpinned')` for an artifact URI with no `contentHash`; plus the
+accept case. Assert the error is `ArtifactRefRejectedError` with the right
+`reason`, not merely that it throws.
+
+**`fetchDispatchArtifact` (I/O)** — happy path; tampered bytes →
+`IntegrityMismatchError`; a rejected ref never reaches `storage.get` (assert the
+double was not called — the guard must run before I/O, not after).
 
 **Byte-identity (D6)** — `output-sentinel.test.ts` and `pipeline-golden.test.ts`
 pass unmodified; `examples/dogfood-gated/bundle.json` re-verifies.
@@ -592,10 +657,18 @@ projection; any change to `StorageProvider`; any change to `writeSentinel`,
 
 ### 9.3 Separate follow-up
 
-`scripts/validate-adrs.mjs` points at a nonexistent `docs/decisions/` and is
-unwired from CI. Repointing it at `docs-site/src/content/docs/explanation/decisions/`
-and adding it to a workflow is real cleanup, but it is not this change and must
-not be assumed by it.
+**Dead ADR validator.** `scripts/validate-adrs.mjs` points at a nonexistent
+`docs/decisions/` and is unwired from CI. Repointing it at
+`docs-site/src/content/docs/explanation/decisions/` and adding it to a workflow is
+real cleanup, but it is not this change and must not be assumed by it.
+
+**No typed not-found on `StorageProvider`.** `get` signals a missing object only
+through provider-specific errors, so every caller sniffs ENOENT and
+`/not found/i` — twice after this change (`retention.ts:90-97` and the new
+package, §4.2). The fix is a `NotFoundError` in the `StorageProvider` contract,
+which is an interface change touching both bundled providers and every
+consumer-written one. Tracked here so the duplication is a recorded debt with an
+owner, not silent drift.
 
 ---
 
@@ -611,9 +684,17 @@ none of it is assumed done):
 
 - The new package must be included in the workspace publish set — the v0.3.1
   release published fifteen packages; this one publishes sixteen.
-- `packages/pangolin-product/package.json` needs `publishConfig.access: public`,
-  the BUSL-1.1 license, and the `repository.directory` field, matching its
-  siblings.
+- **It starts at 0.4.0, not 0.1.0.** The train publishes every package at one
+  version (all fifteen sat at 0.3.1); a lone 0.1.0 would break that invariant and
+  imply a maturity signal the lockstep model does not carry.
+- `packages/pangolin-product/package.json` mirrors its siblings field-for-field
+  (`packages/pangolin-verify/package.json` is the template): `license: BUSL-1.1`,
+  `main: dist/index.js`, `types: dist/index.d.ts`, `type: module`,
+  `publishConfig.access: public`, `files: [dist, README.md, LICENSE]`,
+  `repository.directory`, `homepage`, `bugs`, and the five standard scripts
+  (`lint`, `test`, `typecheck`, `build`, `clean`). No `bin` — this package has no
+  CLI.
+- A `README.md` and `LICENSE` are required, since `files` ships them.
 - The worker image workflow is unaffected (it builds from
   `docker/pangolin-worker/Dockerfile` and the worker gains no dependency here).
 
@@ -631,8 +712,6 @@ rule.
    parsed defensively, with no consumer.
 2. Should ADR-0020 also record the `describe`-is-handle-bound constraint as a
    decision, or is the `pangolin-client-api.md` correction (§8.1) enough?
-3. Is `pangolin-product` the right package name? It matches the domain term used
-   throughout (`concept-typed-product-handoff`, "the product contract").
-   `pangolin-product-read` is more literal about direction; `pangolin-read` is
-   shorter but claims more surface than this package owns. Naming is cheap to fix
-   before first publish and expensive after.
+*(Package naming was resolved: `pangolin-product`, matching the repo's own domain
+vocabulary — "typed-product handoff", "product ref", "upstream product" — and the
+single-word role-noun convention shared by `core`, `client`, `worker`, `verify`.)*
