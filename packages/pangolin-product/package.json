@@ -1,0 +1,37 @@
+{
+  "name": "@quarry-systems/pangolin-product",
+  "version": "0.4.0",
+  "license": "BUSL-1.1",
+  "description": "Consumer-side read of a dispatch's product — the output sentinel and its content-addressed artifacts. Depends only on pangolin-core.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/QuarrySystems/pangolin.git",
+    "directory": "packages/pangolin-product"
+  },
+  "homepage": "https://quarrysystems.github.io/pangolin",
+  "bugs": {
+    "url": "https://github.com/QuarrySystems/pangolin/issues"
+  },
+  "scripts": {
+    "lint": "eslint src --ext .ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@quarry-systems/pangolin-core": "workspace:*"
+  },
+  "devDependencies": {}
+}
