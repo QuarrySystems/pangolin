@@ -34,7 +34,7 @@
 
 import { readFile, writeFile, mkdtemp, mkdir, rm } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
 import {
   PangolinClient,
@@ -69,12 +69,9 @@ import type {
   DispatchExecutorManifest,
   StatusLike,
 } from '@quarry-systems/pangolin-orchestrator';
-import {
-  parsePangolinUri,
-  buildDispatchRecordUri,
-  claudeAuthSecrets,
-} from '@quarry-systems/pangolin-core';
-import type { RuntimeUsage, ComputeProvider } from '@quarry-systems/pangolin-core';
+import { parsePangolinUri, claudeAuthSecrets } from '@quarry-systems/pangolin-core';
+import type { RuntimeUsage, ComputeProvider, StorageProvider } from '@quarry-systems/pangolin-core';
+import { readOutputSentinel } from '@quarry-systems/pangolin-product';
 import { EXECUTION_PATTERNS_TOPIC as TOPIC } from './config.js';
 import { InprocComputeProvider } from './inproc-compute-provider.js';
 import { createFakeRuntime } from './fake-runtime.js';
@@ -146,6 +143,27 @@ interface StatusBodyItem {
   verify?: { passed: boolean };
 }
 
+/** Sentinel read recipe (audit-pinned, spec §4): manifestRef → dispatchId →
+ *  readOutputSentinel → .usage. Best-effort by contract — any failure
+ *  (absent sentinel, malformed sentinel, no usage block, unparseable
+ *  manifestRef) collapses to `undefined`, which callers render as
+ *  "(not captured)" rather than throwing. Deps-injected (not closed over
+ *  `client`/`NAMESPACE`) so it is independently testable — see
+ *  test/usage-read.test.ts. */
+export async function readUsage(
+  deps: { storage: StorageProvider; namespace: string },
+  manifestRef: string | undefined,
+): Promise<RuntimeUsage | undefined> {
+  if (!manifestRef) return undefined;
+  try {
+    const dispatchId = parsePangolinUri(manifestRef).name;
+    const res = await readOutputSentinel(deps, dispatchId);
+    return res.status === 'ok' ? res.sentinel.usage : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 async function main(): Promise<void> {
   // Fresh per-run dirs (a fixed path would let a later run read a prior run's stale
   // records for a reused runId).
@@ -158,23 +176,8 @@ async function main(): Promise<void> {
   await mkdir(secretDir, { recursive: true });
   const store = new SqliteRunStateStore(); // :memory: — single-process
 
-  // Hoisted so the readUsage helper (row 4) can reach client.storage.
+  // Hoisted so the row-4 readUsage() calls below can reach client.storage.
   let client: PangolinClient;
-
-  /** Sentinel read recipe (audit-pinned, spec §4): manifestRef → dispatchId →
-   *  output.json → .usage. Best-effort by contract — any failure is (not captured). */
-  async function readUsage(manifestRef: string | undefined): Promise<RuntimeUsage | undefined> {
-    if (!manifestRef) return undefined;
-    try {
-      const dispatchId = parsePangolinUri(manifestRef).name;
-      const bytes = await client.storage.get(
-        buildDispatchRecordUri(NAMESPACE, dispatchId, 'output.json'),
-      );
-      return (JSON.parse(new TextDecoder().decode(bytes)) as { usage?: RuntimeUsage }).usage;
-    } catch {
-      return undefined;
-    }
-  }
 
   try {
     // 1. Wire the local-stack client. FAKE mode swaps ONLY the compute provider:
@@ -324,7 +327,10 @@ async function main(): Promise<void> {
       const status = rec.body as StatusLike[];
       for (const it of status) {
         if (it.manifestRef && it.status === 'done' && !usageCache.has(it.id)) {
-          const u = await readUsage(it.manifestRef);
+          const u = await readUsage(
+            { storage: client.storage, namespace: NAMESPACE },
+            it.manifestRef,
+          );
           if (u) usageCache.set(it.id, u);
         }
       }
@@ -512,7 +518,10 @@ async function main(): Promise<void> {
       const requested = manifest
         ? (manifest.executorManifest as DispatchExecutorManifest).model.id
         : '(no manifest)';
-      const usage = await readUsage(outcome.manifestRef);
+      const usage = await readUsage(
+        { storage: client.storage, namespace: NAMESPACE },
+        outcome.manifestRef,
+      );
       if (usage) {
         anyUsage = true;
         if (typeof usage.costUsd === 'number') runTotalCost += usage.costUsd;
@@ -565,7 +574,14 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err) => {
-  console.error('dogfood-gated crashed:', err);
-  process.exit(1);
-});
+// Run only when this module is the process entrypoint (`pnpm start[:env|:fake]`),
+// not when imported for its exports (e.g. `readUsage` from test/usage-read.test.ts) —
+// otherwise importing this module would kick off the real Docker/FAKE run as a
+// side effect. `pathToFileURL` (not a bare string compare) so Windows drive-letter
+// URLs match correctly.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((err) => {
+    console.error('dogfood-gated crashed:', err);
+    process.exit(1);
+  });
+}
