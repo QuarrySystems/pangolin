@@ -2,16 +2,33 @@ import { Command } from 'commander';
 import { readFile, writeFile } from 'node:fs/promises';
 import { userInfo } from 'node:os';
 import {
-  OperationsApi, nextDueAfter, validateRun, normalizeRun,
-  buildRunView, renderRunView, nextFrame, renderVerification,
-  pipeline, mapReduce, staticDag,
+  OperationsApi,
+  nextDueAfter,
+  validateRun,
+  normalizeRun,
+  buildRunView,
+  renderRunView,
+  nextFrame,
+  renderVerification,
+  pipeline,
+  mapReduce,
+  staticDag,
 } from '@quarry-systems/pangolin-orchestrator';
 import type {
-  SubmissionTransport, ControlChannel, AuditAnchor, Signature, TimestampToken, ScheduleStore, Schedule, Run,
-  Pattern, StatusLike,
+  SubmissionTransport,
+  ControlChannel,
+  AuditAnchor,
+  Signature,
+  TimestampToken,
+  ScheduleStore,
+  Schedule,
+  Run,
+  Pattern,
+  StatusLike,
 } from '@quarry-systems/pangolin-orchestrator';
-import { parsePangolinUri, buildDispatchRecordUri } from '@quarry-systems/pangolin-core';
-import type { RuntimeUsage } from '@quarry-systems/pangolin-core';
+import { parsePangolinUri } from '@quarry-systems/pangolin-core';
+import type { RuntimeUsage, StorageProvider } from '@quarry-systems/pangolin-core';
+import { readOutputSentinel } from '@quarry-systems/pangolin-product';
 import type { CliContext } from './index.js';
 
 /** Config-owned operator wiring. Client verbs use transport(+anchor/storage); `serve` uses runService. */
@@ -24,11 +41,12 @@ export interface OrchContext {
    *  Additive — when present, `pangolin verify` reports the trusted-time tier; absent leaves
    *  existing behavior unchanged (the time check stays 'n/a'/asserted). */
   verifyTimestamp?: (root: Uint8Array, token: TimestampToken) => boolean;
-  runService?: (signal: AbortSignal) => Promise<void>;   // pre-wired serve() for the `serve` verb
-  scheduleStore?: ScheduleStore;   // config-owned; required for `schedule` verbs
+  runService?: (signal: AbortSignal) => Promise<void>; // pre-wired serve() for the `serve` verb
+  scheduleStore?: ScheduleStore; // config-owned; required for `schedule` verbs
 }
 
-const resolveActor = (flag?: string): string => flag ?? process.env.PANGOLIN_ACTOR ?? `human:${userInfo().username}`;
+const resolveActor = (flag?: string): string =>
+  flag ?? process.env.PANGOLIN_ACTOR ?? `human:${userInfo().username}`;
 
 /**
  * Pure helper: render a single per-item evidence line for `pangolin orch audit`.
@@ -49,7 +67,11 @@ export function renderEvidenceLine(itemId: string, model: string | undefined): s
 
 /** Named --pattern values → the real exported Pattern objects (spec §3 — `OrchContext`
  *  carries no queue/pattern wiring, so the flag is the v1 layout-selection path). */
-const PATTERNS: Record<string, Pattern> = { pipeline, 'map-reduce': mapReduce, 'static-dag': staticDag };
+const PATTERNS: Record<string, Pattern> = {
+  pipeline,
+  'map-reduce': mapReduce,
+  'static-dag': staticDag,
+};
 
 /** Post-terminal audit-summary retry bounds (the export publishes after the terminal
  *  status record — same driver iteration or a tick later). Env vars override for tests. */
@@ -57,11 +79,16 @@ const AUDIT_RETRIES = 15;
 const AUDIT_RETRY_MS = 1000;
 
 /** Resolve a --pattern flag value; reports a clean CLI error (validate-style) on unknown names. */
-function resolvePattern(name: string | undefined, verb: string): { ok: true; pattern?: Pattern } | { ok: false } {
+function resolvePattern(
+  name: string | undefined,
+  verb: string,
+): { ok: true; pattern?: Pattern } | { ok: false } {
   if (name === undefined) return { ok: true };
   const pattern = PATTERNS[name];
   if (!pattern) {
-    console.error(`${verb}: unknown pattern '${name}' — expected one of: ${Object.keys(PATTERNS).join(', ')}`);
+    console.error(
+      `${verb}: unknown pattern '${name}' — expected one of: ${Object.keys(PATTERNS).join(', ')}`,
+    );
     process.exitCode = 1;
     return { ok: false };
   }
@@ -71,33 +98,41 @@ function resolvePattern(name: string | undefined, verb: string): { ok: true; pat
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 export function attachOrchCmd(program: Command, ctx: CliContext): void {
-  const o = program.command('orch').aliases(['orchestrator']).description('Submit, follow, cancel, and audit offload runs');
+  const o = program
+    .command('orch')
+    .aliases(['orchestrator'])
+    .description('Submit, follow, cancel, and audit offload runs');
 
-  o.command('submit <plan.json>').option('--queue <name>').option('--actor <id>').action(async (file, opts) => {
-    const oc = await ctx.getOrchContext();
-    const run = JSON.parse(await readFile(file, 'utf8'));
-    if (opts.queue) run.queue = opts.queue;
-    console.log(await new OperationsApi(oc).submit(run, resolveActor(opts.actor)));
-  });
+  o.command('submit <plan.json>')
+    .option('--queue <name>')
+    .option('--actor <id>')
+    .action(async (file, opts) => {
+      const oc = await ctx.getOrchContext();
+      const run = JSON.parse(await readFile(file, 'utf8'));
+      if (opts.queue) run.queue = opts.queue;
+      console.log(await new OperationsApi(oc).submit(run, resolveActor(opts.actor)));
+    });
 
-  o.command('validate <plan.json>').description('Statically validate a run plan (structure, edges, cycles)').action(async (file) => {
-    let run: unknown;
-    try {
-      run = JSON.parse(await readFile(file, 'utf8'));
-    } catch (err) {
-      console.error(`validate: cannot read plan — ${(err as Error).message}`);
-      process.exitCode = 1;
-      return;
-    }
-    const normalized = normalizeRun(run as Run);
-    const errors = validateRun(normalized);
-    if (errors.length) {
-      for (const e of errors) console.error(e);
-      process.exitCode = 1;
-      return;
-    }
-    console.log(JSON.stringify({ valid: true, items: normalized.items.length }));
-  });
+  o.command('validate <plan.json>')
+    .description('Statically validate a run plan (structure, edges, cycles)')
+    .action(async (file) => {
+      let run: unknown;
+      try {
+        run = JSON.parse(await readFile(file, 'utf8'));
+      } catch (err) {
+        console.error(`validate: cannot read plan — ${(err as Error).message}`);
+        process.exitCode = 1;
+        return;
+      }
+      const normalized = normalizeRun(run as Run);
+      const errors = validateRun(normalized);
+      if (errors.length) {
+        for (const e of errors) console.error(e);
+        process.exitCode = 1;
+        return;
+      }
+      console.log(JSON.stringify({ valid: true, items: normalized.items.length }));
+    });
 
   o.command('status [run-id]').action(async (runId) => {
     const rec = await new OperationsApi(await ctx.getOrchContext()).status(runId);
@@ -125,7 +160,10 @@ export function attachOrchCmd(program: Command, ctx: CliContext): void {
       try {
         lines = renderRunView(
           buildRunView({ plan, ...(resolved.pattern ? { pattern: resolved.pattern } : {}) }),
-          { color: process.stdout.isTTY === true && opts.color !== false, unicode: opts.ascii !== true },
+          {
+            color: process.stdout.isTTY === true && opts.color !== false,
+            unicode: opts.ascii !== true,
+          },
         );
       } catch (err) {
         // pattern.plan() may throw on malformed config — surface it validate-style.
@@ -150,7 +188,7 @@ export function attachOrchCmd(program: Command, ctx: CliContext): void {
 
       if (opts.json) {
         for await (const rec of api.watch(runId)) {
-          console.log(JSON.stringify(rec));   // render each status update until terminal
+          console.log(JSON.stringify(rec)); // render each status update until terminal
         }
         return;
       }
@@ -162,10 +200,13 @@ export function attachOrchCmd(program: Command, ctx: CliContext): void {
       const intervalMs = opts.interval !== undefined ? Number(opts.interval) : undefined;
 
       const evidence = new Map<string, RuntimeUsage>();
-      const evidenceTried = new Set<string>();   // cached per item id — one fetch attempt each
+      const evidenceTried = new Set<string>(); // cached per item id — one fetch attempt each
       let prev: string[] | undefined;
 
-      for await (const rec of api.watch(runId, intervalMs !== undefined ? { intervalMs } : undefined)) {
+      for await (const rec of api.watch(
+        runId,
+        intervalMs !== undefined ? { intervalMs } : undefined,
+      )) {
         // api.watch can yield duplicates and, before the first status publishes,
         // non-status kinds (the status() fallback) — only status arrays render.
         if (rec.kind !== 'status' || !Array.isArray(rec.body)) continue;
@@ -177,16 +218,28 @@ export function attachOrchCmd(program: Command, ctx: CliContext): void {
         // fetch rather than the sum of all fetch latencies.
         if (oc.storage) {
           const pending = status
-            .filter((s) => s.status === 'done' && s.manifestRef !== undefined && !evidenceTried.has(s.id))
+            .filter(
+              (s) => s.status === 'done' && s.manifestRef !== undefined && !evidenceTried.has(s.id),
+            )
             .map((s) => {
               evidenceTried.add(s.id);
               return (async () => {
                 try {
                   const p = parsePangolinUri(s.manifestRef!);
-                  const bytes = await oc.storage!.get(buildDispatchRecordUri(p.namespace, p.name, 'output.json'));
-                  const usage = (JSON.parse(new TextDecoder().decode(bytes)) as { usage?: RuntimeUsage }).usage;
+                  // OrchContext.storage is intentionally a minimal `{ get }` contract (the CLI
+                  // wiring only ever calls `.get`); readOutputSentinel wants the full
+                  // StorageProvider shape but likewise only touches `.get` at runtime — same
+                  // narrowing cast used at other minimal-storage call sites across the repo
+                  // (e.g. pangolin-worker/test/deliver.test.ts, pangolin-product/test/sentinel-read.test.ts).
+                  const res = await readOutputSentinel(
+                    { storage: oc.storage! as unknown as StorageProvider, namespace: p.namespace },
+                    p.name,
+                  );
+                  const usage = res.status === 'ok' ? res.sentinel.usage : undefined;
                   if (usage !== undefined) evidence.set(s.id, usage);
-                } catch { /* best-effort — never fail the watch */ }
+                } catch {
+                  /* best-effort — never fail the watch */
+                }
               })();
             });
           await Promise.all(pending);
@@ -198,10 +251,19 @@ export function attachOrchCmd(program: Command, ctx: CliContext): void {
           id: runId,
           queue: 'default',
           items: status.map((s) => ({
-            id: s.id, executor: 'dispatch', inputs: {}, depends_on: s.depends_on ?? [], resourceLocks: [],
+            id: s.id,
+            executor: 'dispatch',
+            inputs: {},
+            depends_on: s.depends_on ?? [],
+            resourceLocks: [],
           })),
         };
-        const view = buildRunView({ plan, ...(resolved.pattern ? { pattern: resolved.pattern } : {}), status, evidence });
+        const view = buildRunView({
+          plan,
+          ...(resolved.pattern ? { pattern: resolved.pattern } : {}),
+          status,
+          evidence,
+        });
         const frame = nextFrame(prev, renderRunView(view, { color, unicode }));
         if (frame === null) continue;
         if (opts.clear !== false && prev !== undefined) {
@@ -230,42 +292,51 @@ export function attachOrchCmd(program: Command, ctx: CliContext): void {
       console.log('(no audit export published — run may not be sealed)');
     });
 
-  o.command('cancel <target>').option('--actor <id>').action(async (target, opts) => {
-    await new OperationsApi(await ctx.getOrchContext()).cancel(target, resolveActor(opts.actor));
-    console.log(`cancel requested: ${target}`);
-  });
+  o.command('cancel <target>')
+    .option('--actor <id>')
+    .action(async (target, opts) => {
+      await new OperationsApi(await ctx.getOrchContext()).cancel(target, resolveActor(opts.actor));
+      console.log(`cancel requested: ${target}`);
+    });
 
-  o.command('audit <run-id>').option('--out <path>').action(async (runId, opts) => {
-    const oc = await ctx.getOrchContext();
-    const api = new OperationsApi(oc);
-    const bundle = await api.audit(runId);
+  o.command('audit <run-id>')
+    .option('--out <path>')
+    .action(async (runId, opts) => {
+      const oc = await ctx.getOrchContext();
+      const api = new OperationsApi(oc);
+      const bundle = await api.audit(runId);
 
-    // Per-item evidence block (additive — printed to stderr before the JSON bundle).
-    // Reads the pinned model per item straight from the sealed bundle manifests
-    // (manifest.itemId + manifest.executorManifest.model.id). Self-verify + costUsd
-    // are not yet sealed into the bundle, so they are omitted (tracked follow-up).
-    try {
-      const manifests = Array.isArray(bundle.manifests) ? bundle.manifests : [];
-      if (manifests.length > 0) {
-        console.error('--- per-item evidence ---');
-        for (const m of manifests) {
-          // executorManifest is typed opaquely in the bundle; the dispatch executor
-          // seals { model: { id } } into it (see dispatch executor manifest).
-          const model = (m.executorManifest as { model?: { id?: string } } | undefined)?.model?.id;
-          console.error(renderEvidenceLine(m.itemId, model));
+      // Per-item evidence block (additive — printed to stderr before the JSON bundle).
+      // Reads the pinned model per item straight from the sealed bundle manifests
+      // (manifest.itemId + manifest.executorManifest.model.id). Self-verify + costUsd
+      // are not yet sealed into the bundle, so they are omitted (tracked follow-up).
+      try {
+        const manifests = Array.isArray(bundle.manifests) ? bundle.manifests : [];
+        if (manifests.length > 0) {
+          console.error('--- per-item evidence ---');
+          for (const m of manifests) {
+            // executorManifest is typed opaquely in the bundle; the dispatch executor
+            // seals { model: { id } } into it (see dispatch executor manifest).
+            const model = (m.executorManifest as { model?: { id?: string } } | undefined)?.model
+              ?.id;
+            console.error(renderEvidenceLine(m.itemId, model));
+          }
+          console.error('---');
         }
-        console.error('---');
+      } catch {
+        /* best-effort — never fail the audit command itself */
       }
-    } catch { /* best-effort — never fail the audit command itself */ }
 
-    const json = JSON.stringify(bundle, null, 2);
-    if (opts.out) await writeFile(opts.out, json); else console.log(json);
-    if (!bundle.report.intact) process.exitCode = 1;   // audit failure → nonzero exit
-  });
+      const json = JSON.stringify(bundle, null, 2);
+      if (opts.out) await writeFile(opts.out, json);
+      else console.log(json);
+      if (!bundle.report.intact) process.exitCode = 1; // audit failure → nonzero exit
+    });
 
   o.command('serve').action(async () => {
     const oc = await ctx.getOrchContext();
-    if (!oc.runService) throw new Error('pangolin orch serve: pangolin.config `orch` export provides no runService');
+    if (!oc.runService)
+      throw new Error('pangolin orch serve: pangolin.config `orch` export provides no runService');
     const ac = new AbortController();
     const onAbort = () => ac.abort();
     process.on('SIGINT', onAbort);
@@ -280,34 +351,51 @@ export function attachOrchCmd(program: Command, ctx: CliContext): void {
 
   const sched = o.command('schedule').description('Manage recurring submissions');
 
-  sched.command('add')
+  sched
+    .command('add')
     .requiredOption('--id <id>')
     .requiredOption('--cron <expr>')
     .requiredOption('--plan <plan.json>')
     .option('--actor <id>')
     .action(async (opts) => {
       const oc = await ctx.getOrchContext();
-      if (!oc.scheduleStore) throw new Error('pangolin orch schedule: pangolin.config `orch` export provides no scheduleStore');
-      const nextDueAt = nextDueAfter(opts.cron, Date.now());   // validates the expr (throws on bad cron)
+      if (!oc.scheduleStore)
+        throw new Error(
+          'pangolin orch schedule: pangolin.config `orch` export provides no scheduleStore',
+        );
+      const nextDueAt = nextDueAfter(opts.cron, Date.now()); // validates the expr (throws on bad cron)
       const run = JSON.parse(await readFile(opts.plan, 'utf8'));
-      const s: Schedule = { id: opts.id, cronExpr: opts.cron, run, actor: resolveActor(opts.actor), nextDueAt };
+      const s: Schedule = {
+        id: opts.id,
+        cronExpr: opts.cron,
+        run,
+        actor: resolveActor(opts.actor),
+        nextDueAt,
+      };
       oc.scheduleStore.upsert(s);
       console.log(`schedule '${opts.id}' next due ${nextDueAt}`);
     });
 
   sched.command('list').action(async () => {
     const oc = await ctx.getOrchContext();
-    if (!oc.scheduleStore) throw new Error('pangolin orch schedule: pangolin.config `orch` export provides no scheduleStore');
+    if (!oc.scheduleStore)
+      throw new Error(
+        'pangolin orch schedule: pangolin.config `orch` export provides no scheduleStore',
+      );
     for (const s of oc.scheduleStore.list()) {
       console.log(`${s.id}\t${s.cronExpr}\tlast=${s.lastFiredAt ?? '-'}\tnext=${s.nextDueAt}`);
     }
   });
 
-  sched.command('rm')
+  sched
+    .command('rm')
     .requiredOption('--id <id>')
     .action(async (opts) => {
       const oc = await ctx.getOrchContext();
-      if (!oc.scheduleStore) throw new Error('pangolin orch schedule: pangolin.config `orch` export provides no scheduleStore');
+      if (!oc.scheduleStore)
+        throw new Error(
+          'pangolin orch schedule: pangolin.config `orch` export provides no scheduleStore',
+        );
       oc.scheduleStore.remove(opts.id);
       console.log(`schedule '${opts.id}' removed`);
     });

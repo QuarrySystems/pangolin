@@ -175,6 +175,18 @@ client.dispatch.describe(dispatchId: string): Promise<DispatchResult>
 client.dispatch.cancel(dispatchId: string): Promise<void>
 ```
 
+:::caution[`describe` only sees reconciled dispatches]
+`dispatch.describe` reads the dispatch record that `client.dispatch(...)`'s reconcile step
+writes at the end of the call. A dispatch fired with `client.dispatch.fire(...)` alone and never
+carried through `reconcile` writes no dispatch record, so `describe` can never see it —
+`DispatchRecordExpiredError` is thrown, indistinguishable from a record that expired past
+retention (see the [`describe` reference](https://github.com/quarrysystems/pangolin/blob/main/packages/pangolin-client/src/describe.ts)).
+Fire-and-forget consumers that still want the dispatch's output should not poll `describe` —
+read the worker-written output sentinel directly with `readOutputSentinel` from
+`@quarry-systems/pangolin-product` instead (it needs only the dispatch id and namespace, not a
+dispatch record). See [Dispatch lifecycle → Reading output after the fact](/pangolin/reference/dispatch-lifecycle/#reading-output-after-the-fact).
+:::
+
 `ClientDispatchOpts` carries `workerImage: string` (required) and
 `defaultDispatchTimeoutSeconds?: number`; the remaining fields (`subagent`,
 `target`, `env`, `input`, `capabilities`, `addCapabilities`, `secrets`,

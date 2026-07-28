@@ -33,6 +33,7 @@
   "dependencies": {
     "@quarry-systems/pangolin-client": "workspace:*",
     "@quarry-systems/pangolin-core": "workspace:*",
+    "@quarry-systems/pangolin-product": "workspace:*",
     "better-sqlite3": "^11.0.0",
     "cron-parser": "^4",
     "zod": "^3"

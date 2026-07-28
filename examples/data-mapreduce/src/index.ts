@@ -29,7 +29,7 @@
 import { readFile, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import {
   PangolinOrchestrator,
@@ -50,6 +50,7 @@ import {
 } from '@quarry-systems/pangolin-client';
 import type { PipelineRef } from '@quarry-systems/pangolin-client';
 import { LocalStorageProvider } from '@quarry-systems/pangolin-storage-local';
+import { readOutputSentinel } from '@quarry-systems/pangolin-product';
 
 // Import the InprocWorkerExecutor from the orchestrator test fixture.
 // tsx compiles workspace TS directly, resolving workspace:* packages in-source.
@@ -73,11 +74,6 @@ function buildPinnedUri(
   contentHash: string,
 ): string {
   return `pangolin://${namespace}/${type}/${name}/${contentHash}`;
-}
-
-/** Builds a dispatch-record URI: pangolin://<ns>/dispatches/<dispatchId>/<suffix> */
-function buildDispatchUri(namespace: string, dispatchId: string, suffix: string): string {
-  return `pangolin://${namespace}/dispatches/${dispatchId}/${suffix}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -274,6 +270,23 @@ function fillPlaceholders(
 }
 
 // ---------------------------------------------------------------------------
+// Sentinel read — thin wrapper around @quarry-systems/pangolin-product's
+// readOutputSentinel, returning just the blocks[] evidence this example
+// prints. Exported so the example's regression test can prove the read path
+// round-trips against a real LocalStorageProvider without driving the whole
+// offline pipeline.
+// ---------------------------------------------------------------------------
+
+export async function readSentinelBlocks(
+  storage: LocalStorageProvider,
+  namespace: string,
+  dispatchId: string,
+): Promise<Array<{ kind: string; ordinal: number; status: string }> | undefined> {
+  const res = await readOutputSentinel({ storage, namespace }, dispatchId);
+  return res.status === 'ok' ? res.sentinel.blocks : undefined;
+}
+
+// ---------------------------------------------------------------------------
 // Drive loop
 // ---------------------------------------------------------------------------
 
@@ -427,23 +440,17 @@ async function main(): Promise<void> {
     // ---------------------------------------------------------------------------
     // (3) blocks[] evidence sample — sentinel of one map item (map-a.csv)
     //
-    // The InprocWorkerExecutor stores the output sentinel (output.json) at:
-    //   pangolin://<namespace>/dispatches/<dispatchId>/output.json
     // The dispatchId is embedded in dispatchHash as 'inproc-<dispatchId>'.
     // ---------------------------------------------------------------------------
     console.log('\n=== blocks[] evidence sample (sentinel of map-a.csv) ===');
     const mapAItem = itemById.get('map-a.csv');
     if (mapAItem?.dispatchHash) {
       const dispatchId = mapAItem.dispatchHash.replace(/^inproc-/, '');
-      const sentinelUri = buildDispatchUri(NAMESPACE, dispatchId, 'output.json');
       try {
-        const sentinelBytes = await storage.get(sentinelUri);
-        const sentinel = JSON.parse(new TextDecoder().decode(sentinelBytes)) as {
-          blocks?: Array<{ kind: string; ordinal: number; status: string }>;
-        };
-        if (sentinel.blocks && sentinel.blocks.length > 0) {
-          console.log(`  sentinel.blocks (${sentinel.blocks.length} entries):`);
-          for (const b of sentinel.blocks) {
+        const blocks = await readSentinelBlocks(storage, NAMESPACE, dispatchId);
+        if (blocks && blocks.length > 0) {
+          console.log(`  sentinel.blocks (${blocks.length} entries):`);
+          for (const b of blocks) {
             console.log(`    [${b.ordinal}] kind=${b.kind} status=${b.status}`);
           }
         } else {
@@ -533,7 +540,11 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err) => {
-  console.error('data-mapreduce demo crashed:', err);
-  process.exit(1);
-});
+// Only run when executed directly (`tsx src/index.ts`), not when imported
+// (e.g. by test/sentinel-read.test.ts for readSentinelBlocks).
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((err) => {
+    console.error('data-mapreduce demo crashed:', err);
+    process.exit(1);
+  });
+}

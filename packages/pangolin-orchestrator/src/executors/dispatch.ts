@@ -1,10 +1,7 @@
 import type { PangolinClient, InFlightDispatch } from '@quarry-systems/pangolin-client';
 import type { DispatchWork } from '@quarry-systems/pangolin-core';
-import {
-  buildPangolinUri,
-  buildDispatchRecordUri,
-  computeContentHash,
-} from '@quarry-systems/pangolin-core';
+import { buildPangolinUri, computeContentHash } from '@quarry-systems/pangolin-core';
+import { readOutputSentinel } from '@quarry-systems/pangolin-product';
 import type { Executor, ExecutionResult, FireContext, WorkItem } from '../contracts/index.js';
 import { buildManifest } from '../audit/manifest.js';
 import type { DispatchExecutorManifest } from '../contracts/manifest.js';
@@ -201,53 +198,36 @@ export class DispatchExecutor implements Executor {
 
   /**
    * Best-effort: read the patchRef, verify signal, and outputs from the dispatch
-   * output sentinel. NEVER throws — any failure returns an empty object.
+   * output sentinel, delegating parsing/validation to the published reader
+   * (@quarry-systems/pangolin-product). The projection to ExecutionResult's
+   * shape is orchestrator-specific and stays here. NEVER throws — `absent`,
+   * `malformed`, and a rejected promise (unrelated storage errors) all yield
+   * an empty object.
    */
   private async readSentinel(dispatchId: string): Promise<{
     patchRef?: string;
     verify?: ExecutionResult['verify'];
     outputRefs?: ExecutionResult['outputRefs'];
   }> {
-    try {
-      const ns = this.opts.client.namespace;
-      const bytes = await this.opts.client.storage.get(
-        buildDispatchRecordUri(ns, dispatchId, 'output.json'),
-      );
-      const sentinel = JSON.parse(new TextDecoder().decode(bytes));
-      const out: {
-        patchRef?: string;
-        verify?: ExecutionResult['verify'];
-        outputRefs?: ExecutionResult['outputRefs'];
-      } = {};
-      if (typeof sentinel.patchRef === 'string') out.patchRef = sentinel.patchRef;
-      // Construct a clean, bounded verify from the (worker-written but possibly
-      // older/tampered) sentinel — don't forward the raw object by reference.
-      const v = sentinel.verify;
-      if (v && typeof v.passed === 'boolean') {
-        const verify: NonNullable<ExecutionResult['verify']> = { passed: v.passed };
-        if (typeof v.report === 'string') verify.report = v.report.slice(0, 16_000);
-        if (typeof v.durationMs === 'number' && Number.isFinite(v.durationMs)) {
-          verify.durationMs = v.durationMs;
-        }
-        out.verify = verify;
-      }
-      // Construct a clean, bounded outputRefs from the sentinel outputs array.
-      // Sentinel is worker-written and untrusted; reconstruct defensively.
-      const MAX_SENTINEL_OUTPUTS = 256;
-      const o = sentinel.outputs;
-      if (Array.isArray(o)) {
-        const outputRefs = Object.create(null) as Record<string, string>;
-        for (const e of o.slice(0, MAX_SENTINEL_OUTPUTS)) {
-          if (e && typeof e.path === 'string' && typeof e.ref === 'string') {
-            outputRefs[e.path] = e.ref;
-          }
-        }
-        if (Object.keys(outputRefs).length > 0) out.outputRefs = outputRefs;
-      }
-      return out;
-    } catch {
-      return {};
+    const res = await readOutputSentinel(
+      { storage: this.opts.client.storage, namespace: this.opts.client.namespace },
+      dispatchId,
+    ).catch(() => ({ status: 'absent' as const }));
+    if (res.status !== 'ok') return {}; // absent | malformed -> {}
+    const { patchRef, verify, outputs } = res.sentinel;
+    const out: {
+      patchRef?: string;
+      verify?: ExecutionResult['verify'];
+      outputRefs?: ExecutionResult['outputRefs'];
+    } = {};
+    if (patchRef) out.patchRef = patchRef;
+    if (verify) out.verify = verify;
+    if (outputs?.length) {
+      const outputRefs = Object.create(null) as Record<string, string>;
+      for (const e of outputs) outputRefs[e.path] = e.ref;
+      out.outputRefs = outputRefs;
     }
+    return out;
   }
 
   /**

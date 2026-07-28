@@ -16,11 +16,12 @@ import type { CliContext } from '../src/index.js';
 // ---------------------------------------------------------------------------
 // Fake transport (in-memory, mirrors operations-api.test.ts)
 // ---------------------------------------------------------------------------
-function makeFakeTransport(): SubmissionTransport & ControlChannel & {
-  _submissions: SubmissionEnvelope[];
-  _controls: ControlEnvelope[];
-  _outbox: Map<string, OutboxRecord[]>;
-} {
+function makeFakeTransport(): SubmissionTransport &
+  ControlChannel & {
+    _submissions: SubmissionEnvelope[];
+    _controls: ControlEnvelope[];
+    _outbox: Map<string, OutboxRecord[]>;
+  } {
   const submissions: SubmissionEnvelope[] = [];
   const controls: ControlEnvelope[] = [];
   const outbox = new Map<string, OutboxRecord[]>();
@@ -34,7 +35,9 @@ function makeFakeTransport(): SubmissionTransport & ControlChannel & {
       submissions.push(env);
       return env.run.id;
     },
-    async pollInbox(): Promise<SubmissionEnvelope[]> { return [...submissions]; },
+    async pollInbox(): Promise<SubmissionEnvelope[]> {
+      return [...submissions];
+    },
     async ack(_runId: string): Promise<void> {},
     async deadLetter(_runId: string): Promise<void> {},
     async publish(rec: OutboxRecord): Promise<void> {
@@ -48,7 +51,9 @@ function makeFakeTransport(): SubmissionTransport & ControlChannel & {
     async control(env: ControlEnvelope): Promise<void> {
       controls.push(env);
     },
-    async pollControl(): Promise<ControlEnvelope[]> { return [...controls]; },
+    async pollControl(): Promise<ControlEnvelope[]> {
+      return [...controls];
+    },
     async ackControl(_target: string): Promise<void> {},
   };
 }
@@ -60,7 +65,7 @@ function makeOrchContext(overrides: Partial<OrchContext> = {}): OrchContext {
 
 function makeCtx(oc: OrchContext): CliContext & { getOrchContext: () => Promise<OrchContext> } {
   return {
-    getClient: async () => ({} as any),
+    getClient: async () => ({}) as any,
     getOrchContext: async () => oc,
   };
 }
@@ -92,7 +97,17 @@ describe('attachOrchCmd', () => {
     expect(orchCmd).toBeDefined();
     expect(orchCmd.aliases()).toContain('orchestrator');
     const names = orchCmd.commands.map((c) => c.name()).sort();
-    expect(names).toEqual(['audit', 'cancel', 'render', 'schedule', 'serve', 'status', 'submit', 'validate', 'watch']);
+    expect(names).toEqual([
+      'audit',
+      'cancel',
+      'render',
+      'schedule',
+      'serve',
+      'status',
+      'submit',
+      'validate',
+      'watch',
+    ]);
   });
 
   describe('submit', () => {
@@ -155,9 +170,7 @@ describe('attachOrchCmd', () => {
       attachOrchCmd(program, ctx);
 
       try {
-        await captureLog(() =>
-          program.parseAsync(['orch', 'submit', planPath], { from: 'user' }),
-        );
+        await captureLog(() => program.parseAsync(['orch', 'submit', planPath], { from: 'user' }));
         expect(transport._submissions[0].actor).toBe('human:brett');
       } finally {
         if (origEnv === undefined) delete process.env.PANGOLIN_ACTOR;
@@ -199,7 +212,9 @@ describe('attachOrchCmd', () => {
       attachOrchCmd(program, ctx);
 
       const logs = await captureLog(() =>
-        program.parseAsync(['orch', 'cancel', 'run-xyz', '--actor', 'human:brett'], { from: 'user' }),
+        program.parseAsync(['orch', 'cancel', 'run-xyz', '--actor', 'human:brett'], {
+          from: 'user',
+        }),
       );
 
       // Should print confirmation
@@ -225,9 +240,7 @@ describe('attachOrchCmd', () => {
       attachOrchCmd(program, ctx);
 
       try {
-        await captureLog(() =>
-          program.parseAsync(['orch', 'cancel', 'run-abc'], { from: 'user' }),
-        );
+        await captureLog(() => program.parseAsync(['orch', 'cancel', 'run-abc'], { from: 'user' }));
         expect(transport._controls[0].actor).toBe('human:tester');
       } finally {
         if (origEnv === undefined) delete process.env.PANGOLIN_ACTOR;
@@ -343,7 +356,9 @@ describe('attachOrchCmd', () => {
     /** Fake transport whose readOutbox advances through scripted per-call results
      *  (the stock fake returns the full accumulated list, so status() always sees
      *  the latest record — useless for simulating poll-over-poll progression). */
-    function makeSequencedTransport(sequences: OutboxRecord[][]): ReturnType<typeof makeFakeTransport> {
+    function makeSequencedTransport(
+      sequences: OutboxRecord[][],
+    ): ReturnType<typeof makeFakeTransport> {
       const t = makeFakeTransport();
       let call = 0;
       t.readOutbox = async () => {
@@ -357,25 +372,30 @@ describe('attachOrchCmd', () => {
     it('renders frames, dedups identical polls, and notes the missing audit export', async () => {
       const runId = 'run-live-1';
       const recA: OutboxRecord = {
-        runId, kind: 'status',
+        runId,
+        kind: 'status',
         body: [{ id: 'item-1', runId, status: 'running', blockedBy: [], depends_on: [] }],
         at: '2026-06-01T12:00:00Z',
       };
       const recB: OutboxRecord = {
-        runId, kind: 'status',
+        runId,
+        kind: 'status',
         body: [{ id: 'item-1', runId, status: 'done', blockedBy: [], depends_on: [] }],
         at: '2026-06-01T12:00:05Z',
       };
       // A, A (identical poll — must dedup), B (terminal)
       const transport = makeSequencedTransport([[recA], [recA], [recB]]);
-      const oc = makeOrchContext({ transport });   // NO storage — evidence path must skip silently
+      const oc = makeOrchContext({ transport }); // NO storage — evidence path must skip silently
       const ctx = makeCtx(oc);
 
       const program = new Command();
       attachOrchCmd(program, ctx);
 
       const logs = await captureLog(() =>
-        program.parseAsync(['orch', 'watch', runId, '--interval', '0', '--no-clear', '--no-color'], { from: 'user' }),
+        program.parseAsync(
+          ['orch', 'watch', runId, '--interval', '0', '--no-clear', '--no-color'],
+          { from: 'user' },
+        ),
       );
 
       // Two distinct frames + the no-audit note. The duplicate poll produced no frame.
@@ -390,10 +410,14 @@ describe('attachOrchCmd', () => {
     it('skips non-status records seen before the first status publishes', async () => {
       const runId = 'run-live-2';
       const nonStatus: OutboxRecord = {
-        runId, kind: 'audit', body: { runId }, at: '2026-06-01T12:00:00Z',
+        runId,
+        kind: 'audit',
+        body: { runId },
+        at: '2026-06-01T12:00:00Z',
       };
       const recDone: OutboxRecord = {
-        runId, kind: 'status',
+        runId,
+        kind: 'status',
         body: [{ id: 'item-1', runId, status: 'done', blockedBy: [], depends_on: [] }],
         at: '2026-06-01T12:00:05Z',
       };
@@ -405,7 +429,10 @@ describe('attachOrchCmd', () => {
       attachOrchCmd(program, ctx);
 
       const logs = await captureLog(() =>
-        program.parseAsync(['orch', 'watch', runId, '--interval', '0', '--no-clear', '--no-color'], { from: 'user' }),
+        program.parseAsync(
+          ['orch', 'watch', runId, '--interval', '0', '--no-clear', '--no-color'],
+          { from: 'user' },
+        ),
       );
 
       // Exactly one frame (from the status record) + the no-audit note; the
@@ -419,11 +446,18 @@ describe('attachOrchCmd', () => {
     it('fills per-item evidence from storage best-effort (manifestRef → dispatch output.json)', async () => {
       const runId = 'run-live-3';
       const recDone: OutboxRecord = {
-        runId, kind: 'status',
-        body: [{
-          id: 'item-1', runId, status: 'done', blockedBy: [], depends_on: [],
-          manifestRef: 'pangolin://ns1/manifests/d-1',
-        }],
+        runId,
+        kind: 'status',
+        body: [
+          {
+            id: 'item-1',
+            runId,
+            status: 'done',
+            blockedBy: [],
+            depends_on: [],
+            manifestRef: 'pangolin://ns1/manifests/d-1',
+          },
+        ],
         at: '2026-06-01T12:00:00Z',
       };
       const transport = makeSequencedTransport([[recDone]]);
@@ -431,9 +465,12 @@ describe('attachOrchCmd', () => {
       const storage = {
         async get(ref: string): Promise<Uint8Array> {
           seenRefs.push(ref);
-          return new TextEncoder().encode(JSON.stringify({
-            usage: { models: ['m1'], costUsd: 0.25, turns: 3 },
-          }));
+          return new TextEncoder().encode(
+            JSON.stringify({
+              schemaVersion: 1,
+              usage: { models: ['m1'], costUsd: 0.25, turns: 3 },
+            }),
+          );
         },
       };
       const oc = makeOrchContext({ transport, storage });
@@ -443,7 +480,10 @@ describe('attachOrchCmd', () => {
       attachOrchCmd(program, ctx);
 
       const logs = await captureLog(() =>
-        program.parseAsync(['orch', 'watch', runId, '--interval', '0', '--no-clear', '--no-color'], { from: 'user' }),
+        program.parseAsync(
+          ['orch', 'watch', runId, '--interval', '0', '--no-clear', '--no-color'],
+          { from: 'user' },
+        ),
       );
 
       expect(seenRefs).toEqual(['pangolin://ns1/dispatches/d-1/output.json']);
@@ -452,19 +492,34 @@ describe('attachOrchCmd', () => {
       expect(logs[0]).toContain('3t');
     });
 
-    it('still renders frames when a storage evidence read throws', async () => {
-      const runId = 'run-live-4';
+    it('skips evidence (renders no usage suffix) when the sentinel is malformed (bad/missing schemaVersion)', async () => {
+      const runId = 'run-live-3b';
       const recDone: OutboxRecord = {
-        runId, kind: 'status',
-        body: [{
-          id: 'item-1', runId, status: 'done', blockedBy: [], depends_on: [],
-          manifestRef: 'pangolin://ns1/manifests/d-1',
-        }],
+        runId,
+        kind: 'status',
+        body: [
+          {
+            id: 'item-1',
+            runId,
+            status: 'done',
+            blockedBy: [],
+            depends_on: [],
+            manifestRef: 'pangolin://ns1/manifests/d-1',
+          },
+        ],
         at: '2026-06-01T12:00:00Z',
       };
       const transport = makeSequencedTransport([[recDone]]);
       const storage = {
-        async get(_ref: string): Promise<Uint8Array> { throw new Error('boom'); },
+        // Valid JSON, but no schemaVersion: 1 — readOutputSentinel must classify
+        // this as 'malformed' rather than trusting the raw usage field.
+        async get(_ref: string): Promise<Uint8Array> {
+          return new TextEncoder().encode(
+            JSON.stringify({
+              usage: { models: ['m1'], costUsd: 0.25, turns: 3 },
+            }),
+          );
+        },
       };
       const oc = makeOrchContext({ transport, storage });
       const ctx = makeCtx(oc);
@@ -473,7 +528,93 @@ describe('attachOrchCmd', () => {
       attachOrchCmd(program, ctx);
 
       const logs = await captureLog(() =>
-        program.parseAsync(['orch', 'watch', runId, '--interval', '0', '--no-clear', '--no-color'], { from: 'user' }),
+        program.parseAsync(
+          ['orch', 'watch', runId, '--interval', '0', '--no-clear', '--no-color'],
+          { from: 'user' },
+        ),
+      );
+
+      expect(logs[0]).toContain('item-1');
+      expect(logs[0]).not.toContain('m1');
+      expect(logs[0]).not.toContain('$0.25');
+      expect(logs[0]).not.toContain('3t');
+    });
+
+    it('skips evidence when the sentinel reads absent (storage.get rejects with a not-found error)', async () => {
+      const runId = 'run-live-3c';
+      const recDone: OutboxRecord = {
+        runId,
+        kind: 'status',
+        body: [
+          {
+            id: 'item-1',
+            runId,
+            status: 'done',
+            blockedBy: [],
+            depends_on: [],
+            manifestRef: 'pangolin://ns1/manifests/d-1',
+          },
+        ],
+        at: '2026-06-01T12:00:00Z',
+      };
+      const transport = makeSequencedTransport([[recDone]]);
+      const storage = {
+        async get(_ref: string): Promise<Uint8Array> {
+          throw new Error('not found');
+        },
+      };
+      const oc = makeOrchContext({ transport, storage });
+      const ctx = makeCtx(oc);
+
+      const program = new Command();
+      attachOrchCmd(program, ctx);
+
+      const logs = await captureLog(() =>
+        program.parseAsync(
+          ['orch', 'watch', runId, '--interval', '0', '--no-clear', '--no-color'],
+          { from: 'user' },
+        ),
+      );
+
+      expect(logs[0]).toContain('item-1');
+      expect(logs[0]).toContain('state: terminal');
+      expect(logs[0]).not.toContain('m1');
+    });
+
+    it('still renders frames when a storage evidence read throws', async () => {
+      const runId = 'run-live-4';
+      const recDone: OutboxRecord = {
+        runId,
+        kind: 'status',
+        body: [
+          {
+            id: 'item-1',
+            runId,
+            status: 'done',
+            blockedBy: [],
+            depends_on: [],
+            manifestRef: 'pangolin://ns1/manifests/d-1',
+          },
+        ],
+        at: '2026-06-01T12:00:00Z',
+      };
+      const transport = makeSequencedTransport([[recDone]]);
+      const storage = {
+        async get(_ref: string): Promise<Uint8Array> {
+          throw new Error('boom');
+        },
+      };
+      const oc = makeOrchContext({ transport, storage });
+      const ctx = makeCtx(oc);
+
+      const program = new Command();
+      attachOrchCmd(program, ctx);
+
+      const logs = await captureLog(() =>
+        program.parseAsync(
+          ['orch', 'watch', runId, '--interval', '0', '--no-clear', '--no-color'],
+          { from: 'user' },
+        ),
       );
 
       expect(logs[0]).toContain('item-1');
@@ -483,12 +624,14 @@ describe('attachOrchCmd', () => {
     it('repaints in place by default (cursor-up + clear by previous frame height)', async () => {
       const runId = 'run-live-5';
       const recA: OutboxRecord = {
-        runId, kind: 'status',
+        runId,
+        kind: 'status',
         body: [{ id: 'item-1', runId, status: 'running', blockedBy: [], depends_on: [] }],
         at: '2026-06-01T12:00:00Z',
       };
       const recB: OutboxRecord = {
-        runId, kind: 'status',
+        runId,
+        kind: 'status',
         body: [{ id: 'item-1', runId, status: 'done', blockedBy: [], depends_on: [] }],
         at: '2026-06-01T12:00:05Z',
       };
@@ -507,7 +650,9 @@ describe('attachOrchCmd', () => {
       let frameLogs: string[] = [];
       try {
         frameLogs = await captureLog(() =>
-          program.parseAsync(['orch', 'watch', runId, '--interval', '0', '--no-color'], { from: 'user' }),
+          program.parseAsync(['orch', 'watch', runId, '--interval', '0', '--no-color'], {
+            from: 'user',
+          }),
         );
       } finally {
         spy.mockRestore();
@@ -536,12 +681,18 @@ describe('attachOrchCmd', () => {
       process.env.PANGOLIN_WATCH_AUDIT_RETRY_MS = '0';
 
       const { SqliteRunStateStore } = await import('@quarry-systems/pangolin-orchestrator');
-      const { AuditLog } = await import('@quarry-systems/pangolin-orchestrator/src/audit/audit-log.js');
-      const { LocalAnchor } = await import('@quarry-systems/pangolin-orchestrator/src/audit/anchor.js');
+      const { AuditLog } =
+        await import('@quarry-systems/pangolin-orchestrator/src/audit/audit-log.js');
+      const { LocalAnchor } =
+        await import('@quarry-systems/pangolin-orchestrator/src/audit/anchor.js');
 
       const store = new SqliteRunStateStore();
       const anchor = new LocalAnchor(store);
-      const fakeSigner = { async sign() { return { alg: 'none', bytes: new Uint8Array(0) }; } };
+      const fakeSigner = {
+        async sign() {
+          return { alg: 'none', bytes: new Uint8Array(0) };
+        },
+      };
       const log = new AuditLog({ store, signer: fakeSigner, anchor });
 
       const runId = 'run-live-audit-late';
@@ -554,17 +705,25 @@ describe('attachOrchCmd', () => {
       const exp = { runId, entries, root, items: [{ id: 'item-1', status: 'done' }] };
 
       const recDone: OutboxRecord = {
-        runId, kind: 'status',
+        runId,
+        kind: 'status',
         body: [{ id: 'item-1', runId, status: 'done', blockedBy: [], depends_on: [] }],
         at: '2026-06-01T00:01:30Z',
       };
-      const auditRec: OutboxRecord = { runId, kind: 'audit', body: exp, at: '2026-06-01T00:02:00Z' };
+      const auditRec: OutboxRecord = {
+        runId,
+        kind: 'audit',
+        body: exp,
+        at: '2026-06-01T00:02:00Z',
+      };
 
       // Poll 1 (watch): terminal status, NO audit export yet.
       // Audit attempt 1: still no export → retry. Attempt 2: export published → summary.
       const transport = makeSequencedTransport([[recDone], [recDone], [recDone, auditRec]]);
       const storage = {
-        async get(_ref: string): Promise<Uint8Array> { throw new Error('no manifests'); },
+        async get(_ref: string): Promise<Uint8Array> {
+          throw new Error('no manifests');
+        },
       };
       const oc = makeOrchContext({ transport, anchor, storage });
       const ctx = makeCtx(oc);
@@ -576,7 +735,10 @@ describe('attachOrchCmd', () => {
       process.exitCode = undefined;
       try {
         const logs = await captureLog(() =>
-          program.parseAsync(['orch', 'watch', runId, '--interval', '0', '--no-clear', '--no-color'], { from: 'user' }),
+          program.parseAsync(
+            ['orch', 'watch', runId, '--interval', '0', '--no-clear', '--no-color'],
+            { from: 'user' },
+          ),
         );
 
         // Frame first, then the verification summary (no "missing export" note).
@@ -614,8 +776,10 @@ describe('attachOrchCmd', () => {
     /** render must work with NO config file — getOrchContext THROWS. */
     function throwingCtx(): CliContext {
       return {
-        getClient: async () => ({} as any),
-        getOrchContext: async () => { throw new Error('getOrchContext must not be called by render'); },
+        getClient: async () => ({}) as any,
+        getOrchContext: async () => {
+          throw new Error('getOrchContext must not be called by render');
+        },
       };
     }
 
@@ -625,9 +789,13 @@ describe('attachOrchCmd', () => {
       items: [
         { id: 'a', executor: 'x', inputs: {}, depends_on: [], resourceLocks: [] },
         {
-          id: 'b', executor: 'x',
-          inputs: { gate: { onRed: 'spawn-fix', subject: 'a', fixTemplate: { executor: 'x', inputs: {} } } },
-          depends_on: ['a'], resourceLocks: [],
+          id: 'b',
+          executor: 'x',
+          inputs: {
+            gate: { onRed: 'spawn-fix', subject: 'a', fixTemplate: { executor: 'x', inputs: {} } },
+          },
+          depends_on: ['a'],
+          resourceLocks: [],
         },
         { id: 'c', executor: 'x', inputs: {}, depends_on: ['b'], resourceLocks: [] },
       ],
@@ -663,7 +831,9 @@ describe('attachOrchCmd', () => {
       attachOrchCmd(program, throwingCtx());
 
       const logs = await captureLog(() =>
-        program.parseAsync(['orch', 'render', planPath, '--pattern', 'pipeline', '--ascii'], { from: 'user' }),
+        program.parseAsync(['orch', 'render', planPath, '--pattern', 'pipeline', '--ascii'], {
+          from: 'user',
+        }),
       );
 
       expect(logs[0]).toContain('[:] b-fix-1');
@@ -672,14 +842,17 @@ describe('attachOrchCmd', () => {
 
     it('renders a generic tree when --pattern is omitted', async () => {
       const planPath = join(tmpDir, 'plan.json');
-      await writeFile(planPath, JSON.stringify({
-        id: 'run-render-tree',
-        queue: 'q',
-        items: [
-          { id: 'a', executor: 'x', inputs: {}, depends_on: [], resourceLocks: [] },
-          { id: 'b', executor: 'x', inputs: {}, depends_on: ['a'], resourceLocks: [] },
-        ],
-      }));
+      await writeFile(
+        planPath,
+        JSON.stringify({
+          id: 'run-render-tree',
+          queue: 'q',
+          items: [
+            { id: 'a', executor: 'x', inputs: {}, depends_on: [], resourceLocks: [] },
+            { id: 'b', executor: 'x', inputs: {}, depends_on: ['a'], resourceLocks: [] },
+          ],
+        }),
+      );
 
       const program = new Command();
       attachOrchCmd(program, throwingCtx());
@@ -725,19 +898,30 @@ describe('attachOrchCmd', () => {
 
     it('surfaces pattern.plan() errors as clean CLI errors (mirrors validate)', async () => {
       const planPath = join(tmpDir, 'plan.json');
-      await writeFile(planPath, JSON.stringify({
-        id: 'run-render-bad-mr',
-        queue: 'q',
-        items: [
-          { id: 'split', executor: 'x', inputs: { mapReduce: 'bogus' }, depends_on: [], resourceLocks: [] },
-        ],
-      }));
+      await writeFile(
+        planPath,
+        JSON.stringify({
+          id: 'run-render-bad-mr',
+          queue: 'q',
+          items: [
+            {
+              id: 'split',
+              executor: 'x',
+              inputs: { mapReduce: 'bogus' },
+              depends_on: [],
+              resourceLocks: [],
+            },
+          ],
+        }),
+      );
 
       const program = new Command();
       attachOrchCmd(program, throwingCtx());
 
       await captureLog(() =>
-        program.parseAsync(['orch', 'render', planPath, '--pattern', 'map-reduce'], { from: 'user' }),
+        program.parseAsync(['orch', 'render', planPath, '--pattern', 'map-reduce'], {
+          from: 'user',
+        }),
       );
 
       expect(process.exitCode).toBe(1);
@@ -751,14 +935,20 @@ describe('attachOrchCmd', () => {
     it('calls through OperationsApi.audit and prints the bundle JSON', async () => {
       // Import orchestrator internals for building a realistic audit export
       const { SqliteRunStateStore } = await import('@quarry-systems/pangolin-orchestrator');
-      const { AuditLog } = await import('@quarry-systems/pangolin-orchestrator/src/audit/audit-log.js');
-      const { LocalAnchor } = await import('@quarry-systems/pangolin-orchestrator/src/audit/anchor.js');
+      const { AuditLog } =
+        await import('@quarry-systems/pangolin-orchestrator/src/audit/audit-log.js');
+      const { LocalAnchor } =
+        await import('@quarry-systems/pangolin-orchestrator/src/audit/anchor.js');
 
       const transport = makeFakeTransport();
 
       const store = new SqliteRunStateStore();
       const anchor = new LocalAnchor(store);
-      const fakeSigner = { async sign() { return { alg: 'none', bytes: new Uint8Array(0) }; } };
+      const fakeSigner = {
+        async sign() {
+          return { alg: 'none', bytes: new Uint8Array(0) };
+        },
+      };
       const log = new AuditLog({ store, signer: fakeSigner, anchor });
 
       const runId = 'run-audit-cli-1';
@@ -773,7 +963,9 @@ describe('attachOrchCmd', () => {
       await transport.publish({ runId, kind: 'audit', body: exp, at: '2026-06-01T00:02:00Z' });
 
       const storage = {
-        async get(_ref: string): Promise<Uint8Array> { throw new Error('no manifests'); },
+        async get(_ref: string): Promise<Uint8Array> {
+          throw new Error('no manifests');
+        },
       };
 
       const oc = makeOrchContext({ transport, anchor, storage });
@@ -798,14 +990,20 @@ describe('attachOrchCmd', () => {
       // Build a valid audit export then tamper with an entry's content so the
       // chain hash check fails during verify(), producing intact=false.
       const { SqliteRunStateStore } = await import('@quarry-systems/pangolin-orchestrator');
-      const { AuditLog } = await import('@quarry-systems/pangolin-orchestrator/src/audit/audit-log.js');
-      const { LocalAnchor } = await import('@quarry-systems/pangolin-orchestrator/src/audit/anchor.js');
+      const { AuditLog } =
+        await import('@quarry-systems/pangolin-orchestrator/src/audit/audit-log.js');
+      const { LocalAnchor } =
+        await import('@quarry-systems/pangolin-orchestrator/src/audit/anchor.js');
 
       const transport = makeFakeTransport();
 
       const store = new SqliteRunStateStore();
       const anchor = new LocalAnchor(store);
-      const fakeSigner = { async sign() { return { alg: 'none', bytes: new Uint8Array(0) }; } };
+      const fakeSigner = {
+        async sign() {
+          return { alg: 'none', bytes: new Uint8Array(0) };
+        },
+      };
       const log = new AuditLog({ store, signer: fakeSigner, anchor });
 
       const runId = 'run-audit-cli-tampered';
@@ -821,12 +1019,19 @@ describe('attachOrchCmd', () => {
       const tamperedEntries = entries.map((e, i) =>
         i === 0 ? { ...e, entryHash: 'tampered-entry-hash' } : e,
       );
-      const exp = { runId, entries: tamperedEntries, root, items: [{ id: 'item-1', status: 'done' }] };
+      const exp = {
+        runId,
+        entries: tamperedEntries,
+        root,
+        items: [{ id: 'item-1', status: 'done' }],
+      };
 
       await transport.publish({ runId, kind: 'audit', body: exp, at: '2026-06-01T00:02:00Z' });
 
       const storage = {
-        async get(_ref: string): Promise<Uint8Array> { throw new Error('no manifests'); },
+        async get(_ref: string): Promise<Uint8Array> {
+          throw new Error('no manifests');
+        },
       };
 
       const oc = makeOrchContext({ transport, anchor, storage });
@@ -838,9 +1043,7 @@ describe('attachOrchCmd', () => {
       const prevExitCode = process.exitCode;
       process.exitCode = undefined;
       try {
-        await captureLog(() =>
-          program.parseAsync(['orch', 'audit', runId], { from: 'user' }),
-        );
+        await captureLog(() => program.parseAsync(['orch', 'audit', runId], { from: 'user' }));
         expect(process.exitCode).toBe(1);
       } finally {
         process.exitCode = prevExitCode;
@@ -849,13 +1052,19 @@ describe('attachOrchCmd', () => {
 
     it('writes audit bundle to --out file when specified', async () => {
       const { SqliteRunStateStore } = await import('@quarry-systems/pangolin-orchestrator');
-      const { AuditLog } = await import('@quarry-systems/pangolin-orchestrator/src/audit/audit-log.js');
-      const { LocalAnchor } = await import('@quarry-systems/pangolin-orchestrator/src/audit/anchor.js');
+      const { AuditLog } =
+        await import('@quarry-systems/pangolin-orchestrator/src/audit/audit-log.js');
+      const { LocalAnchor } =
+        await import('@quarry-systems/pangolin-orchestrator/src/audit/anchor.js');
 
       const transport = makeFakeTransport();
       const store = new SqliteRunStateStore();
       const anchor = new LocalAnchor(store);
-      const fakeSigner = { async sign() { return { alg: 'none', bytes: new Uint8Array(0) }; } };
+      const fakeSigner = {
+        async sign() {
+          return { alg: 'none', bytes: new Uint8Array(0) };
+        },
+      };
       const log = new AuditLog({ store, signer: fakeSigner, anchor });
 
       const runId = 'run-audit-cli-out';
@@ -869,7 +1078,9 @@ describe('attachOrchCmd', () => {
       await transport.publish({ runId, kind: 'audit', body: exp, at: '2026-06-01T00:02:00Z' });
 
       const storage = {
-        async get(_ref: string): Promise<Uint8Array> { throw new Error('no manifests'); },
+        async get(_ref: string): Promise<Uint8Array> {
+          throw new Error('no manifests');
+        },
       };
 
       const oc = makeOrchContext({ transport, anchor, storage });
@@ -924,9 +1135,9 @@ describe('attachOrchCmd', () => {
       const program = new Command();
       attachOrchCmd(program, ctx);
 
-      await expect(
-        program.parseAsync(['orch', 'serve'], { from: 'user' }),
-      ).rejects.toThrow('no runService');
+      await expect(program.parseAsync(['orch', 'serve'], { from: 'user' })).rejects.toThrow(
+        'no runService',
+      );
     });
   });
 
@@ -955,14 +1166,19 @@ describe('attachOrchCmd', () => {
       const transport = makeFakeTransport();
       const ctx = makeCtx(makeOrchContext({ transport }));
       const planPath = join(tmpDir, 'plan.json');
-      await writeFile(planPath, JSON.stringify({
-        id: 'r',
-        queue: 'default',
-        items: [{ id: 'a', executor: 'noop', inputs: {}, depends_on: [], resourceLocks: [] }],
-      }));
+      await writeFile(
+        planPath,
+        JSON.stringify({
+          id: 'r',
+          queue: 'default',
+          items: [{ id: 'a', executor: 'noop', inputs: {}, depends_on: [], resourceLocks: [] }],
+        }),
+      );
       const program = new Command();
       attachOrchCmd(program, ctx);
-      const logs = await captureLog(() => program.parseAsync(['orch', 'validate', planPath], { from: 'user' }));
+      const logs = await captureLog(() =>
+        program.parseAsync(['orch', 'validate', planPath], { from: 'user' }),
+      );
       expect(JSON.parse(logs[0]).valid).toBe(true);
       expect(JSON.parse(logs[0]).items).toBe(1);
       expect(transport._submissions).toHaveLength(0);
@@ -973,11 +1189,22 @@ describe('attachOrchCmd', () => {
       const transport = makeFakeTransport();
       const ctx = makeCtx(makeOrchContext({ transport }));
       const planPath = join(tmpDir, 'plan-invalid.json');
-      await writeFile(planPath, JSON.stringify({
-        id: 'r2',
-        queue: 'default',
-        items: [{ id: 'a', executor: 'noop', inputs: {}, depends_on: ['missing-item'], resourceLocks: [] }],
-      }));
+      await writeFile(
+        planPath,
+        JSON.stringify({
+          id: 'r2',
+          queue: 'default',
+          items: [
+            {
+              id: 'a',
+              executor: 'noop',
+              inputs: {},
+              depends_on: ['missing-item'],
+              resourceLocks: [],
+            },
+          ],
+        }),
+      );
       const program = new Command();
       attachOrchCmd(program, ctx);
 
@@ -992,14 +1219,17 @@ describe('attachOrchCmd', () => {
       const transport = makeFakeTransport();
       const ctx = makeCtx(makeOrchContext({ transport }));
       const planPath = join(tmpDir, 'plan-cycle.json');
-      await writeFile(planPath, JSON.stringify({
-        id: 'r3',
-        queue: 'default',
-        items: [
-          { id: 'a', executor: 'noop', inputs: {}, depends_on: ['b'], resourceLocks: [] },
-          { id: 'b', executor: 'noop', inputs: {}, depends_on: ['a'], resourceLocks: [] },
-        ],
-      }));
+      await writeFile(
+        planPath,
+        JSON.stringify({
+          id: 'r3',
+          queue: 'default',
+          items: [
+            { id: 'a', executor: 'noop', inputs: {}, depends_on: ['b'], resourceLocks: [] },
+            { id: 'b', executor: 'noop', inputs: {}, depends_on: ['a'], resourceLocks: [] },
+          ],
+        }),
+      );
       const program = new Command();
       attachOrchCmd(program, ctx);
 

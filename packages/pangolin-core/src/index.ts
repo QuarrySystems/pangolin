@@ -30,6 +30,7 @@ export * from './audit-canon.js';
 export * from './audit-merkle.js';
 export * from './audit-verify.js';
 export * from './audit-verify-bundle.js';
+export * from './product.js';
 export { runBoundedCommand } from './bounded-command.js';
 export type { RunBoundedCommandOpts, BoundedCommandResult } from './bounded-command.js';
 export { parsePositiveInteger } from './env-int.js';

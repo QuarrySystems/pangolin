@@ -1,10 +1,11 @@
 {
-  "name": "@quarry-systems/pangolin-cli",
-  "version": "0.3.1",
+  "name": "@quarry-systems/pangolin-product",
+  "version": "0.4.0",
   "license": "BUSL-1.1",
-  "description": "The pangolin binary — a thin CLI over PangolinClient that resolves pangolin.config.{ts,js,mjs} and dispatches to subcommands.",
+  "description": "Consumer-side read of a dispatch's product — the output sentinel and its content-addressed artifacts. Depends only on pangolin-core.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "type": "module",
   "publishConfig": {
     "access": "public"
   },
@@ -16,14 +17,11 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/QuarrySystems/pangolin.git",
-    "directory": "packages/pangolin-cli"
+    "directory": "packages/pangolin-product"
   },
   "homepage": "https://quarrysystems.github.io/pangolin",
   "bugs": {
     "url": "https://github.com/QuarrySystems/pangolin/issues"
-  },
-  "bin": {
-    "pangolin": "dist/index.js"
   },
   "scripts": {
     "lint": "eslint src --ext .ts",
@@ -33,12 +31,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@quarry-systems/pangolin-client": "workspace:*",
-    "@quarry-systems/pangolin-core": "workspace:*",
-    "@quarry-systems/pangolin-orchestrator": "workspace:*",
-    "@quarry-systems/pangolin-product": "workspace:*",
-    "commander": "^12.0.0",
-    "yaml": "^2.0.0"
+    "@quarry-systems/pangolin-core": "workspace:*"
   },
   "devDependencies": {}
 }
