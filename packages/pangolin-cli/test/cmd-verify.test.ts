@@ -6,7 +6,6 @@ import { tmpdir } from 'node:os';
 import type {
   AuditBundle,
   AuditAnchor,
-  AuditAnchorReceipt,
   AuditEntryRow,
   AnchoredRoot,
   Signature,

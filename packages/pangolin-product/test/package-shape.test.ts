@@ -45,11 +45,15 @@ it('has no bin field', () => {
   expect(pkg.bin).toBeUndefined();
 });
 
-it('declares all five standard scripts', () => {
+it('declares the standard scripts, including the test-typecheck gate', () => {
+  // Strict `toEqual` on purpose: this pins the exact set AND the exact command
+  // strings, so a drift in either fails loudly. It caught the `lint` widening
+  // and the `typecheck:test` addition when those landed (issue #99).
   expect(pkg.scripts).toEqual({
-    lint: 'eslint src --ext .ts',
+    lint: 'eslint src test --ext .ts',
     test: 'vitest run',
     typecheck: 'tsc --noEmit',
+    'typecheck:test': 'tsc --noEmit -p tsconfig.test.json',
     build: 'tsc',
     clean: 'rm -rf dist',
   });

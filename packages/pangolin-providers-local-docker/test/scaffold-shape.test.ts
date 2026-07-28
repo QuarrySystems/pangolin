@@ -13,7 +13,6 @@ const readJson = (relPath: string): unknown => {
   return JSON.parse(raw);
 };
 
-const FORBIDDEN_PREFIXES = ['@quarry-systems/pangolin-core'];
 
 describe('@quarry-systems/pangolin-providers-local-docker scaffold shape', () => {
   describe('package.json', () => {

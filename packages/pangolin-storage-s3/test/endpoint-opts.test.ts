@@ -6,7 +6,7 @@
 // (private) `s3` field and calling the async `config.endpoint()` resolver
 // that the AWS SDK exposes on every client it constructs.
 
-import { describe, it, expect } from 'vitest';
+import { it, expect } from 'vitest';
 import { S3StorageProvider } from '../src/index.js';
 
 it('builds a client targeting the given endpoint when no client is injected', async () => {

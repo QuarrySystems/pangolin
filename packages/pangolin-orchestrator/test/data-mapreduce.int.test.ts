@@ -29,7 +29,6 @@ import { SqliteRunStateStore } from '../src/runstate/sqlite.js';
 import { assembleBundle } from '../src/audit/bundle.js';
 import { verifyBundle } from '../src/audit/verify-bundle.js';
 import { mapReduce } from '../src/patterns/map-reduce.js';
-import { LocalAnchor } from '../src/audit/anchor.js';
 import { InprocWorkerExecutor } from './fixtures/inproc-worker-executor.js';
 import { makeOrch, driveUntilDone, driveUntil } from './fixtures/pattern-harness.js';
 import type { Run } from '../src/contracts/types.js';

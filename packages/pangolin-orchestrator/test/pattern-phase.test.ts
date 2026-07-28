@@ -1,11 +1,9 @@
 ﻿// packages/pangolin-orchestrator/test/pattern-phase.test.ts
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { SqliteRunStateStore } from '../src/runstate/sqlite.js';
 import { idKeyedExecutor, makeOrch, driveUntilDone, storageFromBlobs } from './fixtures/pattern-harness.js';
 import { PangolinOrchestrator } from '../src/orchestrator.js';
 import { ManualTrigger } from '../src/triggers/manual.js';
-import { AuditLog } from '../src/audit/audit-log.js';
-import { NoneSigner } from '../src/audit/signer.js';
 import { LocalAnchor } from '../src/audit/anchor.js';
 import { assembleBundle } from '../src/audit/bundle.js';
 import { pipeline } from '../src/patterns/pipeline.js';
@@ -171,10 +169,8 @@ describe('pattern-phase: seal ordering (spawning in tick N delays seal to tick N
     await orch.submitRun({ id: 'r-seal', queue: 'default', items: [wi('a')] });
 
     // Drive until item 'a' is done
-    let ticksUntilADone = 0;
     for (let i = 0; i < 32; i++) {
       await orch.tick('default');
-      ticksUntilADone++;
       const aStatus = orch.getStatus('r-seal').find((s) => s.id === 'a');
       if (aStatus?.status === 'done') break;
     }

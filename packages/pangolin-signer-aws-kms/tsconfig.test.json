@@ -1,0 +1,14 @@
+{
+  // Type-checks test/ alongside src/, which tsconfig.json deliberately excludes
+  // (its `include` is src-only so `build` emits only src to dist/).
+  //
+  // Wired to the `typecheck:test` script and run in CI. Only packages whose
+  // test/ currently type-checks clean carry this file — see issue #99 for the
+  // ten packages still carrying test-double debt.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "."
+  },
+  "include": ["src/**/*", "test/**/*"]
+}

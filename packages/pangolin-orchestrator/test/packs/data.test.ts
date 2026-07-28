@@ -1,6 +1,6 @@
 import { it, expect } from "vitest";
 import { dataPack, dataRegistry, dataSplit, dataTransform, dataAggregate } from "../../src/packs/data.js";
-import { devPack, devCodeEdit } from "../../src/packs/dev.js";
+import { devPack } from "../../src/packs/dev.js";
 import { PackRegistry } from "../../src/packs/registry.js";
 import { validateRun, normalizeRun } from "../../src/engine/run-validator.js";
 

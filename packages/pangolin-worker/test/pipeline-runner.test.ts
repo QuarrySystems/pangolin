@@ -63,7 +63,9 @@ class FakeStorage implements StorageProvider {
 // Fake RuntimeAdapter
 // ---------------------------------------------------------------------------
 
-function makeFakeAdapter(exit: RuntimeExit = { exitCode: 0, stdout: '', stderr: '' }): RuntimeAdapter {
+function makeFakeAdapter(
+  exit: RuntimeExit = { exitCode: 0, stdout: '', stderr: '' },
+): RuntimeAdapter {
   return {
     name: 'fake',
     reservedPaths: [],
@@ -97,7 +99,9 @@ async function makeCtx(
     inputJson: opts.inputJson,
     baseline,
     redact: (s) => s,
-    log: (event) => { logs.push(event); },
+    log: (event) => {
+      logs.push(event);
+    },
   };
   return { ctx, logs };
 }
@@ -249,13 +253,19 @@ describe('runPipeline — completed path', () => {
     const brokenStorage: StorageProvider & { puts: unknown[] } = {
       name: 'broken',
       puts: [],
-      put: async () => { throw new Error('storage down'); },
-      get: async () => { throw new Error('no'); },
+      put: async () => {
+        throw new Error('storage down');
+      },
+      get: async () => {
+        throw new Error('no');
+      },
       resolveLatest: async () => null,
       list: async () => [],
       resolveByHash: async () => null,
     };
-    const { ctx, logs } = await makeCtx(dir, { storage: brokenStorage as unknown as StorageProvider });
+    const { ctx, logs } = await makeCtx(dir, {
+      storage: brokenStorage as unknown as StorageProvider,
+    });
 
     const spec: PipelineSpec = {
       schemaVersion: 1,
@@ -337,7 +347,9 @@ describe('runPipeline — gate script logging', () => {
       subagent: {},
       baseline,
       redact: (s) => s.replace(/SECRET/g, '[REDACTED]'),
-      log: (event) => { logs.push(event); },
+      log: (event) => {
+        logs.push(event);
+      },
     };
 
     // Script writes "SECRET text" to stdout and exits 0
@@ -345,7 +357,11 @@ describe('runPipeline — gate script logging', () => {
       schemaVersion: 1,
       id: 'dev.test',
       blocks: [
-        { kind: 'script', command: 'node -e "process.stdout.write(\'SECRET text\')"', lens: 'gate' },
+        {
+          kind: 'script',
+          command: 'node -e "process.stdout.write(\'SECRET text\')"',
+          lens: 'gate',
+        },
       ],
     };
 
@@ -410,10 +426,7 @@ describe('runPipeline — gate failure', () => {
     const spec: PipelineSpec = {
       schemaVersion: 1,
       id: 'dev.test',
-      blocks: [
-        { kind: 'script', command: 'node -e "process.exit(2)"' },
-        { kind: 'agent' },
-      ],
+      blocks: [{ kind: 'script', command: 'node -e "process.exit(2)"' }, { kind: 'agent' }],
     };
 
     const result = await runPipeline(spec, ctx, { declared: false });
@@ -502,7 +515,9 @@ describe('runPipeline — adapter throw propagation', () => {
     const throwingAdapter: RuntimeAdapter = {
       name: 'throwing',
       reservedPaths: [],
-      invoke: async () => { throw new Error('adapter exploded'); },
+      invoke: async () => {
+        throw new Error('adapter exploded');
+      },
     };
     const { ctx } = await makeCtx(dir, { storage, adapter: throwingAdapter });
 
@@ -535,45 +550,33 @@ describe('runPipeline — capture block is not a gate', () => {
     // Storage that throws ONLY on artifact URIs (capture uploads), succeeds on dispatch record URIs.
     // Artifact URIs look like: pangolin://<ns>/artifact/...
     // Dispatch record URIs look like: pangolin://<ns>/dispatch/...
-    const artifactThrowStorage: StorageProvider = {
-      name: 'artifact-throw',
-      put: async (uri: string, _contents: Uint8Array) => {
-        if (uri.includes('/artifact/')) throw new Error('artifact upload failed');
-        return { contentHash: 'sha256:fake' };
-      },
-      get: async () => { throw new Error('no'); },
-      resolveLatest: async () => null,
-      list: async () => [],
-      resolveByHash: async () => null,
-    };
-
     const sentinelPuts: string[] = [];
     const trackingSentinelStorage: StorageProvider = {
       name: 'tracking',
-      put: async (uri: string, contents: Uint8Array) => {
+      put: async (uri: string, _contents: Uint8Array) => {
         if (uri.includes('/artifact/')) throw new Error('artifact upload failed');
         sentinelPuts.push(uri);
         return { contentHash: 'sha256:fake' };
       },
-      get: async () => { throw new Error('no'); },
+      get: async () => {
+        throw new Error('no');
+      },
       resolveLatest: async () => null,
       list: async () => [],
       resolveByHash: async () => null,
     };
 
-    const { ctx, logs } = await makeCtx(dir, { storage: trackingSentinelStorage });
-
     // spec: [agent, capture(outputs) — will throw on artifact put, capture(patch)]
     // The second agent block (after the failing capture) should still run,
-    // proving capture failure is not a gate.
-    const secondAdapter = makeFakeAdapter({ exitCode: 0, stdout: 'second ran', stderr: '' });
+    // proving capture failure is not a gate. `countingAdapter` below is what
+    // proves it — it counts invocations across both agent blocks.
     const spec: PipelineSpec = {
       schemaVersion: 1,
       id: 'dev.test',
       blocks: [
         { kind: 'agent' },
         { kind: 'capture', what: 'outputs' }, // throws → logs escape.failed, continues
-        { kind: 'agent' },                      // must still run
+        { kind: 'agent' }, // must still run
       ],
     };
 
@@ -626,10 +629,7 @@ describe('runPipeline — unknown block kind', () => {
     const spec: PipelineSpec = {
       schemaVersion: 1,
       id: 'dev.test',
-      blocks: [
-        { kind: 'agent' },
-        { kind: 'unknown-future-block' } as never,
-      ],
+      blocks: [{ kind: 'agent' }, { kind: 'unknown-future-block' } as never],
     };
 
     const result = await runPipeline(spec, ctx, { declared: false });
@@ -691,9 +691,7 @@ describe('runPipeline — verify lens', () => {
     const spec: PipelineSpec = {
       schemaVersion: 1,
       id: 'dev.test',
-      blocks: [
-        { kind: 'script', command: 'node -e "process.exit(0)"', lens: 'verify' },
-      ],
+      blocks: [{ kind: 'script', command: 'node -e "process.exit(0)"', lens: 'verify' }],
     };
 
     const result = await runPipeline(spec, ctx, { declared: false });
@@ -714,7 +712,9 @@ describe('runPipeline — verify lens', () => {
 
 describe('runPipeline — usage aggregation', () => {
   /** Adapter that returns exits[i] on the i-th invoke and records every invocation. */
-  function makeSequenceAdapter(exits: RuntimeExit[]): RuntimeAdapter & { invocations: RuntimeInvocation[] } {
+  function makeSequenceAdapter(
+    exits: RuntimeExit[],
+  ): RuntimeAdapter & { invocations: RuntimeInvocation[] } {
     const invocations: RuntimeInvocation[] = [];
     let i = 0;
     return {
@@ -755,7 +755,12 @@ describe('runPipeline — usage aggregation', () => {
     const storage = new FakeStorage();
     const adapter = makeSequenceAdapter([
       { exitCode: 0, stdout: '', stderr: '', usage: { models: ['m-a'], costUsd: 0.25, turns: 2 } },
-      { exitCode: 0, stdout: '', stderr: '', usage: { models: ['m-b', 'm-a'], costUsd: 0.5, durationMs: 700 } },
+      {
+        exitCode: 0,
+        stdout: '',
+        stderr: '',
+        usage: { models: ['m-b', 'm-a'], costUsd: 0.5, durationMs: 700 },
+      },
     ]);
     const { ctx } = await makeCtx(dir, { storage, adapter });
 
@@ -837,10 +842,7 @@ describe('runPipeline — seal aggregation', () => {
     const spec: PipelineSpec = {
       schemaVersion: 1,
       id: 'dev.test',
-      blocks: [
-        { kind: 'agent' },
-        { kind: 'capture', what: 'patch' },
-      ],
+      blocks: [{ kind: 'agent' }, { kind: 'capture', what: 'patch' }],
     };
 
     const result = await runPipeline(spec, ctx, { declared: false });

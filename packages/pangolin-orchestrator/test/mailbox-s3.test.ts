@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { it, expect } from 'vitest';
 import { S3Mailbox } from '../src/mailbox/s3.js';
 import type { MailboxS3Client } from '../src/contracts/index.js';
 

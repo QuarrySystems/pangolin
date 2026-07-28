@@ -209,21 +209,6 @@ function makeStore(opts: { name?: string; dir?: string } = {}): {
   return { store, staged, cleanupCalls };
 }
 
-function makeClient(overrides: Partial<ConstructorParameters<typeof PangolinClient>[0]> = {}) {
-  const storage = makeMemoryStorage();
-  const { compute } = makeCompute();
-  const credentials = makeCredentials();
-  const opts = {
-    namespace: 'ns',
-    compute: { default: compute },
-    credentials: { default: credentials },
-    storage,
-    targets: { prod: { compute: 'default', credentials: 'default' } },
-    ...overrides,
-  };
-  return { client: new PangolinClient(opts), storage, compute, credentials };
-}
-
 beforeEach(() => {
   vi.restoreAllMocks();
   // Stub HMAC mint so callbacks don't hit AWS.
