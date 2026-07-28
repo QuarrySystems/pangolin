@@ -243,7 +243,16 @@ describe('offload-runner pressure tests', () => {
       tickIntervalMs: 5,
       signal: ac1.signal,
     });
-    await sleep(60); // t0 finishes (5ms); t1 (300ms) is still in-flight -> stranded by the crash
+    // Wait for the CONDITION the crash window needs — t0 done, t1 still in-flight —
+    // rather than assuming 60ms of wall clock gets us there. Under contention the tick
+    // loop (tickIntervalMs: 5) has not completed t0 within 60ms, leaving `midDone` empty
+    // and failing `expect(midDone).toContain('t0')` below for reasons that have nothing
+    // to do with durability. t1 runs 300ms against t0's 5ms, so waiting on t0 still
+    // leaves ample margin to abort while t1 is genuinely stranded.
+    //
+    // Same reasoning as `driveUntil`'s own comment, which this file already applies at
+    // the other three wait points; this was the one place left on a blind sleep.
+    await driveUntil(() => orch1.getStatus().find((s) => s.id === 't0')?.status === 'done');
     ac1.abort();
     await p1;
     const midDone = orch1
