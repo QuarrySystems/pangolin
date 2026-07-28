@@ -724,7 +724,8 @@ depends_on: [task-sentinel-read, task-artifact-fetch]
 files:
   - packages/pangolin-product/src/index.ts
   - packages/pangolin-product/test/barrel.test.ts
-status: pending
+status: done
+commit: fab7c6e
 is_wiring_task: true
 ```
 
@@ -765,7 +766,7 @@ files:
   - packages/pangolin-orchestrator/src/executors/dispatch.ts
   - packages/pangolin-orchestrator/package.json
   - packages/pangolin-orchestrator/test/dispatch-sentinel-read.test.ts
-status: pending
+status: running
 ```
 
 Delete the 46-line private `readSentinel` and delegate. The projection to
@@ -849,7 +850,7 @@ files:
   - packages/pangolin-cli/src/cmd-orch.ts
   - packages/pangolin-cli/package.json
   - packages/pangolin-cli/test/cmd-orch.test.ts
-status: pending
+status: running
 ```
 
 Replace the hand-built URI plus `JSON.parse` at `cmd-orch.ts:185-188` with the
@@ -904,7 +905,7 @@ files:
   - examples/data-mapreduce/src/index.ts
   - examples/data-mapreduce/package.json
   - examples/data-mapreduce/test/sentinel-read.test.ts
-status: pending
+status: running
 review_mode: merged
 ```
 
@@ -960,7 +961,7 @@ files:
   - examples/dogfood-gated/src/index.ts
   - examples/dogfood-gated/package.json
   - examples/dogfood-gated/test/usage-read.test.ts
-status: pending
+status: running
 review_mode: merged
 ```
 
@@ -1013,10 +1014,21 @@ files:
   - docs-site/src/content/docs/explanation/decisions/0020-dispatch-product-read.md
   - docs-site/src/content/docs/explanation/decisions/index.md
   - docs-site/test/decisions-index.test.ts
-status: pending
+  - docs-site/vitest.config.ts
+status: running
 is_wiring_task: true
 review_mode: merged
 ```
+
+> **Scope amended mid-flight (controller, after a BLOCKED report).** `docs-site/vitest.config.ts`
+> sets `include: ['src/**/*.test.ts']`, which OVERRIDES vitest's defaults rather than
+> merging with them — so no file under `docs-site/test/` is ever collected, and an
+> explicit path argument is still filtered against the glob. The plan specified
+> `docs-site/test/*.test.ts` for both docs tasks without checking this, making those
+> tests dead code. This task now owns widening the glob to
+> `['src/**/*.test.ts', 'test/**/*.test.ts']`, which also un-deadens
+> `task-docs`'s already-committed `test/product-read-docs.test.ts`. Every other
+> package in the repo uses `test/`; docs-site was the outlier.
 
 Record the decision now that the surface exists. Marked `is_wiring_task` because
 its `files:` span `docs-site/src` and `docs-site/test` (two subsystem prefixes)
@@ -1083,7 +1095,7 @@ files:
   - docs-site/src/content/docs/reference/pangolin-client-api.md
   - docs-site/src/content/docs/explanation/architecture-overview.md
   - docs-site/test/product-read-docs.test.ts
-status: pending
+status: running
 is_wiring_task: true
 review_mode: merged
 ```
