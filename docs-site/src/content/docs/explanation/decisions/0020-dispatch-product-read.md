@@ -26,9 +26,9 @@ are knowable without holding anything from the `fire()` call itself.
 The worker already writes two different kinds of thing at that anchor, and
 they have different trust shapes:
 
-- **The output sentinel** (`packages/pangolin-worker/src/output-sentinel.ts`)
-  is a URI-addressed overwrite put — "not content-addressed"
-  (`:234-236`). `DispatchRecordUriParts`
+- **The output sentinel** (`packages/pangolin-worker/src/output-sentinel.ts`,
+  in `writeSentinel`) is a URI-addressed overwrite put — "not
+  content-addressed" (`:188`). `DispatchRecordUriParts`
   (`packages/pangolin-core/src/uri.ts:27-36`) has no `contentHash` field, by
   design: the sentinel's location is fixed ahead of time (dispatchId is
   known before the dispatch runs), so it cannot also be addressed by the
@@ -36,10 +36,11 @@ they have different trust shapes:
   write access to the same storage prefix from overwriting it.
 - **Artifacts** the dispatch produces are referenced via
   `buildPangolinUri({ namespace, type: 'artifact', name: dispatchId,
-  contentHash })` (`output-sentinel.ts:111` and `:187`) — both the hash and
-  the dispatchId are recoverable from the URI itself, so a reader can fetch
-  the bytes and verify them against the URI without trusting the storage
-  backend or the party that wrote them.
+  contentHash })` (`output-sentinel.ts`, in `capturePatch` at `:53` and
+  `captureOutputs` at `:129`) — both the hash and the dispatchId are
+  recoverable from the URI itself, so a reader can fetch the bytes and
+  verify them against the URI without trusting the storage backend or the
+  party that wrote them.
 
 The worker has an internal `fetchVerified` helper that checks a fetched
 blob's bytes against an expected `contentHash` before returning it. The
