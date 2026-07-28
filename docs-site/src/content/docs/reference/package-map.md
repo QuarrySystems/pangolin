@@ -1,15 +1,15 @@
 ---
 title: Package map
-description: The fourteen Pangolin Scale packages and the package dependency graph (everything points at pangolin-core).
+description: The sixteen Pangolin Scale packages and the package dependency graph (everything points at pangolin-core).
 sidebar:
   order: 7
 ---
 
-Pangolin Scale ships as fourteen packages under `packages/`, all published under the
+Pangolin Scale ships as sixteen packages under `packages/`, all published under the
 `@quarry-systems/` npm scope. `pangolin-core` is the types-only contract sink;
 every other package depends on it and nothing else by default.
 
-## The fourteen packages
+## The sixteen packages
 
 | Package | One-liner |
 |---|---|
@@ -27,6 +27,7 @@ every other package depends on it and nothing else by default.
 | `pangolin-secret-store` | `SecretStore` seam plus impls — `InlineSecretStager` (AWS Secrets Manager) and `LocalSecretStore` (on-disk staging). `pangolin-client` also depends on it. |
 | `pangolin-orchestrator` | Orchestrator engine (codename *pangolin-offload*): named queues, `depends_on` resolution, resource locks, a fire-and-reconcile tick loop, SQLite run-state, and a verifiable audit trail (tamper-detecting by default, tamper-evident at the S3 Object Lock tier), behind pluggable `Executor` / `Trigger` seams. The chain/Merkle/verify core + audit types now live in `pangolin-core`; the orchestrator re-exports them as shims for back-compat. Surfaces as `pangolin orch` + the client MCP tools. |
 | `pangolin-verify` | Standalone, **zero-orchestrator-dependency** audit-bundle verifier. Bin: `npx @quarry-systems/pangolin-verify <bundle.json> [--anchor <verify-context.json>] [--json] [--full]`. Depends only on `pangolin-core`. Exports `verifyBundle` plus the `TimestampAuthority` impls. Lets an auditor re-verify a handed-over bundle without installing the orchestrator. |
+| `pangolin-product` | Consumer-side product read: fetches and verifies a dispatch's output — `readOutputSentinel` / `parseOutputSentinel` (the worker-written sentinel) and `fetchDispatchArtifact` / `assertArtifactRef` (the content-addressed patch and `outputs/` artifacts it names). Depends only on `pangolin-core`. See [Dispatch lifecycle → Reading output after the fact](/pangolin/reference/dispatch-lifecycle/#reading-output-after-the-fact). |
 
 :::note
 The README labels the pangolin-mcp tool surface as "exactly six run-time tools."
@@ -56,6 +57,7 @@ graph TD
   secretstore[pangolin-secret-store]
   orch[pangolin-orchestrator<br/><i>offload engine</i>]
   verify[pangolin-verify<br/><i>standalone verifier</i>]
+  product[pangolin-product<br/><i>consumer-side product read</i>]
 
   client --> core
   client --> secretstore
@@ -71,6 +73,7 @@ graph TD
   secretstore --> core
   orch --> core
   verify --> core
+  product --> core
 ```
 
 No Pangolin Scale package depends on another Quarry Systems library (Stoa, Bedrock,

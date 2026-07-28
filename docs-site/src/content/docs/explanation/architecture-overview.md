@@ -110,7 +110,12 @@ flowchart TD
 5. **Escape.** The diff is uploaded as a **content-addressed patch artifact**;
    the sentinel `.pangolin/output.json` carries its `patchRef`. On reconcile the
    executor records it as the item's **`result_ref`** — the one thing that
-   leaves the sandbox by default.
+   leaves the sandbox by default. The sentinel itself is also readable
+   without that reconcile step: any caller holding the dispatch id and
+   namespace can fetch and parse it directly (`readOutputSentinel` from
+   `@quarry-systems/pangolin-product`), independent of the executor's
+   result-recording path — see
+   [Dispatch lifecycle → Reading output after the fact](/pangolin/reference/dispatch-lifecycle/#reading-output-after-the-fact).
 
 6. **Tamper-evident audit (engine-side).** The lifecycle stream is hash-chained
    per run, accumulated into a **Merkle root per epoch**, signed, and handed to a

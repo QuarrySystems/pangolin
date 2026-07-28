@@ -189,6 +189,37 @@ The worker emits a `verify.ran` event:
 {"kind":"verify.ran","dispatchId":"...","passed":true,"durationMs":548}
 ```
 
+## Reading output after the fact
+
+A finished dispatch's product lives in two places: the sentinel itself
+(`.pangolin/output.json`, uploaded to the per-dispatch dispatch-record URI at the end of step 14)
+and the content-addressed artifacts it names (the patch, and any `outputs/` entries).
+`@quarry-systems/pangolin-product` — a package that depends only on `pangolin-core` — is the
+public, consumer-side read of both:
+
+- `readOutputSentinel(deps, dispatchId)` fetches and parses the sentinel. A missing sentinel comes
+  back as `{ status: 'absent' }` rather than throwing — a finished dispatch with no sentinel is a
+  normal outcome, since sentinel writes are best-effort.
+- `fetchDispatchArtifact(storage, ref, expect)` fetches one of the sentinel's artifact refs (e.g.
+  `patchRef`, or an `outputs[].ref`) and verifies it against the content hash embedded in the ref,
+  throwing `IntegrityMismatchError` on a mismatch. `assertArtifactRef` performs the same check
+  without the I/O, rejecting a ref that doesn't match the expected namespace/dispatch id or carries
+  no pinned hash.
+
+The two halves have different trust properties, and the difference matters for anyone reading a
+dispatch's output directly rather than through `pangolin dispatch describe`. The **sentinel** is
+written with a URI-addressed overwrite put — its object key is derived from the namespace and
+dispatch id, not its bytes — so nothing verifies it on read; a later write at the same URI silently
+replaces an earlier one. The **artifacts it names** (the patch, `outputs/` entries) are
+content-addressed and self-verifying: the ref embeds the artifact's sha256, so
+`fetchDispatchArtifact` recomputes the hash on every fetch.
+
+Reading the sentinel this way does not require reconcile, or even a `describe`-able dispatch
+record — it reads whatever the worker last uploaded to the dispatch-record URI, independent of
+the orchestrator/client bookkeeping. See
+[PangolinClient API → client.dispatch](/pangolin/reference/pangolin-client-api/#clientdispatch)
+for the `describe`-only-sees-reconciled-dispatches caveat this complements.
+
 ## The 6 lifecycle events (closed vocabulary)
 
 | Event | Meaning | Worker exit code |
