@@ -7,18 +7,21 @@
   "license": "BUSL-1.1",
   "scripts": {
     "start": "tsx src/index.ts",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --esModuleInterop --skipLibCheck --strict src/index.ts",
     "build": "tsc --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --esModuleInterop --skipLibCheck --strict src/index.ts"
   },
   "dependencies": {
     "@quarry-systems/pangolin-orchestrator": "workspace:*",
     "@quarry-systems/pangolin-client": "workspace:*",
+    "@quarry-systems/pangolin-product": "workspace:*",
     "@quarry-systems/pangolin-worker": "workspace:*",
     "@quarry-systems/pangolin-storage-local": "workspace:*",
     "@quarry-systems/pangolin-secret-store": "workspace:*"
   },
   "devDependencies": {
     "tsx": "^4.19.0",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.9"
   }
 }
