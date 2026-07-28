@@ -3,8 +3,9 @@
   // (its `include` is src-only so `build` emits only src to dist/).
   //
   // Wired to the `typecheck:test` script and run in CI. Only packages whose
-  // test/ currently type-checks clean carry this file — see issue #99 for the
-  // ten packages still carrying test-double debt.
+  // test/ already type-checks clean carry this file; the ten still carrying
+  // test-double debt are tracked in issue #103. Adding this file plus the
+  // script is all it takes to opt a package in — no CI change needed.
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": true,
