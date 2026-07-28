@@ -42,6 +42,25 @@ it('package-map states a package count that matches the actual packages/ directo
   expect(content).toMatch(new RegExp(expectedWord, 'i'));
 });
 
+it('package-map table row count matches the actual packages/ directory count', () => {
+  const count = actualPackageCount();
+  const content = read(packageMapPath);
+  const rowMatches = content.match(/^\|\s*`pangolin-[a-z0-9-]+`\s*\|/gm) ?? [];
+  expect(rowMatches.length).toBe(count);
+});
+
+it('package-map names every directory under packages/ by name', () => {
+  const dirNames = readdirSync(packagesDir).filter((entry) =>
+    statSync(join(packagesDir, entry)).isDirectory(),
+  );
+  const content = read(packageMapPath);
+  for (const dirName of dirNames) {
+    expect(content, `${dirName} is missing from package-map.md`).toMatch(
+      new RegExp('`' + dirName + '`'),
+    );
+  }
+});
+
 it('package-map documents pangolin-product as a table row depending only on pangolin-core', () => {
   const content = read(packageMapPath);
   expect(content).toMatch(/\|\s*`pangolin-product`\s*\|/);

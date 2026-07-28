@@ -28,6 +28,7 @@ every other package depends on it and nothing else by default.
 | `pangolin-orchestrator` | Orchestrator engine (codename *pangolin-offload*): named queues, `depends_on` resolution, resource locks, a fire-and-reconcile tick loop, SQLite run-state, and a verifiable audit trail (tamper-detecting by default, tamper-evident at the S3 Object Lock tier), behind pluggable `Executor` / `Trigger` seams. The chain/Merkle/verify core + audit types now live in `pangolin-core`; the orchestrator re-exports them as shims for back-compat. Surfaces as `pangolin orch` + the client MCP tools. |
 | `pangolin-verify` | Standalone, **zero-orchestrator-dependency** audit-bundle verifier. Bin: `npx @quarry-systems/pangolin-verify <bundle.json> [--anchor <verify-context.json>] [--json] [--full]`. Depends only on `pangolin-core`. Exports `verifyBundle` plus the `TimestampAuthority` impls. Lets an auditor re-verify a handed-over bundle without installing the orchestrator. |
 | `pangolin-product` | Consumer-side product read: fetches and verifies a dispatch's output — `readOutputSentinel` / `parseOutputSentinel` (the worker-written sentinel) and `fetchDispatchArtifact` / `assertArtifactRef` (the content-addressed patch and `outputs/` artifacts it names). Depends only on `pangolin-core`. See [Dispatch lifecycle → Reading output after the fact](/pangolin/reference/dispatch-lifecycle/#reading-output-after-the-fact). |
+| `pangolin-signer-aws-kms` | AWS KMS asymmetric ECDSA-P256 signer for the Pangolin audit seal. Depends only on `pangolin-core`. |
 
 :::note
 The README labels the pangolin-mcp tool surface as "exactly six run-time tools."
@@ -58,6 +59,7 @@ graph TD
   orch[pangolin-orchestrator<br/><i>offload engine</i>]
   verify[pangolin-verify<br/><i>standalone verifier</i>]
   product[pangolin-product<br/><i>consumer-side product read</i>]
+  signerkms[pangolin-signer-aws-kms<br/><i>AWS KMS signer</i>]
 
   client --> core
   client --> secretstore
@@ -74,6 +76,7 @@ graph TD
   orch --> core
   verify --> core
   product --> core
+  signerkms --> core
 ```
 
 No Pangolin Scale package depends on another Quarry Systems library (Stoa, Bedrock,
