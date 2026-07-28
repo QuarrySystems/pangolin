@@ -108,6 +108,29 @@ sentinel and artifact refs written by an old worker. Forward-read (an old
 reader parsing bytes from a newer worker) is explicitly out of scope for
 this ADR.
 
+Finally, and deliberately: **the dispatch record stays reconcile-bound.**
+`writeDispatchRecord` remains inside the `reconcile` closure, and
+`describe()` remains the read path for dispatches whose terminal state the
+caller reconciled. The Context above describes that as the gap this
+contract exists to fill; this clause commits to it rather than leaving it
+an implementation artifact.
+
+The alternative — having `fireWork` write a minimal record at fire time so
+`describe()` works for everyone — looks like a strict improvement and is
+not. It would change what the *absence* of a record means. Fire-and-forget
+consumers are being told here to key their read on `storage` +
+`dispatchId` and to treat "no sentinel" as a normal outcome of a finished
+dispatch; a record materialising where none previously existed is a
+behaviour change for anyone who built on that, and it arrives silently
+because nothing fails — the reader simply starts seeing something new.
+
+So the two paths stay distinct and are not a redundancy to be collapsed:
+`describe()` answers "what did the run I was holding onto do", and the
+product read answers "what did dispatch X produce", which is the question
+you can still ask after losing the handle. A change to the record's
+lifecycle should supersede this decision explicitly, and should say what
+it does to consumers who by then read `absent` as meaningful.
+
 ## Consequences
 
 What becomes easier:
