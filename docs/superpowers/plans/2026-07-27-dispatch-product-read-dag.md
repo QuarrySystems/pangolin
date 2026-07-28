@@ -12,13 +12,13 @@ flowchart TD
     task-artifact-ref["task-artifact-ref: assertArtifactRef<br/>files: packages/pangolin-product/src/artifact-ref.ts +1 more"]:::done
     task-sentinel-read["task-sentinel-read: readOutputSentinel<br/>files: packages/pangolin-product/src/sentinel-read.ts +1 more"]:::done
     task-artifact-fetch["task-artifact-fetch: fetchDispatchArtifact<br/>files: packages/pangolin-product/src/artifact-fetch.ts +1 more"]:::done
-    task-pkg-barrel["task-pkg-barrel: package barrel<br/>files: packages/pangolin-product/src/index.ts +1 more"]
-    task-migrate-orch["task-migrate-orch: orchestrator migration<br/>files: packages/pangolin-orchestrator/src/executors/dispatch.ts +2 more"]
-    task-migrate-cli["task-migrate-cli: CLI migration<br/>files: packages/pangolin-cli/src/cmd-orch.ts +2 more"]
-    task-migrate-mapreduce["task-migrate-mapreduce: data-mapreduce migration<br/>files: examples/data-mapreduce/src/index.ts +2 more"]
-    task-migrate-dogfood["task-migrate-dogfood: dogfood-gated migration<br/>files: examples/dogfood-gated/src/index.ts +2 more"]
-    task-adr["task-adr: ADR-0020<br/>files: docs-site/src/content/docs/explanation/decisions/0020-dispatch-product-read.md +2 more"]
-    task-docs["task-docs: docs-site page updates<br/>files: docs-site/src/content/docs/reference/package-map.md +4 more"]
+    task-pkg-barrel["task-pkg-barrel: package barrel<br/>files: packages/pangolin-product/src/index.ts +1 more"]:::done
+    task-migrate-orch["task-migrate-orch: orchestrator migration<br/>files: packages/pangolin-orchestrator/src/executors/dispatch.ts +2 more"]:::done
+    task-migrate-cli["task-migrate-cli: CLI migration<br/>files: packages/pangolin-cli/src/cmd-orch.ts +2 more"]:::done
+    task-migrate-mapreduce["task-migrate-mapreduce: data-mapreduce migration<br/>files: examples/data-mapreduce/src/index.ts +2 more"]:::done
+    task-migrate-dogfood["task-migrate-dogfood: dogfood-gated migration<br/>files: examples/dogfood-gated/src/index.ts +2 more"]:::done
+    task-adr["task-adr: ADR-0020<br/>files: docs-site/src/content/docs/explanation/decisions/0020-dispatch-product-read.md +2 more"]:::done
+    task-docs["task-docs: docs-site page updates<br/>files: docs-site/src/content/docs/reference/package-map.md +4 more"]:::done
 
     task-core-types --> task-worker-reexport
     task-core-types --> task-sentinel-parse
@@ -766,7 +766,8 @@ files:
   - packages/pangolin-orchestrator/src/executors/dispatch.ts
   - packages/pangolin-orchestrator/package.json
   - packages/pangolin-orchestrator/test/dispatch-sentinel-read.test.ts
-status: running
+status: done
+commit: fe36a68
 ```
 
 Delete the 46-line private `readSentinel` and delegate. The projection to
@@ -850,7 +851,8 @@ files:
   - packages/pangolin-cli/src/cmd-orch.ts
   - packages/pangolin-cli/package.json
   - packages/pangolin-cli/test/cmd-orch.test.ts
-status: running
+status: done
+commit: e0cd969
 ```
 
 Replace the hand-built URI plus `JSON.parse` at `cmd-orch.ts:185-188` with the
@@ -905,7 +907,8 @@ files:
   - examples/data-mapreduce/src/index.ts
   - examples/data-mapreduce/package.json
   - examples/data-mapreduce/test/sentinel-read.test.ts
-status: running
+status: done
+commit: 11c7b42
 review_mode: merged
 ```
 
@@ -961,7 +964,8 @@ files:
   - examples/dogfood-gated/src/index.ts
   - examples/dogfood-gated/package.json
   - examples/dogfood-gated/test/usage-read.test.ts
-status: running
+status: done
+commit: 2b6f7a9
 review_mode: merged
 ```
 
@@ -1015,7 +1019,8 @@ files:
   - docs-site/src/content/docs/explanation/decisions/index.md
   - docs-site/test/decisions-index.test.ts
   - docs-site/vitest.config.ts
-status: running
+status: done
+commit: 44bf2ef
 is_wiring_task: true
 review_mode: merged
 ```
@@ -1095,7 +1100,8 @@ files:
   - docs-site/src/content/docs/reference/pangolin-client-api.md
   - docs-site/src/content/docs/explanation/architecture-overview.md
   - docs-site/test/product-read-docs.test.ts
-status: running
+status: done
+commit: d91bb25
 is_wiring_task: true
 review_mode: merged
 ```
