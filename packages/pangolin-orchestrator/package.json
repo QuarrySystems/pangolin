@@ -23,7 +23,7 @@
     "url": "https://github.com/QuarrySystems/pangolin/issues"
   },
   "scripts": {
-    "lint": "eslint src --ext .ts",
+    "lint": "eslint src test --ext .ts",
     "test": "vitest run",
     "test:xproc": "tsc && vitest run --config vitest.xproc.config.ts",
     "typecheck": "tsc --noEmit",

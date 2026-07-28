@@ -311,7 +311,7 @@ describe('attachEnvCmd', () => {
         register: mockRegister,
       },
     };
-    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
 
     const program = new Command();
     attachEnvCmd(program, { getClient: async () => mockClient as any });
@@ -342,7 +342,7 @@ describe('attachEnvCmd', () => {
         register: mockRegister,
       },
     };
-    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
 
     const program = new Command();
     attachEnvCmd(program, { getClient: async () => mockClient as any });

@@ -20,8 +20,6 @@
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { describe, it, expect, vi } from 'vitest';
 import { PANGOLIN_TOOL_NAMES, registerPangolinTools } from '../src/tools.js';

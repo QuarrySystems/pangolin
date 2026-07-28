@@ -16,11 +16,6 @@
 // be misparsed by YAML inside a flow-style mapping.
 
 import { buildProgram } from '../src/index.js';
-import { attachCapabilitiesCmd } from '../src/cmd-capabilities.js';
-import { attachSubagentCmd } from '../src/cmd-subagent.js';
-import { attachEnvCmd } from '../src/cmd-env.js';
-import { attachDispatchCmd } from '../src/cmd-dispatch.js';
-import { attachDeployCmd } from '../src/cmd-deploy.js';
 import { mkdtemp, writeFile, mkdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';

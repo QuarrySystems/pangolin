@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { it, expect } from 'vitest';
 import { GUARANTEE_RANK } from '../../src/contracts/index.js';
 it('GUARANTEE_RANK licenses tamper-evident only at external-immutable+', () => {
   expect(GUARANTEE_RANK.detect).toBe(0);

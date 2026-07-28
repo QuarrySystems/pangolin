@@ -47,3 +47,11 @@ jobs:
 
       - name: Typecheck
         run: pnpm -r typecheck
+
+      # Type-checks test/ as well as src/. `pnpm -r` runs this only in packages
+      # that define the script, so it currently covers the six whose test/ is
+      # already clean; the other ten are tracked in issue #103. Adding a
+      # tsconfig.test.json + typecheck:test to a package opts it in — no change
+      # needed here.
+      - name: Typecheck tests
+        run: pnpm -r typecheck:test
