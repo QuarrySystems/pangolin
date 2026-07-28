@@ -1,28 +1,16 @@
-import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { it, expect } from 'vitest';
+import { packageDirNames, packageCount, read, repoRoot } from './helpers/packages.js';
 
-const repoRoot = join(__dirname, '..', '..');
 const docsRoot = join(repoRoot, 'docs-site', 'src', 'content', 'docs');
-const packagesDir = join(repoRoot, 'packages');
 
 const packageMapPath = join(docsRoot, 'reference', 'package-map.md');
 const dispatchLifecyclePath = join(docsRoot, 'reference', 'dispatch-lifecycle.md');
 const clientApiPath = join(docsRoot, 'reference', 'pangolin-client-api.md');
 const architectureOverviewPath = join(docsRoot, 'explanation', 'architecture-overview.md');
 
-function read(path: string): string {
-  return readFileSync(path, 'utf-8');
-}
-
-function actualPackageCount(): number {
-  return readdirSync(packagesDir).filter((entry) =>
-    statSync(join(packagesDir, entry)).isDirectory(),
-  ).length;
-}
-
 it('package-map states a package count that matches the actual packages/ directory count', () => {
-  const count = actualPackageCount();
+  const count = packageCount();
   expect(count).toBe(16); // sanity: fails loudly if packages/ drifts without this test being updated
 
   const content = read(packageMapPath);
@@ -43,16 +31,14 @@ it('package-map states a package count that matches the actual packages/ directo
 });
 
 it('package-map table row count matches the actual packages/ directory count', () => {
-  const count = actualPackageCount();
+  const count = packageCount();
   const content = read(packageMapPath);
   const rowMatches = content.match(/^\|\s*`pangolin-[a-z0-9-]+`\s*\|/gm) ?? [];
   expect(rowMatches.length).toBe(count);
 });
 
 it('package-map names every directory under packages/ by name', () => {
-  const dirNames = readdirSync(packagesDir).filter((entry) =>
-    statSync(join(packagesDir, entry)).isDirectory(),
-  );
+  const dirNames = packageDirNames();
   const content = read(packageMapPath);
   for (const dirName of dirNames) {
     expect(content, `${dirName} is missing from package-map.md`).toMatch(

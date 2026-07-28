@@ -9,6 +9,50 @@ workspace. See [RELEASING.md](./RELEASING.md) for how a release is cut.
 
 ## [Unreleased]
 
+### Added
+
+- **`@quarry-systems/pangolin-product` — a new package (the sixteenth).** The
+  consumer-side read of a dispatch's product: `readOutputSentinel`,
+  `parseOutputSentinel`, `assertArtifactRef`, and `fetchDispatchArtifact`.
+  Keyed on `storage` + `dispatchId`, so a caller that never held — or has since
+  lost — the `fire()` handle can still recover what a dispatch produced.
+  Depends only on `pangolin-core`.
+
+  This closes a structural gap: `writeDispatchRecord` runs inside the
+  `reconcile` closure, so a fire-and-forget consumer never writes a dispatch
+  record and `dispatch.describe()` was permanently unavailable to it. See
+  ADR-0020.
+
+- The sentinel wire types (`OutputSentinel`, `OutputEntry`, `BlockOutcome`,
+  `MAX_OUTPUT_ENTRIES`) moved from `pangolin-worker` to `pangolin-core` and are
+  re-exported from the worker for back-compat. `writeSentinel`'s emitted bytes
+  are unchanged.
+
+- ADR-0019 (`target` is an isolation boundary, not a router) and ADR-0020 (the
+  dispatch product read is a public, storage-keyed contract).
+
+- `typecheck:test` in the six packages whose `test/` type-checks clean, plus a
+  CI step. A package opts in by adding `tsconfig.test.json` and the script.
+
+### Changed
+
+- Every package's `lint` script now covers `test/` as well as `src/`. Test
+  files were previously neither linted nor type-checked repo-wide.
+
+- `vitest.shared.ts` at the repo root holds the shared test config; each
+  package merges it. Replaces `pangolin-orchestrator`'s standalone timeout
+  config rather than duplicating that constant per package.
+
+### Fixed
+
+- `pressure-runner` SCENARIO 3 used a wall-clock `sleep(60)` to establish its
+  crash window and failed under load; it now waits on the condition. Several
+  suites also ran on vitest's 5s default while spawning real `git` subprocesses.
+  Together these made `pnpm -r test` fail on a different test most runs.
+
+- `.eslintrc.cjs` declared `rules:` twice, so the second silently overwrote the
+  first and a `no-this-alias` allowance had never been in effect.
+
 ## [0.3.1] - 2026-07-24 — Security: patch-capture credential env-scoping
 
 ### Fixed
