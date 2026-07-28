@@ -111,12 +111,13 @@ it via `needs` and applies it with `git apply inputs/patch`.
 
 ## What's in this repo
 
-Thirteen packages under `packages/`:
+Sixteen packages under `packages/`:
 
 | Package | One-liner |
 |---|---|
 | [`pangolin-core`](packages/pangolin-core/) | Types-only contract package. Every other pangolin package depends on this; nothing depends on anything else by default. |
 | [`pangolin-client`](packages/pangolin-client/) | Caller-side SDK. `PangolinClient` is the single entry point integrators construct: registration + dispatch surface, with wired-in providers. |
+| [`pangolin-product`](packages/pangolin-product/) | Consumer-side read of a dispatch's product — the output sentinel and the content-addressed artifacts it names. Keyed on `storage` + `dispatchId`, so a caller that never held (or has since lost) the `fire()` handle can still recover what a dispatch produced. Depends only on `pangolin-core`. |
 | [`pangolin-cli`](packages/pangolin-cli/) | The `pangolin` binary. Thin CLI over `PangolinClient` that resolves `pangolin.config.{ts,js,mjs}` and dispatches to subcommands. Canonical privileged entry point. |
 | [`pangolin-mcp`](packages/pangolin-mcp/) | Stdio MCP server exposing exactly nine run-time, orchestration-safe tools. `register` / `assign` are deliberately absent — privileged ops never reach the AI loop. |
 | [`pangolin-worker`](packages/pangolin-worker/) | Container-side runtime. One process per dispatch. Fetches bundles, verifies integrity, overlays the workspace, resolves secrets, hands off to a `RuntimeAdapter`. The runtime is a block-pipeline runner — agent / script / capture blocks, seal auto-appended. |
@@ -128,6 +129,8 @@ Thirteen packages under `packages/`:
 | [`pangolin-storage-local`](packages/pangolin-storage-local/) | `StorageProvider` backed by the local filesystem. Pairs with `pangolin-providers-local-docker` for the local stack. |
 | [`pangolin-secret-store`](packages/pangolin-secret-store/) | `SecretStore` seam plus impls — `AwsSecretStore` (AWS Secrets Manager), `LocalSecretStore` (on-disk), and a `storeFromConfig` factory. `pangolin-client` takes injected per-target stores (`secretStores`); the worker builds its store via `storeFromConfig`. |
 | [`pangolin-orchestrator`](packages/pangolin-orchestrator/) | Orchestrator engine (codename *pangolin-offload*): named queues, `depends_on` resolution, resource locks, a fire-and-reconcile tick loop, SQLite run-state, typed-product handoff (`needs` → content-addressed `inputRefs`), per-queue execution patterns with audited dynamic spawn, and provenance-closure verification, behind pluggable `Executor` / `Trigger` seams. |
+| [`pangolin-signer-aws-kms`](packages/pangolin-signer-aws-kms/) | AWS KMS asymmetric ECDSA-P256 `Signer` for the audit seal. Keeps the KMS SDK out of `pangolin-core`. |
+| [`pangolin-verify`](packages/pangolin-verify/) | Standalone audit-bundle verifier — the artifact an auditor runs, with no orchestrator dependency. Owns the RFC 3161 / ASN.1 (`pkijs`) dependency so `pangolin-core` stays dependency-light. |
 
 Plus:
 
@@ -208,6 +211,9 @@ graph TD
   slocal[pangolin-storage-local]
   secretstore[pangolin-secret-store]
   orch[pangolin-orchestrator<br/><i>offload engine</i>]
+  product[pangolin-product<br/><i>product read</i>]
+  signerkms[pangolin-signer-aws-kms]
+  verify[pangolin-verify<br/><i>auditor-run verifier</i>]
 
   client --> core
   client --> secretstore
@@ -227,6 +233,9 @@ graph TD
   secretstore --> core
   orch --> core
   orch --> client
+  product --> core
+  signerkms --> core
+  verify --> core
 ```
 
 ASCII rendering of the same graph:
@@ -246,7 +255,10 @@ pangolin-core                              (types only)
    ├── pangolin-providers-aws-creds        (CredentialProvider, AWS)
    ├── pangolin-storage-s3                 (StorageProvider, S3)
    ├── pangolin-storage-local              (StorageProvider, local FS)
-   └── pangolin-secret-store               (SecretStore seam: AWS + Local; pangolin-client and pangolin-worker also depend on it)
+   ├── pangolin-secret-store               (SecretStore seam: AWS + Local; pangolin-client and pangolin-worker also depend on it)
+   ├── pangolin-product                    (consumer-side product read — sentinel + artifacts, keyed on storage + dispatchId)
+   ├── pangolin-signer-aws-kms             (Signer impl, AWS KMS ECDSA-P256)
+   └── pangolin-verify                     (standalone audit-bundle verifier — no orchestrator dependency)
 ```
 
 No Pangolin Scale package depends on another Quarry Systems library (Stoa,
@@ -260,10 +272,12 @@ check on `package.json` dependencies.
 - [Full MVP design spec](docs/superpowers/specs/2026-05-21-agora-mvp-design.md) — the §1–§11 design canon.
 - [Orchestrator architecture spec](docs/superpowers/specs/2026-05-28-agora-orchestrator-design.md) — the *pangolin-offload* design: registries, effect tiers, queues/deps/locks, the intent outbox, and the trunk trap-check driving the `pangolin-orchestrator` package.
 - [Offload V1 delivery spec](docs/superpowers/specs/2026-05-29-agora-offload-v1-design.md) — the shipped V1 slice (`serve` + escape + tamper-evident audit + operator surface), the security/determinism/auditability edge, and the honesty constraints. See also [How an offload run executes](https://quarrysystems.github.io/pangolin/explanation/how-offload-runs/).
-- [Architecture decisions](https://quarrysystems.github.io/pangolin/explanation/decisions/) — eighteen ADRs covering
+- [Architecture decisions](https://quarrysystems.github.io/pangolin/explanation/decisions/) — twenty ADRs covering
   package scope, repo location, runtime-adapter seam, secret TTL,
   lifecycle vocabulary, MCP auth model, the source-available (BSL) license,
-  orchestration-as-a-separate-layer (ADR-0018, superseding ADR-0010), and more.
+  orchestration-as-a-separate-layer (ADR-0018, superseding ADR-0010),
+  `target` as an isolation boundary rather than a router (ADR-0019), the
+  dispatch product read as a storage-keyed public contract (ADR-0020), and more.
 - [Examples](examples/) — worked, runnable demonstrations against the
   local provider stack.
 
