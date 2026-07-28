@@ -55,7 +55,7 @@ describe('attachEnvCmd', () => {
         register: mockRegister,
       },
     };
-    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
     const program = new Command();
     attachEnvCmd(program, { getClient: async () => mockClient as any });
@@ -90,7 +90,7 @@ describe('attachEnvCmd', () => {
         register: mockRegister,
       },
     };
-    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
     const program = new Command();
     attachEnvCmd(program, { getClient: async () => mockClient as any });
@@ -128,7 +128,7 @@ describe('attachEnvCmd', () => {
         register: mockRegister,
       },
     };
-    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
     const program = new Command();
     attachEnvCmd(program, { getClient: async () => mockClient as any });
@@ -166,7 +166,7 @@ describe('attachEnvCmd', () => {
         register: mockRegister,
       },
     };
-    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
     const program = new Command();
     attachEnvCmd(program, { getClient: async () => mockClient as any });
@@ -228,7 +228,7 @@ describe('attachEnvCmd', () => {
         list: mockList,
       },
     };
-    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
     const program = new Command();
     attachEnvCmd(program, { getClient: async () => mockClient as any });
@@ -261,7 +261,7 @@ describe('attachEnvCmd', () => {
         get: mockGet,
       },
     };
-    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
     const program = new Command();
     attachEnvCmd(program, { getClient: async () => mockClient as any });
@@ -285,7 +285,7 @@ describe('attachEnvCmd', () => {
         get: mockGet,
       },
     };
-    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
     const program = new Command();
     attachEnvCmd(program, { getClient: async () => mockClient as any });
