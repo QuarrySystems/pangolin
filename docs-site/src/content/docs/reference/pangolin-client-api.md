@@ -41,6 +41,33 @@ interface TargetConfig {
 }
 ```
 
+A target names the **isolation boundary** a dispatch runs inside — the
+`compute` + `credentials` + `secretStore` tuple bounding what it can reach,
+touch, and spend. It is not a scheduling hint.
+
+Introduce a new target when the answer to *"what could this dispatch steal or
+break?"* changes — a different effect tier (read-only analysis vs. holding
+production write credentials), a different tenant's secret material, or a
+genuinely different execution environment. Pin a single target otherwise;
+carrying the same value for every dispatch is the seam that lets you split a
+boundary later without touching call sites.
+
+Do **not** split targets purely for queueing (that is the orchestrator's
+`queues`) or for resource sizing (`DispatchWork.resources` overrides
+`defaultResources` per dispatch). Two targets with identical `compute`,
+`credentials`, and `secretStore` draw no boundary.
+
+`target` is **not an authorization check** — the caller selects it freely and
+the runtime validates only that the name resolves. A dispatch record states
+which envelope a dispatch ran inside; it does not attest that the caller was
+permitted to select it. See
+[ADR-0019](/pangolin/explanation/decisions/0019-target-is-an-isolation-boundary/).
+
+Targets are constructor-wired live provider instances, not content-addressed
+registry artifacts, so they do not appear in `pangolin.config.yaml` and are not
+reconciled by `pangolin deploy` — that manifest registers hashable content
+(capabilities, subagents, envs).
+
 Readonly fields after construction: `namespace`, `compute`, `credentials`,
 `storage`, `targets`, `secretStores`, `telemetry`, `resultSink`,
 `defaultModel`, and `retention` (resolved to `{ defaultDays, maxDays }`).

@@ -32,6 +32,7 @@ ADR that references the old one, not editing the existing file.
 - [0016](/pangolin/explanation/decisions/0016-cancel-in-mvp/) — `cancel()` is in MVP, not v0.2; best-effort cancellation via provider stop + worker SIGTERM trap.
 - [0017](/pangolin/explanation/decisions/0017-source-available-bsl/) — Pangolin Scale is source-available under BSL 1.1 (no hosted-service Additional Use Grant; 4yr → Apache-2.0), superseding the earlier FSL-1.1-MIT choice.
 - [0018](/pangolin/explanation/decisions/0018-orchestration-ships-as-a-layer/) — Pangolin Scale ships orchestration as a separate opt-in layer (`pangolin-orchestrator` / offload), partially superseding ADR-0010's "orchestration only above Pangolin Scale / out of scope forever" posture. The client-SDK workflow-primitive rejection still stands.
+- [0019](/pangolin/explanation/decisions/0019-target-is-an-isolation-boundary/) — A dispatch `target` names the isolation boundary a dispatch runs inside (compute + credentials + secretStore), not a scheduling hint. Vary it when blast radius changes; pin it otherwise. It is not an authorization check.
 - [0020](/pangolin/explanation/decisions/0020-dispatch-product-read/) — Reading a dispatch's product is a public contract keyed on storage + `dispatchId`, with no fire-side handle. The sentinel is an unverifiable overwrite-put record; the artifacts it names are content-addressed and self-verifying.
 
 ## Source
