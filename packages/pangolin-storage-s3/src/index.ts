@@ -43,6 +43,7 @@ import {
   computeContentHash,
   ConflictError,
   IntegrityMismatchError,
+  StorageNotFoundError,
   type StorageProvider,
   type PangolinUriParts,
   type StorageUriParts,
@@ -225,15 +226,19 @@ export class S3StorageProvider implements StorageProvider {
   async get(uri: string): Promise<Uint8Array> {
     const parsed = parseStorageUri(uri);
     if (parsed.kind === 'dispatch-record') {
-      return this.getDispatchRecord(parsed);
+      return this.getDispatchRecord(parsed, uri);
     }
     if (!parsed.contentHash) {
       throw new Error(`S3StorageProvider.get requires a pinned URI with contentHash: ${uri}`);
     }
     const blobKey = this.blobKey(parsed, parsed.contentHash);
-    const resp = await this.s3.send(
-      new GetObjectCommand({ Bucket: this.opts.bucket, Key: blobKey }),
-    );
+    let resp;
+    try {
+      resp = await this.s3.send(new GetObjectCommand({ Bucket: this.opts.bucket, Key: blobKey }));
+    } catch (err) {
+      if (isNotFound(err)) throw new StorageNotFoundError(uri);
+      throw err;
+    }
     const bytes = await streamToUint8Array(resp.Body);
     const actual = computeContentHash(bytes);
     if (actual !== parsed.contentHash) {
@@ -442,10 +447,16 @@ export class S3StorageProvider implements StorageProvider {
 
   private async getDispatchRecord(
     parsed: Extract<StorageUriParts, { kind: 'dispatch-record' }>,
+    uri: string,
   ): Promise<Uint8Array> {
     const key = this.dispatchRecordKey(parsed);
-    const resp = await this.s3.send(new GetObjectCommand({ Bucket: this.opts.bucket, Key: key }));
-    return await streamToUint8Array(resp.Body);
+    try {
+      const resp = await this.s3.send(new GetObjectCommand({ Bucket: this.opts.bucket, Key: key }));
+      return await streamToUint8Array(resp.Body);
+    } catch (err) {
+      if (isNotFound(err)) throw new StorageNotFoundError(uri);
+      throw err;
+    }
   }
 
   private dispatchRecordKey(parts: Extract<StorageUriParts, { kind: 'dispatch-record' }>): string {
