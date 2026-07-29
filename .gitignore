@@ -33,3 +33,13 @@ spike/rfc3161/package-lock.json
 # dogfood-gated fake-mode ($0) run artifacts — throwaway; the committed real-run
 # proof (bundle.json / verify-context.json / patches/) must never be clobbered.
 examples/dogfood-gated/fake-out/
+
+# Sealed bundles from ad-hoc serve-stack client runs. These land next to the
+# committed smoke fixture (smoke.mjs / smoke-plan.json), so without this they
+# read as files someone meant to keep. They are run OUTPUT — regenerate them.
+# A committed sealed bundle is also a standing hash-chain liability: the #59
+# repo-wide agora://->pangolin:// substitution rewrote one in place and broke
+# its verify, which is why examples/**/bundle.json is pinned -text in
+# .gitattributes. Don't grow that surface here.
+deploy/serve-stack/client/*-bundle.json
+deploy/serve-stack/client/loop-proof.json
