@@ -215,12 +215,30 @@ looks identical to this false negative.
 If the inline path genuinely cannot compute handoff, `not computed` is the honest
 label; `n/a` asserts the run had no handoff edges, which was false here.
 
-**Worth noting on the same evidence:** at zero handoff edges (the single-item
-`smoke.mjs` run) the display correctly shows `─ n/a` rather than a green tick, and
-at two edges the bundle verify reports the count. So the *presentation* layer does
-not claim closure it hasn't established. That is a stronger position than
-`checkHandoffClosure`'s own return value, which is worth keeping in mind when
-citing this check as a guarantee.
+### 5a. The bundle verify gives handoff a green tick at zero edges
+
+A third run (`converter-loop-proof-1785344533713`, two items, no `needs` edges)
+completes the matrix, and it contradicts a reassuring reading of the above:
+
+| | 0 edges | 2 edges |
+|---|---|---|
+| `orch watch` | `─ n/a` | `─ n/a` |
+| `pangolin verify <bundle>` | **`✓ no handoff edges`** | `✓ 2 input refs accounted for` |
+
+The label is honest — "no handoff edges" states exactly what was found. The **tick
+is not**. `✓` renders identically to the four checks above it that did real work
+(chain linkage, merkle/anchor agreement, signature, anchor immutability), so a
+reader scanning the block for ✓/✗ sees five passes and concludes provenance was
+verified. Nothing was verified; there was nothing to verify.
+
+This matters most in the case the check exists for. A plan that was *supposed* to
+carry handoff edges but lost them — a converter bug, a hand-edit, a refactor that
+dropped a `needs` block — produces `✓ handoff no handoff edges` and reads as
+success. The check cannot fail for the failure it is meant to catch.
+
+**Suggested fix.** Render the zero-edge case as `─ no handoff edges` (neutral, as
+`authorization  not attested` already does) rather than `✓`. The reserved-glyph
+distinction already exists in this output; handoff simply is not using it.
 
 ---
 
