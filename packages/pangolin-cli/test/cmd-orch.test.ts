@@ -10,8 +10,22 @@ import type {
   OutboxRecord,
   SubmissionEnvelope,
 } from '@quarry-systems/pangolin-orchestrator';
+import { StorageNotFoundError } from '@quarry-systems/pangolin-core';
+import * as pangolinProduct from '@quarry-systems/pangolin-product';
 import { attachOrchCmd, type OrchContext } from '../src/cmd-orch.js';
 import type { CliContext } from '../src/index.js';
+
+// Spy on the product read so the assertion is about the CLI's own watch path,
+// not about readOutputSentinel in isolation — cmd-orch.ts's bare `catch {}`
+// around the evidence fetch would otherwise make any outcome (returned
+// 'absent' vs. threw and got swallowed) look identical from the rendered
+// frame alone.
+vi.mock('@quarry-systems/pangolin-product', async () => {
+  const actual = await vi.importActual<typeof import('@quarry-systems/pangolin-product')>(
+    '@quarry-systems/pangolin-product',
+  );
+  return { ...actual, readOutputSentinel: vi.fn(actual.readOutputSentinel) };
+});
 
 // ---------------------------------------------------------------------------
 // Fake transport (in-memory, mirrors operations-api.test.ts)
@@ -540,7 +554,7 @@ describe('attachOrchCmd', () => {
       expect(logs[0]).not.toContain('3t');
     });
 
-    it('skips evidence when the sentinel reads absent (storage.get rejects with a not-found error)', async () => {
+    it('skips evidence because the sentinel read returned absent, not because it threw', async () => {
       const runId = 'run-live-3c';
       const recDone: OutboxRecord = {
         runId,
@@ -559,12 +573,18 @@ describe('attachOrchCmd', () => {
       };
       const transport = makeSequencedTransport([[recDone]]);
       const storage = {
-        async get(_ref: string): Promise<Uint8Array> {
-          throw new Error('not found');
+        async get(ref: string): Promise<Uint8Array> {
+          // Message omits "not found" so the assertion below cannot pass via
+          // the deleted string/ENOENT sniff — only isStorageNotFound (a name
+          // check) makes readOutputSentinel classify this as absent.
+          throw new StorageNotFoundError(ref, `absent: ${ref}`);
         },
       };
       const oc = makeOrchContext({ transport, storage });
       const ctx = makeCtx(oc);
+
+      const spy = vi.mocked(pangolinProduct.readOutputSentinel);
+      spy.mockClear();
 
       const program = new Command();
       attachOrchCmd(program, ctx);
@@ -579,6 +599,12 @@ describe('attachOrchCmd', () => {
       expect(logs[0]).toContain('item-1');
       expect(logs[0]).toContain('state: terminal');
       expect(logs[0]).not.toContain('m1');
+
+      // Assert through the CLI's own call to readOutputSentinel: it resolved
+      // to 'absent' rather than throwing (which cmd-orch.ts's bare `catch {}`
+      // would otherwise swallow, making a throw look identical to absence).
+      expect(spy).toHaveBeenCalledTimes(1);
+      await expect(spy.mock.results[0]!.value).resolves.toEqual({ status: 'absent' });
     });
 
     it('still renders frames when a storage evidence read throws', async () => {

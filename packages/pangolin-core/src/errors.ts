@@ -75,3 +75,37 @@ export class IntegrityMismatchError extends Error {
     this.name = 'IntegrityMismatchError';
   }
 }
+
+/**
+ * Thrown by a `StorageProvider.get` implementation when the requested
+ * object does not exist. `uri` carries the caller-facing `pangolin://` URI
+ * (not a backend-specific key). A second constructor argument lets a
+ * provider supply its own message while `uri` and `name` stay fixed.
+ */
+export class StorageNotFoundError extends Error {
+  constructor(
+    readonly uri: string,
+    message = `storage object not found: ${uri}`,
+  ) {
+    super(message);
+    this.name = 'StorageNotFoundError';
+  }
+}
+
+/**
+ * True when `err` signals a missing storage object.
+ *
+ * The `name` comparison is the load-bearing leg — per this file's header
+ * convention it survives realms and duplicate package copies. `instanceof` is
+ * exact-match insurance for a single-copy tree and adds no behaviour the name
+ * check does not already cover. Not a type predicate: a name comparison cannot
+ * soundly narrow to the class.
+ */
+export function isStorageNotFound(err: unknown): boolean {
+  if (err instanceof StorageNotFoundError) return true;
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    (err as { name?: unknown }).name === 'StorageNotFoundError'
+  );
+}

@@ -2,12 +2,17 @@ import { describe, it, expect } from 'vitest';
 import { describeDispatch, DispatchRecordExpiredError } from '../src/describe.js';
 import { writeDispatchRecord } from '../src/retention.js';
 import { PangolinClient } from '../src/client.js';
-import type { DispatchResult, StorageProvider } from '@quarry-systems/pangolin-core';
+import {
+  StorageNotFoundError,
+  type DispatchResult,
+  type StorageProvider,
+} from '@quarry-systems/pangolin-core';
 
 /**
  * Minimal in-memory storage stub mirroring the one in retention.test.ts so the
  * round-trip tests here can write a real record via `writeDispatchRecord` and
- * read it back via `describeDispatch`.
+ * read it back via `describeDispatch`. Throws a typed `StorageNotFoundError`
+ * on get for missing keys, mirroring the real LocalStorageProvider behaviour.
  */
 function makeMemoryStorage(): StorageProvider & {
   blobs: Map<string, Uint8Array>;
@@ -22,7 +27,7 @@ function makeMemoryStorage(): StorageProvider & {
     },
     async get(uri: string) {
       const v = blobs.get(uri);
-      if (!v) throw new Error(`memory storage: blob not found: ${uri}`);
+      if (!v) throw new StorageNotFoundError(uri, `memory storage: blob missing: ${uri}`);
       return v;
     },
     async resolveLatest() {
@@ -58,16 +63,14 @@ const baseResult: DispatchResult = {
 };
 
 describe('describeDispatch', () => {
-  it('throws DispatchRecordExpiredError when the record is missing (ENOENT)', async () => {
+  it('throws DispatchRecordExpiredError when the storage backend throws StorageNotFoundError', async () => {
     const storage: StorageProvider = {
-      name: 'enoent',
+      name: 'not-found',
       async put() {
         return { contentHash: 'x' };
       },
-      async get() {
-        const err: NodeJS.ErrnoException = new Error('not found');
-        err.code = 'ENOENT';
-        throw err;
+      async get(uri: string) {
+        throw new StorageNotFoundError(uri, 'backend object missing');
       },
       async resolveLatest() {
         return null;

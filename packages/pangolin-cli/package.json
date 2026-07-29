@@ -1,6 +1,6 @@
 {
   "name": "@quarry-systems/pangolin-cli",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "license": "BUSL-1.1",
   "description": "The pangolin binary — a thin CLI over PangolinClient that resolves pangolin.config.{ts,js,mjs} and dispatches to subcommands.",
   "main": "dist/index.js",

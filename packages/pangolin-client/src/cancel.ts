@@ -16,8 +16,9 @@ import { readDispatchRecord } from './retention.js';
 
 /**
  * Best-effort cancellation of a dispatched task. Returns `undefined`
- * unconditionally; failures of any participant (storage, credentials,
- * provider) collapse to a silent no-op per §7.6's idempotency contract.
+ * unconditionally when the dispatch record is missing or purged. Other
+ * backend errors propagate — `readDispatchRecord` rethrows anything that is
+ * not a StorageNotFoundError, and this function does not catch.
  */
 export async function cancelDispatch(client: PangolinClient, dispatchId: string): Promise<void> {
   // `cancelled` reflects the cancel REQUEST (intent), so emit it unconditionally up front — before

@@ -3,7 +3,7 @@ import { PangolinOrchestrator, SqliteRunStateStore, ManualTrigger } from '../../
 import { PangolinClient } from '@quarry-systems/pangolin-client';
 import { DispatchExecutor } from '../../src/executors/dispatch.js';
 import type { Run } from '../../src/contracts/index.js';
-import { buildDispatchRecordUri } from '@quarry-systems/pangolin-core';
+import { buildDispatchRecordUri, StorageNotFoundError } from '@quarry-systems/pangolin-core';
 import type {
   ComputeProvider,
   CredentialProvider,
@@ -57,7 +57,9 @@ function makeMemoryStorage(): StorageProvider & {
     },
     async get(uri: string) {
       const v = blobs.get(uri);
-      if (!v) throw new Error(`memory storage: not found: ${uri}`);
+      // Message deliberately omits "not found": the class default contains it,
+      // and a double using the default would still satisfy the deleted sniff.
+      if (!v) throw new StorageNotFoundError(uri, `absent: ${uri}`);
       return v;
     },
     async resolveLatest(uri: string) {

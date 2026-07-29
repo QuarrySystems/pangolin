@@ -198,8 +198,10 @@ and the content-addressed artifacts it names (the patch, and any `outputs/` entr
 public, consumer-side read of both:
 
 - `readOutputSentinel(deps, dispatchId)` fetches and parses the sentinel. A missing sentinel comes
-  back as `{ status: 'absent' }` rather than throwing — a finished dispatch with no sentinel is a
-  normal outcome, since sentinel writes are best-effort.
+  back as `{ status: 'absent' }` rather than throwing. That rests on the storage contract:
+  `StorageProvider.get` signals a missing object with `StorageNotFoundError`, and
+  `readOutputSentinel` classifies on that type rather than on the error message. A finished
+  dispatch with no sentinel is a normal outcome, since sentinel writes are best-effort.
 - `fetchDispatchArtifact(storage, ref, expect)` fetches one of the sentinel's artifact refs (e.g.
   `patchRef`, or an `outputs[].ref`) and verifies it against the content hash embedded in the ref,
   throwing `IntegrityMismatchError` on a mismatch. `assertArtifactRef` performs the same check

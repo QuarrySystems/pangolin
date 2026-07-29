@@ -13,6 +13,7 @@
 
 import {
   buildDispatchRecordUri,
+  isStorageNotFound,
   type DispatchResult,
   type TraceContext,
 } from '@quarry-systems/pangolin-core';
@@ -82,16 +83,7 @@ export async function readDispatchRecord(
     const bytes = await client.storage.get(uri);
     return JSON.parse(new TextDecoder().decode(bytes)) as DispatchRecord;
   } catch (err) {
-    if (isNotFound(err)) return null;
+    if (isStorageNotFound(err)) return null;
     throw err;
   }
-}
-
-function isNotFound(err: unknown): boolean {
-  if (err === null || typeof err !== 'object') return false;
-  const code = (err as { code?: unknown }).code;
-  if (code === 'ENOENT') return true;
-  const message = (err as { message?: unknown }).message;
-  if (typeof message === 'string' && /not found/i.test(message)) return true;
-  return false;
 }

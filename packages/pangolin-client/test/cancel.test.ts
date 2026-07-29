@@ -2,19 +2,20 @@ import { describe, it, expect } from 'vitest';
 import { cancelDispatch } from '../src/cancel.js';
 import { PangolinClient } from '../src/client.js';
 import { writeDispatchRecord } from '../src/retention.js';
-import type {
-  ComputeProvider,
-  CredentialProvider,
-  LifecycleEvent,
-  StorageProvider,
-  ProviderContext,
-  TaskHandle,
+import {
+  StorageNotFoundError,
+  type ComputeProvider,
+  type CredentialProvider,
+  type LifecycleEvent,
+  type StorageProvider,
+  type ProviderContext,
+  type TaskHandle,
 } from '@quarry-systems/pangolin-core';
 
 /**
  * Minimal in-memory storage stub satisfying the StorageProvider contract.
- * Records (uri, bytes) and surfaces a `/not found/i`-matching error on get
- * for missing keys, mirroring LocalStorageProvider behaviour.
+ * Records (uri, bytes) and throws a typed `StorageNotFoundError` on get for
+ * missing keys, mirroring LocalStorageProvider behaviour.
  */
 function makeMemoryStorage(): StorageProvider & {
   blobs: Map<string, Uint8Array>;
@@ -29,7 +30,7 @@ function makeMemoryStorage(): StorageProvider & {
     },
     async get(uri: string) {
       const v = blobs.get(uri);
-      if (!v) throw new Error(`memory storage: blob not found: ${uri}`);
+      if (!v) throw new StorageNotFoundError(uri, `memory storage: blob missing: ${uri}`);
       return v;
     },
     async resolveLatest() {
@@ -41,16 +42,14 @@ function makeMemoryStorage(): StorageProvider & {
   };
 }
 
-function makeEnoentStorage(): StorageProvider {
+function makeNotFoundStorage(): StorageProvider {
   return {
-    name: 'enoent',
+    name: 'not-found',
     async put() {
       return { contentHash: 'x' };
     },
-    async get() {
-      const err: NodeJS.ErrnoException = new Error('missing');
-      err.code = 'ENOENT';
-      throw err;
+    async get(uri: string) {
+      throw new StorageNotFoundError(uri, 'backend object missing');
     },
     async resolveLatest() {
       return null;
@@ -107,8 +106,8 @@ function makeRecordingProvider(opts?: {
 }
 
 describe('cancelDispatch', () => {
-  it('is a no-op when the dispatch record is missing (ENOENT)', async () => {
-    const storage = makeEnoentStorage();
+  it('is a no-op when the storage backend throws StorageNotFoundError', async () => {
+    const storage = makeNotFoundStorage();
     const client = new PangolinClient({
       namespace: 'o',
       compute: {},
@@ -119,7 +118,7 @@ describe('cancelDispatch', () => {
     await expect(cancelDispatch(client, 'missing')).resolves.toBeUndefined();
   });
 
-  it('is a no-op when the dispatch record is missing (not-found message)', async () => {
+  it('is a no-op when the dispatch record was never written (typed StorageNotFoundError)', async () => {
     const storage = makeMemoryStorage();
     const client = new PangolinClient({
       namespace: 'o',
