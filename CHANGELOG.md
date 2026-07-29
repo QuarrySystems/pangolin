@@ -7,7 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 All packages are versioned in lockstep; this file is the changelog for the whole
 workspace. See [RELEASING.md](./RELEASING.md) for how a release is cut.
 
-## [Unreleased]
+## [0.4.0] - 2026-07-28
+
+### Breaking
+
+- `StorageProvider.get` must now throw `StorageNotFoundError` for a missing
+  object. `describeDispatch` and `cancelDispatch` are not listed as breaking —
+  they have always documented "Unrelated storage errors are re-thrown unchanged",
+  so their behaviour did not change.
 
 ### Added
 
@@ -34,6 +41,11 @@ workspace. See [RELEASING.md](./RELEASING.md) for how a release is cut.
 - `typecheck:test` in the six packages whose `test/` type-checks clean, plus a
   CI step. A package opts in by adding `tsconfig.test.json` and the script.
 
+- `StorageNotFoundError` (constructor `(readonly uri, message?)`, `name` set to
+  the class name per the file's structural-matching convention) and
+  `isStorageNotFound(err): boolean` in `pangolin-core`. Storage providers and
+  their callers now uniformly classify missing objects vs. other errors.
+
 ### Changed
 
 - Every package's `lint` script now covers `test/` as well as `src/`. Test
@@ -52,6 +64,20 @@ workspace. See [RELEASING.md](./RELEASING.md) for how a release is cut.
 
 - `.eslintrc.cjs` declared `rules:` twice, so the second silently overwrote the
   first and a `no-this-alias` allowance had never been in effect.
+
+- **Provider-dependent handling of missing object sentinels is now uniform.**
+  Previously, `LocalStorageProvider.getDispatchRecord` on a missing object
+  returned `{ status: 'absent' }`, but `S3StorageProvider.getDispatchRecord`
+  threw `NoSuchKey` because it had no not-found handling. Callers
+  (`readOutputSentinel` in `pangolin-product` and `readDispatchRecord` in
+  `pangolin-client`) detected absence by message-matching `/not found/i`, which
+  caused unrelated failures (DNS, throttles, misconfiguration) whose error text
+  happened to match to be silently reclassified as absent, turning transient
+  infrastructure errors into durable business facts. Both storage providers now
+  consistently throw `StorageNotFoundError` on a missing object via their
+  pre-existing type-aware `isNotFound` helper (threaded `uri` to
+  `S3StorageProvider.getDispatchRecord`), and callers classify by type instead
+  of message.
 
 ## [0.3.1] - 2026-07-24 — Security: patch-capture credential env-scoping
 
@@ -258,7 +284,7 @@ watch | cancel | audit` — a long-running driver runs a DAG of agent tasks
 - **Effect-tier policy** is computed but not yet enforced.
 - **Pre-1.0 (`0.x`):** interfaces may change between minor versions.
 
-[Unreleased]: https://github.com/QuarrySystems/pangolin/compare/v0.3.1...HEAD
+[0.4.0]: https://github.com/QuarrySystems/pangolin/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/QuarrySystems/pangolin/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/QuarrySystems/pangolin/compare/v0.2.0...v0.3.0
 [0.1.0]: https://github.com/QuarrySystems/pangolin/releases/tag/v0.1.0
