@@ -9,24 +9,23 @@ flowchart TD
     task-provider-local["task-provider-local: local provider not-found translation<br/>files: packages/pangolin-storage-local/src/index.ts +1 more"]
     task-provider-s3["task-provider-s3: S3 provider not-found translation<br/>files: packages/pangolin-storage-s3/src/index.ts +1 more"]
     task-sentinel-read["task-sentinel-read: sentinel read classifies by type<br/>files: packages/pangolin-product/src/sentinel-read.ts +1 more"]
-    task-retention-read["task-retention-read: dispatch-record read classifies by type<br/>files: packages/pangolin-client/src/retention.ts +2 more"]
-    task-doubles-orchestrator["task-doubles-orchestrator: orchestrator storage doubles<br/>files: packages/pangolin-orchestrator/test/dispatch-sentinel-read.test.ts +1 more"]
+    task-retention-read["task-retention-read: dispatch-record read classifies by type<br/>files: packages/pangolin-client/src/retention.ts +4 more"]
+    task-doubles-orchestrator["task-doubles-orchestrator: orchestrator storage doubles<br/>files: packages/pangolin-orchestrator/test/dispatch-sentinel-read.test.ts +2 more"]
     task-doubles-cli["task-doubles-cli: CLI storage double<br/>files: packages/pangolin-cli/test/cmd-orch.test.ts"]
-    task-doubles-example["task-doubles-example: appendable-stream storage stub<br/>files: examples/appendable-stream/src/index.ts +1 more"]
+    task-doubles-example["task-doubles-example: appendable-stream storage stub<br/>files: examples/appendable-stream/src/index.ts +2 more"]
     task-docs["task-docs: storage-contract doc pages<br/>files: docs-site/src/content/docs/how-to/write-a-provider.md +1 more"]
-    task-sweep-verify["task-sweep-verify: repo-wide not-found sweep<br/>files: (none - single_threaded)"]
+    task-sweep-verify["task-sweep-verify: repo-wide not-found sweep<br/>files: docs/superpowers/plans/2026-07-28-storage-not-found-sweep.md"]
     task-release-prep["task-release-prep: 0.4.0 release preparation<br/>files: CHANGELOG.md +16 more"]
 
     task-core-error --> task-provider-local
     task-core-error --> task-provider-s3
-    task-core-error --> task-sentinel-read
     task-core-error --> task-retention-read
     task-core-error --> task-doubles-example
     task-core-error --> task-docs
+    task-provider-local --> task-sentinel-read
+    task-provider-s3 --> task-sentinel-read
     task-sentinel-read --> task-doubles-orchestrator
     task-sentinel-read --> task-doubles-cli
-    task-provider-local --> task-sweep-verify
-    task-provider-s3 --> task-sweep-verify
     task-sentinel-read --> task-sweep-verify
     task-retention-read --> task-sweep-verify
     task-doubles-orchestrator --> task-sweep-verify
@@ -58,9 +57,11 @@ when a dispatch fires, fails, or retries.
 
 Deliberately **not** in this plan, each with a reason in spec §6:
 
-- All three `dispatch.ts` not-found catches (`:520`, `:681`, `:743`). Narrowing
-  any of them turns a transient storage blip into a permanent, un-retryable
-  failure at the consumer — ai-os records `action.failed` durably
+- All three `dispatch.ts` not-found sites (`:520` `markerPresent`, `:681`
+  `readSubagentCapabilities`, `:743` env-bundle). All three are bare
+  `catch {}` blocks, not copies of the message heuristic. Narrowing any of them
+  turns a transient storage blip into a permanent, un-retryable failure at the
+  consumer — ai-os records `action.failed` durably
   (`packages/action/src/handle.ts:29-36`) and early-returns on redelivery
   (`:16`). They defer as one unit alongside the dedupe-marker ordering they
   share. Leaving them regresses nothing: they are fail-open today.
@@ -73,12 +74,32 @@ Deliberately **not** in this plan, each with a reason in spec §6:
 ai-os must land all four `@quarry-systems/*` dependency lines on the 0.4 train,
 and whatever `StorageProvider` it injects must throw `StorageNotFoundError` — a
 `0.3.x` provider paired with `pangolin-product@0.4.0` gets the deleted sniff and
-no typed throw, which is strictly worse than today. Without both, this release
-does not reach its only consumer.
+no typed throw, which is strictly worse than today.
 
 **Publish is manual.** `task-release-prep` bumps versions and moves the changelog
 section; `pnpm -r publish`, `git tag`, and `gh release create` stay operator steps
 per `RELEASING.md` (npm 2FA).
+
+### Two mechanics every task depends on
+
+**Cross-package changes are only visible through `dist/`.** `pangolin-core` is
+`main: dist/index.js` / `types: dist/index.d.ts`, `dist/` is gitignored
+(`.gitignore:5`), `tsconfig.base.json` declares no `paths` and no project
+references, and each package's `node_modules/@quarry-systems/*` is a symlink to
+the package directory. So a task that adds an export consumed by a *downstream*
+task must **build**, or the consumer fails with "has no exported member". This
+bites `task-core-error` (five consumers) and `task-sentinel-read` (two); both
+carry an explicit build criterion. A task's own tests import `../src/…` directly
+and would go green against a stale `dist`, which is exactly why the criterion is
+stated rather than assumed.
+
+**`StorageNotFoundError`'s default message contains the words "not found"**
+(`storage object not found: ${uri}`). A test double that throws it with the
+default message therefore *also* satisfies the `/not found/i` sniff being
+deleted, so an assertion against such a double passes identically before the
+change, after it, and if it were reverted. The doubles tasks deliberately give
+their errors a message **without** those words, so the test can only pass if
+classification is by type.
 
 Accepted quality warnings: S2 and S9-5 on `task-release-prep` (17 files, wiring
 task at `standard`/`merged` review — the check is a countable bump plus a dry-run
@@ -139,6 +160,7 @@ export function isStorageNotFound(err: unknown): boolean {
 
 ```typescript
 // packages/pangolin-core/test/storage-not-found.test.ts
+import { describe, expect, it } from 'vitest';
 import { StorageNotFoundError, isStorageNotFound } from '../src/errors.js';
 
 it('lets a provider supply its own message while keeping uri and name', () => {
@@ -170,8 +192,12 @@ it('does not classify unrelated values as not-found', () => {
 - `StorageProvider.get`'s doc comment in `src/storage.ts` states that a missing
   object MUST throw `StorageNotFoundError`, and that the error's `uri` carries
   the caller-facing `pangolin://` URI rather than a backend key.
-- Both symbols are importable from `@quarry-systems/pangolin-core` with no barrel
-  edit — `src/index.ts:7` is already `export * from './errors.js'`.
+- **`pnpm --filter @quarry-systems/pangolin-core run build` succeeds and the
+  emitted `packages/pangolin-core/dist/errors.d.ts` declares both
+  `StorageNotFoundError` and `isStorageNotFound`.** Five downstream tasks resolve
+  this package through `dist/` (see Context); without the build they fail with
+  "has no exported member". No barrel edit is needed — `src/index.ts:7` is
+  already `export * from './errors.js'`.
 - `resolveLatest`, `list`, and `resolveByHash` are unchanged; they already return
   `null` for absence.
 
@@ -212,6 +238,9 @@ import { StorageNotFoundError } from '@quarry-systems/pangolin-core';
 
 ```typescript
 // packages/pangolin-storage-local/test/not-found.test.ts
+import { expect, it } from 'vitest';
+import { LocalStorageProvider } from '../src/index.js';
+
 it('throws StorageNotFoundError for a missing blob without changing the message', async () => {
   const sp = new LocalStorageProvider({ rootDir });
   const uri = `pangolin://test/capability/ghost/sha256:${'0'.repeat(64)}`;
@@ -234,6 +263,10 @@ it('throws StorageNotFoundError for a missing blob without changing the message'
   converted.
 - The path-traversal guard `parseSafe` (`src/index.ts:346`) and the unpinned-URI
   guard (`:272-274`) are untouched.
+- `pnpm --filter @quarry-systems/pangolin-storage-local run typecheck:test`
+  passes — this package carries a `tsconfig.test.json` covering `test/**/*` and
+  is wired into `.github/workflows/typecheck.yml`, so a new test file that does
+  not typecheck fails CI even with a green suite.
 
 Test file: `packages/pangolin-storage-local/test/not-found.test.ts`.
 
@@ -289,11 +322,15 @@ import { StorageNotFoundError } from '@quarry-systems/pangolin-core';
 
 ```typescript
 // packages/pangolin-storage-s3/test/not-found.test.ts
+import { expect, it } from 'vitest';
 import { NoSuchKey } from '@aws-sdk/client-s3';
+import { S3StorageProvider } from '../src/index.js';
 
 it('translates NoSuchKey on a dispatch record into StorageNotFoundError', async () => {
   const err = new NoSuchKey({ $metadata: { httpStatusCode: 404 }, message: 'The specified key does not exist.' });
-  const sp = new S3StorageProvider({ ...opts, client: s3ThatThrows(err) });
+  // `client?: S3Client` (src/index.ts:56) will not accept a hand-rolled { send } —
+  // the fake needs an explicit cast at the construction site.
+  const sp = new S3StorageProvider({ ...opts, client: s3ThatThrows(err) as unknown as S3Client });
   const uri = 'pangolin://ns/dispatches/d1/output.json';
   await expect(sp.get(uri)).rejects.toMatchObject({ name: 'StorageNotFoundError', uri });
 });
@@ -319,6 +356,9 @@ it('translates NoSuchKey on a dispatch record into StorageNotFoundError', async 
   variant.
 - A non-404 SDK error (e.g. a 403 `AccessDenied`) still propagates unchanged.
 - The LocalStack-gated `test/integration.test.ts` is not modified.
+- `pnpm --filter @quarry-systems/pangolin-storage-s3 run typecheck:test` passes —
+  this package's `tsconfig.test.json` covers `test/**/*`, so the fake S3 client
+  must typecheck, not merely run.
 
 Test file: `packages/pangolin-storage-s3/test/not-found.test.ts`.
 
@@ -326,7 +366,7 @@ Test file: `packages/pangolin-storage-s3/test/not-found.test.ts`.
 
 ```yaml
 id: task-sentinel-read
-depends_on: [task-core-error]
+depends_on: [task-provider-local, task-provider-s3]
 files:
   - packages/pangolin-product/src/sentinel-read.ts
   - packages/pangolin-product/test/sentinel-read.test.ts
@@ -337,6 +377,14 @@ Replaces the message sniff with `isStorageNotFound` and deletes the local
 heuristic. Spec §3.3. The inverted test is the point of the change: an error
 whose message merely contains "not found" must stop being recorded as "this
 dispatch produced nothing."
+
+It depends on **both providers**, not just on `task-core-error`, because two
+example suites drive a real `LocalStorageProvider` through this function and
+assert the no-sentinel case — `examples/dogfood-gated/test/usage-read.test.ts:70`
+(provider constructed at `:52`) and `examples/data-mapreduce/test/sentinel-read.test.ts:47`
+(`:50`). Landing this before the providers throw the typed error turns both red.
+Neither file matches the `task-sweep-verify` grep terms, so nothing downstream
+would catch it.
 
 ## Implementation
 
@@ -358,6 +406,9 @@ import { buildDispatchRecordUri, isStorageNotFound } from '@quarry-systems/pango
 
 ```typescript
 // packages/pangolin-product/test/sentinel-read.test.ts — replaces the assertion at :40
+import { expect, it } from 'vitest';
+import { readOutputSentinel } from '../src/sentinel-read.js';
+
 it('does NOT treat a generic /not found/i message as absent', async () => {
   const storage = { async get() { throw new Error('DNS lookup failed: host not found'); } };
   await expect(
@@ -383,6 +434,14 @@ it('does NOT treat a generic /not found/i message as absent', async () => {
   (`package.json:5`, `:34-37`). Provider translation is covered by
   `task-provider-local` / `task-provider-s3`; neither half is sufficient alone
   and the split is deliberate.
+- `examples/dogfood-gated/test/usage-read.test.ts` and
+  `examples/data-mapreduce/test/sentinel-read.test.ts` pass **unmodified** — both
+  drive a real `LocalStorageProvider` through this function, which is why the
+  provider tasks are dependencies.
+- **`pnpm --filter @quarry-systems/pangolin-product run build` succeeds**, so the
+  two doubles tasks (which import `readOutputSentinel` across the package
+  boundary, resolving through `dist/`) see this change.
+- `pnpm --filter @quarry-systems/pangolin-product run typecheck:test` passes.
 
 Test file: `packages/pangolin-product/test/sentinel-read.test.ts`.
 
@@ -395,6 +454,8 @@ files:
   - packages/pangolin-client/src/retention.ts
   - packages/pangolin-client/src/cancel.ts
   - packages/pangolin-client/test/retention.test.ts
+  - packages/pangolin-client/test/cancel.test.ts
+  - packages/pangolin-client/test/describe.test.ts
 status: pending
 ```
 
@@ -403,6 +464,10 @@ The same substitution for `readDispatchRecord`, plus a comment-only correction t
 of this client's not-found story — and because `cancel.ts`'s comment describes the
 very function being changed. It is already false today: it claims failures of any
 participant collapse to a no-op, while `retention.ts:86` rethrows.
+
+`cancelDispatch` (`src/cancel.ts:32`) and `describeDispatch` (`src/describe.ts:41`)
+both call `readDispatchRecord` **bare**. Their doubles signal absence the old way,
+so this task owns them too — five tests in two sibling files go red otherwise.
 
 ## Implementation
 
@@ -426,6 +491,8 @@ import { isStorageNotFound } from '@quarry-systems/pangolin-core';
 
 ```typescript
 // packages/pangolin-client/test/retention.test.ts
+import { expect, it } from 'vitest';
+
 it('rethrows a generic /not found/i message instead of reporting the record missing', async () => {
   const client = makeClient(storageThatThrows(new Error('endpoint not found (DNS)')));
   await expect(readDispatchRecord(client, 'd1')).rejects.toThrow(/endpoint not found/);
@@ -438,16 +505,28 @@ it('rethrows a generic /not found/i message instead of reporting the record miss
   "not found" now propagates instead of being reported as a missing record.
 - `src/retention.ts` contains no `/not found/i` regex and no
   `err.code === 'ENOENT'` check; the local `isNotFound` at `:90-97` is gone.
-- The ENOENT double at `test/retention.test.ts:174` and the memory-storage double
-  at `:8,24` throw `StorageNotFoundError`.
-- `src/describe.ts` is **not** modified, and `test/describe.test.ts:160-180` —
-  which asserts an `'S3 bucket policy denies access'` error propagates and is not
-  a `DispatchRecordExpiredError` — passes unchanged. `describe.ts:33-35` has
-  always documented "Unrelated storage errors are re-thrown unchanged", so this
-  is not a behaviour change and must not be reported as one.
-- `cancelDispatch`'s **code** is unchanged — no wrap is added. Wrapping the call
-  would swallow the `JSON.parse` at `retention.ts:83` too, turning a corrupt
-  `record.json` into a silent no-op.
+- In `test/retention.test.ts`: the ENOENT double at `:174` and the memory-storage
+  double whose `get` throws at `:24` both throw `StorageNotFoundError`; the doc
+  comment at `:8` (which describes the double as surfacing a `/not found/i`
+  message) is rewritten; and the title at `:167`, "returns null when the record
+  was never written (not-found message)", no longer names a mechanism that no
+  longer exists.
+- In `test/cancel.test.ts`: `makeEnoentStorage()` (`:44-54`) and
+  `makeMemoryStorage()`'s throw (`:32`) throw `StorageNotFoundError`, so `:110`
+  ("is a no-op when the dispatch record is missing (ENOENT)") and `:122`
+  ("…(not-found message)") still resolve to `undefined`. Both fail without this —
+  `cancelDispatch` does not catch.
+- In `test/describe.test.ts`: the ENOENT double (`:68-69`) and
+  `makeMemoryStorage()` (`:25`) throw `StorageNotFoundError`, so `:61`, `:84`,
+  and `:91` still reach `DispatchRecordExpiredError` rather than a raw rethrow.
+- `src/describe.ts` and `cancelDispatch`'s **code** are unchanged. The pinned
+  test at `test/describe.test.ts:159-180` — which asserts an `'S3 bucket policy
+  denies access'` error propagates and is not a `DispatchRecordExpiredError` —
+  passes with no edit, because `describe.ts:33-35` has always documented
+  "Unrelated storage errors are re-thrown unchanged". Note this is true of that
+  test only; the three above genuinely need their doubles converted.
+- No wrap is added to `cancelDispatch`: wrapping would swallow the `JSON.parse`
+  at `retention.ts:83` too, turning a corrupt `record.json` into a silent no-op.
 - `src/cancel.ts:17-21`'s comment states that a missing or purged record is a
   no-op while other backend errors propagate.
 
@@ -461,12 +540,13 @@ depends_on: [task-sentinel-read]
 files:
   - packages/pangolin-orchestrator/test/dispatch-sentinel-read.test.ts
   - packages/pangolin-orchestrator/test/executors/dispatch.test.ts
+  - packages/pangolin-orchestrator/test/executors/dispatch-orchestrator.int.test.ts
 status: pending
 ```
 
-Two doubles signal absence by message. After `task-sentinel-read` lands they would
-exercise the `.catch` swallow at `src/executors/dispatch.ts:215` instead of the
-real `absent` branch — the suite stays green while silently testing something
+Three doubles signal absence by message. After `task-sentinel-read` lands they
+would exercise the `.catch` swallow at `src/executors/dispatch.ts:215` instead of
+the real `absent` branch — the suite stays green while silently testing something
 else. Spec §3.5.
 
 ## Implementation
@@ -477,19 +557,22 @@ import { StorageNotFoundError } from '@quarry-systems/pangolin-core';
 
     async get(uri: string) {
       const v = blobs.get(uri);
-      if (!v) throw new StorageNotFoundError(uri);
+      // Message deliberately omits "not found": the default message contains it,
+      // and a double using the default would still satisfy the deleted sniff.
+      if (!v) throw new StorageNotFoundError(uri, `absent: ${uri}`);
       return v;
     },
 
 // The header comment at :28-30 — "`get` on a missing key throws a 'not found'
 // message, matching pangolin-product's isNotFound sniff" — is rewritten; it
 // otherwise describes deleted code.
-// test/executors/dispatch.test.ts:72 takes the identical change, same double shape.
+// test/executors/dispatch.test.ts:72 and
+// test/executors/dispatch-orchestrator.int.test.ts:60 take the identical change.
 ```
 
 ```typescript
 it('signals absence by type, so the real absent branch is still exercised', async () => {
-  const storage = makeMemoryStorage(); // now throws StorageNotFoundError
+  const storage = makeMemoryStorage(); // throws StorageNotFoundError, message has no "not found"
   await expect(
     readOutputSentinel({ storage, namespace: 'ns' }, 'missing'),
   ).resolves.toEqual({ status: 'absent' }); // not the .catch at executors/dispatch.ts:215
@@ -498,21 +581,31 @@ it('signals absence by type, so the real absent branch is still exercised', asyn
 
 ## Acceptance criteria
 
-- Both doubles — `test/dispatch-sentinel-read.test.ts:84` and
-  `test/executors/dispatch.test.ts:72` — throw `StorageNotFoundError` instead of
-  an `Error` carrying a `/not found/i` message.
+- All three doubles — `test/dispatch-sentinel-read.test.ts:84`,
+  `test/executors/dispatch.test.ts:72`, and
+  `test/executors/dispatch-orchestrator.int.test.ts:60` — throw
+  `StorageNotFoundError` instead of an `Error` carrying a `/not found/i` message.
+- Each double's message **does not contain the words "not found"**. With the
+  class's default message it would, and the assertions below would then pass
+  identically before this change, after it, and if `task-sentinel-read` were
+  reverted — proving nothing.
 - The header comment at `test/dispatch-sentinel-read.test.ts:28-30` no longer
   refers to `pangolin-product`'s deleted sniff.
 - `test/dispatch-sentinel-read.test.ts:235` ("reconcile yields no
-  patchRef/verify/outputRefs when the sentinel is absent") still reaches
-  `readOutputSentinel`'s `absent` return, asserted directly by that call
-  resolving to `{ status: 'absent' }`. Without this the test silently becomes a
+  patchRef/verify/outputRefs when the sentinel is absent") reaches
+  `readOutputSentinel`'s `absent` return, asserted through the spy wrapper this
+  file already installs at `:22-25`. Without this the test silently becomes a
   duplicate of `:268` ("reconcile never throws even when storage.get rejects with
   an unrelated error").
-- `test/executors/dispatch.test.ts:725` likewise still exercises the real absent
-  path rather than the swallow.
-- `src/executors/dispatch.ts` is **not** modified — the `.catch` at `:215` is a
-  documented `NEVER throws` contract and removing it strands the item.
+- `test/executors/dispatch.test.ts:725` ("reconcile of a done dispatch with no
+  sentinel yields resultRef undefined, no throw") asserts `resultRef === undefined`
+  **and** that the converted double was reached — this file does not wrap
+  `readOutputSentinel`, so the check is that the double threw
+  `StorageNotFoundError` (not a generic error) on the missing key.
+- `src/executors/dispatch.ts` is **not** modified. Its `.catch` at `:215` is a
+  documented `NEVER throws` contract; `test/dispatch-sentinel-read.test.ts:268`
+  is the characterisation that pins it (spec §4) and must remain green and
+  unmodified.
 
 Test file: `packages/pangolin-orchestrator/test/dispatch-sentinel-read.test.ts`.
 
@@ -539,7 +632,8 @@ import { StorageNotFoundError } from '@quarry-systems/pangolin-core';
 
       const storage = {
         async get(ref: string): Promise<Uint8Array> {
-          throw new StorageNotFoundError(ref);
+          // message omits "not found" so the assertion below cannot pass via the deleted sniff
+          throw new StorageNotFoundError(ref, `absent: ${ref}`);
         },
       };
 ```
@@ -554,7 +648,9 @@ it('reports no usage evidence via the absent branch, not via the bare catch', as
 ## Acceptance criteria
 
 - The double at `test/cmd-orch.test.ts:561-565` throws `StorageNotFoundError`
-  rather than `new Error('not found')`.
+  rather than `new Error('not found')`, with a message that does **not** contain
+  the words "not found" — otherwise the assertion passes via the deleted sniff
+  and proves nothing.
 - The absence path is asserted on `readOutputSentinel` resolving to
   `{ status: 'absent' }`, so the assertion cannot pass merely because
   `src/cmd-orch.ts:240`'s bare `catch {}` swallowed a throw.
@@ -575,8 +671,15 @@ depends_on: [task-core-error]
 files:
   - examples/appendable-stream/src/index.ts
   - examples/appendable-stream/package.json
+  - pnpm-lock.yaml
 status: pending
+is_wiring_task: true
 ```
+
+`is_wiring_task` is set because this task adds a cross-package dependency edge
+and therefore necessarily touches the root `pnpm-lock.yaml` alongside the
+example's own files — a mixed-prefix `files:` by construction, not by sloppy
+scoping. The `## Implementation` section below is retained regardless.
 
 A **src-tree** stub whose entire contract is the message being deleted. It is
 behaviourally inert today — its consumer `assembleBundle` absorbs any throw at
@@ -599,6 +702,9 @@ import { StorageNotFoundError } from '@quarry-systems/pangolin-core';
 ```json
 // examples/appendable-stream/package.json — the manifest currently declares only
 // pangolin-orchestrator, so importing the error class needs a new edge.
+// `pnpm install` must follow, to create the node_modules symlink and update
+// pnpm-lock.yaml — the package's typecheck script passes bare file paths to tsc
+// with no tsconfig, so an unresolvable import fails immediately.
 "dependencies": {
   "@quarry-systems/pangolin-orchestrator": "workspace:*",
   "@quarry-systems/pangolin-core": "workspace:*"
@@ -610,13 +716,17 @@ import { StorageNotFoundError } from '@quarry-systems/pangolin-core';
 - The stub at `src/index.ts:237-241` throws `StorageNotFoundError(ref)` instead of
   `` new Error(`storage: not found: ${ref}`) ``; the file contains no
   `/not found/` string.
-- `package.json` declares `@quarry-systems/pangolin-core": "workspace:*"`
-  alongside the existing `pangolin-orchestrator` entry. Without it the import is
-  undeclared and the example does not build.
+- `package.json` declares `"@quarry-systems/pangolin-core": "workspace:*"`
+  alongside the existing `pangolin-orchestrator` entry.
+- `pnpm install` is run so the `node_modules/@quarry-systems/pangolin-core`
+  symlink exists, and the resulting `pnpm-lock.yaml` change is committed. Without
+  it the example's typecheck fails with "Cannot find module". Note
+  `scripts/check-declared-deps.mjs:21` walks `packages/` only, so CI does not
+  catch an undeclared import here.
 - `examples/appendable-stream/test/appendable-stream.test.ts` passes unchanged —
   the stub feeds `assembleBundle`, which absorbs any throw, so behaviour is
   identical either way.
-- The example still builds and typechecks.
+- The example builds and typechecks.
 
 Test file: `examples/appendable-stream/test/appendable-stream.test.ts`.
 
@@ -666,7 +776,7 @@ type rather than on the error message.
   sentinel returns `{ status: 'absent' }` and names the provider contract that
   guarantees it.
 - Neither page mentions a `head()` probe or a size-bounded read.
-  `docs-site/test/product-read-docs.test.ts:91-108` guards `dispatch-lifecycle.md`
+  `docs-site/test/product-read-docs.test.ts:91-109` guards `dispatch-lifecycle.md`
   against `/head\(\)/` and `/size[- ]?(bound|cap|limit)ed? read/i` and must stay
   green — that surface is deferred, so the guard is correct.
 - `docs-site/test/product-read-docs.test.ts` is **not** modified, and no new doc
@@ -680,14 +790,13 @@ Test file: `docs-site/test/product-read-docs.test.ts` (must remain green; not mo
 ```yaml
 id: task-sweep-verify
 depends_on:
-  - task-provider-local
-  - task-provider-s3
   - task-sentinel-read
   - task-retention-read
   - task-doubles-orchestrator
   - task-doubles-cli
   - task-doubles-example
-files: []
+files:
+  - docs/superpowers/plans/2026-07-28-storage-not-found-sweep.md
 status: pending
 single_threaded: true
 quality_reviewer_hint: opus
@@ -695,24 +804,29 @@ quality_reviewer_hint: opus
 
 The sweep mandated by spec §3.5, run as an explicit step with a pass criterion
 rather than a claim. Three prior spec revisions each shipped a list of affected
-doubles asserted to be complete and each was missing sites — so this task's job is
-to prove closure, and it runs alone so it can safely touch anything it finds.
+doubles asserted to be complete and each was missing sites. It runs
+`single_threaded` because it may need to edit files no task foresaw; the declared
+file is the report it must leave behind, so its findings are reviewable rather
+than living only in a transcript.
 
 ## Implementation
 
 ```bash
 # Five trees: the four pnpm-workspace.yaml roots PLUS test/, which sits outside
 # every workspace root and has its own runner (vitest.e2e.config.ts).
+# Expect ~103 hits across ~55 files — most will be verdict (b) or (c).
 rg -n --type ts -e 'not found' -e 'ENOENT' -e 'NoSuchKey' \
    packages/ examples/ deploy/ docs-site/ test/
 ```
 
 ```markdown
-| file:line | reaches storage.get on a narrowed path? | disposition |
+<!-- docs/superpowers/plans/2026-07-28-storage-not-found-sweep.md -->
+| file:line | verdict | note |
 |---|---|---|
-| packages/pangolin-storage-s3/src/index.ts:112-121 | no — provider-internal detection | keep |
-| test/e2e/inline-secret-lifecycle.test.ts:93 | no — SecretStore, not StorageProvider | keep |
-| <every remaining hit> | yes / no | converted / keep + reason |
+| packages/pangolin-storage-s3/src/index.ts:112-121 | (b) not a caller | provider-internal detection — keep |
+| packages/pangolin-client/test/dispatch-dedupe.test.ts:73 | (c) deferred caller | feeds markerPresent (§6.1) — keep |
+| test/e2e/inline-secret-lifecycle.test.ts:93 | (b) not a caller | SecretStore, not StorageProvider — keep |
+| <every remaining hit> | (a) / (b) / (c) | converted / reason |
 ```
 
 ## Acceptance criteria
@@ -720,22 +834,27 @@ rg -n --type ts -e 'not found' -e 'ENOENT' -e 'NoSuchKey' \
 - The grep is run over all five trees — `packages/`, `examples/`, `deploy/`,
   `docs-site/`, and `test/`. A workspace-scoped sweep would miss the last, which
   holds `test/e2e/` (22 files) and `test/monorepo-bootstrap.test.ts`.
-- Every hit is recorded in the disposition table with exactly one of two verdicts:
-  "reaches `storage.get` on a narrowed read path" → converted to throw
-  `StorageNotFoundError`, or "does not" → left alone with the reason named. A hit
-  with no verdict is a failure of this task.
-- No file under the five trees still signals a **storage** not-found by message or
-  by `err.code === 'ENOENT'`. Non-storage uses are explicitly named as out —
-  e.g. the `SecretStore` mock at `test/e2e/inline-secret-lifecycle.test.ts:93`,
-  which is a different interface.
-- Any site fixed here that no earlier task already covered is listed separately in
-  the report, so a gap in the plan is visible rather than silently absorbed.
+- Every hit is recorded in `docs/superpowers/plans/2026-07-28-storage-not-found-sweep.md`
+  with exactly one of three verdicts:
+  **(a)** feeds `storage.get` on a narrowed read path (`readOutputSentinel` or
+  `readDispatchRecord`) → converted to throw `StorageNotFoundError`;
+  **(b)** not a `StorageProvider` not-found signal at all → keep, reason named;
+  **(c)** feeds only a §6.1-deferred bare `catch {}`
+  (`packages/pangolin-client/src/dispatch.ts:520-527`, `:681-684`, `:745`) →
+  keep, because those catches swallow every throw and are deferred by design.
+  A hit with no verdict is a failure of this task.
+- Verdict (c) is expected to cover the bulk of `packages/pangolin-client/test/`
+  (`dispatch-dedupe.test.ts:73`, `dispatch.test.ts:78`, `dispatch-fire.test.ts:66`,
+  and siblings). These are **not** converted — spec §3.5 names them out of scope.
+- Any hit given verdict (a) that no earlier task already covered is listed in a
+  separate "gaps" section of the report, so a hole in the plan is visible rather
+  than silently absorbed.
 - `pnpm -r test` is green, and `typecheck:test` passes for the six packages that
   have it (`pangolin-product`, `pangolin-providers-aws-creds`,
   `pangolin-secret-store`, `pangolin-signer-aws-kms`, `pangolin-storage-local`,
   `pangolin-storage-s3`).
 
-Test file: none — verification is the disposition table plus a green `pnpm -r test`.
+Test file: `docs/superpowers/plans/2026-07-28-storage-not-found-sweep.md` is the reviewable artifact; the executable gate is a green `pnpm -r test`.
 
 ## Task: 0.4.0 release preparation
 
@@ -776,13 +895,13 @@ manual operator steps per `RELEASING.md` (the npm account enforces 2FA on writes
 - All 16 `packages/*/package.json` read `"version": "0.4.0"`. Fifteen move from
   `0.3.1`; `pangolin-product` already reads `0.4.0` and is left unchanged. No
   package is `"private": true`, so all 16 publish.
-- `CHANGELOG.md`'s `[Unreleased]` section becomes `## [0.4.0] - 2026-07-28`,
-  retaining the six already-merged entries (#97, #98, #100, #102, #104, #105) and
-  adding this change, with link references updated at the bottom.
-- The **Breaking** heading names exactly one item: `StorageProvider.get` must now
-  throw `StorageNotFoundError` for a missing object. `describeDispatch` and
-  `cancelDispatch` are **not** listed as breaking — `describe.ts:33-35` has always
-  documented the rethrow.
+- `CHANGELOG.md`'s `[Unreleased]` section becomes `## [0.4.0] - 2026-07-28` with
+  link references updated at the bottom. **No existing bullet is dropped** — it
+  currently carries eight bullets across Added / Changed / Fixed.
+- A new `### Breaking` heading is added naming exactly one item:
+  `StorageProvider.get` must now throw `StorageNotFoundError` for a missing
+  object. `describeDispatch` and `cancelDispatch` are **not** listed as breaking —
+  `describe.ts:33-35` has always documented the rethrow.
 - A **Fixed** entry records the provider-dependent `absent` path: a missing
   sentinel returned `absent` on the local provider but threw on S3.
 - `pnpm -r run build` succeeds and `pnpm -r publish --dry-run --no-git-checks`
