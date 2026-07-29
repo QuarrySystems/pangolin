@@ -25,6 +25,7 @@ import {
   serve,
   verifyBundle,
 } from '@quarry-systems/pangolin-orchestrator';
+import { StorageNotFoundError } from '@quarry-systems/pangolin-core';
 import type {
   Executor,
   FireContext,
@@ -236,7 +237,7 @@ export async function runAppendableStream(): Promise<AppendableStreamResult> {
     // provide an empty store (missing manifests are silently skipped by assembleBundle).
     const emptyStorage = {
       async get(ref: string): Promise<Uint8Array> {
-        throw new Error(`storage: not found: ${ref}`);
+        throw new StorageNotFoundError(ref);
       },
     };
 
