@@ -9,3 +9,10 @@
 # `agora://`->`pangolin://` inside a committed bundle and broke its verify.)
 examples/**/bundle.json -text
 examples/**/verify-context.json -text
+
+# Shell scripts are bind-mounted into Linux containers (the `volumes:` entries in
+# deploy/serve-stack and the MinIO examples). On a Windows checkout with
+# core.autocrlf=true they arrive with CRLF endings, and the container's shell then
+# fails on the stray carriage return — the serve stack's minio-init exits 2 before
+# the stack can start. Pin them to LF regardless of the local autocrlf setting.
+*.sh text eol=lf
