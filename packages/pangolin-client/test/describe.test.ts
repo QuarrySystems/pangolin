@@ -63,9 +63,9 @@ const baseResult: DispatchResult = {
 };
 
 describe('describeDispatch', () => {
-  it('throws DispatchRecordExpiredError when the record is missing (ENOENT)', async () => {
+  it('throws DispatchRecordExpiredError when the storage backend throws StorageNotFoundError', async () => {
     const storage: StorageProvider = {
-      name: 'enoent',
+      name: 'not-found',
       async put() {
         return { contentHash: 'x' };
       },

@@ -42,9 +42,9 @@ function makeMemoryStorage(): StorageProvider & {
   };
 }
 
-function makeEnoentStorage(): StorageProvider {
+function makeNotFoundStorage(): StorageProvider {
   return {
-    name: 'enoent',
+    name: 'not-found',
     async put() {
       return { contentHash: 'x' };
     },
@@ -106,8 +106,8 @@ function makeRecordingProvider(opts?: {
 }
 
 describe('cancelDispatch', () => {
-  it('is a no-op when the dispatch record is missing (ENOENT)', async () => {
-    const storage = makeEnoentStorage();
+  it('is a no-op when the storage backend throws StorageNotFoundError', async () => {
+    const storage = makeNotFoundStorage();
     const client = new PangolinClient({
       namespace: 'o',
       compute: {},
@@ -118,7 +118,7 @@ describe('cancelDispatch', () => {
     await expect(cancelDispatch(client, 'missing')).resolves.toBeUndefined();
   });
 
-  it('is a no-op when the dispatch record is missing (not-found message)', async () => {
+  it('is a no-op when the dispatch record was never written (typed StorageNotFoundError)', async () => {
     const storage = makeMemoryStorage();
     const client = new PangolinClient({
       namespace: 'o',
