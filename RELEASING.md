@@ -15,8 +15,37 @@ not yet in place (see "Future" below).
    references at the bottom.
 4. **Build:** `pnpm -r run build`.
 5. **Sanity-check** what will publish without uploading:
-   `pnpm -r publish --dry-run --no-git-checks` (tarballs should contain only
-   `dist/`, `README.md`, `LICENSE`, `package.json`).
+
+   ```sh
+   pnpm -r publish --dry-run --no-git-checks
+   ```
+
+   Check two things, in this order:
+
+   - **Count the packages it lists — it must name every publishable package**
+     (16 as of `0.4.0`):
+
+     ```sh
+     pnpm -r publish --dry-run --no-git-checks | grep -c '^+ @quarry-systems/'
+     ```
+
+     `pnpm -r publish` **silently skips any package whose version is already on
+     the registry**, so a stale tree — wrong branch, or a bump that never landed —
+     produces a dry-run that looks *successful* and is merely short. **If the
+     count is lower than the number of publishable packages, STOP.** The bump is
+     not in your working tree, and publishing would ship only whichever packages
+     happen to be ahead of the registry, on their own.
+
+     This is not hypothetical. Before `0.4.0`, `pangolin-product` sat at `0.4.0`
+     and unpublished from the moment PR #97 added it, while the other fifteen
+     were `0.3.1`. On any branch without the release commit, the dry-run printed
+     exactly one package and no error. Publishing would have burned `0.4.0` on a
+     lone package built from pre-release source, pinned (per step 2's rewrite) to
+     `pangolin-core@0.3.1` — and npm versions are immutable, so the real release
+     would have had to become `0.4.1`.
+
+   - **Tarball contents** should be only `dist/`, `README.md`, `LICENSE`, and
+     `package.json`.
 6. **Publish to npm** (requires npm auth; the account has 2FA enforced on writes,
    so it prompts for a one-time code and reuses it across the batch):
    ```sh
@@ -36,6 +65,15 @@ not yet in place (see "Future" below).
 
 ## Notes
 
+- **Publish with `pnpm`, never `npm`.** `pnpm publish` rewrites each
+  `workspace:*` dependency to the concrete version being published
+  (`"@quarry-systems/pangolin-core": "workspace:*"` becomes `"0.4.0"` in the
+  tarball); `npm publish` ships the literal `workspace:*`, which no consumer can
+  resolve. `pnpm -r` also publishes in dependency order, so no package is ever
+  briefly on the registry pointing at a version that does not exist yet. This is
+  the mechanism behind step 2's "they must match" — the rewrite targets whatever
+  version each dep resolves to *at publish time*, so a mixed-version tree bakes a
+  wrong pin into the tarball rather than failing loudly.
 - The package set is private-to-publish-safe via `publishConfig.access: public`
   and a `files: ["dist", "README.md", "LICENSE"]` allowlist on every package.
 - The worker OCI image is published separately to GHCR; make sure the image tag
