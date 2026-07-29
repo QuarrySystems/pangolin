@@ -206,8 +206,10 @@ semantics; only errors that were *misclassified* as absent change.
 | `pangolin-product/src/sentinel-read.ts:20` | `{ status: 'absent' }` | throws; local `isNotFound` (`:34-39`) and its blast-radius comment deleted |
 | `pangolin-client/src/retention.ts:85` | `null` | throws; local `isNotFound` (`:90-97`) deleted |
 
-Two copies of the heuristic become zero. The third
-(`pangolin-client/src/dispatch.ts:520-527`) is deferred with its siblings — §6.1.
+Two copies of the heuristic become zero — `sentinel-read.ts:34-39` and
+`retention.ts:90-97` are the only two that exist. The three `dispatch.ts` sites
+(`:520-527`, `:681-684`, `:743-751`) are bare `catch {}` blocks rather than copies
+of the heuristic, and they defer together — §6.1.
 
 **`readDispatchRecord`'s two consumers need no code change**, which is worth
 stating because an earlier revision wrongly claimed otherwise:
