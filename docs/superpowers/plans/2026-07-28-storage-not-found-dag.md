@@ -5,17 +5,17 @@ created: 2026-07-28
 
 ```mermaid
 flowchart TD
-    task-core-error["task-core-error: typed storage not-found error<br/>files: packages/pangolin-core/src/errors.ts +2 more"]
-    task-provider-local["task-provider-local: local provider not-found translation<br/>files: packages/pangolin-storage-local/src/index.ts +1 more"]
-    task-provider-s3["task-provider-s3: S3 provider not-found translation<br/>files: packages/pangolin-storage-s3/src/index.ts +1 more"]
-    task-sentinel-read["task-sentinel-read: sentinel read classifies by type<br/>files: packages/pangolin-product/src/sentinel-read.ts +1 more"]
-    task-retention-read["task-retention-read: dispatch-record read classifies by type<br/>files: packages/pangolin-client/src/retention.ts +4 more"]
-    task-doubles-orchestrator["task-doubles-orchestrator: orchestrator storage doubles<br/>files: packages/pangolin-orchestrator/test/dispatch-sentinel-read.test.ts +2 more"]
-    task-doubles-cli["task-doubles-cli: CLI storage double<br/>files: packages/pangolin-cli/test/cmd-orch.test.ts"]
-    task-doubles-example["task-doubles-example: appendable-stream storage stub<br/>files: examples/appendable-stream/src/index.ts +2 more"]
-    task-docs["task-docs: storage-contract doc pages<br/>files: docs-site/src/content/docs/how-to/write-a-provider.md +1 more"]
-    task-sweep-verify["task-sweep-verify: repo-wide not-found sweep<br/>files: docs/superpowers/plans/2026-07-28-storage-not-found-sweep.md"]
-    task-release-prep["task-release-prep: 0.4.0 release preparation<br/>files: CHANGELOG.md +16 more"]
+    task-core-error["task-core-error: typed storage not-found error<br/>files: packages/pangolin-core/src/errors.ts +2 more"]:::done
+    task-provider-local["task-provider-local: local provider not-found translation<br/>files: packages/pangolin-storage-local/src/index.ts +1 more"]:::done
+    task-provider-s3["task-provider-s3: S3 provider not-found translation<br/>files: packages/pangolin-storage-s3/src/index.ts +1 more"]:::done
+    task-sentinel-read["task-sentinel-read: sentinel read classifies by type<br/>files: packages/pangolin-product/src/sentinel-read.ts +1 more"]:::done
+    task-retention-read["task-retention-read: dispatch-record read classifies by type<br/>files: packages/pangolin-client/src/retention.ts +4 more"]:::done
+    task-doubles-orchestrator["task-doubles-orchestrator: orchestrator storage doubles<br/>files: packages/pangolin-orchestrator/test/dispatch-sentinel-read.test.ts +2 more"]:::done
+    task-doubles-cli["task-doubles-cli: CLI storage double<br/>files: packages/pangolin-cli/test/cmd-orch.test.ts"]:::done
+    task-doubles-example["task-doubles-example: appendable-stream storage stub<br/>files: examples/appendable-stream/src/index.ts +2 more"]:::done
+    task-docs["task-docs: storage-contract doc pages<br/>files: docs-site/src/content/docs/how-to/write-a-provider.md +1 more"]:::done
+    task-sweep-verify["task-sweep-verify: repo-wide not-found sweep<br/>files: docs/superpowers/plans/2026-07-28-storage-not-found-sweep.md"]:::done
+    task-release-prep["task-release-prep: 0.4.0 release preparation<br/>files: CHANGELOG.md +16 more"]:::done
 
     task-core-error --> task-provider-local
     task-core-error --> task-provider-s3
@@ -131,7 +131,7 @@ files:
   - packages/pangolin-core/src/errors.ts
   - packages/pangolin-core/src/storage.ts
   - packages/pangolin-core/test/storage-not-found.test.ts
-status: pending
+status: done
 ```
 
 Adds the typed not-found signal to the contract sink plus the single helper both
@@ -225,7 +225,7 @@ depends_on: [task-core-error]
 files:
   - packages/pangolin-storage-local/src/index.ts
   - packages/pangolin-storage-local/test/not-found.test.ts
-status: pending
+status: done
 ```
 
 Both `LocalStorageProvider` not-found sites throw the typed error while keeping
@@ -300,7 +300,7 @@ depends_on: [task-core-error]
 files:
   - packages/pangolin-storage-s3/src/index.ts
   - packages/pangolin-storage-s3/test/not-found.test.ts
-status: pending
+status: done
 ```
 
 The two S3 read paths gain a not-found catch reusing the provider's existing
@@ -396,7 +396,7 @@ depends_on: [task-provider-local, task-provider-s3]
 files:
   - packages/pangolin-product/src/sentinel-read.ts
   - packages/pangolin-product/test/sentinel-read.test.ts
-status: pending
+status: done
 ```
 
 Replaces the message sniff with `isStorageNotFound` and deletes the local
@@ -489,7 +489,7 @@ files:
   - packages/pangolin-client/test/retention.test.ts
   - packages/pangolin-client/test/cancel.test.ts
   - packages/pangolin-client/test/describe.test.ts
-status: pending
+status: done
 ```
 
 The same substitution for `readDispatchRecord`, plus a comment-only correction to
@@ -590,7 +590,7 @@ files:
   - packages/pangolin-orchestrator/test/dispatch-sentinel-read.test.ts
   - packages/pangolin-orchestrator/test/executors/dispatch.test.ts
   - packages/pangolin-orchestrator/test/executors/dispatch-orchestrator.int.test.ts
-status: pending
+status: done
 ```
 
 Three doubles signal absence by message. After `task-sentinel-read` lands they
@@ -673,7 +673,7 @@ id: task-doubles-cli
 depends_on: [task-sentinel-read]
 files:
   - packages/pangolin-cli/test/cmd-orch.test.ts
-status: pending
+status: done
 ```
 
 The CLI's `OrchContext.storage` double signals absence by message, so the same
@@ -743,7 +743,7 @@ files:
   - examples/appendable-stream/src/index.ts
   - examples/appendable-stream/package.json
   - pnpm-lock.yaml
-status: pending
+status: done
 is_wiring_task: true
 single_threaded: true
 ```
@@ -816,7 +816,7 @@ depends_on: [task-core-error]
 files:
   - docs-site/src/content/docs/how-to/write-a-provider.md
   - docs-site/src/content/docs/reference/dispatch-lifecycle.md
-status: pending
+status: done
 model_hint: cheap
 review_mode: merged
 ```
@@ -875,7 +875,7 @@ depends_on:
   - task-doubles-example
 files:
   - docs/superpowers/plans/2026-07-28-storage-not-found-sweep.md
-status: pending
+status: done
 single_threaded: true
 quality_reviewer_hint: opus
 ```
@@ -978,7 +978,7 @@ files:
   - packages/pangolin-storage-s3/package.json
   - packages/pangolin-verify/package.json
   - packages/pangolin-worker/package.json
-status: pending
+status: done
 is_wiring_task: true
 model_hint: cheap
 review_mode: merged
