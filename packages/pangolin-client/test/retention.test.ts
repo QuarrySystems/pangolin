@@ -1,12 +1,16 @@
 import { describe, it, expect } from 'vitest';
 import { writeDispatchRecord, readDispatchRecord, type DispatchRecord } from '../src/retention.js';
 import { PangolinClient } from '../src/client.js';
-import type { DispatchResult, StorageProvider } from '@quarry-systems/pangolin-core';
+import {
+  StorageNotFoundError,
+  type DispatchResult,
+  type StorageProvider,
+} from '@quarry-systems/pangolin-core';
 
 /**
  * Minimal in-memory storage stub satisfying the StorageProvider contract.
- * Records (uri, bytes) and surfaces a `/not found/i`-matching error on get
- * for missing keys, mirroring the real LocalStorageProvider behaviour.
+ * Records (uri, bytes) and throws a typed `StorageNotFoundError` on get for
+ * missing keys, mirroring the real LocalStorageProvider behaviour.
  */
 function makeMemoryStorage(): StorageProvider & {
   blobs: Map<string, Uint8Array>;
@@ -21,7 +25,7 @@ function makeMemoryStorage(): StorageProvider & {
     },
     async get(uri: string) {
       const v = blobs.get(uri);
-      if (!v) throw new Error(`memory storage: blob not found: ${uri}`);
+      if (!v) throw new StorageNotFoundError(uri, `memory storage: blob missing: ${uri}`);
       return v;
     },
     async resolveLatest() {
@@ -164,23 +168,21 @@ describe('readDispatchRecord', () => {
     expect(read!.retentionDays).toBe(7);
   });
 
-  it('returns null when the record was never written (not-found message)', async () => {
+  it('returns null when the record was never written (typed StorageNotFoundError)', async () => {
     const storage = makeMemoryStorage();
     const client = makeClient(storage, 30);
     const read = await readDispatchRecord(client, 'never-existed');
     expect(read).toBeNull();
   });
 
-  it('returns null when the storage backend signals ENOENT', async () => {
+  it('returns null when the storage backend throws StorageNotFoundError', async () => {
     const storage: StorageProvider = {
       name: 'enoent',
       async put() {
         return { contentHash: 'x' };
       },
-      async get() {
-        const err: NodeJS.ErrnoException = new Error('whatever');
-        err.code = 'ENOENT';
-        throw err;
+      async get(uri: string) {
+        throw new StorageNotFoundError(uri, 'backend object missing');
       },
       async resolveLatest() {
         return null;
@@ -212,6 +214,26 @@ describe('readDispatchRecord', () => {
     };
     const client = makeClient(storage, 30);
     await expect(readDispatchRecord(client, 'd1')).rejects.toThrow(/bucket policy/);
+  });
+
+  it('rethrows a generic /not found/i message instead of reporting the record missing', async () => {
+    const storage: StorageProvider = {
+      name: 'flaky-dns',
+      async put() {
+        return { contentHash: 'x' };
+      },
+      async get() {
+        throw new Error('endpoint not found (DNS)');
+      },
+      async resolveLatest() {
+        return null;
+      },
+      async list() {
+        return [];
+      },
+    };
+    const client = makeClient(storage, 30);
+    await expect(readDispatchRecord(client, 'd1')).rejects.toThrow(/endpoint not found/);
   });
 
   it('round-trips a trace on the dispatch record', async () => {
