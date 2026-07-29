@@ -15,6 +15,12 @@
 export interface StorageProvider {
   readonly name: string;
   put(uri: string, contents: Uint8Array): Promise<{ contentHash: string }>;
+  /**
+   * Fetch the object at `uri`. MUST throw `StorageNotFoundError` (from
+   * `./errors.js`) when no object exists at that URI — never return a
+   * sentinel value. The thrown error's `uri` MUST carry the caller-facing
+   * `pangolin://` URI passed in here, not a backend-specific key.
+   */
   get(uri: string): Promise<Uint8Array>;
   resolveLatest(
     uri: string,
