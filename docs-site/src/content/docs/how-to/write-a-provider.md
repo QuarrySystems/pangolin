@@ -148,6 +148,12 @@ resolve/list queries. The storage layer interprets them as a path.
 The provider picks the hash algorithm. `LocalStorageProvider` and
 `S3StorageProvider` both use sha256.
 
+**`get(uri)` contract:** Return the object's bytes. **If the object does not exist, throw
+`StorageNotFoundError` from `@quarry-systems/pangolin-core`.** Its `uri` field carries the
+`pangolin://` URI you were handed, not your backend key. Callers classify absence with
+`isStorageNotFound`; a provider that throws an untyped error will have a missing object
+treated as an infrastructure failure instead.
+
 **Common stumbles:**
 
 - **`resolveByHash` is load-bearing for the dispatch path.** Subagents
