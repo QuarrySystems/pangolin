@@ -1,6 +1,6 @@
 import { it, expect } from 'vitest';
 import { readOutputSentinel } from '../src/sentinel-read.js';
-import type { StorageProvider } from '@quarry-systems/pangolin-core';
+import { StorageNotFoundError, type StorageProvider } from '@quarry-systems/pangolin-core';
 
 it('propagates a non-not-found storage error instead of reporting absent', async () => {
   const storage = {
@@ -25,27 +25,25 @@ it('reads from the URI built by buildDispatchRecordUri, not string concatenation
   expect(seen).toEqual(['pangolin://ns/dispatches/d1/output.json']);
 });
 
-it('returns absent when the provider throws an ENOENT-coded error', async () => {
+it('returns absent when the provider throws a StorageNotFoundError', async () => {
   const storage = {
     get: async () => {
-      const err = new Error('boom') as Error & { code?: string };
-      err.code = 'ENOENT';
-      throw err;
+      throw new StorageNotFoundError('pangolin://ns/dispatches/d1/output.json');
     },
   };
   const res = await readOutputSentinel({ storage: storage as never, namespace: 'ns' }, 'd1');
   expect(res).toEqual({ status: 'absent' });
 });
 
-it('returns absent when the provider throws an error whose message matches /not found/i', () => {
+it('does NOT treat a generic /not found/i message as absent', async () => {
   const storage = {
-    get: async () => {
-      throw new Error('Object Not Found');
+    async get() {
+      throw new Error('DNS lookup failed: host not found');
     },
   };
-  return readOutputSentinel({ storage: storage as never, namespace: 'ns' }, 'd1').then((res) => {
-    expect(res).toEqual({ status: 'absent' });
-  });
+  await expect(
+    readOutputSentinel({ storage: storage as never, namespace: 'ns' }, 'd1'),
+  ).rejects.toThrow(/DNS lookup failed/); // today this resolves to { status: 'absent' }
 });
 
 it('returns exactly what parseOutputSentinel returns for the fetched bytes on success', async () => {
