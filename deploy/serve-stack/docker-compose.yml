@@ -51,8 +51,10 @@ services:
 
   # ---------------------------------------------------------------------------
   # localstack — AWS Secrets Manager emulator (the proper secret lane).
-  # serve stages ANTHROPIC_API_KEY here as a per-dispatch secret; the worker
-  # resolves the ref over the network (cross-container, unlike a local-FS store).
+  # serve stages the Claude credential here as a per-dispatch secret (either
+  # ANTHROPIC_API_KEY or a CLAUDE_CODE_OAUTH_TOKEN subscription token — see
+  # .env.example); the worker resolves the ref over the network
+  # (cross-container, unlike a local-FS store).
   # No volume on purpose — community edition has no persistence.
   # ---------------------------------------------------------------------------
   localstack:
@@ -137,8 +139,10 @@ services:
       # Config reads PANGOLIN_S3_ACCESS_KEY / PANGOLIN_S3_SECRET_KEY for its S3Client.
       PANGOLIN_S3_ACCESS_KEY: minioadmin
       PANGOLIN_S3_SECRET_KEY: minioadmin
-      # Anthropic key is supplied by `env_file: .env` below — do NOT also list
-      # it here: a compose `environment:` entry overrides `env_file`.
+      # The Claude credential (ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN) and
+      # the optional PANGOLIN_CLAUDE_AUTH lane pin are supplied by
+      # `env_file: .env` below — do NOT also list them here: a compose
+      # `environment:` entry overrides `env_file`.
       # SQLite run-state DB — persisted on the named volume below.
       PANGOLIN_DB_PATH: /data/pangolin.db
       # Persisted signer seed (spec S5) — generated 0600 on first boot, read on

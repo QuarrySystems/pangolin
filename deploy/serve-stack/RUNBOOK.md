@@ -214,13 +214,44 @@ pnpm install && pnpm -r build
 cp deploy/serve-stack/.env.example deploy/serve-stack/.env
 ```
 
-Open `deploy/serve-stack/.env` and set:
+Open `deploy/serve-stack/.env` and set the Claude credential. There are two
+mutually-exclusive lanes — fill in **exactly one**. `claudeAuthSecrets()`
+(`packages/pangolin-core/src/claude-auth.ts`) stages a single env var and never
+both, because the `claude` CLI ranks `ANTHROPIC_API_KEY` above
+`CLAUDE_CODE_OAUTH_TOKEN`; staging both would silently bill the API
+organization and defeat the subscription.
+
+Either lane is staged per-dispatch via LocalStack Secrets Manager — the laptop
+never holds the value.
+
+**Lane 1 — subscription** (Claude Pro/Max; bills the subscription's usage
+allowance, no API credits). Mint the token with `claude setup-token`:
 
 ```bash
-# Your Anthropic API key — staged per-dispatch via LocalStack Secrets Manager.
-# The laptop never holds this value.
-ANTHROPIC_API_KEY=sk-ant-...
+CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...
+PANGOLIN_CLAUDE_AUTH=subscription
+```
 
+**Lane 2 — API key** (bills the API organization per-token):
+
+```bash
+ANTHROPIC_API_KEY=sk-ant-...
+PANGOLIN_CLAUDE_AUTH=api-key
+```
+
+`PANGOLIN_CLAUDE_AUTH` is optional — leave it empty and the lane is selected
+automatically (a non-empty OAuth token picks `subscription`, otherwise
+`api-key`). Pinning it is worth the line on an always-on stack: if the pinned
+lane's credential is blank or expired, the run fails on that lane instead of
+silently falling through to the other one with an empty value.
+
+> Subscription tokens expire. When previously-working dispatches start failing
+> on credentials with nothing else changed, re-mint with `claude setup-token`
+> and restart serve.
+
+Then set the Docker socket GID:
+
+```bash
 # GID of /var/run/docker.sock so the non-root serve user can launch workers.
 # Run the one-liner below, paste the number here.
 DOCKER_GID=<paste output of the command below>
