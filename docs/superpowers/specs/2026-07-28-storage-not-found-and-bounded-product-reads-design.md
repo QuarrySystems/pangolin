@@ -1,16 +1,16 @@
 # Typed storage not-found
 
 **Status:** design proposed 2026-07-28 · **Author:** agent:claude-opus-5 (with Brett) · **Confidence:** high
-**Revision:** rev 5 — four audit rounds. See §9.
+**Revision:** rev 6 — five audit rounds. See §9.
 
 A missing storage object becomes a typed `StorageNotFoundError` instead of a
 message the caller has to sniff. Today that sniff silently breaks the `absent`
 path on S3: a finished dispatch with no output sentinel **throws** where the
 published contract says it returns `{ status: 'absent' }`.
 
-Bounded product reads — the `head()` size-ceiling work that shared this spec
-through rev 3 — are deferred to their own spec (§6.2), as are two of the five
-not-found call sites (§6.1).
+**Scope is the storage contract and the two read paths that consume it.** There
+are no changes to the dispatch fire path (§6.1) and no bounded-read work
+(§6.2). Nothing in this release alters when a dispatch fires, fails, or retries.
 
 **Evidence discipline for this spec.** Every factual claim about current behavior
 carries a `file:line` citation. Claims about what *will* exist are marked as
@@ -34,7 +34,7 @@ resolve it either way.
 ### 1.2 Why 0.4.0
 
 §3 is not additive: it changes what `StorageProvider.get` must do on a missing
-object and deletes the compensating logic from three callers. That is a breaking
+object and deletes the compensating logic from two callers. That is a breaking
 change to the provider contract, so the release is `0.4.0` and all sixteen
 packages move there in lockstep.
 
@@ -107,38 +107,6 @@ whose text happens to contain that phrase is reclassified as `absent`. For a
 consumer that maps `absent` to "this dispatch produced nothing," a transient
 infrastructure error becomes a durable business fact.
 
-### 2.3 The dedupe guard fails open on the same gap
-
-`packages/pangolin-client/src/dispatch.ts:520-527`:
-
-```ts
-async function markerPresent(storage: StorageProvider, uri: string): Promise<boolean> {
-  try { await storage.get(uri); return true; } catch { return false; }
-}
-```
-
-Every throw reads as "not present." Its caller is the dedupe guard
-(`dispatch.ts:131-142`), whose comment (`:124-130`) states the stakes: a re-fire
-"would otherwise re-stage the per-dispatch secrets / callback HMAC key under the
-same name, replacing the first container's key mid-run." A throttle or transient
-500 therefore opens the guard.
-
-**This site is safe to narrow, and the safety is structural.** `markerPresent`
-is called at `dispatch.ts:133`; the durable dedupe marker is not written until
-`:136`. Nothing durable precedes the guard — `:112-116` is argument validation,
-`:118` mints a local `dispatchId`, `:121-122` compute trace and timeout, `:132`
-builds a URI string. No storage write, no `store.stage`, no callback-HMAC mint.
-A rejection therefore rejects `fireWork` with nothing to clean up, and at the
-orchestrator layer it lands on the safe side of a boundary that file already
-names (`packages/pangolin-orchestrator/src/executors/dispatch.ts:88-90`):
-
-> Container starts HERE. Anything that throws BEFORE this is a clean pre-start
-> failure. Anything AFTER must NOT throw, or tick fails the item without
-> recording the dispatchHash and the running container is orphaned.
-
-Two sibling catches later in `dispatch.ts` do **not** have this property and are
-deferred — §6.1.
-
 ---
 
 ## 3. Design
@@ -160,38 +128,49 @@ export class StorageNotFoundError extends Error {
 }
 ```
 
-**The optional `message` is deliberate.** `LocalStorageProvider` today throws two
-*distinct* messages — "blob not found for URI" (`storage-local/src/index.ts:286`)
-and "dispatch record not found for URI" (`:329`) — and a test asserts on the
-specificity: `packages/pangolin-storage-local/test/smoke.test.ts:58-63`, named
-*"get() surfaces a descriptive error for missing blob (not raw ENOENT)"*, matches
-`/blob not found/i`. Collapsing both into one generic string would lose
-diagnostics and turn that test red for no benefit. Providers pass their existing
-message; the type carries the signal.
+**`uri` is always the caller-facing `pangolin://…` URI, never a backend key.**
+This must be stated because it is not free to honour: `S3StorageProvider.get`
+receives `uri` at `index.ts:225` but calls `this.getDispatchRecord(parsed)` at
+`:228` without it, and that method's only in-scope identifier is an S3 key
+(`:446`). Threading `uri` into `getDispatchRecord` is part of §3.2. The local
+provider already passes it (`storage-local/src/index.ts:314-317`). Without this
+rule the two providers would populate the same field with different URI spaces —
+the provider-divergence-by-accident that §2 exists to eliminate.
+
+`uri` has **no readers** in this release; it is diagnostic surface for logs and
+future callers, and is recorded as such rather than left to look load-bearing.
+
+**The optional `message` preserves existing diagnostics.**
+`LocalStorageProvider` throws two *distinct* messages — "blob not found for URI"
+(`storage-local/src/index.ts:286`) and "dispatch record not found for URI"
+(`:329`) — and two tests assert on that specificity:
+`packages/pangolin-storage-local/test/smoke.test.ts:58-63` matches
+`/blob not found/i`, and `test/integration.test.ts:315-318` matches `/not found/i`
+on the dispatch-record path. Providers pass their existing message; the type
+carries the signal. `S3StorageProvider` has no not-found message today (neither
+`index.ts:230-243` nor `:443-449` has a catch), so it takes the default — a
+deliberate, stated asymmetry rather than an oversight.
 
 `StorageProvider.get` (`packages/pangolin-core/src/storage.ts:18`) gains a
 contract note: an object that does not exist **must** throw
 `StorageNotFoundError`. `resolveLatest`, `list`, and `resolveByHash` already
 return `null` for absence and are unchanged.
 
-**Detection uses a `name` comparison, exposed as one helper.** `errors.ts:1-5`
-documents the convention:
+**Detection is one exported helper.** Core exports
+`isStorageNotFound(err: unknown): boolean` — `err instanceof StorageNotFoundError
+|| err?.name === 'StorageNotFoundError'`, null-safe and non-object safe. Both
+callers in §3.3 use it, so there is one definition of "is this a not-found."
 
-> Each error class sets `name` to its class name so callers can use
-> `err.name === 'IntegrityMismatchError'` for structural matching, even across
-> realms / serialized payloads.
+It is **not** a type predicate: a `name` comparison cannot soundly narrow to the
+class. This costs nothing here — neither call site reads `.uri`.
 
-Core exports `isStorageNotFound(err: unknown): boolean` — null-safe, non-object
-safe, **not** a type predicate (a name comparison cannot soundly narrow to the
-class). All three call sites in §3.3 use the helper rather than inlining the
-comparison, so there is one definition of "is this a not-found."
-
-Note the nearest precedent is belt-and-braces rather than name-only: ai-os checks
-`err instanceof DispatchAlreadyExistsError || err?.name === '…'`
-(`packages/adapter-pangolin-dispatch/src/executor.ts:73-75`, with the rationale
-at `:68-72`). `isStorageNotFound` does the same — `instanceof` first, `name`
-fallback — so a single-copy tree gets exact matching and a mixed tree still
-works.
+The `name` leg is the one that matters, per the documented convention at
+`errors.ts:1-5`: *"Each error class sets `name` to its class name so callers can
+use `err.name === 'IntegrityMismatchError'` for structural matching, even across
+realms / serialized payloads."* The `instanceof` leg is cheap insurance for the
+single-copy case and mirrors the shape ai-os already uses
+(`packages/adapter-pangolin-dispatch/src/executor.ts:73-75`, rationale at
+`:68-72`). It adds no behaviour the `name` leg does not already cover.
 
 **This is the fix `sentinel-read.ts:26-29` asks for, not the one it forbids.**
 That comment objects to hoisting *provider quirk-detection* into core, then names
@@ -207,44 +186,50 @@ in the provider (`storage-s3/src/index.ts:112-121`, which stays private).
 - `S3StorageProvider.get` — the blob branch is **inline in `get()`** at
   `index.ts:230-243` (there is no `getBlob` method on this class); it gains a
   not-found catch using the existing `isNotFound` at `index.ts:112`.
-- `S3StorageProvider.getDispatchRecord` — `index.ts:443-449`, same. **This is
+- `S3StorageProvider.getDispatchRecord` — `index.ts:443-449`, same, **and its
+  signature gains the `uri`** threaded from `get()` at `:228` (§3.1). **This is
   the call that fixes §2.**
 
 `AwsS3MailboxClient` already hand-rolls a third not-found shape
-(`packages/pangolin-storage-s3/src/aws-s3-mailbox-client.ts:18`,
-`if (e instanceof NoSuchKey) return null`). It is a different interface and out
-of scope, but the implementation must reuse `isNotFound` rather than add a
-*fourth* variant.
+(`packages/pangolin-storage-s3/src/aws-s3-mailbox-client.ts:18`). It is a
+different interface and out of scope, but the implementation must reuse
+`isNotFound` rather than add a *fourth* variant.
 
 ### 3.3 Callers whose behaviour changes
 
-Each narrows to "if `isStorageNotFound(err)`, today's behaviour; otherwise
-rethrow." A genuinely absent object keeps current semantics; only transient
-errors change.
+Both are **read** paths. Each narrows to "if `isStorageNotFound(err)`, today's
+behaviour; otherwise rethrow." A genuinely absent object keeps current
+semantics; only errors that were *misclassified* as absent change.
 
-| Site | Absent → | Transient → (new) |
+| Site | Absent → | Previously-misclassified transient → |
 |---|---|---|
 | `pangolin-product/src/sentinel-read.ts:20` | `{ status: 'absent' }` | throws; local `isNotFound` (`:34-39`) and its blast-radius comment deleted |
 | `pangolin-client/src/retention.ts:85` | `null` | throws; local `isNotFound` (`:90-97`) deleted |
-| `pangolin-client/src/dispatch.ts:520-527` | `false` | throws (§2.3 — pre-marker, strands nothing) |
 
-Three copies of the heuristic become zero.
+Two copies of the heuristic become zero. The third
+(`pangolin-client/src/dispatch.ts:520-527`) is deferred with its siblings — §6.1.
 
-**`readDispatchRecord` has two downstream consumers that inherit the change**, and
-one of them has a contract that the change breaks:
+**`readDispatchRecord`'s two consumers need no code change**, which is worth
+stating because an earlier revision wrongly claimed otherwise:
 
-- `describeDispatch` (`packages/pangolin-client/src/describe.ts:41-42`) turns a
-  `null` record into `DispatchRecordExpiredError`. A transient error now
-  propagates raw instead — arguably more correct, since "expired" was a lie about
-  a throttle, but it is a visible API change and the changelog says so.
-- `cancelDispatch` (`packages/pangolin-client/src/cancel.ts:32`) is documented at
-  `cancel.ts:17-21` as: "Returns `undefined` unconditionally; failures of any
-  participant (storage, credentials, provider) collapse to a silent no-op per
-  §7.6's idempotency contract." A rethrow violates that. **Decision:** preserve
-  the documented contract — `cancelDispatch` wraps its `readDispatchRecord` call
-  so any error still collapses to a no-op. It is the one place where swallowing
-  is the specified behaviour rather than an accident, and this spec is not the
-  place to renegotiate §7.6.
+- `describeDispatch` (`packages/pangolin-client/src/describe.ts:41-42`) already
+  documents the post-change behaviour at `describe.ts:33-35`: *"Throws
+  `DispatchRecordExpiredError` if `readDispatchRecord` returns `null` … Unrelated
+  storage errors are re-thrown unchanged."* `retention.ts:72-74` says the same
+  ("Re-throws any other backend error"), and `describe.test.ts:160-180` pins it
+  with a storage that throws `'S3 bucket policy denies access'`. Nothing breaks;
+  the only delta is that an error whose message *happens* to contain "not found"
+  stops being misclassified — §2.2's hazard, removed. **This is not a breaking
+  change and must not be listed as one.**
+- `cancelDispatch` (`packages/pangolin-client/src/cancel.ts:32`) likewise does not
+  catch, so a non-not-found backend error already rejects it today. Its header
+  comment (`cancel.ts:17-21`) claims "failures of any participant (storage,
+  credentials, provider) collapse to a silent no-op," which is **already
+  inaccurate** against `retention.ts:86`. **Decision: correct the comment, change
+  no code.** Wrapping the call to make the comment true would add an
+  unconditional swallow — including of the `JSON.parse` at `retention.ts:83`,
+  turning a corrupt `record.json` into a silent no-op — which is the opposite of
+  this spec's direction.
 
 ### 3.4 Callers deliberately left alone
 
@@ -267,51 +252,61 @@ An earlier revision proposed removing this as "papering over §2." It is not;
 §2's fix simply makes it fire far less often. The same reasoning covers
 `cmd-orch.ts:240` and both `examples/` paths (§2).
 
-### 3.5 Doubles and stubs that encode the deleted behaviour
+### 3.5 Sweep: doubles and stubs that encode the deleted behaviour
 
 Deleting the sniff invalidates every double that signals absence by message or
-`ENOENT`. **The plan must run an explicit sweep across all four workspace roots**
-(`packages/*`, `examples/*`, `deploy/*`, `docs-site` per `pnpm-workspace.yaml`) —
-three prior revisions of this spec each shipped an "enumerated, complete" table
-that was not, so the sweep is a required step and the list below is its known
-starting point, not a claim of completeness.
+`ENOENT`. **The plan runs an explicit sweep**, because three prior revisions of
+this spec each shipped a table claimed complete that was not. The list below is
+the sweep's known starting point, not a completeness claim.
 
-**Assertions of the deleted behaviour — these invert, they do not get updated:**
+**Scope — five trees.** The four `pnpm-workspace.yaml` roots (`packages/*`,
+`examples/*`, `deploy/*`, `docs-site`) **plus `test/`** — `test/e2e/` and
+`test/monorepo-bootstrap.test.ts` sit outside every workspace root and have their
+own runner (`vitest.e2e.config.ts`), so a workspace-scoped sweep would miss them.
 
-| Site | Action |
-|---|---|
-| `packages/pangolin-product/test/sentinel-read.test.ts:40` — *"returns absent when the provider throws an error whose message matches `/not found/i`"* | Becomes §4's regression test: such a message is **not** absent. |
-| `packages/pangolin-client/test/cancel.test.ts:122` — *"is a no-op when the dispatch record is missing (not-found message)"* | Per §3.3 `cancelDispatch` still no-ops, so this survives — but it must be re-grounded on the wrap, not the sniff, or it passes for a deleted reason. |
+**Pass criterion.** Grep every `.ts` under those five trees for `/not found/i`,
+`ENOENT`, and `NoSuchKey`. For each hit, record either "reaches `storage.get` on
+a §3.3 path" (→ must throw `StorageNotFoundError`) or "does not" (→ no change,
+reason noted). The sweep is complete when every hit carries one of those two
+dispositions — not when someone has "looked."
+
+**Assertion of the deleted behaviour — this inverts:**
+
+- `packages/pangolin-product/test/sentinel-read.test.ts:40` — *"returns absent
+  when the provider throws an error whose message matches `/not found/i`"*.
+  Becomes §4's regression test: such a message is **not** absent.
 
 **Doubles that must throw `StorageNotFoundError`:**
 
 - `packages/pangolin-product/test/sentinel-read.test.ts:28` (ENOENT-coded)
 - `packages/pangolin-client/test/retention.test.ts:8,24,174`
-- `packages/pangolin-client/test/dispatch-dedupe.test.ts:73`
-- `packages/pangolin-client/test/cancel.test.ts:19-42,44-62`
-- `packages/pangolin-client/test/describe.test.ts:12-33,62-77` — tests at `:61,85,93`
-  reach `DispatchRecordExpiredError` only via the sniff
 - `examples/appendable-stream/src/index.ts:237-241` — a **src** stub whose entire
   contract is the deleted message. Behaviourally inert today (its consumer
   `assembleBundle` absorbs any throw at
   `packages/pangolin-orchestrator/src/audit/bundle.ts:41-47`), but it must move.
 
-**Doubles that would silently stop testing what their name claims** — these
-produce no red suite, which makes them the more dangerous class:
+**Doubles that would silently stop testing what their name claims** — no red
+suite, which makes them the more dangerous class:
 
 - `packages/pangolin-orchestrator/test/dispatch-sentinel-read.test.ts:84` throws
   `memory storage: not found: ${uri}`, and its header comment at `:28-30` says so
   explicitly ("matching pangolin-product's isNotFound sniff") — a comment that
-  becomes a false statement about deleted code. Its test at `:235`, *"reconcile
-  yields no patchRef/verify/outputRefs when the sentinel is absent"*, currently
+  becomes a false statement about deleted code. Its test at `:235` currently
   exercises the genuine `absent` branch; after the change it would exercise the
   `.catch` at `executors/dispatch.ts:215` instead, becoming a duplicate of `:268`
   while still claiming absent coverage.
-- `packages/pangolin-orchestrator/test/executors/dispatch.test.ts:72`, same
-  pattern, test at `:725`.
+- `packages/pangolin-orchestrator/test/executors/dispatch.test.ts:72`, test at
+  `:725`, same pattern.
+- `packages/pangolin-cli/test/cmd-orch.test.ts:561-565` — the double for the
+  duck-typed storage §3.6 calls out; after the change it exercises the `catch {}`
+  at `cmd-orch.ts:240` rather than the `absent` branch.
 
-Both doubles move to `StorageNotFoundError` so the orchestrator keeps real
-`absent` coverage.
+All move to `StorageNotFoundError` so the real `absent` coverage survives.
+
+`packages/pangolin-client/test/dispatch-dedupe.test.ts:73` and
+`test/cancel.test.ts` / `test/describe.test.ts` are **not** in scope: their paths
+are unchanged by §3.3 (`markerPresent` deferred; `describe`/`cancel` unchanged per
+§3.3).
 
 ### 3.6 Blast radius
 
@@ -321,40 +316,50 @@ there are none outside this repo — but there are duck-typed `{ get }` storages
 **inside** it, in src, cast to `StorageProvider`: `OrchContext.storage` at
 `packages/pangolin-cli/src/cmd-orch.ts:38`, cast at `:235`. That one is
 behaviourally safe only because of the `catch {}` at `:240`, which is worth
-stating rather than leaving to be rediscovered. The contract change is called out
-in the changelog as breaking.
+stating rather than leaving to be rediscovered.
 
 ---
 
 ## 4. Testing
 
-- **A provider throwing a generic `Error` whose message contains "not found" is
-  not treated as absent.** This is `sentinel-read.test.ts:40` inverted, and it is
-  the point of the change.
-- **Regression for §2:** a missing sentinel on an S3-backed provider returns
-  `{ status: 'absent' }`. Asserted on `readOutputSentinel` directly, not through
-  any swallowing caller. This fails today.
+**Provider translation — lives in the provider packages.**
+
 - `LocalStorageProvider` `ENOENT` → `StorageNotFoundError` on both the blob and
   dispatch-record paths, **with the existing messages preserved** so
-  `storage-local/test/smoke.test.ts:58-63` passes unchanged (§3.1).
-- `S3StorageProvider` `NoSuchKey` → `StorageNotFoundError` on both paths. **Unit
-  tests, with the fixture constructed as a real `NoSuchKey` instance** so
+  `smoke.test.ts:58-63` and `integration.test.ts:315-318` pass unchanged (§3.1),
+  and with `.uri` carrying the `pangolin://` URI.
+- `S3StorageProvider` `NoSuchKey` → `StorageNotFoundError` on both paths, **with
+  the fixture constructed as a real `NoSuchKey` instance** so
   `err instanceof NoSuchKey` (`index.ts:113`) is genuinely exercised rather than
-  the `name` fallback. The LocalStack-gated
+  the `name` fallback. `.uri` carries the `pangolin://` URI, not the S3 key —
+  this is the assertion that pins the §3.1/§3.2 threading. The LocalStack-gated
   `packages/pangolin-storage-s3/test/integration.test.ts` is not extended.
-- `readDispatchRecord` returns `null` for a missing record and **rethrows** a
-  generic error; `describeDispatch` propagates that rethrow rather than
-  converting it to `DispatchRecordExpiredError`; `cancelDispatch` still resolves
-  `undefined` for **both** (§3.3).
-- `markerPresent` returns `false` for `StorageNotFoundError` and **rethrows** a
-  generic error, **and a rethrow leaves no dedupe marker written**
-  (`dispatch.ts:136` never reached). The existing double already makes this
-  observable: `packages/pangolin-client/test/dispatch-dedupe.test.ts:19` records
-  `storage.put:${uri}` into a shared `callOrder` array at `:53`, and `:264`
-  already asserts marker absence by that mechanism.
-- **§3.4 characterisation:** `readSentinel` still returns `{}` when the underlying
-  read rejects, so `reconcile` completes and the item does not strand. This pins
-  the `.catch` that must not be removed.
+
+**Read-path classification — lives in `pangolin-product` / `pangolin-client`.**
+
+`packages/pangolin-product` declares `dependencies: { pangolin-core }` and no
+devDependencies (`package.json:34-37`), and its stated identity is "Depends only
+on pangolin-core" (`package.json:5`). Its tests therefore use a double that
+throws `StorageNotFoundError` — **they must not import a storage provider**, and
+the plan must not add that dep edge. The provider tests above are what connect
+the chain; neither half is sufficient alone, and that split is deliberate.
+
+- **Regression for §2:** `readOutputSentinel` returns `{ status: 'absent' }` when
+  the provider throws `StorageNotFoundError`, asserted directly rather than
+  through any swallowing caller.
+- **The inversion:** a provider throwing a generic `Error` whose message contains
+  "not found" is **not** treated as absent. This is `sentinel-read.test.ts:40`
+  turned around, and it fails today.
+- `readDispatchRecord` returns `null` for `StorageNotFoundError` and **rethrows**
+  a generic error (already true per `retention.test.ts:214`; re-pinned against the
+  new mechanism).
+- `describeDispatch` still converts `null` → `DispatchRecordExpiredError` and
+  still propagates a generic storage error unchanged — `describe.test.ts:160-180`
+  passes without modification (§3.3).
+
+**§3.4 characterisation:** `readSentinel` still returns `{}` when the underlying
+read rejects, so `reconcile` completes and the item does not strand. This pins the
+`.catch` that must not be removed.
 
 No test is specified for "`isStorageNotFound` matches across duplicate
 `pangolin-core` copies." Within one vitest process there is a single module copy,
@@ -367,19 +372,25 @@ this suite can assert.
 
 ## 5. Consumer impact (ai-os) — two hard preconditions
 
-The fix does **not** reach ai-os automatically. Both of these are required, and
-neither is currently true.
+The fix does **not** reach ai-os automatically. Neither precondition is currently
+true.
 
-**1. Both dependency lines move to `^0.4.0`.**
-`packages/adapter-pangolin-dispatch/package.json:12` pins `pangolin-client` and
-`:13` pins `pangolin-core`, both at `^0.3.0`; on 0.x a caret pins the minor. Left
-alone, ai-os stays on `pangolin-client@0.3.1`, whose `markerPresent` still
-swallows every throw — so §2.3's fix, the one site this spec argues is safe to
-narrow, **is never delivered to the only consumer that uses it.** ai-os sets
-`dedupeOnDispatchId: true` (`packages/adapter-pangolin-dispatch/src/executor.ts:56`)
-and is that consumer. This is correctness, not hygiene, and it means the child-3
-plan's "resolving `pangolin-core` 0.3 and 0.4 side-by-side" acceptance criterion
-(plan `:492`) must be dropped.
+**1. ai-os unifies on the 0.4 `pangolin-core`.**
+`packages/adapter-pangolin-dispatch/package.json:12-13` pins `pangolin-client`
+and `pangolin-core` at `^0.3.0`; on 0.x a caret pins the minor, so a mixed tree
+resolves **two** `pangolin-core` copies. The child-3 plan's read adapter maps a
+tampered artifact via a bare `instanceof IntegrityMismatchError` with no `name`
+fallback (plan `:475-477`) — under two copies that check silently fails and a
+**tampered artifact is misclassified as an infra throw**. That alone requires a
+single core copy.
+
+Consequently the plan's "two core majors resolve side-by-side" design must be
+withdrawn — it is asserted in five places, not one: `:14` (DAG node label), `:44`,
+`:52`, `:445-446` (the design prose), and `:492` (the acceptance criterion).
+Updating only the AC leaves the prose contradicting it. Note child-3 also adds a
+third and fourth dependency line (`pangolin-product` and `pangolin-core` on the
+new read package), so "bump both pins" is really "land all four on the 0.4
+train."
 
 **2. Whatever `StorageProvider` ai-os injects must throw `StorageNotFoundError`.**
 The §2 fix lives in the *providers* (§3.2), not in `pangolin-product`;
@@ -390,56 +401,59 @@ no typed throw — **strictly worse than today**. ai-os declares no
 `createPangolinClient` (`packages/adapter-pangolin-dispatch/src/client.ts:12`) is
 exported but never called, so the provider is genuinely unchosen. Either a
 bundled `pangolin-storage-*@^0.4.0` or an ai-os implementation honouring the
-contract satisfies this; the choice belongs to ai-os's plan, not to this spec.
+contract satisfies this; the choice belongs to ai-os's plan.
 
-Also unchanged from earlier revisions: **the BLOCKED gate does not pass until
-this release publishes.** Its wording is "verify the *published*
-`pangolin-product@^0.4.0` actually exports `readOutputSentinel` +
-`fetchDispatchArtifact`" (plan `:437-439`). The source barrel
-(`packages/pangolin-product/src/index.ts:7-12`) exports all four symbols, but no
-`0.4.0` exists on npm — `git tag` tops out at `v0.3.1`, and §8 is the step that
-creates it.
+**The BLOCKED gate does not pass until this release publishes.** Its wording is
+"verify the *published* `pangolin-product@^0.4.0` actually exports
+`readOutputSentinel` + `fetchDispatchArtifact`" (plan `:437-439`). The source
+barrel (`packages/pangolin-product/src/index.ts:7-12`) exports all four symbols,
+but no `0.4.0` exists on npm — `git tag` tops out at `v0.3.1`.
 
-**No product-read size bound ships in 0.4.0** (§6.2). ai-os's read adapter will
-fetch artifacts unbounded, exactly as it would have before this spec existed;
-ai-os controls its own provider and can bound reads there in the interim.
+**No product-read size bound ships in 0.4.0** (§6.2), and **no dispatch fire-path
+behaviour changes** (§6.1). ai-os's dispatch dedupe guard stays fail-open exactly
+as today.
 
 ---
 
 ## 6. Out of scope
 
-### 6.1 Two `dispatch.ts` catches that must not be narrowed yet
+### 6.1 All three `dispatch.ts` not-found catches
 
-`packages/pangolin-client/src/dispatch.ts:681-684` (`readSubagentCapabilities`,
-`catch { return [] }` — fires with **zero capabilities**) and `:743-751`
-(env-bundle read, `catch { continue }` — launches **without secrets**) are the
-same fail-open defect as §2.3 with worse consequences. They are deferred anyway,
-because narrowing them where they sit is a regression:
+`markerPresent` (`packages/pangolin-client/src/dispatch.ts:520-527`, dedupe guard
+opens on a transient error), `readSubagentCapabilities` (`:681-684`, fires with
+**zero capabilities**), and the env-bundle read (`:743-751`, launches **without
+secrets**) are all fail-open on this same gap. They defer **as one unit** because
+they share a root cause and a consumer-visible failure mode:
 
-- Both run **after** the durable dedupe marker is written at `dispatch.ts:136` —
-  `resolveCapabilities` at `:147`, `flattenEnvBundleSecrets` at `:327`. A new
-  throw leaves the marker behind with no container started. On retry
+- **Consumer un-retryability.** A throw out of `fireWork` reaches ai-os's action
+  seam, which durably records `action.failed`
+  (`packages/action/src/handle.ts:29-36`) and then early-returns on any
+  redelivery whose `causedBy` already has an event (`handle.ts:16`). No consumer
+  re-fires. So narrowing *any* of the three converts a transient blip into a
+  permanent, un-retryable failure. An earlier revision kept `markerPresent` on
+  the argument that it throws before anything is staged — true inside Pangolin
+  (`dispatch.ts:133` precedes the marker write at `:136`), but the argument was
+  scoped to the wrong boundary.
+- **Marker ordering.** `:681` and `:743` additionally run *after* the durable
+  marker (`resolveCapabilities` at `:147`, `flattenEnvBundleSecrets` at `:327`),
+  so a throw leaves the marker with no container started; on retry
   `markerPresent` returns `true` → `DispatchAlreadyExistsError`, which ai-os
-  treats as benign and reports as success
-  (`packages/adapter-pangolin-dispatch/src/executor.ts:73-77`). One storage blip
-  would mean the dispatch never ran, cannot be retried, and is durably recorded
-  as `action.completed`.
-- The env-bundle throw also lands **after** per-dispatch secrets are staged
-  (`dispatch.ts:178`) and the callback HMAC is minted (`:193`), and the
-  compensating `cleanup()` (`:463-467`) is reachable only through the returned
+  treats as benign success (`adapter-pangolin-dispatch/src/executor.ts:73-77`) —
+  the dispatch never ran and is recorded as `action.completed`.
+- **Stranded credentials.** The env-bundle throw lands after per-dispatch secrets
+  are staged (`dispatch.ts:178`) and the callback HMAC is minted (`:193`), and
+  `cleanup()` (`:463-467`) is reachable only through the returned
   `InFlightDispatch` — which `fireWork`'s callers never receive on the throw path
   (`dispatchWork` calls it at `:500`, outside the `try/finally` at `:501-506`).
-  Stranded credentials, from a credential-hygiene change.
 
-Fixing these means moving or rolling back the dedupe marker and making staging
-cleanup reachable on the throw path — the dispatch lifecycle, not the storage
-contract. **Leaving them alone regresses nothing:** they are fail-open today and
-stay exactly as they are.
+The follow-up must address marker ordering (or rollback), reachable cleanup, and
+the consumer's retry story together. **Leaving all three alone regresses
+nothing:** they are fail-open today and stay exactly as they are.
 
 ### 6.2 Bounded product reads
 
 The `head()` size-ceiling design shared this spec through rev 3 and is deferred
-whole. It is not ready:
+whole:
 
 - The proposed fixed 1 MiB sentinel ceiling does not survive the real worst case.
   Block count has no write-side cap (`packages/pangolin-core/src/pipeline.ts:94`
@@ -448,17 +462,17 @@ whole. It is not ready:
   `writeSentinel`), and each `BlockOutcome` carries a `verify.report` up to a
   caller-overridable `DEFAULT_REPORT_LIMIT = 8_000`
   (`packages/pangolin-worker/src/verify.ts:28,31`) plus up to 256 outputs.
-- An optional `head` feeds a systematic `StorageHeadUnsupportedError` into the
-  §3.4 swallows, turning "produced nothing" from transient into permanent for any
-  provider without `head`.
+- An optional `head` feeds a systematic error into the §3.4 swallows, turning
+  "produced nothing" from transient into permanent for any provider without it.
 - The read inventory must be rebuilt across `examples/` (five further
-  `storage.get` sites beyond the twelve in `packages/*/src`) and `deploy/`.
+  `storage.get` sites beyond the twelve in `packages/*/src`), `deploy/`, and
+  `test/`.
 
 ### 6.3 Also deferred
 
 - **Bounding `readDispatchRecord`.** `pangolin-client` does not depend on
-  `pangolin-product`, so the size guard would cross a package boundary. This is a
-  cost decision, **not** a safety one: the worker's credential *can* write
+  `pangolin-product`, so the size guard would cross a package boundary. A cost
+  decision, **not** a safety one: the worker's credential *can* write
   `record.json`, since `S3StorageProvider.put` routes any dispatch-record URI to
   `putDispatchRecord` with no suffix allowlist (`index.ts:217-222`) and
   `buildDispatchRecordUri` accepts an arbitrary suffix
@@ -473,22 +487,21 @@ whole. It is not ready:
 ## 7. Documentation
 
 - `CHANGELOG.md` — `[Unreleased]` becomes `## [0.4.0] - 2026-07-28`, absorbing
-  the six merged PRs plus this change. A **Breaking** heading names the
-  `StorageProvider.get` not-found contract and `describeDispatch`'s changed
-  behaviour on a transient error (§3.3). §2 is listed under **Fixed** as a
-  provider-dependent `absent` path.
+  the six merged PRs plus this change. A **Breaking** heading names exactly one
+  thing: the `StorageProvider.get` not-found contract. §2 is listed under
+  **Fixed** as a provider-dependent `absent` path. `describeDispatch` and
+  `cancelDispatch` are **not** listed as breaking (§3.3).
 - `packages/pangolin-core/src/storage.ts` — the `get` contract note.
+- `packages/pangolin-client/src/cancel.ts:17-21` — correct the no-op comment,
+  which is already inaccurate against `retention.ts:86` (§3.3).
 - `docs-site/src/content/docs/how-to/write-a-provider.md:126-166` — reproduces
   the `StorageProvider` interface literally; it gains the `get` not-found MUST.
-  This is the page a future implementor reads. (It is **not** in the guarded file
-  list of `docs-site/test/product-read-docs.test.ts:91-108`, so this edit is
-  unconstrained.)
+  This is the page a future implementor reads. It is **not** in the guarded file
+  list of `docs-site/test/product-read-docs.test.ts:91-108`, so the edit is
+  unconstrained.
 - `docs-site/src/content/docs/reference/dispatch-lifecycle.md:200-207` — states
   "A missing sentinel comes back as `{ status: 'absent' }` rather than throwing."
   That stays true and gains the provider-contract reason it now rests on.
-- `packages/pangolin-client/src/cancel.ts:17-21` — the no-op contract comment
-  stays accurate under §3.3's wrap; no edit needed, but the plan verifies it
-  rather than assuming.
 - No change to `docs-site/test/product-read-docs.test.ts`. Its guard forbids
   documenting a `head()` probe or size-bounded read — correct, since §6.2 defers
   exactly that surface.
@@ -509,30 +522,35 @@ only `dist`/`README.md`/`LICENSE`, `pnpm -r publish --access public`, annotated
 
 ## 9. Revision history
 
-**rev 5 (2026-07-28)** — fourth audit round. The core design (§2, §2.3, §3.1–3.4,
-§6) came back verified; every finding landed in the two sections rev 4 added to
-justify its scope cut.
+Five audit rounds. The pattern was consistent enough to be worth recording: every
+round's blocking findings landed in text the *previous* round had added, while §2
+— the original defect and its evidence — came back "verified, do not touch" every
+time. The resolution was not to keep fixing but to keep cutting, until what
+remained was only what had never moved.
 
-| Change | Driver |
-|---|---|
-| §5 reversed: bumping ai-os's pins is **correctness**, not hygiene | Without it ai-os stays on `pangolin-client@0.3.1` and §2.3's fix never reaches the only consumer that sets `dedupeOnDispatchId`. |
-| §5 gains the provider precondition | The fix lives in the providers; ai-os declares no `pangolin-storage-*` dep and `createPangolinClient` is never called, so a 0.3.x provider + `pangolin-product@0.4` would be *worse* than today. |
-| §5's "the read adapter matches on `err.name`" deleted | `adapter-pangolin-read` does not exist; the bullet described non-existent code as fact, violating this spec's own evidence rule. |
-| §3.3 gains `describe.ts:41` and `cancel.ts:32`; `cancelDispatch` gets a wrap | Two `readDispatchRecord` consumers were unnamed, and `cancel.ts:17-21` documents an unconditional no-op that a rethrow would violate. |
-| §3.5 drops the "enumerated, not swept" claim and mandates a sweep | Three revisions each shipped a table claimed complete that was not. Adds `cancel.test.ts`, `describe.test.ts`, `storage-local/test/smoke.test.ts`, and two orchestrator doubles that would have silently stopped testing `absent` while staying green. |
-| `StorageNotFoundError` takes an optional message | A single generic string would flatten the local provider's two distinct messages and turn `smoke.test.ts:58-63` red. |
-| `isStorageNotFound` is `instanceof`-then-`name`, not name-only | The cited ai-os precedent is belt-and-braces; rev 4 asserted name-only while citing an instance of both. |
-| §4's cross-copy test dropped as vacuous | Unassertable in one vitest process by this spec's own standard. |
-| §3.6 notes the in-repo duck-typed `{ get }` storages | Blast radius was scoped to "outside this repo"; `cmd-orch.ts:38` is inside it. |
+**rev 6** — dropped `markerPresent` from scope, leaving zero fire-path changes.
+Its "safe to narrow" argument (nothing staged before `dispatch.ts:133`) was true
+inside Pangolin but scoped to the wrong boundary: at ai-os a throw becomes a
+durable, un-retryable `action.failed` (`packages/action/src/handle.ts:16,29-36`).
+All three `dispatch.ts` catches now defer as one unit (§6.1). Also: withdrew the
+false claim that `describeDispatch` breaks (`describe.ts:33-35` has always
+documented the rethrow, and `describe.test.ts:160-180` pins it) and the **Breaking**
+changelog entry it would have produced; dropped the `cancelDispatch` wrap in
+favour of correcting its already-inaccurate comment; pinned `StorageNotFoundError.uri`
+to the `pangolin://` URI and threaded it into `S3StorageProvider.getDispatchRecord`,
+which could not construct it; resolved where the §2 regression test lives without
+inverting `pangolin-product`'s dependency layering; extended the sweep to `test/`
+(a fifth tree outside every workspace root) and gave it a pass criterion.
+
+**rev 5** — reversed §5: bumping ai-os's pins is correctness, not hygiene; added
+the provider precondition; mandated a sweep in place of a third "complete" table.
 
 **rev 4** — cut scope to typed-not-found only; deferred `dispatch.ts:681`/`:745`
-(post-marker throws make a blip un-retryable *and* reported as success) and all
-bounded-read work.
+and all bounded-read work.
 
 **rev 3** — reverted required-`head` (double assertions bypass structural
 checking) and the orchestrator `.catch` removal (strands the run); corrected the
 artifact-immunity argument to content-derived blob keys.
 
 **rev 2** — corrected the 64 MiB default against the worker's 100 MiB write cap;
-named the oversize outcomes; added `markerPresent`; corrected the non-existent
-`S3StorageProvider.getBlob`.
+named the oversize outcomes; corrected the non-existent `S3StorageProvider.getBlob`.
