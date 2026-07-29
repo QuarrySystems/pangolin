@@ -242,6 +242,70 @@ distinction already exists in this output; handoff simply is not using it.
 
 ---
 
+## 6. `serve()` drives exactly one queue, so a multi-queue config is half-inert
+
+**Symptom.** An item submitted to a configured, validated queue other than the one
+`serve` happens to tick sits at `ready` forever. No error appears in the serve log,
+in `orch status`, or in the audit chain. The serve loop continues dispatching other
+work normally throughout.
+
+**Cause.** `packages/pangolin-orchestrator/src/serve/driver.ts:57` reads
+
+```ts
+const queue = opts.queue ?? 'default';
+```
+
+and lines 84 and 135 call `opts.orchestrator.tick(queue)` — one queue, singular.
+`ServeOptions.queue` (`:11`) is a single optional string.
+`deploy/serve-stack/serve-entrypoint.mjs` passes no `queue`, so the deployed stack
+ticks only `default`.
+
+Meanwhile `PangolinOrchestrator` accepts and validates the full map
+(`orchestrator.ts:105-110`), and this stack's own config declares two queues:
+
+```js
+const queues = {
+  default: { concurrency: 2 },
+  gated:   { concurrency: 2, pattern: pipeline },
+};
+```
+
+`gated` is declared, validated, and never driven. `tick` filters
+`i.queue === queue` (`tick.ts:50`), so nothing in that queue is ever considered
+ready, fired, or reconciled.
+
+**Impact.** Silent and total for the affected queue. Observed directly: a two-item
+run submitted to `gated` sat `ready` with `blockedBy: []` for 20+ minutes while the
+loop dispatched unrelated work; resubmitted unchanged to `default` it completed in
+67 seconds.
+
+Two things make this worse than a normal misconfiguration:
+
+- The config is *valid*. The orchestrator accepts the queue, so there is no startup
+  warning and no obvious place to look.
+- **`orch cancel` cannot rescue it.** Cancellation is processed by the same tick
+  loop, so a run stranded on an unticked queue cannot be cancelled either. The only
+  exit is to stop caring about that run id — and because submit is idempotent by id,
+  the id stays occupied.
+
+The comment in `pangolin.config.mjs` describing `gated` as "a dedicated `gated`
+queue carrying the pipeline pattern" is therefore aspirational as deployed.
+
+**Suggested fix.** Either drive every configured queue, or refuse to start when the
+config declares queues the loop will not tick.
+
+Driving all of them looks closest to intent — the orchestrator already holds the
+map, so `serve` could iterate `Object.keys` of it rather than taking a single name.
+If a single-queue serve process is deliberate (one process per queue, say), then the
+startup check is the cheaper fix: log or fail on
+`configuredQueues - {tickedQueue}` being non-empty, so the operator learns at boot
+rather than from a run that never moves.
+
+Documenting alone would not be enough here. The failure produces no signal to
+correlate with a doc, which is what makes it expensive to diagnose.
+
+---
+
 ## Related: CRLF on shell scripts
 
 A fifth issue — all four tracked `.sh` files checking out as CRLF on Windows and
