@@ -175,6 +175,55 @@ docker run --rm --network pangolin-serve-stack_default \
 
 ---
 
+## 5. `orch watch`'s inline verify under-reports against `pangolin verify`
+
+**Symptom.** The same run, verified two ways, disagrees.
+
+A three-item run with two `needs` handoff edges, watched inline:
+
+```
+  ✓ chain        8 entries, hash-linked, no gaps
+  ✓ root         merkle = anchored root
+  ✓ signature    true
+  ✓ anchor       s3:pangolin-audit  (external-immutable)
+  ─ handoff      n/a
+```
+
+The same run, via `orch audit --out` then `pangolin verify`:
+
+```
+  ✓ handoff        2 input refs accounted for
+  ─ authorization  not attested
+```
+
+**Cause.** Not diagnosed here — the two paths render from different inputs, and
+the inline summary appears not to have the binding data the bundle carries.
+
+**Impact.** `watch` is the path an operator actually uses while a run is in
+flight, and it is the path `smoke.mjs` recommends. It reports `n/a` for a check
+that in fact passed with two accounted-for refs, and it omits the
+`authorization` row entirely. An operator reasonably concludes handoff provenance
+was never established.
+
+This cuts both ways and the benign direction is the dangerous one: here it
+*under*-claims, which is safe in isolation but trains operators to read `handoff
+n/a` as normal — so a genuinely absent handoff, in a run where one was expected,
+looks identical to this false negative.
+
+**Suggested fix.** Render both paths from the same verification result, or have
+`watch` state explicitly that its summary is partial and name the full command.
+If the inline path genuinely cannot compute handoff, `not computed` is the honest
+label; `n/a` asserts the run had no handoff edges, which was false here.
+
+**Worth noting on the same evidence:** at zero handoff edges (the single-item
+`smoke.mjs` run) the display correctly shows `─ n/a` rather than a green tick, and
+at two edges the bundle verify reports the count. So the *presentation* layer does
+not claim closure it hasn't established. That is a stronger position than
+`checkHandoffClosure`'s own return value, which is worth keeping in mind when
+citing this check as a guarantee.
+
+---
+
 ## Related: CRLF on shell scripts
 
 A fifth issue — all four tracked `.sh` files checking out as CRLF on Windows and
