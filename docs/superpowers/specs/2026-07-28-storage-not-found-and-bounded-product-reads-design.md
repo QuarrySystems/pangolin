@@ -1,19 +1,22 @@
-# Typed storage not-found + bounded product reads
+# Typed storage not-found
 
 **Status:** design proposed 2026-07-28 · **Author:** agent:claude-opus-5 (with Brett) · **Confidence:** high
-**Revision:** rev 3 — incorporates two audit rounds. See §11 for what changed and why.
+**Revision:** rev 4 — scope cut to the verified core after three audit rounds. See §9.
 
-Two changes to the storage contract, cut together as **0.4.0**. First: a missing
-object becomes a typed `StorageNotFoundError` instead of a message the caller
-has to sniff — which today silently breaks the `absent` path on S3, and makes
-three security-relevant catch blocks in the dispatch path fail open. Second: the
-two reads on the product path gain a size bound enforced *before* the bytes are
-fetched, closing the volume half of the boundary `pangolin-product` already
-defends.
+A missing storage object becomes a typed `StorageNotFoundError` instead of a
+message the caller has to sniff. Today that sniff silently breaks the `absent`
+path on S3: a finished dispatch with no output sentinel **throws** where the
+published contract says it returns `{ status: 'absent' }`.
+
+Bounded product reads — the `head()` size-ceiling work that shared this spec
+through rev 3 — are deferred to their own spec (§6). So are two of the five
+not-found call sites, for a reason worth stating up front: narrowing them as rev
+3 specified would have created a silent-loss path worse than the fail-open
+behaviour it replaced (§6.1).
 
 **Evidence discipline for this spec.** Every factual claim about current behavior
 carries a `file:line` citation. Claims about what *will* exist are marked as
-decisions, not descriptions. §9 (documentation) may only describe surface that
+decisions, not descriptions. §7 (documentation) may only describe surface that
 lands in the same change.
 
 ---
@@ -30,31 +33,25 @@ determinism (#102), and doc inventories (#105). All are additive.
 fifteen packages sit at `0.3.1`, so lockstep is currently broken and a release
 has to resolve it either way.
 
-### 1.2 Why 0.4.0 and not 0.3.2
+### 1.2 Why 0.4.0
 
-The unreleased work alone would be a patch. §3 is not additive: it changes what
-`StorageProvider.get` must do on a missing object and deletes the compensating
-logic from four callers, one of which changes dispatch-failure semantics (§3.3).
-That is a breaking change to the provider contract, so the release is `0.4.0` and
-every package moves there in lockstep. This also lets `pangolin-product` stay
-where it is rather than being walked backwards.
+§3 is not additive: it changes what `StorageProvider.get` must do on a missing
+object and deletes the compensating logic from three callers. That is a breaking
+change to the provider contract, so the release is `0.4.0` and all sixteen
+packages move there in lockstep. This also lets `pangolin-product` stay where it
+is rather than being walked backwards.
 
 ### 1.3 No external consumers
 
 Pangolin has no third-party `StorageProvider` implementors and no published
 consumer other than ai-os, which is developed in step. Back-compatibility for
-unknown implementors is not a constraint on this design, and §3 spends that
-freedom deliberately: it deletes the fallback rather than layering the typed
-check on top of it.
-
-That freedom does **not** extend to enforcement. §5.1 records why `head` is
-optional rather than required: the type system cannot enforce a `StorageProvider`
-obligation across this repo's test doubles, and a spec must not assert a
-guarantee the toolchain does not provide.
+unknown implementors is not a constraint, and §3 spends that freedom
+deliberately: it deletes the fallback rather than layering the typed check on top
+of it.
 
 ---
 
-## 2. Defect A — the `absent` path does not work on S3
+## 2. The defect — the `absent` path does not work on S3
 
 `readOutputSentinel` promises that a missing sentinel is a normal outcome, not an
 error. Its header comment states the reasoning:
@@ -64,7 +61,7 @@ error. Its header comment states the reasoning:
 > and the entrypoint emits `dispatch.finished` regardless.
 > — `packages/pangolin-product/src/sentinel-read.ts:2-5`
 
-On S3 it does not hold. The chain:
+On S3 it does not hold:
 
 1. `readOutputSentinel` builds a **dispatch-record** URI
    (`packages/pangolin-product/src/sentinel-read.ts:15`) and reads it at
@@ -78,20 +75,19 @@ On S3 it does not hold. The chain:
    only for `err.code === 'ENOENT'` or a message matching `/not found/i`.
    An SDK `NoSuchKey` satisfies neither.
 
-So on S3 a finished dispatch with no sentinel **throws** where the contract says
-it returns `{ status: 'absent' }`. On the local provider it happens to work,
-because `LocalStorageProvider`'s dispatch-record path throws a message that
-contains the words "not found"
+On the local provider it happens to work, because `LocalStorageProvider`'s
+dispatch-record path throws a message containing the words "not found"
 (`packages/pangolin-storage-local/src/index.ts:329`). The behaviour differs by
 provider, and the provider that works does so by accident of phrasing.
 
-**Inside Pangolin the defect is currently invisible.** Both in-repo callers of
-`readOutputSentinel` swallow the throw —
-`packages/pangolin-orchestrator/src/executors/dispatch.ts:215` and
-`packages/pangolin-cli/src/cmd-orch.ts:240`. The user-visible victim is ai-os,
-whose read adapter does not swallow. This is why the §6 regression test sits on
-`readOutputSentinel` itself, not on either caller — and why neither caller's
-swallow is removed (§3.4).
+**Inside Pangolin the defect is currently invisible.** All four in-repo callers
+of `readOutputSentinel` swallow the throw — `packages/pangolin-cli/src/cmd-orch.ts:240`,
+`packages/pangolin-orchestrator/src/executors/dispatch.ts:215`,
+`examples/data-mapreduce/src/index.ts:285`, and
+`examples/dogfood-gated/src/index.ts:160`. The user-visible victim is ai-os,
+whose read adapter does not swallow. This is why §4's regression test sits on
+`readOutputSentinel` itself rather than on any caller, and why none of the four
+swallows is removed (§3.4).
 
 The same defect sits on `readDispatchRecord`
 (`packages/pangolin-client/src/retention.ts:82-88`), which returns `null` for a
@@ -109,7 +105,7 @@ The provider knows precisely when an object is missing; it discards that
 knowledge before the caller sees it, and its callers try to reconstruct it from
 an error message.
 
-### 2.2 The hazard the remaining copies carry
+### 2.2 The hazard the sniff carries
 
 `sentinel-read.ts:30-33` documents its own blast radius: `/not found/i` is a
 substring match, so an unrelated failure — DNS, misconfiguration, a throttle —
@@ -117,27 +113,32 @@ whose text happens to contain that phrase is reclassified as `absent`. For a
 consumer that maps `absent` to "this dispatch produced nothing," a transient
 infrastructure error is recorded as a durable business fact.
 
-### 2.3 Three catch blocks in the dispatch path fail open on the same gap
+### 2.3 The dedupe guard fails open on the same gap
 
-The heuristic is the visible symptom. The more serious instances are bare
-catches in `packages/pangolin-client/src/dispatch.ts`, each of which exists
-because `StorageProvider` gave the caller no way to tell "absent" from "broken":
+`packages/pangolin-client/src/dispatch.ts:520-527`:
 
-| Site | Current behaviour | Consequence of a transient error |
-|---|---|---|
-| `dispatch.ts:520-527` `markerPresent` | `try { get } catch { return false }` | The dedupe guard (`dispatch.ts:131-142`) opens. Its own comment (`:124-130`) states the stakes: a re-fire "would otherwise re-stage the per-dispatch secrets / callback HMAC key under the same name, replacing the first container's key mid-run." |
-| `dispatch.ts:681-684` `readSubagentCapabilities` | `catch { return [] }` | The dispatch fires with **zero capabilities** instead of the subagent's bound set — a silent capability downgrade on the security-relevant path. |
-| `dispatch.ts:743-751` env-bundle read | `catch { continue }` | The container launches **without its secrets**. |
+```ts
+async function markerPresent(storage: StorageProvider, uri: string): Promise<boolean> {
+  try { await storage.get(uri); return true; } catch { return false; }
+}
+```
 
-All three are fail-*open*. §2.2's framing applies to each with a
-credential-rotation or capability-downgrade blast radius. `markerPresent`'s
-comment names `readSubagentCapabilities` as the convention it mirrors
-(`dispatch.ts:517-518`), so these are one defect with three instances rather
-than three separate bugs.
+Every throw reads as "not present." Its caller is the dedupe guard
+(`dispatch.ts:131-142`), whose comment (`:124-130`) states the stakes: a re-fire
+"would otherwise re-stage the per-dispatch secrets / callback HMAC key under the
+same name, replacing the first container's key mid-run." A throttle or transient
+500 therefore opens the guard.
+
+This site is **safe to narrow** because of where it sits: `markerPresent` is
+called at `dispatch.ts:133`, and the durable dedupe marker is not written until
+`dispatch.ts:136`. A throw from it happens before any marker, secret, or HMAC
+exists, so nothing is stranded and the dispatch stays retryable. Two sibling
+catches later in the same file do **not** have that property and are deferred —
+see §6.1.
 
 ---
 
-## 3. Design A — `StorageNotFoundError`
+## 3. Design
 
 ### 3.1 Core
 
@@ -153,22 +154,34 @@ export class StorageNotFoundError extends Error {
 }
 ```
 
-Assignment in the constructor, matching `IntegrityMismatchError`
-(`errors.ts:69`).
-
 `StorageProvider.get` (`packages/pangolin-core/src/storage.ts:18`) gains a
 contract note: an object that does not exist **must** throw
-`StorageNotFoundError`. Same for `head` (§5.1). `resolveLatest`, `list`, and
-`resolveByHash` already return `null` for absence and are unchanged.
+`StorageNotFoundError`. `resolveLatest`, `list`, and `resolveByHash` already
+return `null` for absence and are unchanged.
+
+**Callers match on `err.name`, not `instanceof`.** This is the documented
+convention at `packages/pangolin-core/src/errors.ts:1-5`:
+
+> Each error class sets `name` to its class name so callers can use
+> `err.name === 'IntegrityMismatchError'` for structural matching, even across
+> realms / serialized payloads.
+
+ai-os already applies it, with a comment naming the exact failure mode it guards
+(`packages/adapter-pangolin-dispatch/src/executor.ts:73-75`: a dual-package split
+making an imported class no longer `===` the one thrown internally). An earlier
+revision of this spec mandated `instanceof` and then had to spend a §7 bullet
+requiring ai-os to move both dependency pins in lockstep to avoid duplicate
+`pangolin-core` copies. Name-matching dissolves that coupling (§5).
+
+A small exported helper in core — `isStorageNotFound(err): boolean`, a `name`
+comparison — keeps the three call sites from hand-rolling the check.
 
 **This is the fix `sentinel-read.ts:26-29` asks for, not the one it forbids.**
-That comment objects to hoisting *provider quirk-detection* into core — "would
-put provider quirk-detection in the contract sink" — and then names the real
-defect itself: "`StorageProvider` has no typed not-found signal, so every caller
-sniffs." §3 puts a typed *class* in core and leaves *detection* in the provider
-(`isNotFound`, `packages/pangolin-storage-s3/src/index.ts:112-121`). The
-distinction is load-bearing and is recorded here so a later reader does not
-mistake this change for the one that comment rejects.
+That comment objects to hoisting *provider quirk-detection* into core ("would put
+provider quirk-detection in the contract sink") and then names the real defect
+itself: "`StorageProvider` has no typed not-found signal, so every caller sniffs."
+This change puts a typed *class* in core and leaves *detection* in the provider
+(`isNotFound`, `packages/pangolin-storage-s3/src/index.ts:112-121`).
 
 ### 3.2 Providers
 
@@ -183,34 +196,25 @@ mistake this change for the one that comment rejects.
 
 ### 3.3 Callers whose behaviour changes
 
-Each narrows to `if (e instanceof StorageNotFoundError) <today's behaviour>;
-throw e;` — a genuinely absent object keeps current semantics, and only
-transient errors change.
+Each narrows to "if not-found, today's behaviour; otherwise rethrow." A genuinely
+absent object keeps current semantics; only transient errors change.
 
 | Site | Absent → | Transient → (new) |
 |---|---|---|
-| `pangolin-product/src/sentinel-read.ts` | `{ status: 'absent' }` | throws; local `isNotFound` (`:34-39`) and its comment deleted |
-| `pangolin-client/src/retention.ts:82-88` | `null` | throws; local `isNotFound` (`:90-97`) deleted |
-| `pangolin-client/src/dispatch.ts:520-527` | `false` | throws |
-| `pangolin-client/src/dispatch.ts:681-684` | `[]` | throws |
-| `pangolin-client/src/dispatch.ts:743-751` | skip the bundle | throws |
+| `pangolin-product/src/sentinel-read.ts:20` | `{ status: 'absent' }` | throws; local `isNotFound` (`:34-39`) and its blast-radius comment deleted |
+| `pangolin-client/src/retention.ts:85` | `null` | throws; local `isNotFound` (`:90-97`) deleted |
+| `pangolin-client/src/dispatch.ts:520-527` | `false` | throws (§2.3 — pre-marker, strands nothing) |
 
-**Stated trade-off.** The last three make dispatch *less available* under storage
-flakiness: a blip that previously produced a degraded-but-running dispatch now
-produces a failed one. This is deliberate. Firing with zero capabilities, or
-launching a container without its secrets, is a worse outcome than failing the
-dispatch, and silent degradation is precisely the failure class the worker
-failure-policy work exists to prevent. It is a real trade, not a free win, and
-the changelog says so.
+Three copies of the heuristic become zero.
 
 ### 3.4 Callers deliberately left alone
 
-**`pangolin-orchestrator/src/executors/dispatch.ts:215`'s
-`.catch(() => ({ status: 'absent' }))` stays.** An earlier revision proposed
-removing it as "papering over §2." It is not — it is a documented contract at
-`executors/dispatch.ts:199-206`: "NEVER throws — `absent`, `malformed`, and a
-rejected promise (unrelated storage errors) all yield an empty object." Removing
-it strands the run:
+**All four `readOutputSentinel` swallows stay.** In particular
+`pangolin-orchestrator/src/executors/dispatch.ts:215`'s
+`.catch(() => ({ status: 'absent' }))` is a documented contract at
+`executors/dispatch.ts:199-206` — "NEVER throws — `absent`, `malformed`, and a
+rejected promise (unrelated storage errors) all yield an empty object" — and
+removing it strands the run:
 
 1. `reconcile()` deletes the in-flight entry (`dispatch.ts:165`) and calls
    `entry.inflight.cleanup()` (`:171`) **before** `readSentinel` at `:174`.
@@ -221,15 +225,33 @@ it strands the run:
    entry is gone. The item stays `running` until a configured `maxRuntimeMs`
    overrun (`tick.ts:74-88`) frees it, if one is configured at all.
 
-So the alternative to "relabelled as produced-nothing" is "completed dispatch
-silently lost and the run stalls." The `.catch` is correct; §2's fix simply makes
-it fire far less often.
+An earlier revision proposed removing this `.catch` as "papering over §2." It is
+not; §2's fix simply makes it fire far less often. The same reasoning covers
+`cmd-orch.ts:240` ("best-effort — never fail the watch") and the two `examples/`
+callers.
 
-`pangolin-cli/src/cmd-orch.ts:240`'s bare `catch {}` also stays — its comment
-("best-effort — never fail the watch") is a deliberate posture for a watch
-command. §5.1 addresses the separate problem that its storage lacks `head`.
+### 3.5 Doubles and stubs that encode the deleted behaviour
 
-### 3.5 Blast radius
+Deleting the sniff invalidates every test double that signals absence by message
+or `ENOENT`. These are enumerated rather than left to a sweep, because two of
+them are *assertions of the behaviour being removed* and must be inverted, not
+merely updated:
+
+| Site | Action |
+|---|---|
+| `packages/pangolin-product/test/sentinel-read.test.ts:40` — *"returns absent when the provider throws an error whose message matches `/not found/i`"* | **Inverted.** It becomes the §4 regression test: a `/not found/i` message is *not* absent. |
+| `packages/pangolin-product/test/sentinel-read.test.ts:28` — *"returns absent when the provider throws an ENOENT-coded error"* | Rewritten: the double throws `StorageNotFoundError`. |
+| `packages/pangolin-client/test/retention.test.ts:174` — *"returns null when the storage backend signals ENOENT"* | Same. |
+| `packages/pangolin-client/test/retention.test.ts:8,24` — memory-storage double surfacing a `/not found/i` error | Throws `StorageNotFoundError`. |
+| `packages/pangolin-client/test/dispatch-dedupe.test.ts:73` — same pattern | Throws `StorageNotFoundError`. |
+| `examples/appendable-stream/src/index.ts:237-241` — hand-rolled `{ get }` stub throwing `` `storage: not found: ${ref}` `` | Throws `StorageNotFoundError`. Behaviourally inert today (its consumer `assembleBundle` absorbs any throw at `packages/pangolin-orchestrator/src/audit/bundle.ts:41-47`), but it is a src-tree stub whose entire contract is the message being deleted. |
+
+The sweep covers all four workspace roots — `packages/*`, `examples/*`,
+`deploy/*`, `docs-site` (`pnpm-workspace.yaml`). Prior revisions of this spec
+twice enumerated `packages/` only and twice missed a caller; `deploy/` contains
+only `serve-stack` and no storage reads.
+
+### 3.6 Blast radius
 
 A `StorageProvider` implementation that does not throw the typed error now
 surfaces a missing object as an unhandled infrastructure throw rather than
@@ -238,428 +260,155 @@ The contract change is called out in the changelog as breaking.
 
 ---
 
-## 4. Defect B — both product reads are unbounded
+## 4. Testing
 
-`fetchDispatchArtifact` reads bytes named by the output sentinel, which is
-written by the dispatch's own run. `packages/pangolin-product/src/artifact-ref.ts`
-states the threat in its header: a product ref is an unhashed overwrite-put, so
-following one unguarded lets an attacker aim the caller's credential at another
-dispatch's or namespace's bytes.
-
-`assertArtifactRef` closes *where the bytes come from*. Nothing closes *how many
-bytes arrive*. `artifact-fetch.ts`'s own JSDoc concedes this:
-
-> `StorageProvider.get` takes no size bound and the interface exposes no size
-> metadata, so an oversized object cannot be pre-checked here. Bound it in your
-> own provider (e.g. HeadObject/Content-Length before GetObject).
-
-It names the correct mechanism and assigns it to the caller.
-
-### 4.1 Why a post-fetch length check cannot be the primary control
-
-Both bundled providers fully buffer **and** hash before `get()` returns:
-`packages/pangolin-storage-s3/src/index.ts:237-241` streams to a `Uint8Array`
-then calls `computeContentHash`; `packages/pangolin-storage-local/src/index.ts:278-292`
-does `readFile` then the same. A `bytes.length` check inside
-`fetchDispatchArtifact` would run after two complete passes over the object.
-
-There is no length check in `fetchDispatchArtifact` today
-(`packages/pangolin-product/src/artifact-fetch.ts:16-21`). §5.7's post-read
-assertion is therefore a **new addition**, not a description of existing
-behaviour, and it is a backstop rather than the control.
-
-### 4.2 Why streaming `get()` is not the answer here
-
-Streaming is feasible — `computeContentHash`
-(`packages/pangolin-core/src/content-hash.ts:82-90`) is built on
-`createHash('sha256')` with incremental `.update()`. It is rejected on
-proportion, not difficulty. There are twelve `storage.get(...)` call sites across
-four packages (`pangolin-client` ×4 — `dispatch.ts:522,681,745`,
-`retention.ts:82`; `pangolin-worker` ×4 — `bundle-fetcher.ts:112,140,162,190`;
-`pangolin-orchestrator` ×2 — `audit/bundle.ts:43`, `executors/dispatch.ts:245`;
-`pangolin-product` ×2). Eleven want whole bytes immediately. Converting `get()`
-to a stream makes those eleven re-buffer by hand to reach the state they start
-from today. Exactly one site benefits: `artifact-fetch.ts:18`. Deferred; revisit
-only if a second genuine streaming consumer appears.
-
-### 4.3 The sentinel read needs the same bound
-
-`sentinel-read.ts:18` is equally unbounded, and `output.json` is written by the
-run (`packages/pangolin-worker/src/output-sentinel.ts:189`), so it is
-attacker-influenced. A hostile run that writes a multi-gigabyte sentinel kills
-the consumer before any artifact ref is parsed.
-
-The entry caps in `sentinel-parse.ts` do not help, for two reasons.
-`buildBlocks` (`sentinel-parse.ts:74,136`) caps blocks at `MAX_OUTPUT_ENTRIES`
-(256, `pangolin-core/src/product.ts:9`) and caps each block's own outputs at 256
-again (`sentinel-parse.ts:96`) — 65,536 entries in the worst case — and `summary`
-is copied with no length cap at all (`sentinel-parse.ts:125`), unlike `report`
-which *is* capped at `sentinel-parse.ts:36`. More fundamentally, every one of
-those caps runs *after* `JSON.parse` (`sentinel-parse.ts:113`). They bound the
-resulting object, never the input. Only a byte ceiling protects the read.
-
----
-
-## 5. Design B — `head?()` and byte ceilings
-
-### 5.1 `head` is optional, and the missing-capability case is named
-
-`StorageProvider` gains:
-
-```ts
-/**
- * Object size in bytes, without transferring the body. Throws
- * `StorageNotFoundError` if the object does not exist, exactly as `get` does.
- * Routes by URI kind identically to `get`.
- *
- * OPTIONAL: providers that cannot answer omit it, and the bounded product
- * reads throw `StorageHeadUnsupportedError` rather than reading unbounded.
- */
-head?(uri: string): Promise<{ size: number }>;
-```
-
-**Optional, with one runtime capability check** that throws
-`StorageHeadUnsupportedError(providerName, uri)` when `typeof storage.head !==
-'function'`. Never skip the check and read unbounded — that silently restores the
-defect §4 exists to close.
-
-A previous revision made `head` **required**, on the reasoning that the resulting
-compile errors would be few and mechanical. That reasoning was wrong on a point
-of TypeScript: the repo's minimal-storage doubles use
-`as unknown as StorageProvider` (`pangolin-worker/test/deliver.test.ts:22,46,69,98,130,174`,
-`pipeline-runner.test.ts:267`, `pangolin-product/test/sentinel-read.test.ts:86`),
-and a double assertion through `unknown` bypasses structural checking entirely.
-Requiring `head` would not have produced an error at any of them. The sites that
-*would* break — 10 `implements StorageProvider` and 49 `: StorageProvider`
-annotations across the test suites — mostly sit in packages that **do not
-typecheck their tests at all**: only 6 of 16 packages carry `tsconfig.test.json`
-and `typecheck:test`, the other ten being issue #103, which §8 puts out of scope.
-
-So "required" would have been compiler-enforced in exactly two files —
-`LocalStorageProvider` (`pangolin-storage-local/src/index.ts:56`) and
-`S3StorageProvider` (`pangolin-storage-s3/src/index.ts:170`), both of which §5.2
-implements anyway — and a runtime `TypeError` everywhere else. Asserting a
-guarantee the toolchain does not provide is the same species of error as A
-itself, where the provider knew something the type system did not carry.
-
-The minimal-`{get}` storage shape is a settled repo idiom, not a one-off:
-`OrchContext.storage?: { get(ref): Promise<Uint8Array> }`
-(`pangolin-cli/src/cmd-orch.ts:38`), plus `interface StorageLike { get(...) }` at
-`pangolin-orchestrator/src/audit/bundle.ts:13` and
-`pangolin-orchestrator/src/operations-api.ts:19`. The latter two never call a
-product read and are unaffected.
-
-**`cmd-orch.ts` is fixed regardless.** It is the one src caller of a bounded read
-whose storage lacks `head` (`cmd-orch.ts:234-237`, inside a bare `catch {}` at
-`:240`), so under any design where a missing `head` throws, `pangolin orch watch`
-silently stops reporting usage evidence. `OrchContext.storage` widens to
-`{ get(...); head(...) }` and the CLI wiring supplies both. This is a published
-config surface (`pangolin.config.*`), so the changelog lists it as breaking.
-
-### 5.2 Provider implementations
-
-`head` **must route by URI kind exactly as `get` does.** The sentinel and the
-artifact are different URI shapes, and a `head` that handles only one silently
-breaks the other read.
-
-- `S3StorageProvider.head` — mirrors the branch at `index.ts:226-233`:
-  `dispatch-record` → `dispatchRecordKey`; blob → the pinned-hash `blobKey`,
-  **including the unpinned-URI throw at `index.ts:231`**. Uses
-  `HeadObjectCommand` → `ContentLength`, and the existing `isNotFound`
-  (`index.ts:112`) so a missing object throws `StorageNotFoundError`.
-- `LocalStorageProvider.head` — `stat` on `blobPath` or `dispatchRecordPath` as
-  appropriate, routed through `parseSafe` (`index.ts:346`) so the path-traversal
-  guard applies to `head` as it does to `get`, and **including the identical
-  unpinned-URI guard at `index.ts:272-274`** (`blobPath` cannot be built without
-  a `contentHash`). `ENOENT` → `StorageNotFoundError`.
-
-### 5.3 Ceilings live in core, beside the write-side cap they must agree with
-
-The write side already caps captured files:
-`packages/pangolin-worker/src/output-sentinel.ts:34` defines
-`MAX_OUTPUT_FILE_BYTES = 100 * 1024 * 1024`, enforced at `output-sentinel.ts:124`
-(`if (fileStat.size > MAX_OUTPUT_FILE_BYTES) continue`). A read default below
-that would reject artifacts a compliant worker legitimately captured.
-
-`MAX_OUTPUT_FILE_BYTES` **moves to `packages/pangolin-core/src/product.ts`**
-beside `MAX_OUTPUT_ENTRIES` (`:9`), whose prose already names it
-(`product.ts:58`). It has exactly three references —
-`output-sentinel.ts:34` (its definition), `output-sentinel.ts:124`, and
-`pangolin-worker/test/output-sentinel.test.ts:19` — and is **not** in the worker
-barrel, so the two importers are updated directly. No back-compat re-export is
-added: with no external consumers (§1.3) and no barrel export, it would be dead
-surface. (`pangolin-worker` already depends on `pangolin-core`; no cycle, no
-boundary crossed.)
-
-```ts
-// packages/pangolin-core/src/product.ts
-export const MAX_OUTPUT_ENTRIES = 256;                    // existing
-export const MAX_OUTPUT_FILE_BYTES = 100 * 1024 * 1024;   // moved from the worker
-export const DEFAULT_MAX_ARTIFACT_BYTES = MAX_OUTPUT_FILE_BYTES;
-export const MAX_SENTINEL_BYTES = 1_048_576;              // 1 MiB, fixed
-```
-
-`DEFAULT_MAX_ARTIFACT_BYTES` is *derived from* the write cap rather than
-restating its value, so the two cannot diverge.
-
-**Known asymmetry, documented not fixed:** `patch-capture.ts` has no write-side
-byte cap, so a patch larger than `DEFAULT_MAX_ARTIFACT_BYTES` is captured on
-write and rejected on read. Bounding patch capture is worker-behaviour work
-outside this release; it is recorded here so the gap is deliberate rather than
-discovered.
-
-### 5.4 Read surface — the sentinel ceiling is fixed, the artifact bound is not
-
-```ts
-readOutputSentinel(deps, dispatchId)                                  // no opts
-fetchDispatchArtifact(storage, ref, expect, opts?: { maxBytes?: number })
-```
-
-The asymmetry is deliberate and resolves an ambiguity an audit raised. If the
-sentinel ceiling were caller-configurable, then `{ reason: 'too-large' }` would
-mean "over *your* limit" — two consumers reading the same dispatch would reach
-different conclusions, and §5.5's justification for recording it as a durable
-business fact would collapse. `MAX_SENTINEL_BYTES` is therefore a **wire-format
-bound**, not a caller policy: `output.json` is metadata — paths, refs, a summary,
-per-block outcomes — and 1 MiB sits roughly two orders of magnitude above a
-realistic worst case at `MAX_OUTPUT_ENTRIES` (256 entries × a ~200-byte path+ref
-pair ≈ 51 KB, plus block evidence).
-
-The artifact bound stays caller-configurable because it is genuinely a caller
-policy, and because it throws an error carrying both `size` and `limit` (§5.5) —
-self-describing, so no consumer has to guess whose limit was hit.
-
-`maxBytes` must be a finite integer `>= 0`; `0` is a real bound of zero, not a
-falsy synonym for "omitted". Non-finite, negative, or non-integer values throw
-`RangeError` at the call, **after** `assertArtifactRef` and before any I/O, so
-the §5.6 ordering guarantee is not weakened by argument validation.
-
-### 5.5 Outcomes differ because the two functions' contracts differ
-
-- **`readOutputSentinel` returns** `{ status: 'malformed', reason: 'too-large' }`.
-  `SentinelMalformedReason` (`sentinel-parse.ts:19`) extends from
-  `'not-json' | 'not-an-object' | 'bad-schema-version'` to include `'too-large'`.
-  This function's design premise is that abnormal input is a return value, not an
-  exception — an oversized sentinel is abnormal *input*, the same class as
-  malformed JSON. ai-os maps `malformed → 'unreadable'`, a durable business
-  outcome, which is correct given §5.4's fixed ceiling: a hostile run wrote a
-  sentinel outside the wire format, and that is a fact about the dispatch.
-
-  Like `'absent'`, `'too-large'` is **never constructed by
-  `parseOutputSentinel`** — it is synthesized by the I/O wrapper before parsing.
-  This is noted in the union's comment, mirroring what `sentinel-parse.ts:23-25`
-  already does for `'absent'`.
-
-  No in-repo consumer discriminates on `.reason`
-  (`executors/dispatch.ts:216` and `cmd-orch.ts:238` branch on `status` alone),
-  so the new variant breaks no exhaustive switch.
-- **`fetchDispatchArtifact` throws** `ArtifactTooLargeError(size, limit, ref)`,
-  matching how it already signals `IntegrityMismatchError` and
-  `ArtifactRefRejectedError`. ai-os's adapter already catches per-ref errors into
-  `unverified[]`, so this slots in without a new branch.
-
-Both `ArtifactTooLargeError` and `StorageHeadUnsupportedError` are defined in
-**`pangolin-core/src/errors.ts`**. An earlier revision argued for package-local
-placement on the grounds that only one package throws them; the repo's actual
-convention contradicts that — `CapabilityTooLargeError` (`errors.ts:25`) is
-thrown only from `pangolin-client/src/capabilities-register.ts:81`, and
-`PartialStateTooLargeError` (`errors.ts:47`) is likewise single-package. Core is
-the error sink here; this spec follows the precedent rather than inventing a rule
-its two nearest neighbours violate.
-
-### 5.6 Ordering is load-bearing
-
-In `fetchDispatchArtifact` the sequence is **assert ref → validate opts → head →
-get → verify hash**.
-
-`assertArtifactRef` must stay first. It is documented as throwing before any I/O
-(`artifact-fetch.ts:17`), and `head()` *is* I/O against a caller-supplied URI.
-Calling `head` on an unvalidated ref would point the caller's credential at an
-arbitrary object — the precise attack `artifact-ref.ts` exists to prevent. A size
-pre-check must never become an oracle for refs the ref guard would have rejected.
-
-A `StorageNotFoundError` from `head` is treated identically to one from `get`: in
-`fetchDispatchArtifact` it propagates (a ref naming a missing object is a real
-error), and in `readOutputSentinel` it classifies as `absent` from **either**
-call.
-
-`readOutputSentinel` has no ref assertion — it builds its own URI from
-`namespace` + `dispatchId` — so its sequence is **head → get → parse**.
-
-### 5.7 The `head`→`get` race, and what the post-read check is actually for
-
-A post-read length assertion is added to **both** reads. It is not the primary
-control (§4.1) — on a buffering provider the bytes are already resident when it
-runs. It exists for two narrower reasons:
-
-1. A provider whose `head` under-reports must not be able to lift the ceiling.
-2. The sentinel URI is a **dispatch record**, an overwrite-put
-   (`putDispatchRecord`, `packages/pangolin-storage-s3/src/index.ts:423-441`,
-   "overwrites are intentional"), so a run that can rewrite it can grow the
-   object between `head` and `get`.
-
-**The artifact read is not exposed to that race**, and the reason is the *write*
-path, not the hash check. A blob's storage key is derived from its own content:
-`S3StorageProvider.putBlob` computes `contentHash = computeContentHash(contents)`
-and keys on it (`index.ts:394-399`), writing with `IfNoneMatch: '*'`
-(`index.ts:410`); `LocalStorageProvider.putBlob` does the same
-(`index.ts:247-254`). Different bytes therefore cannot occupy the same key —
-there is nothing to swap. The hash check at `artifact-fetch.ts:19-20` runs *after*
-the body is buffered and protects integrity, never memory, so it could not have
-supplied this guarantee.
-
-**Residual risk, accepted and unasserted:** for the sentinel, a run that wins the
-`head`→`get` race can still cause one oversized buffer to be read before the
-post-read check rejects it. Closing that fully requires a bounded or streaming
-`get` (§4.2). No test asserts this; it is recorded as accepted risk rather than
-covered.
-
-### 5.8 One helper, not two copies
-
-The shared portion — resolve the limit, capability-check `head`, probe, compare,
-and the post-read assertion — lands in a single internal helper in
-`pangolin-product` (`src/size-guard.ts`, not exported from the barrel), used by
-both reads. Each caller supplies its own outcome per §5.5. A spec whose thesis is
-"three copies of `isNotFound` and only the one that never runs is correct" does
-not ship two copies of its own new guard.
-
----
-
-## 6. Testing
-
-**A.**
-- A provider throwing a generic `Error` whose message contains "not found" is
-  **not** treated as absent. This fails today and is the point of the change.
+- **A provider throwing a generic `Error` whose message contains "not found" is
+  not treated as absent.** This is `sentinel-read.test.ts:40` inverted, and it is
+  the point of the change.
+- **Regression for §2:** a missing sentinel on an S3-backed provider returns
+  `{ status: 'absent' }`. Asserted on `readOutputSentinel` directly, not through
+  any of the four swallowing callers. This fails today.
 - `LocalStorageProvider` `ENOENT` → `StorageNotFoundError`, on both the blob and
   dispatch-record paths.
-- `S3StorageProvider` `NoSuchKey` → `StorageNotFoundError`, on both paths. **Unit
-  tests, with the fixture constructed as a real `NoSuchKey` instance** so
+- `S3StorageProvider` `NoSuchKey` → `StorageNotFoundError`, on both paths.
+  **Unit tests, with the fixture constructed as a real `NoSuchKey` instance** so
   `err instanceof NoSuchKey` (`index.ts:113`) is genuinely exercised rather than
   the `name` fallback; a hand-rolled `{ name: 'NoSuchKey' }` would assert the
   mock, not the SDK. The LocalStack-gated
   `packages/pangolin-storage-s3/test/integration.test.ts` is not extended.
-- **Regression for §2:** a missing sentinel on an S3-backed provider returns
-  `{ status: 'absent' }`. Asserted on `readOutputSentinel` directly, not through
-  either swallowing caller.
-- `readDispatchRecord` returns `null` for a missing record on S3.
-- Each of the three §3.3 dispatch sites: `StorageNotFoundError` preserves today's
-  behaviour (`false` / `[]` / skip), and a generic error **rethrows**. The
-  dedupe guard must not open on a throttle; the dispatch must not fire with an
-  empty capability set on a 500.
+- `readDispatchRecord` returns `null` for a missing record and **rethrows** a
+  generic error.
+- `markerPresent` returns `false` for `StorageNotFoundError` and **rethrows** a
+  generic error — the dedupe guard must not open on a throttle. Paired with a
+  test that a rethrow from `markerPresent` leaves **no** dedupe marker written
+  (`dispatch.ts:136` never reached), which is what makes §2.3's safety claim
+  assertable rather than asserted.
 - **§3.4 characterisation:** `readSentinel` still returns `{}` when the
   underlying read rejects, so `reconcile` completes and the item does not strand.
   This pins the `.catch` that must not be removed.
-
-**B.**
-- Oversized artifact → `ArtifactTooLargeError` **and the `get` spy was never
-  called**. Asserting the rejection alone would pass against a post-fetch-only
-  design; asserting `get` was not called is what proves memory protection.
-- Oversized sentinel → `{ status: 'malformed', reason: 'too-large' }`, `get`
-  never called.
-- **A ref that fails `assertArtifactRef` → `head` was never called.** This pins
-  §5.6; without it a later refactor can reorder the checks and reopen the
-  credential-aiming path.
-- A storage object with no `head` → `StorageHeadUnsupportedError` from both
-  reads. No path reads unbounded.
-- A `head` that under-reports → caught by the post-read assertion, and
-  distinguishable from the `head`-path rejection by error identity (artifact) or
-  by `get` having been called (sentinel).
-- `maxBytes: 0` rejects everything; `-1`, `NaN`, `1.5` throw `RangeError`, and a
-  bad ref combined with a bad `maxBytes` throws `ArtifactRefRejectedError` (ref
-  assertion wins — §5.6).
-- `head` routes correctly for **both** URI kinds on both providers (§5.2);
-  `LocalStorageProvider.head` rejects a traversal URI that `parseSafe` catches
-  and an unpinned blob URI.
+- `isStorageNotFound` matches an error crossing a package boundary — i.e. one
+  constructed from a *different* copy of `pangolin-core` — which `instanceof`
+  would not (§3.1).
 
 ---
 
-## 7. Consumer impact (ai-os)
+## 5. Consumer impact (ai-os)
 
 ai-os's child-3 plan pins `pangolin-product@^0.4.0` and `pangolin-core@^0.4.0`,
-so those pins are correct as written. Four consequential notes:
+so those pins are correct as written.
 
 - **The BLOCKED gate does not "pass" yet — it passes once this release
-  publishes.** The gate's wording is "verify the *published*
-  `pangolin-product@^0.4.0` actually exports `readOutputSentinel` +
-  `fetchDispatchArtifact`" (plan `:437-439`). The source barrel
-  (`packages/pangolin-product/src/index.ts:7-12`) does export all four symbols,
-  but no `0.4.0` exists on npm — `git tag` tops out at `v0.3.1`, and §10 is the
-  step that creates it. ai-os must not start that task before the publish.
-- **ai-os's injected `StorageProvider` and its test fake must implement `head`**
-  (§5.1) — otherwise every product read throws `StorageHeadUnsupportedError`. The
-  plan injects `deps.storage` (`:461`) and its test uses `fakeStorage` (`:478`);
-  both are authored against the final contract, since the task is
-  `status: pending` (`:431`).
-- **Both dependency lines must move, not one.**
-  `packages/adapter-pangolin-dispatch/package.json:12` pins `pangolin-client` and
-  `:13` pins `pangolin-core`, both at `^0.3.0`. Bumping only core is insufficient:
-  published `pangolin-client@0.3.1` declares its own core dep (`workspace:*`,
-  rewritten at publish to `0.3.1`), so a second `pangolin-core` copy survives
-  transitively and the `instanceof` failure this note exists to prevent is
-  untouched. Move both to `^0.4.0`, and drop the plan's "resolving
-  `pangolin-core` 0.3 and 0.4 side-by-side" acceptance criterion (`:492`), which
-  this contradicts.
-- ai-os's `malformed → 'unreadable'` mapping now also carries `'too-large'`
-  (§5.5). No new branch is needed, but the mapping's meaning widens.
+  publishes.** Its wording is "verify the *published* `pangolin-product@^0.4.0`
+  actually exports `readOutputSentinel` + `fetchDispatchArtifact`" (plan
+  `:437-439`). The source barrel
+  (`packages/pangolin-product/src/index.ts:7-12`) exports all four symbols, but
+  no `0.4.0` exists on npm — `git tag` tops out at `v0.3.1`, and §8 is the step
+  that creates it. ai-os must not start that task before the publish.
+- **ai-os's read adapter matches on `err.name`,** consistent with §3.1 and with
+  what `packages/adapter-pangolin-dispatch/src/executor.ts:73-75` already does.
+- **Bumping `adapter-pangolin-dispatch` to `^0.4.0` is now hygiene, not
+  correctness.** `packages/adapter-pangolin-dispatch/package.json:12-13` pin
+  `pangolin-client` and `pangolin-core` at `^0.3.0`, and on 0.x a caret pins the
+  minor, so a mixed tree resolves two `pangolin-core` copies. Under
+  `instanceof` that was a correctness bug; under name-matching it is duplicated
+  bytes. The plan's "resolving `pangolin-core` 0.3 and 0.4 side-by-side"
+  acceptance criterion (`:492`) therefore stands and needs no edit.
+- **No product-read size bound ships in 0.4.0** (§6.2). ai-os's read adapter
+  fetches artifacts unbounded, exactly as it would have before this spec existed.
+  ai-os controls its own `StorageProvider` and can bound reads there in the
+  interim.
 
 ---
 
-## 8. Out of scope
+## 6. Out of scope
 
-- **Issue #103** (typecheck test files in the remaining 10 packages, 213 errors).
-  Hygiene; nothing downstream waits on it; its own release. Note §5.1 depends on
-  the *current* state here — if #103 lands first, required-`head` becomes a
-  materially cheaper option and is worth revisiting.
-- **Bounding `readDispatchRecord`** (`pangolin-client/src/retention.ts:82-88`).
-  §4's threat model does not reach it: `record.json` is written by
-  `writeDispatchRecord` in **pangolin-client** (`retention.ts:45`, called from
-  `dispatch.ts:448`) — the consumer's own process — whereas the run writes only
-  `output.json` (`pangolin-worker/src/output-sentinel.ts:189`) and
-  `undelivered/*.json` (`deliver.ts:41`) under that prefix. It is not
-  attacker-influenced, and bounding it would push the §5.8 guard across a package
-  boundary (`pangolin-client` does not depend on `pangolin-product`). Revisit if
-  the worker's write scope to the dispatch-record prefix ever widens.
+### 6.1 Two `dispatch.ts` catches that must not be narrowed yet
+
+`packages/pangolin-client/src/dispatch.ts:681-684` (`readSubagentCapabilities`,
+`catch { return [] }` — fires with **zero capabilities**) and `:743-751`
+(env-bundle read, `catch { continue }` — launches **without secrets**) are the
+same fail-open defect as §2.3 with worse consequences. They are deferred anyway,
+because narrowing them where they sit is a regression:
+
+- Both run **after** the durable dedupe marker is written at `dispatch.ts:136` —
+  `resolveCapabilities` at `:147`, `flattenEnvBundleSecrets` at `:327`. A new
+  throw therefore leaves the marker behind with no container started. On retry
+  `markerPresent` returns `true` → `DispatchAlreadyExistsError`, which ai-os
+  treats as benign and reports as success
+  (`packages/adapter-pangolin-dispatch/src/executor.ts:73-77`). One storage blip
+  would mean the dispatch never ran, cannot be retried, and is durably recorded
+  as `action.completed`.
+- The env-bundle throw also lands **after** per-dispatch secrets are staged
+  (`dispatch.ts:178`) and the callback HMAC is minted (`:193`), and the
+  compensating `cleanup()` (`:463-467`) is reachable only through the returned
+  `InFlightDispatch` — which `fireWork`'s callers never receive on the throw
+  path (`dispatchWork` calls it at `:500`, outside the `try/finally` at
+  `:501-506`). Stranded credentials, from a credential-hygiene change.
+
+Fixing these properly means moving or rolling back the dedupe marker and making
+staging cleanup reachable on the throw path — the dispatch lifecycle, not the
+storage contract. **Leaving them alone regresses nothing:** they are fail-open
+today and stay exactly as they are.
+
+### 6.2 Bounded product reads
+
+The `head()` size-ceiling design shared this spec through rev 3 and is deferred
+whole. It is not ready:
+
+- The proposed fixed 1 MiB sentinel ceiling does not survive the real worst case.
+  Block count has no write-side cap (`packages/pangolin-core/src/pipeline.ts:94`
+  rejects only an *empty* `blocks` array;
+  `packages/pangolin-worker/src/pipeline-runner.ts:464` passes every outcome to
+  `writeSentinel`), and each `BlockOutcome` carries a `verify.report` up to a
+  caller-overridable `DEFAULT_REPORT_LIMIT = 8_000`
+  (`packages/pangolin-worker/src/verify.ts:28,31`) plus up to 256 outputs. A
+  legitimate large pipeline would become permanently unreadable.
+- An optional `head` feeds a systematic `StorageHeadUnsupportedError` straight
+  into the §3.4 swallows, turning "produced nothing" from transient into
+  permanent for any provider without `head` — including six hand-rolled
+  `implements StorageProvider` doubles in `pangolin-worker/test/`.
+- The read inventory has to be rebuilt across `examples/` (five further
+  `storage.get` sites beyond the twelve in `packages/*/src`) and `deploy/`.
+
+### 6.3 Also deferred
+
+- **Bounding `readDispatchRecord`.** `pangolin-client` does not depend on
+  `pangolin-product`, so the size guard would cross a package boundary. Note this
+  is a cost decision, not a safety one: the worker's credential *can* write
+  `record.json`, since `S3StorageProvider.put` routes any dispatch-record URI to
+  `putDispatchRecord` with no suffix allowlist (`index.ts:217-222`) and
+  `buildDispatchRecordUri` accepts an arbitrary suffix
+  (`packages/pangolin-core/src/uri.ts:212-229`).
+- **Issue #103** (typecheck test files in the remaining 10 packages).
 - **Release automation** (RELEASING.md "Future"). 0.4.0 is cut by hand.
-- **Streaming `get()`.** §4.2, and the residual race in §5.7.
-- **A write-side byte cap on patch capture.** §5.3.
 - **A typed not-found on `list`/`resolveLatest`/`resolveByHash`.** They already
   return `null` for absence.
 
 ---
 
-## 9. Documentation
-
-Landing in the same change:
+## 7. Documentation
 
 - `CHANGELOG.md` — `[Unreleased]` becomes `## [0.4.0] - 2026-07-28`, absorbing
-  the six already-merged PRs plus A and B. A **Breaking** heading names three
-  things: the `StorageProvider.get` not-found contract, the dispatch-availability
-  trade in §3.3, and the `OrchContext.storage` widening. §2 is listed under
-  **Fixed** as a provider-dependent `absent` path.
-- `packages/pangolin-core/src/storage.ts` — contract notes on `get` and `head?`.
-- **`docs-site/src/content/docs/how-to/write-a-provider.md:126-166`** — reproduces
-  the `StorageProvider` interface literally and documents the optional-method
-  posture. It gains `head?` and the `get` not-found MUST. This is the page a
-  future implementor reads.
-- **`docs-site/src/content/docs/reference/dispatch-lifecycle.md:200-207`** — pins
-  both read signatures and states "A missing sentinel comes back as
-  `{ status: 'absent' }` rather than throwing." `fetchDispatchArtifact` gains
-  `opts`, and the `absent` sentence gains its `'too-large'` sibling. Its
-  cross-references at `reference/package-map.md:30`,
-  `reference/pangolin-client-api.md:212`, and
-  `explanation/architecture-overview.md:115` are checked against the new text.
-- **`docs-site/test/product-read-docs.test.ts:91-105` must be inverted.** It
-  currently asserts those four pages **must not** match `/head\(\)/` or
-  `/size[- ]?(bound|cap|limit)ed? read/i` — a guard against documenting unbuilt
-  surface. This change builds it, so the guard becomes an assertion that the
-  surface *is* documented. Without this the release lands red.
+  the six already-merged PRs plus this change. A **Breaking** heading names the
+  `StorageProvider.get` not-found contract. §2 is listed under **Fixed** as a
+  provider-dependent `absent` path, which is what a reader upgrading needs to
+  know.
+- `packages/pangolin-core/src/storage.ts` — the `get` contract note.
+- `docs-site/src/content/docs/how-to/write-a-provider.md:126-166` — reproduces
+  the `StorageProvider` interface literally; it gains the `get` not-found MUST.
+  This is the page a future implementor reads.
+- `docs-site/src/content/docs/reference/dispatch-lifecycle.md:200-207` — states
+  "A missing sentinel comes back as `{ status: 'absent' }` rather than throwing."
+  That stays true and gains the provider-contract reason it now rests on.
+- No change to `docs-site/test/product-read-docs.test.ts`. Its guard at `:91-105`
+  forbids documenting a `head()` probe or a size-bounded read — correct, since
+  §6.2 defers exactly that surface. (Rev 3 would have had to invert it.)
 - An ADR is **not** warranted. ADR-0020 already established the product read as a
-  public storage-keyed contract; this hardens that contract rather than deciding
-  anything new about its shape.
+  public storage-keyed contract; this hardens the storage contract underneath it.
 
 ---
 
-## 10. Release mechanics
+## 8. Release mechanics
 
 Per `RELEASING.md`: bump all sixteen packages to `0.4.0` in lockstep
 (`pangolin-product` is already there), move the changelog section, `pnpm -r run
@@ -669,26 +418,33 @@ only `dist`/`README.md`/`LICENSE`, `pnpm -r publish --access public`, annotated
 
 ---
 
-## 11. Revision history
+## 9. Revision history
 
-**rev 3 (2026-07-28)** — second audit round.
+**rev 4 (2026-07-28)** — third audit round. Scope cut to the verified core.
+
+The audits converged on a pattern: §2 and its evidence were "solid, do not touch"
+in all three rounds, while every added element churned — a 64 MiB default that
+contradicted the worker's 100 MiB write cap, a required `head` that the type
+system could not enforce, a removed orchestrator `.catch` that stranded runs, and
+finally two narrowed catches that would have made a storage blip permanently
+un-retryable *and* recorded as success. Each was a fix for the previous round's
+fix.
 
 | Change | Driver |
 |---|---|
-| `head` reverts to **optional**, with a named `StorageHeadUnsupportedError` | rev 2's required-`head` rested on a false premise: `as unknown as StorageProvider` bypasses structural checking, so requiring it would have errored at none of the sites rev 2 listed. Real enforcement is two files; 10 of 16 packages don't typecheck tests at all. |
-| Orchestrator `.catch` **stays** (§3.4) | rev 2 called it "papering over §2." It is a documented `NEVER throws` contract, and removing it strands the item permanently — `reconcile` destroys in-flight state before the read, and `tick.ts:90` is unguarded. |
-| All three `dispatch.ts` catches narrow (§2.3, §3.3), replacing rev 2's untestable "is swept" | Two siblings to `markerPresent` are worse than it: `:681` fires with zero capabilities, `:745` launches without secrets. |
-| Sentinel ceiling becomes **fixed**; only the artifact bound is caller-configurable (§5.4) | A configurable sentinel ceiling made `'too-large'` mean "over *your* limit," which contradicts §5.5's argument for recording it as a durable business fact. |
-| Error classes go in **core**, not package-local (§5.5) | rev 2 invented a placement rule that `CapabilityTooLargeError` and `PartialStateTooLargeError` both violate. |
-| §5.7's artifact-immunity reason corrected | rev 2 credited the hash check, which runs after buffering and protects integrity, not memory. The real guarantee is content-derived blob keys + `IfNoneMatch`. |
-| §9 gains the doc-test inversion | `product-read-docs.test.ts:91-105` actively forbids documenting `head()`; rev 2 would have landed the suite red. |
-| §5.3 drops the back-compat re-export | The constant has three references and no barrel export; a re-export would be dead surface. |
-| §8 gains `readDispatchRecord` with a reason | rev 2 left the third dispatch-record read unmentioned. It is written by the client, not the run, so §4's threat model does not reach it. |
-| §7 requires **both** pins to move | Bumping core alone leaves `pangolin-client@0.3.1` pulling a second core copy transitively. |
-| §5.2 gains the local unpinned-URI guard; three citation drifts corrected | Audit house-style findings. |
+| `dispatch.ts:681` + `:745` deferred (§6.1) | Both sit after the dedupe marker write; narrowing them makes a transient blip un-retryable and reported to ai-os as `action.completed`. Deferring regresses nothing — they are fail-open today. |
+| `markerPresent` retained | It is called at `:133`, before the marker write at `:136`, so its throw strands nothing. §4 asserts that. |
+| All of B deferred (§6.2) | The sentinel ceiling arithmetic does not survive unbounded blocks × caller-overridable `verify.report`; optional `head` feeds a permanent failure into the §3.4 swallows; the read inventory was never built over `examples/`. |
+| `err.name` matching replaces `instanceof` (§3.1) | `errors.ts:1-5` documents name-matching as the convention, ai-os already uses it, and it dissolves the dual-`pangolin-core` pin coupling rev 3 spent a §7 bullet on. |
+| §2's caller inventory corrected to four | Two `examples/` callers were missed twice; `examples/` and `deploy/` are workspace roots (`pnpm-workspace.yaml`). |
+| §3.5 enumerates the doubles, two of which invert | `sentinel-read.test.ts:40` asserts the exact behaviour being deleted. |
+| §6.3 withdraws the `readDispatchRecord` threat-model reason | The worker's credential *can* write `record.json`; the exclusion rests on package boundaries, a cost decision. |
 
-**rev 2 (2026-07-28)** — first audit round: corrected the 64 MiB default against
-the worker's existing 100 MiB write cap; named the oversize outcomes; added
-`markerPresent`; corrected the non-existent `S3StorageProvider.getBlob`; added
-the two stale doc pages; marked the post-read check as an addition rather than
-existing behaviour.
+**rev 3** — reverted required-`head` (double assertions bypass structural
+checking; enforcement was two files) and the orchestrator `.catch` removal
+(strands the run); corrected the artifact-immunity argument to content-derived
+blob keys.
+
+**rev 2** — corrected the 64 MiB default against the worker's 100 MiB write cap;
+named the oversize outcomes; added `markerPresent`; corrected the non-existent
+`S3StorageProvider.getBlob`; added the stale doc pages.
