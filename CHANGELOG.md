@@ -67,17 +67,18 @@ workspace. See [RELEASING.md](./RELEASING.md) for how a release is cut.
 
 - **Provider-dependent handling of missing object sentinels is now uniform.**
   Previously, `LocalStorageProvider.getDispatchRecord` on a missing object
-  returned `{ status: 'absent' }`, but `S3StorageProvider.getDispatchRecord`
-  threw `NoSuchKey` because it had no not-found handling. Callers
-  (`readOutputSentinel` in `pangolin-product` and `readDispatchRecord` in
-  `pangolin-client`) detected absence by message-matching `/not found/i`, which
-  caused unrelated failures (DNS, throttles, misconfiguration) whose error text
-  happened to match to be silently reclassified as absent, turning transient
-  infrastructure errors into durable business facts. Both storage providers now
-  consistently throw `StorageNotFoundError` on a missing object via their
-  pre-existing type-aware `isNotFound` helper (threaded `uri` to
-  `S3StorageProvider.getDispatchRecord`), and callers classify by type instead
-  of message.
+  threw an error whose inlined `ENOENT` check callers (`readOutputSentinel` in
+  `pangolin-product` and `readDispatchRecord` in `pangolin-client`)
+  message-sniffed to produce `{ status: 'absent' }`, while
+  `S3StorageProvider.getDispatchRecord` threw `NoSuchKey` with no not-found
+  handling. Callers' message-matching `/not found/i` on both caused unrelated
+  failures (DNS, throttles, misconfiguration) whose error text happened to match
+  to be silently reclassified as absent, turning transient infrastructure errors
+  into durable business facts. Both storage providers now consistently throw
+  `StorageNotFoundError` on a missing object — the local provider from its
+  inlined `ENOENT` check, S3 from its pre-existing type-aware `isNotFound`
+  helper — with `S3StorageProvider.getDispatchRecord` gaining the `uri` it
+  previously lacked, and callers classify by type instead of message.
 
 ## [0.3.1] - 2026-07-24 — Security: patch-capture credential env-scoping
 
