@@ -31,6 +31,7 @@ import {
   buildPangolinUri,
   computeContentHash,
   IntegrityMismatchError,
+  StorageNotFoundError,
   type StorageProvider,
   type PangolinUriParts,
   type StorageUriParts,
@@ -283,7 +284,10 @@ export class LocalStorageProvider implements StorageProvider {
         'code' in err &&
         (err as NodeJS.ErrnoException).code === 'ENOENT'
       ) {
-        throw new Error(`LocalStorageProvider: blob not found for URI: ${uri}`);
+        throw new StorageNotFoundError(
+          uri,
+          `LocalStorageProvider: blob not found for URI: ${uri}`,
+        );
       }
       throw err;
     }
@@ -326,7 +330,10 @@ export class LocalStorageProvider implements StorageProvider {
         'code' in err &&
         (err as NodeJS.ErrnoException).code === 'ENOENT'
       ) {
-        throw new Error(`LocalStorageProvider: dispatch record not found for URI: ${uri}`);
+        throw new StorageNotFoundError(
+          uri,
+          `LocalStorageProvider: dispatch record not found for URI: ${uri}`,
+        );
       }
       throw err;
     }
