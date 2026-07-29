@@ -7,7 +7,7 @@ import type {
   TaskExit,
   TaskHandle,
 } from '@quarry-systems/pangolin-core';
-import { buildDispatchRecordUri } from '@quarry-systems/pangolin-core';
+import { buildDispatchRecordUri, StorageNotFoundError } from '@quarry-systems/pangolin-core';
 import * as pangolinProduct from '@quarry-systems/pangolin-product';
 import { DispatchExecutor } from '../src/executors/dispatch.js';
 import type { WorkItem } from '../src/contracts/index.js';
@@ -26,8 +26,9 @@ vi.mock('@quarry-systems/pangolin-product', async () => {
 
 // ---------------------------------------------------------------------------
 // Minimal in-memory storage stub (same shape/behavior as the one in
-// test/executors/dispatch.test.ts — `get` on a missing key throws a "not
-// found" message, matching pangolin-product's isNotFound sniff).
+// test/executors/dispatch.test.ts — `get` on a missing key throws
+// `StorageNotFoundError`, matching `isStorageNotFound`'s type-based check
+// in @quarry-systems/pangolin-product's readOutputSentinel).
 // ---------------------------------------------------------------------------
 function makeMemoryStorage(): StorageProvider & {
   blobs: Map<string, Uint8Array>;
@@ -81,7 +82,9 @@ function makeMemoryStorage(): StorageProvider & {
     },
     async get(uri: string) {
       const v = blobs.get(uri);
-      if (!v) throw new Error(`memory storage: not found: ${uri}`);
+      // Message deliberately omits "not found": the class default contains it,
+      // and a double using the default would still satisfy the deleted sniff.
+      if (!v) throw new StorageNotFoundError(uri, `absent: ${uri}`);
       return v;
     },
     async resolveLatest(uri: string) {
@@ -233,6 +236,8 @@ describe('DispatchExecutor sentinel read (delegated to pangolin-product)', () =>
   });
 
   it('reconcile yields no patchRef/verify/outputRefs when the sentinel is absent', async () => {
+    const spy = vi.mocked(pangolinProduct.readOutputSentinel);
+    spy.mockClear();
     const storage = makeMemoryStorage() as StorageProvider & ReturnType<typeof makeMemoryStorage>;
     storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
     const { compute, resolveExit } = makeDeferredCompute();
@@ -246,6 +251,14 @@ describe('DispatchExecutor sentinel read (delegated to pangolin-product)', () =>
     expect(res?.resultRef).toBeUndefined();
     expect(res?.verify).toBeUndefined();
     expect(res?.outputRefs).toBeUndefined();
+
+    // Prove reconcile reached readOutputSentinel's real `absent` branch (the
+    // double's StorageNotFoundError is caught by isStorageNotFound inside
+    // readOutputSentinel itself), not the `.catch` swallow at
+    // executors/dispatch.ts:215 that also yields resultRef undefined for an
+    // unrelated storage error.
+    expect(spy).toHaveBeenCalledTimes(1);
+    await expect(spy.mock.results[0]!.value).resolves.toEqual({ status: 'absent' });
   });
 
   it('reconcile yields {} projection when the sentinel is malformed (not JSON)', async () => {

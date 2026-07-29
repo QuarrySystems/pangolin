@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { PangolinClient } from '@quarry-systems/pangolin-client'; // barrel import installs prototype getters
 import type { ClientDispatchOpts, InFlightDispatch } from '@quarry-systems/pangolin-client';
 import type {
@@ -10,9 +10,20 @@ import type {
   TaskExit,
   TaskHandle,
 } from '@quarry-systems/pangolin-core';
-import { buildDispatchRecordUri } from '@quarry-systems/pangolin-core';
+import { buildDispatchRecordUri, StorageNotFoundError } from '@quarry-systems/pangolin-core';
+import * as pangolinProduct from '@quarry-systems/pangolin-product';
 import { DispatchExecutor } from '../../src/executors/dispatch.js';
 import type { WorkItem, FireContext } from '../../src/contracts/index.js';
+
+// Spy on the published reader while preserving its real behavior, so the
+// "no sentinel" reconcile test below can assert reconcile reached the real
+// `absent` branch rather than the `.catch` swallow at dispatch.ts:215.
+vi.mock('@quarry-systems/pangolin-product', async () => {
+  const actual = await vi.importActual<typeof import('@quarry-systems/pangolin-product')>(
+    '@quarry-systems/pangolin-product',
+  );
+  return { ...actual, readOutputSentinel: vi.fn(actual.readOutputSentinel) };
+});
 
 // ---------------------------------------------------------------------------
 // In-memory storage stub (copied from pangolin-client/test/dispatch.test.ts)
@@ -69,7 +80,9 @@ function makeMemoryStorage(): StorageProvider & {
     },
     async get(uri: string) {
       const v = blobs.get(uri);
-      if (!v) throw new Error(`memory storage: not found: ${uri}`);
+      // Message deliberately omits "not found": the class default contains it,
+      // and a double using the default would still satisfy the deleted sniff.
+      if (!v) throw new StorageNotFoundError(uri, `absent: ${uri}`);
       return v;
     },
     async resolveLatest(uri: string) {
@@ -723,6 +736,8 @@ describe('DispatchExecutor', () => {
   });
 
   it('reconcile of a done dispatch with no sentinel yields resultRef undefined, no throw', async () => {
+    const spy = vi.mocked(pangolinProduct.readOutputSentinel);
+    spy.mockClear();
     const { compute, resolveExit } = makeDeferredCompute();
     const storage = makeMemoryStorage();
     storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
@@ -750,6 +765,13 @@ describe('DispatchExecutor', () => {
     const res = await executor.reconcile(dispatchHash);
     expect(res?.status).toBe('done');
     expect(res?.resultRef).toBeUndefined();
+
+    // Prove reconcile reached readOutputSentinel's real `absent` branch, not
+    // the `.catch` swallow at executors/dispatch.ts:215 — both yield
+    // resultRef undefined, so asserting that alone would pass even if
+    // task-sentinel-read's type-based classification were reverted.
+    expect(spy).toHaveBeenCalledTimes(1);
+    await expect(spy.mock.results[0]!.value).resolves.toEqual({ status: 'absent' });
   });
 
   it('reconcile of a done dispatch surfaces sentinel outputs as outputRefs', async () => {
