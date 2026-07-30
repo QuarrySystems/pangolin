@@ -148,6 +148,15 @@ export interface SyncProvider {
 }
 ```
 
+:::caution[Provisional stability]
+The `./providers` subpath (`@quarry-systems/pangolin-cli/providers`) is versioned
+but not yet stable. `loadSubagents(dir)` means "the directory containing
+subagent files" to `ClaudeCodeProvider` (`claude-code.ts:28,31-32`) but "a repo
+root" to `StoaProvider`, which sets `defaultSubagentDir = '.'` and rebuilds both
+paths internally (`stoa.ts:33,38-40`) — one parameter, two meanings, unresolved,
+so the interface may change on a minor release.
+:::
+
 A provider is a pure data adapter — it reads filesystem and returns
 Pangolin Scale-native shapes. It does NOT call the `PangolinClient` or perform
 registration. The `cmd-*` files orchestrate by taking provider output and
@@ -157,8 +166,9 @@ When composing on top of an existing provider, prefer composition over
 inheritance. The `stoa` provider holds a `ClaudeCodeProvider` instance and
 delegates `loadCapabilities` to it.
 
-To register a provider, add an entry to the `PROVIDERS` map in
-`packages/pangolin-cli/src/providers/index.ts`:
+To register an **in-tree** provider — one that ships as part of
+`pangolin-cli` itself — add an entry to the `PROVIDERS` map in
+`packages/pangolin-cli/src/providers/registry.ts`:
 
 ```typescript
 const PROVIDERS: ReadonlyMap<string, SyncProvider> = new Map<string, SyncProvider>([
@@ -168,8 +178,31 @@ const PROVIDERS: ReadonlyMap<string, SyncProvider> = new Map<string, SyncProvide
 ]);
 ```
 
-That's the only registry touchpoint — both sync commands resolve providers
-through `resolveProvider(name)` from the same map.
+That's the only registry touchpoint for a built-in — both sync commands
+resolve providers through `resolveProviderLazily(name, getSyncProviders)`
+from that same map. A provider outside this package never touches
+`registry.ts`; see below.
+
+## Registering an out-of-tree provider
+
+Implement `SyncProvider` against `@quarry-systems/pangolin-cli/providers`,
+then register it in your `pangolin.config`:
+
+```javascript
+import { RemoraProvider } from 'remora-pangolin-provider';
+export const syncProviders = [new RemoraProvider()];
+```
+
+Built-in names (`claude-code`, `stoa`) cannot be overridden — a collision is
+a hard error naming the config file and the array index.
+
+### Import safety is a requirement
+
+Your provider package is imported by `pangolin.config`, and that file is
+evaluated by the **`pangolin-mcp` server at startup**, which has nothing to
+do with `sync`. Your package must therefore be a real `dependency` (not a
+`devDependency`), survive a pruned production install, and must not throw at
+module scope. A provider that violates this takes down the MCP server.
 
 ## See also
 

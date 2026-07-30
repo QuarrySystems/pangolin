@@ -22,12 +22,27 @@ in this exact order:
 The first file that exists is dynamically imported. If none exist, the CLI
 errors with `no pangolin.config.{ts,js,mjs} found in <cwd>`.
 
+:::note[The `.ts` leg needs a recent Node]
+Resolution is by existence, not by successful import — the loader `access()`s
+each filename in order and imports the first one found; it does not fall
+through to `.js`/`.mjs` if that import then fails. Loading `pangolin.config.ts`
+directly (no build step) relies on Node's native TypeScript stripping, which is
+on by default only from **Node 22.18**. This workspace's `package.json`
+declares `"node": ">=20"`, so on Node 20/21 (or early 22.x) a
+`pangolin.config.ts` in the cwd makes every command fail with
+`ERR_UNKNOWN_FILE_EXTENSION` instead of falling back to a `.js`/`.mjs` sibling.
+Verified: Node 20.17.0 fails, Node 22.20.0 succeeds. Ship `pangolin.config.mjs`
+(or `.js`) instead of `.ts` unless you control the Node version at every call
+site — including the `pangolin-mcp` server's runtime.
+:::
+
 ## What it must export
 
 | Export | Used by | Required |
 |---|---|---|
 | `default` **or** named `client` | All `PangolinClient`-backed commands (`capabilities`, `subagent`, `env`, `dispatch`, `deploy`) | The client surface. Errors if neither is present. |
 | named `orch` | The `pangolin orch` family | Only when running an `orch` verb. Errors lazily (clear message) if an `orch` verb runs without it. |
+| named `syncProviders` | `capabilities sync` / `subagent sync`, only when `--provider` names something the built-ins (`claude-code`, `stoa`) don't cover | Optional. See [`syncProviders`](#syncproviders) below. |
 
 `default` and `client` are interchangeable for the client — the loader takes
 `mod.default ?? mod.client`. The `orch` export is an `OrchContext`:
@@ -71,6 +86,25 @@ export const orch = {
 ```
 
 Custom implementations can satisfy the `ScheduleStore` interface directly.
+
+### `syncProviders`
+
+Optional. An array of `SyncProvider` instances; see
+[Authoring a new sync provider](/pangolin/how-to/sync-capabilities-subagents/#authoring-a-new-sync-provider).
+Loaded lazily — only when `--provider` names something the built-in
+providers (`claude-code`, `stoa`) do not cover, so a config with no
+`syncProviders` export pays no cost on every other command.
+
+Note this file is imported by **two** processes: the `pangolin` CLI, where
+`getSyncProviders` is genuinely lazy (only a `--provider` miss on the
+built-ins evaluates it), and the `pangolin-mcp` server, which has its own
+config loader and imports the whole `pangolin.config` module — module-scope
+code included — at startup, whether or not any sync verb ever runs. A
+`syncProviders` expression like `[new RemoraProvider()]` therefore constructs
+your provider (and executes anything your provider package does at module
+scope) as a side effect of `pangolin-mcp` starting up. See the [import-safety
+requirement](/pangolin/how-to/sync-capabilities-subagents/#import-safety-is-a-requirement)
+for out-of-tree providers.
 
 ## Worked `pangolin.config.mjs`
 

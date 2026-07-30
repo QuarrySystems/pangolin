@@ -34,7 +34,7 @@ Manage capability bundles.
 | `register` | `--name <name>` (required), `--from <dir>` (required) | Walks `<dir>` recursively, builds a `files:` map keyed by forward-slash relative paths, calls `client.capabilities.register`. Prints the resulting `CapabilityRef` as JSON. |
 | `list` | — | Prints one tab-delimited line per capability: `name\tcontentHash\tregisteredAt`. |
 | `get <name>` | — | Prints the named capability ref as JSON, or `(not found)` when the lookup returns `null`. |
-| `sync` | `--provider <name>` (required), `--from <dir>`, `--dry-run` | Bulk-registers capabilities from a provider's on-disk convention. `--from` defaults to the provider's `defaultCapabilityDir`. `--dry-run` parses and prints without registering. See [Sync capabilities & subagents](/pangolin/how-to/sync-capabilities-subagents/). |
+| `sync` | `--provider <name>` (required), `--from <dir>`, `--dry-run` | Bulk-registers capabilities from a provider's on-disk convention. `--provider` names a built-in (`claude-code`, `stoa`) or a provider supplied via `syncProviders` in `pangolin.config` — built-in names cannot be overridden (a collision is a hard error). `--from` defaults to the provider's `defaultCapabilityDir`. `--dry-run` parses and prints without registering. See [Sync capabilities & subagents](/pangolin/how-to/sync-capabilities-subagents/). |
 
 ## `pangolin subagent`
 
@@ -46,7 +46,7 @@ Manage subagents.
 | `assign <name>` | `--capabilities <list>` (required, comma-separated) | **Currently restricted.** Touches the client (so config errors surface), then throws a clear error directing you to re-register the subagent with the new capability list. Full assign-only flow is deferred to v1.5. |
 | `list` | — | Prints one tab-delimited line per subagent: `name\tcontentHash\tregisteredAt`. |
 | `get <name>` | — | Prints the named subagent ref as JSON, or `(not found)`. |
-| `sync` | `--provider <name>` (required), `--from <dir>`, `--dry-run` | Bulk-registers subagents from a provider's convention. `--from` defaults to `defaultSubagentDir`. |
+| `sync` | `--provider <name>` (required), `--from <dir>`, `--dry-run` | Bulk-registers subagents from a provider's convention. `--provider` names a built-in (`claude-code`, `stoa`) or a provider supplied via `syncProviders` in `pangolin.config` — built-in names cannot be overridden (a collision is a hard error). `--from` defaults to `defaultSubagentDir`. See [Sync capabilities & subagents](/pangolin/how-to/sync-capabilities-subagents/). |
 
 ## `pangolin env`
 
