@@ -8,14 +8,14 @@ default_quality_reviewer_hint: standard
 
 ```mermaid
 flowchart TD
-    task-registry["task-registry: provider registry module<br/>files: packages/pangolin-cli/src/providers/registry.ts +1 more"]
-    task-config-loader["task-config-loader: config loader consolidation + sync seam<br/>files: packages/pangolin-cli/src/index.ts +1 more"]
-    task-actions["task-actions: lazy provider resolution in the sync actions<br/>files: packages/pangolin-cli/src/cmd-subagent.ts +3 more"]
-    task-barrel["task-barrel: trim providers barrel to the SPI<br/>files: packages/pangolin-cli/src/providers/index.ts +1 more"]
-    task-bin-spawn["task-bin-spawn: real-bin wiring test<br/>files: packages/pangolin-cli/test/bin-spawn.test.ts"]
-    task-exports["task-exports: package exports map<br/>files: packages/pangolin-cli/package.json +2 more"]
-    task-docs["task-docs: provider authoring guide<br/>files: docs-site/src/content/docs/how-to/sync-capabilities-subagents.md +2 more"]
-    task-changelog["task-changelog: breaking-change entry<br/>files: CHANGELOG.md"]
+    task-registry["task-registry: provider registry module<br/>files: packages/pangolin-cli/src/providers/registry.ts +1 more"]:::done
+    task-config-loader["task-config-loader: config loader consolidation + sync seam<br/>files: packages/pangolin-cli/src/index.ts +1 more"]:::done
+    task-actions["task-actions: lazy provider resolution in the sync actions<br/>files: packages/pangolin-cli/src/cmd-subagent.ts +3 more"]:::done
+    task-barrel["task-barrel: trim providers barrel to the SPI<br/>files: packages/pangolin-cli/src/providers/index.ts +1 more"]:::done
+    task-bin-spawn["task-bin-spawn: real-bin wiring test<br/>files: packages/pangolin-cli/test/bin-spawn.test.ts"]:::done
+    task-exports["task-exports: package exports map<br/>files: packages/pangolin-cli/package.json +2 more"]:::done
+    task-docs["task-docs: provider authoring guide<br/>files: docs-site/src/content/docs/how-to/sync-capabilities-subagents.md +2 more"]:::done
+    task-changelog["task-changelog: breaking-change entry<br/>files: CHANGELOG.md"]:::done
 
     task-registry --> task-config-loader
     task-config-loader --> task-actions
@@ -106,7 +106,7 @@ depends_on: []
 files:
   - packages/pangolin-cli/src/providers/registry.ts
   - packages/pangolin-cli/test/providers-registry.test.ts
-status: pending
+status: done
 model_hint: opus
 quality_reviewer_hint: opus
 ```
@@ -260,7 +260,7 @@ depends_on: [task-registry]
 files:
   - packages/pangolin-cli/src/index.ts
   - packages/pangolin-cli/test/config-loader.test.ts
-status: pending
+status: done
 ```
 
 Collapse the two duplicated config-resolution loops into one helper, add
@@ -378,7 +378,7 @@ files:
   - packages/pangolin-cli/src/cmd-capabilities.ts
   - packages/pangolin-cli/test/cmd-subagent.test.ts
   - packages/pangolin-cli/test/cmd-capabilities.test.ts
-status: pending
+status: done
 ```
 
 Switch both sync actions from the synchronous `resolveProvider` to
@@ -456,7 +456,7 @@ depends_on: [task-actions]
 files:
   - packages/pangolin-cli/src/providers/index.ts
   - packages/pangolin-cli/test/providers-barrel.test.ts
-status: pending
+status: done
 ```
 
 Reduce `providers/index.ts` to exactly the published SPI surface — three types plus
@@ -514,7 +514,7 @@ id: task-bin-spawn
 depends_on: [task-actions]
 files:
   - packages/pangolin-cli/test/bin-spawn.test.ts
-status: pending
+status: done
 ```
 
 Spawn the built binary against a **real `pangolin.config.mjs`** in a scratch cwd.
@@ -622,7 +622,7 @@ files:
   - packages/pangolin-cli/package.json
   - packages/pangolin-cli/test/exports-resolution.test.ts
   - packages/pangolin-cli/.gitignore
-status: pending
+status: done
 ```
 
 Declare the `./providers` subpath, making this the first package in the monorepo
@@ -740,7 +740,7 @@ files:
   - docs-site/src/content/docs/how-to/sync-capabilities-subagents.md
   - docs-site/src/content/docs/reference/config.md
   - docs-site/src/content/docs/reference/cli.md
-status: pending
+status: done
 ```
 
 Rewrite the authoring section, which currently instructs the impossible — "add an
@@ -829,7 +829,7 @@ id: task-changelog
 depends_on: [task-config-loader]
 files:
   - CHANGELOG.md
-status: pending
+status: done
 is_wiring_task: true
 model_hint: cheap
 review_mode: merged
@@ -895,6 +895,41 @@ exported, so a consumer told to supply the member could not name its type.
 
 Test file: none — `CHANGELOG.md` has no automated check (`grep -rn CHANGELOG
 .github/workflows/` returns nothing); verified by review against the criteria above.
+
+---
+
+## Execution record
+
+- **2026-07-30** · **8/8 done, 0 failed, 0 skipped.** Five dispatch ticks; two ran
+  two implementers in parallel (`task-actions` ∥ `task-changelog`,
+  `task-barrel` ∥ `task-bin-spawn`, `task-exports` ∥ `task-docs`).
+- Commits, in order: `0e04fab` registry · `32c65f8` config loader · `e07a732`
+  changelog · `de9016b` actions · `60fe40d` barrel · `33f3120` bin-spawn ·
+  `fdbb0f9` bin-spawn fixup · `0b1be89` exports · `a83dad6` docs.
+- **One review loop.** `task-bin-spawn` failed quality review on an Important
+  finding: `--from <cwd>` in the hostile-config case was load-bearing but
+  unexplained (without it the built-in's default `.claude/agents` ENOENTs before
+  the assertion), and `expect(stdout).not.toContain(...)` was vacuous because
+  stdout is unconditionally empty on that path. Fixed in `fdbb0f9` by documenting
+  the flag and seeding a real `agents/demo.md` so the case asserts
+  `(dry-run) subagent demo` positively. Re-review APPROVED.
+- **Gate-2's B2 was validated in practice, not just in principle.** The
+  `task-bin-spawn` implementer ran the new suite against the pre-change `dist/`
+  and got exactly the predicted RED: `unknown --provider 'probe'`. The
+  spec reviewer then independently mutation-tested the built output under both
+  failure modes — construction site unwired, and the member weakened with `?.` —
+  and confirmed the discriminating case goes red for each. That case is the only
+  assertion in the suite that distinguishes those states from success.
+- Final gates, repo-wide: `pnpm -r build` ✓ · `pnpm run check:deps` ✓ ·
+  `pnpm -r lint` ✓ · `pnpm -r typecheck` ✓ ·
+  `pnpm -r --workspace-concurrency=1 test` ✓ (`pangolin-cli` 23 files / 213 tests,
+  up from 193 at branch start) · `pnpm --filter docs-site build` ✓.
+- Adding the repo's first `exports` map broke nothing: the clean-room dependency
+  guard passes and every package still builds.
+- Open polish, non-blocking, both raised as review Suggestions: the docs' example
+  imports `remora-pangolin-provider`, which is not a real npm package and reads
+  like one; and `providers/index.ts`'s type re-export line remains covered by no
+  automated check (documented as review-only in `task-barrel`).
 
 ---
 
