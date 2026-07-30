@@ -1,0 +1,60 @@
+## Lens: coherence
+## Charter: No CLAUDE.md/AGENTS.md/.claude/audit-charter.md exists in this repo (confirmed absent, per task framing). This lens compares the artifact only against itself, so the docs-site ADR/architecture material was consulted only to confirm it is not needed to adjudicate internal contradictions — no charter rule bears on a same-document coherence check. Downstream: none found (per task framing — spec is untracked, unimplemented, no plan references it), so no finding here can be downgraded to STALE/DEFERRED-by-downstream; severities below are assigned on the spec's own text.
+
+### Grounding table
+| Assumption | Where in artifact | Verified at file:line | VERIFIED / CONTRADICTED / NOT-FOUND / UNVERIFIABLE |
+|---|---|---|---|
+| §1.1 claims `SubagentDef` carries `promptTemplate` and `capabilities`, then explains "the distinction" as `promptTemplate` vs `systemPrompt` | §1.1 | spec:29, spec:32 | CONTRADICTED (internally) |
+| §6 points to "§8" for the dry-run regression test | §6 | spec:295-296 | CONTRADICTED — test is in §9 (spec:351), §8 has no test content (spec:321-334) |
+| §5 states errors always name "the config file and the offending array index" | §5 | spec:275 | CONTRADICTED by §9's own test wording for the non-array case (spec:348) |
+| D4 states "the merged set is passed in" to `resolveProvider` | §2 D4 | spec:126 vs spec:217-222 | CONTRADICTED (imprecise) — the unmerged `extra` list is passed in; `resolveProvider` performs the merge itself by delegating to `mergeProviders` |
+| Decision table order D1..D8 vs. section elaboration order | §2 vs §7/§8 | spec:129-130 vs spec:300,321 | CONTRADICTED (ordering only, not content) — §7 elaborates D8, §8 elaborates D7 |
+| All other decision-table rows (D1, D2, D3, D5, D6) match their elaborating sections | §2 vs §3–§6 | spec:123-125,127-128 vs §3,§4,§5,§6 | VERIFIED |
+| §9 testing table rows match the mechanisms described in §3–§7 | §9 vs §3–§7 | spec:342-355 | VERIFIED |
+| §11 out-of-scope rows match their cited reasons (§1.4, §8, D3) | §11 vs §1.4/§8/§2 | spec:388-394 | VERIFIED |
+| Nested `file:line` citation ranges are self-consistent (e.g. action ranges in §4.2/§4.3/§5/§6 all nest inside each other) | throughout | spec:207-208,233-234,269-270,293-294 | VERIFIED (internally consistent, not checked against actual source — out of lens) |
+
+### Findings
+
+- **DEFERRED** · §1.1 names the wrong second field of `SubagentDef`, then explains a distinction that doesn't match the fields it just named.
+  - Artifact text: "The contract already expresses this. `SubagentDef` (`packages/pangolin-cli/src/providers/types.ts:19-31`) carries both `promptTemplate` and `capabilities`. The runtime honors the distinction: `renderPrompt` (...) Mustache-renders `promptTemplate` when it is a non-empty string and otherwise returns `systemPrompt` **verbatim**." (spec:27-32)
+  - Evidence: The sentence introduces a pair of fields — `promptTemplate` and `capabilities` — and says "the runtime honors *the distinction*" between them. But the very next clause describes the distinction as being between `promptTemplate` and `systemPrompt`, never mentioning `capabilities` again. Everywhere else in the document, `systemPrompt` is the term used for `SubagentDef`'s fallback field (e.g. spec:37 "`ClaudeCodeProvider.loadSubagents` hardcodes `{ name, systemPrompt: body }`"), and "capabilities" is reserved throughout for the unrelated `CapabilityBundle`/`loadCapabilities`/`defaultCapabilityDir` machinery (spec:392: "the bundle is `Record<string, Uint8Array>` and the provider owns every key"). No other passage supports `SubagentDef` having a `capabilities` field.
+  - Concrete failure: A reader building a mental model of `SubagentDef`'s shape from this section alone — which is exactly the audience of a provider-authoring SPI spec — comes away believing `SubagentDef` carries capability data, when capabilities are handled by a wholly separate `loadCapabilities`/`CapabilityBundle` path per §5 and §11. This is scene-setting prose (not one of D1-D8's elaborating sections), so it does not misdirect the concrete signatures in §3-§8, which never repeat the error.
+  - Resolution: Replace `capabilities` with `systemPrompt` at spec:29 so the named pair matches the distinction explained in the following sentence.
+
+- **DEFERRED** · §6 cites "§8" for a regression test that actually lives in §9; §8 contains no test.
+  - Artifact text: "**Regression guard.** `pangolin subagent sync --provider claude-code --dry-run` works today in a repo with no config at all, because `--dry-run` skips the client entirely (`cmd-subagent.ts:125`, `cmd-capabilities.ts:60`). If `getSyncProviders` threw on a missing config file, that would break. §8 covers it with a test." (spec:292-296)
+  - Evidence: §8 ("Stability posture (D7)", spec:321-334) discusses only the provisional-stability decision and the `loadSubagents(dir)` overload — it contains no test and no mention of `--dry-run`. The actual test is in §9's testing table: "Absent config | no config file → `[]`, and `--dry-run` sync on a built-in still succeeds (§6 guard)" (spec:351), which itself correctly cross-references back to §6.
+  - Concrete failure: A reader following the pointer from §6 lands in the wrong section and finds no test, momentarily concluding the regression guard is undocumented/untested (it isn't). Low practical cost in an 11-section document, but it is a broken pointer as written.
+  - Resolution: Change "§8 covers it with a test" (spec:295-296) to "§9 covers it with a test."
+
+- **DEFERRED** · §5's blanket claim that "Errors name the config file and the offending array index" is not satisfiable for the "non-array export" rejection case, and §9's own test wording already reflects that gap.
+  - Artifact text: §5 lists five reject conditions including "a non-array export" (spec:264), then states as a general rule: "Errors name the config file and the offending array index." (spec:275). §9's corresponding test only claims: "non-array export rejected, naming the config file" (spec:348) — no index — while the very next row is explicit about an index: "entry missing `loadSubagents` rejected, naming the index" (spec:349).
+  - Concrete failure: If §5's rule is read as universal (it reads that way — "Rejects: [list]... Errors name the config file and the offending array index" immediately follows the list with no qualifier), it cannot be satisfied when the offending value isn't an array at all — there is no index to name. §9's own wording already implicitly carves out this exception, so the document contradicts its own stated invariant in the section that is supposed to be its concrete acceptance criteria.
+  - Resolution: Qualify §5's sentence, e.g. "Errors name the config file, and the offending array index when the export is validated entry-by-entry" — or split it into two sentences matching the two error shapes §9 already distinguishes.
+
+- **DEFERRED** · D4's summary ("the merged set is passed in") describes a different mechanism than §4.3's concrete signature (the *unmerged* `extra` list is passed in; `resolveProvider` merges it itself).
+  - Artifact text: D4: "`resolveProvider` stays synchronous and pure; the merged set is passed in" (spec:126). §4.3: "`resolveProvider` and `listProviderNames` each gain an optional trailing parameter... `export function resolveProvider(name: string, extra?: readonly SyncProvider[]): SyncProvider;`... Both delegate to `mergeProviders`." (spec:214-222).
+  - Evidence: The parameter type is `readonly SyncProvider[]` (a plain array, not the `ReadonlyMap<string, SyncProvider>` that `mergeProviders` produces per its own signature at spec:194-197), and §4.3 states plainly that `resolveProvider` computes the merge itself ("Both delegate to `mergeProviders`"). So what is "passed in" is the pre-merge `extra` list, not "the merged set" — the merged set is what `resolveProvider` produces internally, not what it receives.
+  - Concrete failure: Low — an implementer building from the concrete code snippet in §4.3 would follow the correct signature regardless of the terser D4 summary. But a reader who stops at the decision table (§2's stated purpose as a quick-reference) could reasonably infer `resolveProvider` expects a pre-merged `Map` and that callers are responsible for calling `mergeProviders` themselves before calling it — the opposite of the design in §4.3.
+  - Resolution: Reword D4 to something like "the extra-provider list is passed in and merged internally" to match §4.3, or state explicitly in §4.3 that D4's "merged set" language refers to the *output* of the call, not the input.
+
+- **DEFERRED** · The decision table's D7/D8 order is reversed in the elaborating sections.
+  - Artifact text: §2 lists "D7 | The SPI ships explicitly provisional..." before "D8 | The three config-resolution copies collapse to one helper" (spec:129-130). The document then elaborates them out of order: "## 7. Config loader consolidation (D8)" (spec:300) precedes "## 8. Stability posture (D7)" (spec:321).
+  - Evidence: Purely a numbering/ordering observation — the content of §7 correctly matches D8 and the content of §8 correctly matches D7; nothing factual is contradicted, only the sequence.
+  - Concrete failure: None beyond a moment of "why does §7 elaborate D8 instead of D7" friction for a reader cross-checking the table against the prose in decision order, which the task specifically asked this lens to do.
+  - Resolution: Either reorder the decision table to D1, D2, D3, D4, D5, D6, D8, D7 to match prose order, or swap §7/§8's content order to match the table. Cosmetic; author's choice.
+
+### Checked, no finding
+
+- D1/D2/D3/D5/D6 each match their elaborating sections (§3, §4.1-4.2, §4.2, §5, §6) with no contradiction found in field names, types, or stated behavior.
+- The `file:line` citation ranges nest consistently across sections wherever the same underlying code region is referenced from multiple places (e.g. `cmd-subagent.ts:121-135` in §4.3 fully contains the narrower citations at `:123` in §5, `:125` in §6, and `:131` in §4.2; the `cmd-capabilities.ts` equivalents nest the same way). This is evidence of care, not a defect.
+- §9's testing table rows correspond to real mechanisms described earlier (merge collision/duplicate-name errors match §4.2; unknown-provider enumeration matches §4.3; `[]`-on-absence matches §6; loader precedence and unchanged error strings match §7; exports subpath resolution matches §3's known-risk paragraph) — no row tests behavior the document doesn't otherwise describe.
+- §11's out-of-scope table rows each cite a real, correctly-pointing reason: the `loadSubagents(dir)` redesign row correctly points at §8 (spec:388, and §8 is indeed about that overload, spec:327-334); the npm/global discovery row correctly points at the trust argument in §1.4; the "overriding built-ins" row correctly matches D3's hard-error decision.
+- §10's "No ADR" claim is consistent with §1.4's ADR-0005 discussion — both agree the change is consistency-with, not modification-of, that boundary; no contradiction between the two passages.
+- The two high-level changes named in the intro (publish SPI surface, add `syncProviders` config export) are consistent with D1/D2 respectively; D3-D8 are correctly framed as supporting decisions for those two, not competing or contradictory top-level changes.
+- Terminology is stable throughout for: "exports map," "built-ins"/`PROVIDERS`, "out-of-tree provider," `promptTemplate`/`systemPrompt` (outside the one §1.1 lapse flagged above), `mergeProviders`, `validateSyncProviders`, `loadConfigModule`. The `getX` (interface-seam name, e.g. `getOrchContext` at spec:288, `getClient`/`getOrchContext` at spec:354) vs. `defaultGetX` (concrete implementation, e.g. `defaultGetClient`/`defaultGetOrchContext` at spec:73, spec:302) split is used consistently and matches the pattern the spec itself establishes for the new `getSyncProviders`/`defaultGetSyncProviders` pair (spec:230, spec:316) — not a naming defect.
+
+### Out of lens
+
+(none)
