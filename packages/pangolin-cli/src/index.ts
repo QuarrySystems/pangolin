@@ -19,6 +19,7 @@ import { attachOrchCmd } from './cmd-orch.js';
 import type { OrchContext } from './cmd-orch.js';
 import { attachVerifyCmd } from './cmd-verify.js';
 import { attachPipelineCmd } from './cmd-pipeline.js';
+import type { ConfigProviders } from './providers/registry.js';
 
 export interface CliContext {
   /** Lazily-loaded PangolinClient instance (from pangolin.config.ts in cwd). */
@@ -27,11 +28,17 @@ export interface CliContext {
    *  Throws lazily (clear error) only when an orch verb actually runs without an `orch`
    *  config export — mirrors how getClient throws lazily without a config file. */
   getOrchContext: () => Promise<OrchContext>;
+  /** Lazily-loaded config providers (from pangolin.config.ts `syncProviders` export in
+   *  cwd). `null` when no pangolin.config.* exists in cwd; never throws for that case
+   *  (a missing config just means "built-ins only" to the provider registry). */
+  getSyncProviders: () => Promise<ConfigProviders | null>;
 }
 
 export function buildProgram(ctx: CliContext): Command {
   const program = new Command();
-  program.name('pangolin').description('Pangolin Scale CLI — register artifacts and dispatch workers');
+  program
+    .name('pangolin')
+    .description('Pangolin Scale CLI — register artifacts and dispatch workers');
   attachCapabilitiesCmd(program, ctx);
   attachSubagentCmd(program, ctx);
   attachEnvCmd(program, ctx);
@@ -43,60 +50,82 @@ export function buildProgram(ctx: CliContext): Command {
   return program;
 }
 
-export async function defaultGetClient(): Promise<PangolinClient> {
-  // Resolve ./pangolin.config.{ts,js,mjs} relative to cwd, dynamic import, expect
-  // a default export of an PangolinClient instance (or a named `client` export).
+const CONFIG_FILENAMES = ['pangolin.config.ts', 'pangolin.config.js', 'pangolin.config.mjs'];
+
+/** Locate and import ./pangolin.config.{ts,js,mjs} from cwd, in that resolution order.
+ *  `null` when none of the three exist. Shared by defaultGetClient, defaultGetOrchContext,
+ *  and defaultGetSyncProviders so the filename that actually resolved is known to all
+ *  three instead of being loop-local. */
+async function loadConfigModule(): Promise<{
+  mod: Record<string, unknown>;
+  filename: string;
+} | null> {
   const { pathToFileURL } = await import('node:url');
   const { resolve } = await import('node:path');
   const { access } = await import('node:fs/promises');
-  for (const filename of ['pangolin.config.ts', 'pangolin.config.js', 'pangolin.config.mjs']) {
+  for (const filename of CONFIG_FILENAMES) {
     const path = resolve(process.cwd(), filename);
     try {
       await access(path);
     } catch {
       continue;
     }
-    const mod = await import(pathToFileURL(path).href);
-    const client = mod.default ?? mod.client;
-    if (!client) {
-      throw new Error(
-        `pangolin-cli: ${filename} must export an PangolinClient instance as default or named 'client'`,
-      );
-    }
-    return client as PangolinClient;
+    const mod = (await import(pathToFileURL(path).href)) as Record<string, unknown>;
+    return { mod, filename };
   }
-  throw new Error(`pangolin-cli: no pangolin.config.{ts,js,mjs} found in ${process.cwd()}`);
+  return null;
+}
+
+export async function defaultGetClient(): Promise<PangolinClient> {
+  // Resolve ./pangolin.config.{ts,js,mjs} relative to cwd, dynamic import, expect
+  // a default export of an PangolinClient instance (or a named `client` export).
+  const loaded = await loadConfigModule();
+  if (!loaded)
+    throw new Error(`pangolin-cli: no pangolin.config.{ts,js,mjs} found in ${process.cwd()}`);
+  const client = loaded.mod.default ?? loaded.mod.client;
+  if (!client) {
+    throw new Error(
+      `pangolin-cli: ${loaded.filename} must export an PangolinClient instance as default or named 'client'`,
+    );
+  }
+  return client as PangolinClient;
 }
 
 export async function defaultGetOrchContext(): Promise<OrchContext> {
   // Resolve ./pangolin.config.{ts,js,mjs} relative to cwd, dynamic import, expect
   // a named `orch` export of an OrchContext object.
-  const { pathToFileURL } = await import('node:url');
-  const { resolve } = await import('node:path');
-  const { access } = await import('node:fs/promises');
-  for (const filename of ['pangolin.config.ts', 'pangolin.config.js', 'pangolin.config.mjs']) {
-    const path = resolve(process.cwd(), filename);
-    try {
-      await access(path);
-    } catch {
-      continue;
-    }
-    const mod = await import(pathToFileURL(path).href);
-    const oc = mod.orch;
-    if (!oc) {
-      throw new Error(
-        `pangolin-cli: ${filename} must export an OrchContext as a named 'orch' export for pangolin orch commands`,
-      );
-    }
-    return oc as OrchContext;
+  const loaded = await loadConfigModule();
+  if (!loaded)
+    throw new Error(`pangolin-cli: no pangolin.config.{ts,js,mjs} found in ${process.cwd()}`);
+  const oc = loaded.mod.orch;
+  if (!oc) {
+    throw new Error(
+      `pangolin-cli: ${loaded.filename} must export an OrchContext as a named 'orch' export for pangolin orch commands`,
+    );
   }
-  throw new Error(`pangolin-cli: no pangolin.config.{ts,js,mjs} found in ${process.cwd()}`);
+  return oc as OrchContext;
+}
+
+/** Resolve `./pangolin.config.{ts,js,mjs}`'s `syncProviders` export, normalizing an
+ *  explicit `undefined` export to an empty array. Returns `null` when no config file
+ *  exists in cwd at all — that is not an error here, unlike defaultGetClient /
+ *  defaultGetOrchContext, because a missing config just means "built-ins only" to the
+ *  provider registry (see resolveProviderLazily). Any other value (including `null`) is
+ *  passed straight through un-narrowed; validating the shape is mergeProviders' job. */
+export async function defaultGetSyncProviders(): Promise<ConfigProviders | null> {
+  const loaded = await loadConfigModule();
+  if (!loaded) return null;
+  const raw = loaded.mod.syncProviders;
+  return { providers: raw === undefined ? [] : raw, source: loaded.filename };
 }
 
 /** Render an uncaught CLI error for the user: the clean message by default (the cmd-*.ts layers
  *  already throw actionable `Error`s), the full stack only under `PANGOLIN_DEBUG`. Non-Error throws
  *  are stringified. Pure + exported so the top-level handler's formatting is testable. */
-export function formatCliError(err: unknown, debug: boolean = !!process.env.PANGOLIN_DEBUG): string {
+export function formatCliError(
+  err: unknown,
+  debug: boolean = !!process.env.PANGOLIN_DEBUG,
+): string {
   if (err instanceof Error) return debug && err.stack ? err.stack : err.message;
   return String(err);
 }
@@ -107,7 +136,11 @@ export function formatCliError(err: unknown, debug: boolean = !!process.env.PANG
 // as the entry script (e.g. via the `pangolin` bin), build the program and
 // parse argv; when it is `require()`d from a test, skip the side effect.
 if (typeof require !== 'undefined' && require.main === module) {
-  const program = buildProgram({ getClient: defaultGetClient, getOrchContext: defaultGetOrchContext });
+  const program = buildProgram({
+    getClient: defaultGetClient,
+    getOrchContext: defaultGetOrchContext,
+    getSyncProviders: defaultGetSyncProviders,
+  });
   program.parseAsync(process.argv).catch((err) => {
     // Clean message by default; full stack under PANGOLIN_DEBUG (see formatCliError).
     console.error(formatCliError(err));
