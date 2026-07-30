@@ -24,7 +24,7 @@
 import { it, expect, beforeEach, afterEach } from 'vitest';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -71,12 +71,32 @@ it('resolves a CONFIG-SUPPLIED provider through the real bin', async () => {
 
 it('a built-in under --dry-run survives an import-hostile config', async () => {
   await writeFile(join(cwd, 'pangolin.config.mjs'), HOSTILE_CONFIG);
+  // Seed a real subagent file so the run has something to find. Without
+  // this, `loadSubagents` would return `[]` and the test's only signal
+  // would be "the process didn't throw" — no evidence the built-in path
+  // actually ran successfully against the hostile config.
+  const agentsDir = join(cwd, 'agents');
+  await mkdir(agentsDir);
+  await writeFile(join(agentsDir, 'demo.md'), '---\nname: demo\n---\nYou are a demo subagent.\n');
   const { stdout } = await run(
     process.execPath,
-    [bin, 'subagent', 'sync', '--provider', 'claude-code', '--from', cwd, '--dry-run'],
+    [
+      bin,
+      'subagent',
+      'sync',
+      '--provider',
+      'claude-code',
+      // --from <agentsDir> avoids the built-in's default relative
+      // '.claude/agents' dir, which doesn't exist in this scratch cwd and
+      // would ENOENT before we reach the thing under test.
+      '--from',
+      agentsDir,
+      '--dry-run',
+    ],
     { cwd },
   );
   expect(stdout).not.toContain('boom-from-config');
+  expect(stdout).toContain('(dry-run) subagent demo');
 });
 
 it('a typo surfaces the import error, not the unknown-provider message', async () => {
