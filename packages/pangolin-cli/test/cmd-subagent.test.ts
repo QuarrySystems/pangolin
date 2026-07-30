@@ -5,6 +5,17 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { it, expect, describe, vi, afterEach } from 'vitest';
 
+// Shape-valid config-supplied provider used to exercise the `getSyncProviders`
+// seam without a built-in name colliding with it. See providers/registry.ts
+// validateEntry for the required shape.
+const probeProvider = {
+  name: 'probe',
+  defaultSubagentDir: '.',
+  defaultCapabilityDir: '.',
+  loadSubagents: async () => [{ name: 'probed-agent' }],
+  loadCapabilities: async () => [{ name: 'probed-cap', files: {} }],
+};
+
 describe('attachSubagentCmd', () => {
   afterEach(() => {
     vi.clearAllMocks();
@@ -103,7 +114,7 @@ describe('attachSubagentCmd', () => {
     });
   });
 
-  it('sync --dry-run skips registration and never calls getClient', async () => {
+  it('sync --dry-run skips registration and never calls getClient or getSyncProviders for a built-in provider', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'pangolin-sync-sub-dry-'));
     await writeFile(join(dir, 'g.md'), '---\nname: g\n---\nbody\n', 'utf8');
 
@@ -111,7 +122,15 @@ describe('attachSubagentCmd', () => {
     const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
     const program = new Command();
-    attachSubagentCmd(program, { getClient });
+    attachSubagentCmd(program, {
+      getClient,
+      // A built-in name (claude-code) must short-circuit before getExtra is
+      // ever awaited — resolveProviderLazily's whole point. Throwing here
+      // proves it, rather than a no-op fake that would pass either way.
+      getSyncProviders: async () => {
+        throw new Error('getSyncProviders should not be called for a built-in provider');
+      },
+    });
     await program.parseAsync([
       'node', 'pangolin', 'subagent', 'sync',
       '--provider', 'claude-code', '--from', dir, '--dry-run',
@@ -121,13 +140,48 @@ describe('attachSubagentCmd', () => {
     expect(consoleSpy).toHaveBeenCalledWith('(dry-run) subagent g');
   });
 
+  it('sync --provider probe resolves a config-supplied provider via getSyncProviders', async () => {
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    const program = new Command();
+    attachSubagentCmd(program, {
+      getClient: async () => ({} as any),
+      getSyncProviders: async () => ({ providers: [probeProvider], source: 'pangolin.config.ts' }),
+    });
+    await program.parseAsync([
+      'node', 'pangolin', 'subagent', 'sync',
+      '--provider', 'probe', '--from', '.', '--dry-run',
+    ]);
+
+    expect(consoleSpy).toHaveBeenCalledWith('(dry-run) subagent probed-agent');
+  });
+
   it('sync rejects unknown providers', async () => {
     const program = new Command();
-    attachSubagentCmd(program, { getClient: async () => ({} as any) });
+    attachSubagentCmd(program, {
+      getClient: async () => ({} as any),
+      getSyncProviders: async () => null,
+    });
     await expect(
       program.parseAsync([
         'node', 'pangolin', 'subagent', 'sync', '--provider', 'made-up', '--from', '.',
       ]),
     ).rejects.toThrow(/unknown --provider 'made-up'/);
+  });
+
+  it('sync --help succeeds without invoking a throwing getSyncProviders fake', async () => {
+    const program = new Command();
+    program.exitOverride();
+    program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
+    attachSubagentCmd(program, {
+      getClient: async () => ({} as any),
+      getSyncProviders: async () => {
+        throw new Error('getSyncProviders should not be called by --help');
+      },
+    });
+
+    await expect(
+      program.parseAsync(['node', 'pangolin', 'subagent', 'sync', '--help']),
+    ).rejects.toMatchObject({ code: 'commander.helpDisplayed' });
   });
 });

@@ -17,7 +17,7 @@ import { Command } from 'commander';
 import { readFile } from 'node:fs/promises';
 import { parse as parseYaml } from 'yaml';
 import type { CliContext } from './index.js';
-import { resolveProvider } from './providers/index.js';
+import { resolveProviderLazily } from './providers/registry.js';
 import { runSync } from './sync.js';
 
 export function attachSubagentCmd(program: Command, ctx: CliContext): void {
@@ -119,7 +119,7 @@ export function attachSubagentCmd(program: Command, ctx: CliContext): void {
     .option('--from <dir>', "source directory (defaults to the provider's convention)")
     .option('--dry-run', 'parse and print, do not register', false)
     .action(async (opts: { provider: string; from?: string; dryRun: boolean }) => {
-      const provider = resolveProvider(opts.provider);
+      const provider = await resolveProviderLazily(opts.provider, ctx.getSyncProviders);
       const dir = opts.from ?? provider.defaultSubagentDir;
       const defs = await provider.loadSubagents(dir);
       const client = opts.dryRun ? null : await ctx.getClient();
