@@ -144,6 +144,16 @@ workspace. See [RELEASING.md](./RELEASING.md) for how a release is cut.
   it cheaply *because* terminal runs went quiet. And existing outboxes are not
   rewritten — the accumulated records stay, but reads no longer walk them.
 
+- **The serve loop publishes a run's status only when it has changed.** Suppressing
+  republication of *terminal* runs bounded growth for runs that finish, and did
+  nothing for runs that do not: a run with a single permanently-stuck item never
+  satisfies "all items terminal", so it re-emitted identical bytes every tick
+  indefinitely. Those are the runs most likely to sit for days, so they were the worst
+  ones to leave out. Status is now fingerprinted and republished only on a real change
+  — which covers stuck runs, and cuts writes for slow runs generally. Every distinct
+  change is still published, including changes to `blockedBy`, `resultRef`,
+  `manifestRef` and `verify` that leave the status strings untouched.
+
 - **Outbox records are no longer overwritten when `serve` restarts.**
   `MailboxSubmissionTransport` numbered outbox keys from a per-instance counter seeded
   at 0, and mailbox writes are overwrites — so every restart rewound the counter and

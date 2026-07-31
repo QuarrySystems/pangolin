@@ -1,4 +1,5 @@
 // packages/pangolin-orchestrator/src/serve/driver.ts
+import { createHash } from 'node:crypto';
 import type { PangolinOrchestrator, StatusItem } from '../orchestrator.js';
 import type { SubmissionTransport, ControlChannel, AppendChannel } from '../contracts/index.js';
 import { TERMINAL_STATUSES } from '../contracts/index.js';
@@ -48,6 +49,17 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
+/** Digest of a run's status body, used to decide whether anything actually changed since
+ *  the last publish.
+ *
+ *  Covers the whole StatusItem, not just `status`: `blockedBy`, `resultRef`, `manifestRef`
+ *  and `verify` are all things a client watches for, and a run can change in those while
+ *  every status string stays put. The record's `at` timestamp is deliberately excluded —
+ *  it moves every tick, so including it would defeat the comparison entirely. */
+function fingerprintStatus(items: StatusItem[]): string {
+  return createHash('sha256').update(JSON.stringify(items)).digest('hex');
+}
+
 /** Default surfacing when no `onError` is wired: the serve loop's errors (poison submissions,
  *  control/publish/scheduler failures) must not vanish silently. Operators override via `onError`. */
 function defaultServeOnError(err: unknown): void {
@@ -69,23 +81,6 @@ export async function serve(opts: ServeOptions): Promise<void> {
   const configured = opts.orchestrator.getConfiguredQueues();
   const queues = opts.queue !== undefined ? [opts.queue] : configured;
 
-  // Every configured queue is ATTEMPTED each pass, whatever its siblings did. Awaiting
-  // them in a bare loop would let a throw from an early queue abort the pass before the
-  // later ones are ticked — and since each pass restarts at the same failing queue, one
-  // deterministic fault would starve every queue behind it forever. That is precisely the
-  // silently-never-driven failure this whole change exists to remove, so it must not be
-  // reintroduced through the back door.
-  //
-  // Failures are collected, not swallowed: the pass still ends up throwing, because
-  // /readyz staleness is derived from iterations reaching their end cleanly and a broken
-  // tick must not read as a healthy iteration. A lone failure rethrows AS-IS so
-  // single-queue deployments see byte-identical error surfacing; several become an
-  // AggregateError naming each one, since reporting only the first would hide the rest.
-  //
-  // Sequential on purpose — not a missed parallelisation. The orchestrator is a
-  // single-writer design (one SQLite writer, one shared lock manager), so concurrent
-  // ticks would race. Each tick(q) is a queue-filtered query, so the cost is small and
-  // proportional to the number of configured queues.
   /** Drain everything arriving from the transport — submissions, then extends, then
    *  control — and apply it to the orchestrator.
    *
@@ -127,6 +122,25 @@ export async function serve(opts: ServeOptions): Promise<void> {
     }
   };
 
+  /** Tick every queue this process drives, one pass.
+   *
+   *  Every configured queue is ATTEMPTED each pass, whatever its siblings did. Awaiting
+   *  them in a bare loop would let a throw from an early queue abort the pass before the
+   *  later ones are ticked — and since each pass restarts at the same failing queue, one
+   *  deterministic fault would starve every queue behind it forever. That is precisely the
+   *  silently-never-driven failure this whole change exists to remove, so it must not be
+   *  reintroduced through the back door.
+   *
+   *  Failures are collected, not swallowed: the pass still ends up throwing, because
+   *  /readyz staleness is derived from iterations reaching their end cleanly and a broken
+   *  tick must not read as a healthy iteration. A lone failure rethrows AS-IS so
+   *  single-queue deployments see byte-identical error surfacing; several become an
+   *  AggregateError naming each one, since reporting only the first would hide the rest.
+   *
+   *  Sequential on purpose — not a missed parallelisation. The orchestrator is a
+   *  single-writer design (one SQLite writer, one shared lock manager), so concurrent
+   *  ticks would race. Each tick(q) is a queue-filtered query, so the cost is small and
+   *  proportional to the number of configured queues. */
   const tickAll = async () => {
     const failures: unknown[] = [];
     for (const q of queues) {
@@ -232,6 +246,13 @@ export async function serve(opts: ServeOptions): Promise<void> {
     // direction — a client that missed the announcement gets another one.
     const publishedTerminal = new Set<string>();
 
+    // Last published status body per run, as a digest. Deliberately NOT the body itself:
+    // an entry is then a fixed 64 bytes whatever the run's size, so a long-lived process
+    // that has seen many runs holds a map proportional to run COUNT and nothing else.
+    // In-memory like the two sets above — a restart re-publishes each run's current status
+    // once, which is bounded by restarts and is the safe direction.
+    const lastStatusFingerprint = new Map<string, string>();
+
     while (!opts.signal?.aborted) {
       try {
         await drainIngress();
@@ -269,10 +290,27 @@ export async function serve(opts: ServeOptions): Promise<void> {
           // republishing it every tick is what made the outbox grow without bound.
           const terminal = items.every((i) => TERMINAL_STATUSES.has(i.status));
           if (terminal && publishedTerminal.has(runId)) continue;
+
+          // …and more generally, publish only what has CHANGED. The terminal guard above
+          // bounds runs that FINISH; this bounds the ones that do not. A run with a single
+          // permanently-stuck item never satisfies `terminal`, so it used to re-emit
+          // identical bytes every tick forever — the stranded-queue case of issue 7, and
+          // any run whose executor stops reconciling. Those are exactly the runs left
+          // sitting for days, so they were the worst possible ones to exclude.
+          //
+          // The terminal guard is kept rather than folded into this one: it short-circuits
+          // on item statuses alone, so a settled run never pays for fingerprinting its
+          // whole body on every tick.
+          const fingerprint = fingerprintStatus(items);
+          if (lastStatusFingerprint.get(runId) === fingerprint) continue;
+
           await opts.transport.publish({ runId, kind: 'status', body: items, at });
           // Marked only AFTER the publish resolves, matching publishedAudit below. Marking
           // first would let a transient publish failure retire the run permanently — the
-          // final status would never land and no later tick would retry it.
+          // final status would never land and no later tick would retry it. The same
+          // reasoning applies to the fingerprint: record it only once the bytes are out,
+          // or a failed publish would be remembered as delivered.
+          lastStatusFingerprint.set(runId, fingerprint);
           if (terminal) publishedTerminal.add(runId);
         }
 

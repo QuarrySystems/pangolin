@@ -471,13 +471,20 @@ entire case, on real data.
 
 Three things this changed:
 
-**Change 1 does not bound a STUCK run.** `publishedTerminal` suppresses only when
-*every* item is terminal, so a run with one permanently-stuck item republishes
+**Change 1 does not bound a STUCK run — FIXED.** `publishedTerminal` suppresses only
+when *every* item is terminal, so a run with one permanently-stuck item republished
 identical bytes every tick forever — precisely the stranded-queue scenario of issue 7,
-and any run whose executor never reconciles. The cheaper and more general fix is
-**publish-on-change**: skip the publish when the status body matches the last one
-published. That bounds stuck runs too and largely subsumes change 1, since a terminal
-run's status stops changing on its own.
+and any run whose executor never reconciles. The serve loop now fingerprints a run's
+status and publishes only on a real change, which covers stuck runs and cuts writes
+for slow runs generally.
+
+The terminal guard is kept rather than folded in: it short-circuits on item statuses
+alone, so a settled run never pays to fingerprint its whole body every tick. The
+fingerprint is a digest rather than the body, so the in-memory map is proportional to
+run *count* and nothing else, and it is recorded only after the publish resolves —
+same reasoning as the terminal guard, since a failed publish must not be remembered as
+delivered. Every distinct change is still published, including changes to `blockedBy`,
+`resultRef`, `manifestRef` and `verify` that leave the status strings untouched.
 
 **Change 2 fixed the GETs, not the LIST.** `readLatestOutbox` still lists the whole run
 prefix before scanning backward. Eliminating 23,307 sequential `get`s was the 60 s win,
