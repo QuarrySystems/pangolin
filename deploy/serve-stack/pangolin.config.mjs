@@ -5,7 +5,9 @@
 //   orch              — OrchContext: { transport, storage, anchor, verifySignature, createOrchestrator }
 //
 // IMPORT-SAFE: no throw at load when the Claude credential (ANTHROPIC_API_KEY or
-// CLAUDE_CODE_OAUTH_TOKEN) / PANGOLIN_S3_ENDPOINT are absent.
+// CLAUDE_CODE_OAUTH_TOKEN) / PANGOLIN_S3_ENDPOINT are absent. Import-safe is not
+// use-safe: an absent PANGOLIN_S3_ENDPOINT throws on the first S3 call rather
+// than defaulting to real AWS (see the S3 client block below).
 // No SQLite opened at module level — only inside createOrchestrator() (D3 single-writer).
 // No filesystem I/O at module level either — the persisted signer seed is read /
 // created lazily inside getSigner() (first call from createOrchestrator() or
@@ -48,9 +50,39 @@ import {
 // ---------------------------------------------------------------------------
 // Shared S3 client — built once, reused for storage + mailbox + anchor +
 // public-key publication. Safe at module level: no I/O in the SDK constructor.
+//
+// The endpoint is a LAZY PROVIDER, not a bare `process.env` read, and the
+// difference matters. Compose always sets PANGOLIN_S3_ENDPOINT inside the
+// container, so an unset value only ever means this serve config was loaded
+// somewhere it does not belong — most easily by running a `pangolin` CLI verb
+// from `deploy/serve-stack` instead of `deploy/serve-stack/client`. Passing
+// `undefined` there is silently valid to the AWS SDK: it falls back to the real
+// `s3.<region>.amazonaws.com` and issues live requests to Amazon for a bucket
+// named `pangolin-data`. The operator then gets a genuine AWS error that names
+// neither pangolin nor MinIO, which is a slow and misleading way to learn about
+// a one-line mistake — and it sends unintended traffic to a third party.
+//
+// Deferring to a provider keeps the module IMPORT-SAFE (see header): offline
+// verbs like `pangolin verify bundle.json` load this file but never touch S3, so
+// they must not throw at import. The provider runs on the first S3 call instead,
+// which is exactly when an absent endpoint has become a real problem.
 // ---------------------------------------------------------------------------
+function requireS3Endpoint() {
+  const endpoint = process.env.PANGOLIN_S3_ENDPOINT;
+  if (!endpoint) {
+    throw new Error(
+      'PANGOLIN_S3_ENDPOINT is not set. This is the serve-side config, which is ' +
+        'only valid inside the serve container (compose sets the endpoint there). ' +
+        'For laptop/client use, run from deploy/serve-stack/client so the CLI ' +
+        'loads client/pangolin.config.mjs instead. Refusing to fall back to ' +
+        'the default AWS S3 endpoint.',
+    );
+  }
+  return endpoint;
+}
+
 const s3 = new S3Client({
-  endpoint: process.env.PANGOLIN_S3_ENDPOINT,
+  endpoint: () => requireS3Endpoint(),
   forcePathStyle: true,
   region: 'us-east-1',
   credentials: {

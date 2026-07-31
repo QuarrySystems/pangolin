@@ -1,6 +1,8 @@
 // deploy/serve-stack/client/smoke.mjs — laptop health check for the always-on stack.
 //
-// Run from the laptop with the SSH tunnel up (ssh -L 9000:localhost:9000 …):
+// Needs MinIO reachable on 127.0.0.1:9000 — either a local Docker stack publishing
+// it directly, or a remote serve host with the SSH tunnel up
+// (ssh -L 9000:localhost:9000 …). See client/pangolin.config.mjs for both topologies.
 //   node deploy/serve-stack/client/smoke.mjs        (or: pnpm run smoke from deploy/serve-stack)
 //
 // Flow (spec §3, audit #6):
@@ -56,7 +58,11 @@ const runId = await api.submit(plan, 'human:smoke');
 // 4. Hand the operator the follow-ups.
 console.log(`submitted smoke run '${runId}' (1 item)`);
 console.log('');
+// NOT `pnpm exec` — it rewrites cwd to the package root (deploy/serve-stack), so
+// the CLI would resolve the SERVE config instead of client/pangolin.config.mjs.
+// That defeats the "resolves from cwd" premise these very instructions rely on.
+// Invoke the bin directly to keep cwd intact. See KNOWN-ISSUES.md #2.
 console.log('Follow along / verify (from deploy/serve-stack/client — the CLI resolves pangolin.config.mjs from cwd; tunnel still up):');
-console.log(`  pnpm exec pangolin orch watch ${runId}`);
-console.log(`  pnpm exec pangolin orch audit ${runId} --out bundle.json`);
-console.log('  pnpm exec pangolin verify bundle.json');
+console.log(`  ../node_modules/.bin/pangolin orch watch ${runId}`);
+console.log(`  ../node_modules/.bin/pangolin orch audit ${runId} --out bundle.json`);
+console.log('  ../node_modules/.bin/pangolin verify bundle.json');

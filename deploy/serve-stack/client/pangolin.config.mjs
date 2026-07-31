@@ -1,9 +1,18 @@
 // deploy/serve-stack/client/pangolin.config.mjs — the laptop kit (spec §3).
 //
 // Loaded by the plain-node `pangolin` bin (registration verbs, orch submit/watch/
-// render/audit, verify) and by client/smoke.mjs. Talks to the always-on stack
-// THROUGH THE SSH TUNNEL: only port 9000 (MinIO) is forwarded — 4566
-// (LocalStack) is serve/worker-side and never needed here.
+// render/audit, verify), by client/smoke.mjs, and by remora's nightly driver.
+//
+// Reaches ONE port of the always-on stack: 9000 (MinIO). 4566 (LocalStack) is
+// serve/worker-side and never needed here. Two topologies, and the comments below
+// used to name only the second:
+//
+//   local Docker  — `pangolin-minio` publishes 9000 itself. No tunnel, no ssh.
+//                   This is the current setup; `docker ps` is the check.
+//   remote serve  — `ssh -L 9000:localhost:9000 <serve-host>` forwards it.
+//
+// Both are served by the same endpoint below, so nothing here needs to know which
+// one you are on.
 //
 // Exports:
 //   default / client  — PangolinClient (namespace 'serve-stack' — MUST match the
@@ -35,11 +44,20 @@ import {
 } from '@quarry-systems/pangolin-orchestrator';
 
 // ---------------------------------------------------------------------------
-// Shared S3 client — the tunneled MinIO endpoint (ssh -L 9000:localhost:9000).
+// Shared S3 client — MinIO on loopback:9000, however it got there (see header).
 // Same env override as the serve side for non-default setups.
+//
+// `127.0.0.1`, NOT `localhost`. Measured 2026-07-30 against a healthy MinIO:
+// `localhost:9000` failed 1 call in 10, `127.0.0.1:9000` 0 in 10. `localhost`
+// resolves ::1 first on this machine, and something else answers IPv6 loopback on
+// 9000 (`wslrelay.exe`) and TIMES OUT rather than refusing — the worst case for
+// Happy Eyeballs fallback. The symptom is a random `read ECONNRESET` against a
+// stack that is fine, which reads as an outage and is not one. Both topologies in
+// the header reach 127.0.0.1: Docker publishes on 0.0.0.0, and `ssh -L` binds
+// loopback.
 // ---------------------------------------------------------------------------
 const s3 = new S3Client({
-  endpoint: process.env.PANGOLIN_S3_ENDPOINT ?? 'http://localhost:9000',
+  endpoint: process.env.PANGOLIN_S3_ENDPOINT ?? 'http://127.0.0.1:9000',
   forcePathStyle: true,
   region: 'us-east-1',
   credentials: {

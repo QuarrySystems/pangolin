@@ -25,6 +25,13 @@ is the artifact that was read and measured.
 
 ## 1. `DOCKER_GID` default of `999` is wrong under Docker Desktop
 
+**Status: FIXED** (docs). `RUNBOOK.md` §4.3 now carries the per-topology table
+(`999`/`998` for Engine, `0` for Docker Desktop), states that the socket must not
+be statted from the host under Desktop, describes the silent-healthy-but-never-dispatches
+failure, and explains why group `0` is not a meaningful additional privilege. The
+compose default is unchanged: `999` is correct for the Engine-on-WSL2 topology
+Step 1 actually builds.
+
 **Symptom.** `serve` starts, reports healthy, but cannot launch worker containers.
 
 **Cause.** `docker-compose.yml` sets `group_add: - "${DOCKER_GID:-999}"`, and
@@ -56,6 +63,16 @@ grants the power. Worth stating explicitly so the value doesn't look alarming.
 ---
 
 ## 2. `smoke.mjs` prints follow-up commands that cannot work as written
+
+**Status: FIXED.** `client/smoke.mjs` now prints `../node_modules/.bin/pangolin …`
+and carries a comment explaining why `pnpm exec` cannot be used. `RUNBOOK.md` §5.5
+and §6.4 use the same form, with the reason stated once in §5.5. The cwd rewrite
+was re-confirmed on this branch before the change:
+
+```
+$ cd deploy/serve-stack/client && pnpm exec node -e "console.log(process.cwd())"
+C:\Users\brett\Documents\Knowledge\agora\deploy\serve-stack
+```
 
 **Symptom.** Copy-pasting the commands the smoke script prints fails with an S3
 error that mentions neither pangolin nor MinIO:
@@ -94,6 +111,21 @@ cwd") is defeated by the command it recommends.
 
 ## 3. Serve config's S3 endpoint has no fallback, so it silently targets real AWS
 
+**Status: FIXED** — fail-fast, as the suggested fix below argues for.
+
+The fix had to respect a constraint the original write-up missed: this config
+documents itself as IMPORT-SAFE when `PANGOLIN_S3_ENDPOINT` is absent (header,
+lines 7–8), and that property is load-bearing. The CLI imports whichever
+`pangolin.config.mjs` sits in cwd for *every* verb, including offline ones like
+`pangolin verify bundle.json` that never touch S3. A module-level throw would
+break those.
+
+So `endpoint` is now a lazy provider rather than a bare `process.env` read —
+import stays clean, and the throw happens on the first S3 call, which is exactly
+when an absent endpoint has become a real problem. Verified against the real
+config with the variable unset: import succeeds, `readOutbox()` throws
+`PANGOLIN_S3_ENDPOINT is not set…`, and nothing reaches `amazonaws.com`.
+
 **Symptom.** The confusing error in issue 2 comes from **Amazon**, not MinIO.
 
 **Cause.** `pangolin.config.mjs:53` (serve):
@@ -128,6 +160,28 @@ outcome.
 ---
 
 ## 4. A missing local public key reports `TAMPERED`, not "unverifiable"
+
+**Status: PARTIALLY FIXED — and one premise below was wrong.**
+
+*Correction.* The Impact section claims "the runbook never instructs the operator
+to fetch the key." That is false, and was false when written. `RUNBOOK.md` §5.3
+("Fetch the serve public key") has existed since the serve-stack landed in #57 —
+`git log -S "Fetch the serve public key"` confirms it. The documented happy path
+did include the fetch; the cold-start operator skipped it. The most likely reason
+is that §5.3's only recipe used `aws s3 cp`, so anyone without the AWS CLI hit a
+dead end at exactly that step and moved on.
+
+*What is fixed.* §5.3 now also gives a `minio/mc` container recipe needing no
+local AWS CLI, and states plainly that skipping it makes a healthy run verify as
+`TAMPERED` — so an operator who sees that verdict checks the key before
+concluding anything about the bundle.
+
+*What remains open, and is the real issue.* The tri-state reporting.
+`verifySignature` still returns `false` for both "no trust anchor" and "signature
+does not match", and the verify output still renders both as `✗ signature false`.
+Documentation cannot fix that; it needs the change described under Suggested fix.
+Being unable to distinguish an unconfigured verifier from a genuine tamper is the
+part that matters, and it is untouched.
 
 **Symptom.** A perfectly good run verifies as:
 
