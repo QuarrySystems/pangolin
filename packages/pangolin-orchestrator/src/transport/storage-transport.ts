@@ -24,8 +24,42 @@ export class MailboxSubmissionTransport
   ) {}
   private inbox = (id: string) => `${this.ns}/submissions/${id}.json`;
   private dead = (id: string) => `${this.ns}/dead/${id}.json`;
+
+  /** Next outbox sequence — WALL-CLOCK SEEDED, and never allowed to go backwards.
+   *
+   *  This counter is per-INSTANCE and mailbox writes are overwrites, so seeding it at 0
+   *  (as this did) meant every serve restart rewound it and the new process re-minted
+   *  keys the previous one had already used. Two silent failures came out of that:
+   *  records written before the restart were CLOBBERED — including, eventually, a run's
+   *  `kind: 'audit'` record, after which `orch audit` reports "no audit export published
+   *  yet" for a run that definitely sealed one — and the lexically-greatest key stopped
+   *  being the newest, so everything that reads "the latest" (readLatestOutbox's reverse
+   *  scan, readOutbox().at(-1) before it) silently returned a pre-restart record.
+   *
+   *  Seeding from Date.now() makes a fresh process resume ahead of any predecessor
+   *  without reading a byte of existing state. The max() guards the one case a bare
+   *  clock read would not: sustained publishing faster than 1/ms would run the counter
+   *  ahead of wall clock, and it must then keep climbing rather than stall or repeat.
+   *  (Observed rate on the serve stack is ~47/s, so this is headroom, not a hot path.) */
+  private nextSeq(): number {
+    this.seq = Math.max(Date.now(), this.seq + 1);
+    return this.seq;
+  }
+
+  /** Per-instance discriminator, closing the one collision window the clock seed cannot.
+   *  Two processes starting inside the SAME millisecond seed to the same value, and
+   *  without this their first records would overwrite each other — the exact failure
+   *  being fixed, just narrowed rather than closed. It sorts after the sequence, so
+   *  ordering is unaffected: ties only occur between records that are genuinely
+   *  concurrent, and both survive. */
+  private readonly instance = randomUUID().slice(0, 8);
+
+  /** Width 16, not 12: epoch-ms is 13 digits today and 12 would truncate the ordering
+   *  this key exists to encode. Legacy 12-digit keys still sort BEFORE these — they
+   *  differ inside the leading zeros, long before length matters — so a stack upgraded
+   *  mid-life keeps reading its newest record, not its oldest. */
   private outbox = (id: string) =>
-    `${this.ns}/outbox/${id}/${String(++this.seq).padStart(12, '0')}.json`;
+    `${this.ns}/outbox/${id}/${String(this.nextSeq()).padStart(16, '0')}-${this.instance}.json`;
   private controlKey = (id: string) => `${this.ns}/control/${id}.json`;
   async submit(env: SubmissionEnvelope): Promise<string> {
     try {
@@ -67,10 +101,15 @@ export class MailboxSubmissionTransport
   }
   /** Newest record of `kind` (any kind when omitted), without reading the whole outbox.
    *
-   *  Safe because outbox keys are zero-padded to a fixed width by `outbox()` above, so
-   *  lexical key order IS publication order — seq 10 sorts after seq 9, not between 1
-   *  and 2. Scanning back from the newest key and stopping at the first match costs one
-   *  `get` in the common case instead of one per record.
+   *  Rests on lexical key order being publication order, which `outbox()` above provides
+   *  by zero-padding to a fixed width — seq 10 sorts after seq 9, not between 1 and 2.
+   *  An earlier version of this comment stopped there, and that was only true WITHIN one
+   *  process: the sequence used to reset to 0 on restart, so the greatest key could
+   *  belong to a previous run of the daemon. The clock seeding in `nextSeq()` is what
+   *  makes the claim hold across restarts, and the two must be read together.
+   *
+   *  Scanning back from the newest key and stopping at the first match costs one `get`
+   *  in the common case instead of one per record.
    *
    *  Still O(keys) in the worst case — a `kind` that was never published reads
    *  everything. Both real callers ask for a kind that is normally the newest or nearly

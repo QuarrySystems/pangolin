@@ -453,6 +453,58 @@ per run stops growing with uptime. Worth doing alongside `listRuns()`, not befor
 they are; what changes is that reads no longer walk them and new ones stop piling
 up.
 
+### 6a. Measured again on 2026-07-31, and the numbers moved the plan
+
+Re-measured against the live stack (still on the pre-fix build, up 18h):
+
+| | |
+|---|---|
+| runs (outbox prefixes, and distinct runs in the serve DB — they agree) | **95** |
+| items of actual work | **105**, all terminal |
+| outbox objects | **1,701,236** |
+| outbox size | **1018 MiB** |
+| delimited list (`Delimiter:'/'`, what change 3 would expose) | **2 s** |
+| recursive list (what `list()` forces today) | **~8 min** |
+
+~17,900 records per run, for 105 items of work. The 2 s vs 8 min gap is change 3's
+entire case, on real data.
+
+Three things this changed:
+
+**Change 1 does not bound a STUCK run.** `publishedTerminal` suppresses only when
+*every* item is terminal, so a run with one permanently-stuck item republishes
+identical bytes every tick forever — precisely the stranded-queue scenario of issue 7,
+and any run whose executor never reconciles. The cheaper and more general fix is
+**publish-on-change**: skip the publish when the status body matches the last one
+published. That bounds stuck runs too and largely subsumes change 1, since a terminal
+run's status stops changing on its own.
+
+**Change 2 fixed the GETs, not the LIST.** `readLatestOutbox` still lists the whole run
+prefix before scanning backward. Eliminating 23,307 sequential `get`s was the 60 s win,
+but the list stays proportional to records, and S3 cannot page backwards. Making reads
+genuinely O(1) wants a **latest pointer** — `publish` also overwriting
+`outbox/<runId>/latest.json` — which additionally removes any dependence on key
+ordering.
+
+**A correctness bug was hiding under the ordering assumption.** See below.
+
+### 6b. Outbox keys collided across restarts (fixed)
+
+`seq` was a per-instance counter seeded at 0, and mailbox writes are overwrites, so
+every `serve` restart rewound it and re-minted keys the previous process had used.
+Records written before the restart were clobbered — eventually including a run's
+`kind: 'audit'` record, which is what `orch audit` needs, so a sealed run could report
+"no audit export published yet". And the lexically-greatest key stopped being the
+newest, so `status()` could return a pre-restart record and appear to go backwards.
+
+Not exhibited on this stack only because it has run as a single process: the run
+inspected spans `000000000002` → `000001204974` with timestamps in step. The next
+restart is what would have broken it.
+
+The sequence is now clock-seeded and monotonic, with a per-instance discriminator for
+the same-millisecond case. This also repairs the premise change 2 was documented on —
+"lexical key order IS publication order" was only ever true within one process.
+
 **Symptom.** Reading one completed run takes over a minute, and the cost is
 proportional to how long the stack has been up rather than to anything about the
 run. Measured 2026-07-30 against a stack with 21 historical runs:

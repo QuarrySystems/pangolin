@@ -144,6 +144,27 @@ workspace. See [RELEASING.md](./RELEASING.md) for how a release is cut.
   it cheaply *because* terminal runs went quiet. And existing outboxes are not
   rewritten — the accumulated records stay, but reads no longer walk them.
 
+- **Outbox records are no longer overwritten when `serve` restarts.**
+  `MailboxSubmissionTransport` numbered outbox keys from a per-instance counter seeded
+  at 0, and mailbox writes are overwrites — so every restart rewound the counter and
+  the new process re-minted keys the previous one had already used. Two silent
+  failures followed: records written before the restart were **clobbered**, eventually
+  including a run's `kind: 'audit'` record (after which `orch audit` reports "no audit
+  export published yet" for a run that definitely sealed one); and the
+  lexically-greatest key stopped being the newest, so `status()` — which resolves the
+  latest record by key order — could return a **pre-restart** record and appear to go
+  backwards in time.
+
+  The sequence is now seeded from wall-clock ms and never allowed to decrease, and
+  keys carry a per-instance discriminator so two processes starting in the same
+  millisecond cannot collide. Keys widen from 12 to 16 digits; legacy 12-digit keys
+  sort *before* the new ones, so an upgraded stack keeps reading its newest record.
+
+  Honest limit: if two processes start within the same millisecond *and* the earlier
+  one has already drifted ahead of the clock, their relative order is a tie. Nothing
+  is lost in that window — only the ordering between genuinely concurrent records is
+  unspecified.
+
 - **The report embedded in an audit bundle is now the complete verdict.**
   `assembleBundle` built `bundle.report` with the chain-only `verify()` — chain, root,
   signature and anchor, and nothing else. It hardcodes `handoff: { ok: 'n/a' }` and
