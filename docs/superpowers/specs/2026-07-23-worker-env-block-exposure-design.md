@@ -388,6 +388,42 @@ credentials to the two consumers that need them. Sequenced smallest-first:
 - **(d)** provider changes: `pangolin-providers-local-docker` supplies static `AWS_*` via `extraEnv`;
   Fargate supplies the refreshing pointer. Different shapes, different refresh semantics (constraint 4).
 
+### A tripwire, and where NOT to put it
+
+**Nothing in the test suite currently asserts anything about this exposure.** It is described in the
+threat model and in `0.5.0`'s release notes, and that is all. A finding that lives only in prose can
+quietly persist across releases — and, worse, can be *partially* fixed without anyone noticing the rest
+is still open.
+
+So the design should land an executable acceptance criterion **written before the mechanism**, expressing
+the property C1′ is verified to deliver:
+
+> Given a container holding a credential in the entrypoint's environment, no process in the PID namespace
+> exposes that credential via `/proc/<pid>/environ`, and no hand-off artifact survives into the agent's
+> lifetime.
+
+Write it now as a **skipped/expected-fail** test (vitest `it.skip`, or `it.fails` so a surprise pass is
+itself loud), pointing at this document. Un-skipping it becomes the definition of done, rather than a
+judgement call made at the end by whoever is tired.
+
+**The caveat is where it goes, and it is not a detail.** The natural home — the Docker E2E lane — is
+gated behind `PANGOLIN_E2E_DOCKER=1` and **passes-as-skipped** without it
+(`test/e2e/helpers/docker-skip.ts`). CI sets neither the flag nor pulls the image. That is precisely how
+the pinned worker digest in `test/e2e/helpers/worker-image.ts` stayed *dangling* — not merely stale, the
+digest no longer resolved — across four releases while `pnpm test:e2e` reported a clean 77 passed
+(fixed 2026-07-31, see that file's header). **A security tripwire parked in a lane that passes-as-skipped
+is theatre.**
+
+Split it, then:
+
+- the **container-level proof** stays as the scripts in
+  `./experiments/2026-07-31-proc-c1/`, run deliberately, and wired to a dedicated CI job if it is to be
+  trusted between releases — not to a suite that skips silently;
+- the **mechanism-level assertions** belong in the default suite, where they cannot be skipped: that the
+  entrypoint `exec`s rather than spawns, and that the process `runWorker` runs in carries no credential
+  variable. Those are cheap, run everywhere, and would catch a regression that reintroduces a surviving
+  launcher — which is exactly the shape C1 got wrong.
+
 Also unresolved: constraint 3 — the worker declares no credential-provider dependency, and
 `pnpm check:deps` fails on undeclared bare specifiers, so adding one is a real packaging change.
 
