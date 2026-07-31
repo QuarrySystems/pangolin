@@ -115,6 +115,7 @@ describe('attachOrchCmd', () => {
       'audit',
       'cancel',
       'render',
+      'runs',
       'schedule',
       'serve',
       'status',

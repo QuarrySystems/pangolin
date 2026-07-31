@@ -16,7 +16,9 @@ import type {
 } from './contracts/index.js';
 import { assembleBundle } from './audit/bundle.js';
 
-interface StorageLike { get(ref: string): Promise<Uint8Array>; }
+interface StorageLike {
+  get(ref: string): Promise<Uint8Array>;
+}
 
 export interface OperationsApiDeps {
   transport: SubmissionTransport & ControlChannel;
@@ -33,8 +35,14 @@ const TERMINAL_ITEM_STATUSES = new Set(['done', 'failed', 'skipped', 'cancelled'
  *  Mirrors serve/driver.ts's sleep — kept minimal, no timers beyond setTimeout. */
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
-    if (signal?.aborted) { resolve(); return; }
-    const onAbort = () => { clearTimeout(timer); resolve(); };
+    if (signal?.aborted) {
+      resolve();
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      resolve();
+    };
     const timer = setTimeout(() => {
       signal?.removeEventListener('abort', onAbort);
       resolve();
@@ -84,6 +92,20 @@ export class OperationsApi {
     return kind === undefined ? recs.at(-1) : recs.filter((r) => r.kind === kind).at(-1);
   }
 
+  /** Every run id the outbox knows about, newest-first by id where ids are timestamped.
+   *
+   *  The one client-facing question that previously had no answer: every other read takes
+   *  a runId the caller must already hold, so "what runs exist?" meant opening the serve
+   *  container's SQLite by hand. Throws rather than returning `[]` when the transport
+   *  cannot answer — an empty list would be indistinguishable from "no runs", and quietly
+   *  reporting nothing is the failure mode this file has been burned by twice. */
+  async listRuns(): Promise<string[]> {
+    if (!this.deps.transport.listRuns) {
+      throw new Error('listRuns: the configured transport does not support run enumeration');
+    }
+    return (await this.deps.transport.listRuns()).sort().reverse();
+  }
+
   /** Send a cancel control envelope for a target run or item; captures actor (§6.4). */
   async cancel(target: string, actor: string): Promise<void> {
     const env: ControlEnvelope = { kind: 'cancel', target, actor, at: this.now() };
@@ -99,7 +121,8 @@ export class OperationsApi {
     }
     const rawBody = (await this.readLatest(runId, 'audit'))?.body;
     if (
-      rawBody === null || rawBody === undefined ||
+      rawBody === null ||
+      rawBody === undefined ||
       typeof rawBody !== 'object' ||
       typeof (rawBody as Record<string, unknown>).runId !== 'string'
     ) {
@@ -137,5 +160,7 @@ export class OperationsApi {
     }
   }
 
-  private now(): string { return this.deps.nowIso?.() ?? new Date().toISOString(); }
+  private now(): string {
+    return this.deps.nowIso?.() ?? new Date().toISOString();
+  }
 }

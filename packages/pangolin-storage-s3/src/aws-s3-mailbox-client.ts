@@ -1,27 +1,79 @@
-import { S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command, DeleteObjectCommand, NoSuchKey } from '@aws-sdk/client-s3';
+import {
+  S3Client,
+  PutObjectCommand,
+  GetObjectCommand,
+  ListObjectsV2Command,
+  DeleteObjectCommand,
+  NoSuchKey,
+} from '@aws-sdk/client-s3';
 import type { MailboxS3Client } from '@quarry-systems/pangolin-core';
 
-export interface AwsS3MailboxClientOpts { client: S3Client; bucket: string; prefix?: string; }
+export interface AwsS3MailboxClientOpts {
+  client: S3Client;
+  bucket: string;
+  prefix?: string;
+}
 
 export class AwsS3MailboxClient implements MailboxS3Client {
   private readonly p: string;
-  constructor(private readonly o: AwsS3MailboxClientOpts) { this.p = o.prefix ? o.prefix.replace(/\/?$/, '/') : ''; }
-  private k(key: string) { return this.p + key; }
+  constructor(private readonly o: AwsS3MailboxClientOpts) {
+    this.p = o.prefix ? o.prefix.replace(/\/?$/, '/') : '';
+  }
+  private k(key: string) {
+    return this.p + key;
+  }
   async put(key: string, bytes: Uint8Array) {
-    await this.o.client.send(new PutObjectCommand({ Bucket: this.o.bucket, Key: this.k(key), Body: bytes }));
+    await this.o.client.send(
+      new PutObjectCommand({ Bucket: this.o.bucket, Key: this.k(key), Body: bytes }),
+    );
   }
   async get(key: string) {
     try {
-      const r = await this.o.client.send(new GetObjectCommand({ Bucket: this.o.bucket, Key: this.k(key) }));
+      const r = await this.o.client.send(
+        new GetObjectCommand({ Bucket: this.o.bucket, Key: this.k(key) }),
+      );
       if (!r.Body) return new Uint8Array(0); // present but empty object
       return new Uint8Array(await r.Body.transformToByteArray());
-    } catch (e) { if (e instanceof NoSuchKey) return null; throw e; }
+    } catch (e) {
+      if (e instanceof NoSuchKey) return null;
+      throw e;
+    }
   }
   async list(prefix: string) {
-    const out: string[] = []; let token: string | undefined;
+    const out: string[] = [];
+    let token: string | undefined;
     do {
-      const r = await this.o.client.send(new ListObjectsV2Command({ Bucket: this.o.bucket, Prefix: this.k(prefix), ContinuationToken: token }));
+      const r = await this.o.client.send(
+        new ListObjectsV2Command({
+          Bucket: this.o.bucket,
+          Prefix: this.k(prefix),
+          ContinuationToken: token,
+        }),
+      );
       for (const c of r.Contents ?? []) if (c.Key) out.push(c.Key.slice(this.p.length));
+      token = r.IsTruncated ? r.NextContinuationToken : undefined;
+    } while (token);
+    return out;
+  }
+  /** Immediate child prefixes, via S3's own Delimiter support.
+   *
+   *  The point is that S3 does the grouping server-side: CommonPrefixes returns one entry
+   *  per distinct next segment however many objects sit beneath it, so enumerating 95 runs
+   *  costs 95 entries rather than the 1.7M objects `list` would walk. */
+  async listPrefixes(prefix: string) {
+    const out: string[] = [];
+    let token: string | undefined;
+    const base = this.k(prefix);
+    do {
+      const r = await this.o.client.send(
+        new ListObjectsV2Command({
+          Bucket: this.o.bucket,
+          Prefix: base,
+          Delimiter: '/',
+          ContinuationToken: token,
+        }),
+      );
+      for (const c of r.CommonPrefixes ?? []) if (c.Prefix) out.push(c.Prefix.slice(this.p.length));
       token = r.IsTruncated ? r.NextContinuationToken : undefined;
     } while (token);
     return out;

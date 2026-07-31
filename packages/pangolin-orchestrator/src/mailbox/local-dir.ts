@@ -115,6 +115,27 @@ export class LocalDirMailbox implements MailboxStore {
     return results;
   }
 
+  /** Immediate child directories under `prefix`, each with a trailing '/'.
+   *
+   *  A single non-recursive readdir, so it is O(children) rather than O(files beneath) —
+   *  the same asymmetry S3's Delimiter provides, which is the point of the capability.
+   *  Only directories qualify: a plain file at this level is a record, not a group. */
+  async listPrefixes(prefix: string): Promise<string[]> {
+    const dirPrefix = prefix.endsWith('/') ? prefix : prefix + '/';
+    const dir = keyToPath(this.root, dirPrefix.slice(0, -1));
+    let entries: Dirent<string>[];
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch (err: unknown) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
+      throw err;
+    }
+    return entries
+      .filter((e) => e.isDirectory())
+      .map((e) => `${dirPrefix}${decodeSegment(e.name)}/`)
+      .sort();
+  }
+
   async delete(key: string): Promise<void> {
     const filePath = keyToPath(this.root, key);
     try {

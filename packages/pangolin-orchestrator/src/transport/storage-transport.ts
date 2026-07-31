@@ -124,6 +124,31 @@ export class MailboxSubmissionTransport
     }
     return undefined;
   }
+  /** Every run this outbox knows about.
+   *
+   *  Uses the mailbox's delimited listing when it has one, which costs one entry per RUN.
+   *  Without it there is no choice but to list every key and derive the run segment —
+   *  correct, but one entry per RECORD, which on the measured serve stack was 1.7M
+   *  objects against 95 runs (~8 minutes versus 2 seconds). The fallback exists so a
+   *  third-party mailbox still answers; it is not meant to be the path anyone takes.
+   *
+   *  There was previously no way to ask this at all from a client: enumerating runs meant
+   *  opening the serve container's SQLite directly. */
+  async listRuns(): Promise<string[]> {
+    const root = `${this.ns}/outbox/`;
+    if (this.mbox.listPrefixes) {
+      return (await this.mbox.listPrefixes(root)).map((p) =>
+        p.slice(root.length).replace(/\/$/, ''),
+      );
+    }
+    const runs = new Set<string>();
+    for (const key of await this.mbox.list(root)) {
+      const rest = key.slice(root.length);
+      const cut = rest.indexOf('/');
+      if (cut > 0) runs.add(rest.slice(0, cut));
+    }
+    return [...runs];
+  }
   async control(env: ControlEnvelope): Promise<void> {
     try {
       await this.mbox.put(this.controlKey(env.target), enc(env));

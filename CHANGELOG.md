@@ -144,6 +144,18 @@ workspace. See [RELEASING.md](./RELEASING.md) for how a release is cut.
   it cheaply *because* terminal runs went quiet. And existing outboxes are not
   rewritten — the accumulated records stay, but reads no longer walk them.
 
+- **`pangolin orch runs` — list every run the outbox knows about.** There was no way
+  to ask this from a client at all: every other read takes a `runId` you must already
+  hold, so discovering what exists meant opening the serve container's SQLite by hand.
+  Backed by new optional `MailboxStore.listPrefixes` / `MailboxS3Client.listPrefixes`
+  (S3 `Delimiter` + `CommonPrefixes`) and `SubmissionTransport.listRuns`, plus
+  `OperationsApi.listRuns()`. Costs one entry per **run** rather than one per
+  **record** — measured at 2 s against ~8 min on a stack holding 1.7M objects for 95
+  runs. All three members are optional, so existing implementations stay valid;
+  `listRuns` falls back to deriving run ids from `list` when the mailbox has no
+  delimited support, and `S3Mailbox` advertises `listPrefixes` only when its seam can
+  really do it rather than emulating it at the cost it exists to avoid.
+
 - **The serve loop publishes a run's status only when it has changed.** Suppressing
   republication of *terminal* runs bounded growth for runs that finish, and did
   nothing for runs that do not: a run with a single permanently-stuck item never

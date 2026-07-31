@@ -135,6 +135,21 @@ export function attachOrchCmd(program: Command, ctx: CliContext): void {
       console.log(JSON.stringify({ valid: true, items: normalized.items.length }));
     });
 
+  o.command('runs')
+    .description('List every run id the outbox knows about')
+    .option('--json', 'emit the raw array as JSON')
+    .action(async (opts: { json?: boolean }) => {
+      const runs = await new OperationsApi(await ctx.getOrchContext()).listRuns();
+      if (opts.json) {
+        console.log(JSON.stringify(runs, null, 2));
+        return;
+      }
+      // Plain lines, one id per row: this is the input to `orch status`/`orch audit`,
+      // so it should pipe into xargs without anyone reaching for jq.
+      for (const r of runs) console.log(r);
+      console.error(`${runs.length} run${runs.length === 1 ? '' : 's'}`);
+    });
+
   o.command('status [run-id]').action(async (runId) => {
     const rec = await new OperationsApi(await ctx.getOrchContext()).status(runId);
     console.log(JSON.stringify(rec ?? null, null, 2));
