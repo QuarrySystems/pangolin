@@ -24,7 +24,7 @@ export async function verify(
   deps: {
     store: AuditStore;
     anchor: AuditAnchor;
-    verifySignature?: (root: Uint8Array, sig: Signature) => boolean;
+    verifySignature?: (root: Uint8Array, sig: Signature) => boolean | 'n/a';
     /** Trusted-time injection point (mirrors verifySignature). Core never owns the
      *  RFC-3161/ASN.1 weight — a token rides on the fetched AnchoredRoot and is verified
      *  here only if a verifier is injected. Absent verifier => time check is 'n/a'. */
@@ -67,10 +67,29 @@ export async function verify(
   const rootOk: boolean | 'n/a' = anchored
     ? Buffer.compare(Buffer.from(recomputed), Buffer.from(anchored.root)) === 0
     : 'n/a';
-  const sigOk: boolean | 'n/a' =
-    anchored?.signature && deps.verifySignature
-      ? deps.verifySignature(anchored.root, anchored.signature)
-      : 'n/a';
+  // Signature is TRI-state, and collapsing it to a boolean is the bug in KNOWN-ISSUES #4:
+  // a verifier holding no public key could only answer `false`, which is also the answer
+  // for a signature that genuinely does not match. A healthy run then read `✗ TAMPERED`.
+  // "I have no trust anchor" and "this signature does not match" are different facts, and
+  // a tamper-evidence tool that renders them identically cannot adjudicate the one case it
+  // exists for — it fails toward a false alarm, which is the safer direction, but it also
+  // teaches operators to read `✗ signature` as "probably the missing key again".
+  //
+  // Three ways to reach 'n/a', and the detail says which, because the remedy differs:
+  // nothing to check, nothing to check WITH, or a verifier that cannot resolve the key.
+  let sigOk: boolean | 'n/a';
+  let sigDetail: string | undefined;
+  if (!anchored?.signature) {
+    sigOk = 'n/a';
+    sigDetail = 'no signature on the anchored root';
+  } else if (!deps.verifySignature) {
+    sigOk = 'n/a';
+    sigDetail = 'no verifier configured';
+  } else {
+    sigOk = deps.verifySignature(anchored.root, anchored.signature);
+    // Left undefined for true/false so the renderers keep printing the bare verdict.
+    if (sigOk === 'n/a') sigDetail = 'unverifiable — no trust anchor (public key) available';
+  }
 
   // Trusted-time: a SEPARATE assurance dimension. The token rides on the fetched root;
   // verify it only when a verifier is injected (core owns no ASN.1). A failed time check
@@ -83,7 +102,7 @@ export async function verify(
   const checks = {
     chain: { ok: chainOk, detail: chainDetail },
     root: { ok: rootOk },
-    signature: { ok: sigOk },
+    signature: { ok: sigOk, ...(sigDetail !== undefined ? { detail: sigDetail } : {}) },
     anchor: { ok: anchorOk },
     handoff: { ok: 'n/a' as const },
     time: { ok: timeOk },

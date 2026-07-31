@@ -161,7 +161,42 @@ outcome.
 
 ## 4. A missing local public key reports `TAMPERED`, not "unverifiable"
 
-**Status: PARTIALLY FIXED — and one premise below was wrong.**
+**Status: FIXED — and one premise below was wrong.**
+
+*The tri-state landed.* `verifySignature` may now return `'n/a'` alongside
+`true`/`false`, and the three states are kept apart end to end:
+
+| verifier says | `checks.signature.ok` | `intact` | `claim` | renders |
+|---|---|---|---|---|
+| verified | `true` | ✓ | may be tamper-evident | `✓ signature  true` |
+| does not match | `false` | ✗ | tamper-detecting | `✗ signature  false` |
+| no trust anchor | `'n/a'` | ✓ | tamper-detecting | `─ signature  unverifiable — no trust anchor (public key) available` |
+
+Most of the machinery was already there and unused: `CheckResult.ok` was already
+`boolean | 'n/a'`, `intact` already tested `sigOk !== false`, `claimFor` already
+required `sigOk === true` for the tamper-evident claim, and both renderers already
+mapped `'n/a'` to `─`. The value even flowed through `verify()` untouched at
+runtime — only the *type* forbade returning it, and no `detail` explained it. So a
+missing key now reports `TAMPER-DETECTING` with an explanatory signature row instead
+of `✗ TAMPERED`, and **a real mismatch still reports `✗ TAMPERED`** — separating the
+states must not soften the one that matters, and a test pins that.
+
+Three ways to reach `'n/a'`, distinguished by `detail` because the remedy differs:
+`no signature on the anchored root` (nothing to check), `no verifier configured`
+(nothing to check with), and `unverifiable — no trust anchor (public key) available`
+(a verifier that cannot resolve the key).
+
+The actually-broken code was the serve-stack client's own verifier, which caught
+*everything* and returned `false` — swallowing "file absent" and "verification
+failed" identically. Its `try` is now narrow: only the key load is forgiven, and
+`verifyEd25519`'s verdict is returned untouched. `pangolin-verify`'s own path was
+already correct (it passes `undefined` when there is no trust root, which yields
+`'n/a'`).
+
+*Still worth knowing:* the trust anchor is fetched from the same MinIO that stores
+the bundles, so an attacker controlling that store controls both the bundle and the
+key it is checked against. That is a property of this dev topology, not of the fix;
+the config documents the KMS / trust-root-manifest path as the production answer.
 
 *Correction.* The Impact section claims "the runbook never instructs the operator
 to fetch the key." That is false, and was false when written. `RUNBOOK.md` §5.3

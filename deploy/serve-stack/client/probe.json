@@ -1,0 +1,21 @@
+{
+  "id": "concerns-emission-probe-1785345403401",
+  "queue": "default",
+  "items": [
+    {
+      "id": "probe-rename",
+      "executor": "dispatch-a",
+      "trigger": "manual",
+      "inputs": {
+        "subagent": "dag-implementer",
+        "workerInput": {
+          "instructions": "The file `seed.ts` in your workspace root exports a constant named `LABEL`. Rename\nthat identifier to `DISPLAY_LABEL`, updating its declaration and any references to\nit within `seed.ts`. Edit only `seed.ts`, change nothing else about the file, and\ncreate no other source files. Then stop.\n\n## Acceptance criteria\n\n- `seed.ts` declares `DISPLAY_LABEL` and no longer declares `LABEL`.\n- Every in-file reference to the old identifier is updated.\n- No other behaviour in `seed.ts` is altered.\n- No source file other than `seed.ts` is created or modified."
+        }
+      },
+      "depends_on": [],
+      "resourceLocks": [
+        "seed.ts"
+      ]
+    }
+  ]
+}

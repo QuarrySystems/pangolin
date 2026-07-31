@@ -144,6 +144,34 @@ workspace. See [RELEASING.md](./RELEASING.md) for how a release is cut.
   it cheaply *because* terminal runs went quiet. And existing outboxes are not
   rewritten — the accumulated records stay, but reads no longer walk them.
 
+- **A verifier with no trust anchor no longer reports a healthy run as `TAMPERED`.**
+  `verifySignature` returned a bare boolean, so a verifier that could not resolve a
+  public key had only one way to say so: `false` — the same answer it gives for a
+  signature that genuinely does not match. A perfectly good run rendered as
+  `✗ TAMPERED` / `✗ signature false`. "I have no trust anchor" and "this signature
+  does not match" are different facts, and a tamper-evidence tool that renders them
+  identically cannot adjudicate the one case it exists for. It failed toward a false
+  alarm — the safer direction — but it also trains operators to read `✗ signature` as
+  "probably the missing key again", which is how a real tamper gets waved through.
+
+  The injected verifier may now return `'n/a'` as well as `true`/`false`:
+
+  | verifier says | `checks.signature.ok` | `intact` | `claim` |
+  |---|---|---|---|
+  | verified | `true` | ✓ | may be tamper-evident |
+  | does not match | `false` | ✗ | tamper-detecting |
+  | no trust anchor | `'n/a'` | ✓ | tamper-detecting |
+
+  The signature check now also carries a `detail` distinguishing *no signature on the
+  anchored root*, *no verifier configured*, and *unverifiable — no trust anchor
+  available*, since the remedy differs. **A real mismatch is unchanged**: still
+  `false`, still not `intact`, still `failure: 'signature'`.
+
+  Type-level change only for existing verifiers — returning `boolean` remains valid,
+  and the runtime already passed the value through untouched. Consumers that compare
+  `checks.signature.ok === true` will now see `'n/a'` where they previously saw
+  `false`; consumers that treat `!== true` as tampering should test `=== false`.
+
 - **`pangolin verify` no longer gives the handoff check a green tick when there
   was nothing to check.** A bundle with zero handoff edges reported
   `✓ handoff  no handoff edges`. The label was honest but the glyph was not: `✓`

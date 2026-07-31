@@ -32,7 +32,7 @@ export async function assembleBundle(
   deps: {
     anchor: AuditAnchor;
     storage: StorageLike;
-    verifySignature?: (root: Uint8Array, sig: Signature) => boolean;
+    verifySignature?: (root: Uint8Array, sig: Signature) => boolean | 'n/a';
   },
 ): Promise<AuditBundle> {
   const manifests: DispatchManifest[] = [];

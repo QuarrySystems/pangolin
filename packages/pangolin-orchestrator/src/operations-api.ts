@@ -22,7 +22,7 @@ export interface OperationsApiDeps {
   transport: SubmissionTransport & ControlChannel;
   anchor?: AuditAnchor;
   storage?: StorageLike;
-  verifySignature?: (root: Uint8Array, sig: Signature) => boolean;
+  verifySignature?: (root: Uint8Array, sig: Signature) => boolean | 'n/a';
   nowIso?: () => string;
 }
 

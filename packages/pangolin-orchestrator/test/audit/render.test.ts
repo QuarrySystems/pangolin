@@ -97,6 +97,33 @@ describe('n/a marker', () => {
     // make sure it's not rendered as ✓ signature
     expect(out).not.toMatch(/✓ signature/);
   });
+
+  it('an unverifiable signature reads as unverifiable, not TAMPERED (KNOWN-ISSUES #4)', () => {
+    // The exact operator-facing symptom: a client with no local public-key.json used to
+    // render `✗ TAMPERED` / `✗ signature false` on a perfectly healthy run, because the
+    // verifier could only say `false`. It now says 'n/a' and carries a detail naming the
+    // real problem, so the operator fixes their client instead of doubting the bundle.
+    const out = renderVerification(
+      greenBundle({
+        signature: { ok: 'n/a', detail: 'unverifiable — no trust anchor (public key) available' },
+      }),
+      { color: false },
+    );
+
+    expect(out).toMatch(/─ signature/);
+    expect(out).toMatch(/unverifiable/);
+    expect(out).not.toMatch(/✗ signature/);
+    expect(out).not.toMatch(/TAMPERED/);
+  });
+
+  it('a real signature mismatch still renders TAMPERED', () => {
+    // The other half of the contract: separating the states must not soften the one that
+    // matters. `false` is still a tamper and must still shout.
+    const out = renderVerification(greenBundle({ signature: { ok: false } }), { color: false });
+
+    expect(out).toMatch(/✗ signature/);
+    expect(out).not.toMatch(/─ signature/);
+  });
 });
 
 describe('color: false → no ANSI escape sequences', () => {

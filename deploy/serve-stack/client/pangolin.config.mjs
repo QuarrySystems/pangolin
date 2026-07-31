@@ -83,17 +83,33 @@ const anchor = new S3ObjectLockAnchor(
 // verifySignature — against the FETCHED public key (the #55 verify-context
 // shape). The serve container publishes s3://pangolin-data/public-key.json on
 // every start; the runbook's laptop-setup step downloads it next to this file.
-// Lazy + forgiving: absent / unreadable file ⇒ false (import never throws).
+// Lazy (import never throws) and THREE-VALUED, which is the whole point:
+//
+//   true   — the signature verified against the fetched key
+//   false  — the signature does NOT match: a real tamper signal
+//   'n/a'  — no usable key here, so there is nothing to check against
+//
+// Returning `false` for an absent key — as this did — conflates "I have no trust
+// anchor" with "this signature does not match", and the two are different facts. The
+// key file is gitignored and created by a runbook step (§5.3), so the common cause of
+// its absence is a client that was never finished being set up; reporting that as
+// `✗ TAMPERED` on a perfectly healthy run is a false alarm that teaches an operator
+// to discount the very signal this tool exists to raise. See KNOWN-ISSUES.md #4.
+//
+// Note the narrow try: only the KEY LOAD is forgiven. verifyEd25519's own verdict is
+// returned untouched, so a genuine mismatch stays `false` and stays a tamper.
 // ---------------------------------------------------------------------------
 const PUBLIC_KEY_URL = new URL('./public-key.json', import.meta.url);
 
 const verifySignature = (root, sig) => {
+  let spkiDer;
   try {
-    const { spkiDer } = JSON.parse(readFileSync(PUBLIC_KEY_URL, 'utf8'));
-    return verifyEd25519(root, sig, Buffer.from(spkiDer, 'base64'));
+    ({ spkiDer } = JSON.parse(readFileSync(PUBLIC_KEY_URL, 'utf8')));
   } catch {
-    return false;
+    return 'n/a'; // no local public-key.json — fetch it per RUNBOOK.md §5.3
   }
+  if (!spkiDer) return 'n/a'; // present but malformed: still no usable trust anchor
+  return verifyEd25519(root, sig, Buffer.from(spkiDer, 'base64'));
 };
 
 // ---------------------------------------------------------------------------

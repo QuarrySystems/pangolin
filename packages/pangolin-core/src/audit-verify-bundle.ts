@@ -17,7 +17,7 @@ export function verifyBundle(
   bundle: AuditBundle,
   deps: {
     anchor: AuditAnchor;
-    verifySignature?: (root: Uint8Array, sig: Signature) => boolean;
+    verifySignature?: (root: Uint8Array, sig: Signature) => boolean | 'n/a';
     verifyTimestamp?: (root: Uint8Array, token: TimestampToken) => boolean;
   },
 ): Promise<VerificationReport> {

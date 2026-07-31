@@ -1,0 +1,19 @@
+{
+  "id": "outputs-plumbing-probe-1785345561878",
+  "queue": "default",
+  "items": [
+    {
+      "id": "plumbing-write",
+      "executor": "dispatch-a",
+      "trigger": "manual",
+      "inputs": {
+        "subagent": "dag-implementer",
+        "workerInput": {
+          "instructions": "Create a file at exactly `outputs/concerns` — no file extension, at the\n`outputs/` root of your workspace — containing exactly this JSON and nothing else:\n\n```json\n{\n  \"schemaVersion\": 1,\n  \"concerns\": [\n    {\n      \"id\": \"plumbing-check\",\n      \"title\": \"Plumbing probe concern\",\n      \"rationale\": \"Exists only to confirm that a named output artifact is captured and addressable.\",\n      \"proposal\": \"No action required; this concern is a fixture.\",\n      \"verification\": \"The harvest layer can read this envelope back from the run's stored outputs.\",\n      \"files\": [\"seed.ts\"]\n    }\n  ]\n}\n```\n\nCreate no other files and modify nothing else. Then stop.\n\n## Acceptance criteria\n\n- `outputs/concerns` exists and parses as JSON.\n- Its `schemaVersion` is `1` and it contains exactly one concern with id\n  `plumbing-check`.\n- No other file is created or modified."
+        }
+      },
+      "depends_on": [],
+      "resourceLocks": []
+    }
+  ]
+}
