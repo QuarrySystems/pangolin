@@ -41,6 +41,10 @@ function fakeOrch(opts: { tickThrowsAfter?: number } = {}) {
       return { root: undefined };
     },
     cancelRun() {},
+    // serve() asks which queues to drive when `queue` is not given (KNOWN-ISSUES #7).
+    getConfiguredQueues() {
+      return ['default'];
+    },
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any;
 }

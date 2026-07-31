@@ -55,7 +55,33 @@ function defaultServeOnError(err: unknown): void {
 }
 
 export async function serve(opts: ServeOptions): Promise<void> {
-  const queue = opts.queue ?? 'default';
+  // Which queues this process drives. `tick()` filters items by queue, so a configured
+  // queue nobody ticks is one whose items are never considered ready, fired or
+  // reconciled — they sit `ready` with `blockedBy: []` forever, with no error in the
+  // serve log, in `orch status`, or in the audit chain. `orch cancel` cannot rescue
+  // them either, because cancellation is processed by this same loop.
+  //
+  // Naming a queue explicitly still drives exactly that one, so one-process-per-queue
+  // deployments keep working. Omitting it now drives EVERY configured queue rather
+  // than just 'default': the orchestrator already holds and validates the whole map,
+  // so a config declaring queues the loop silently ignored was half-inert by default.
+  const queues = opts.queue !== undefined ? [opts.queue] : opts.orchestrator.getConfiguredQueues();
+  const tickAll = async () => {
+    for (const q of queues) await opts.orchestrator.tick(q);
+  };
+
+  // A single-queue process is legitimate, so this is a notice rather than a refusal —
+  // but the operator has to learn it at boot. The failure it prevents produces no
+  // signal to correlate with a doc, which is what made it expensive to diagnose.
+  const undriven = opts.orchestrator.getConfiguredQueues().filter((q) => !queues.includes(q));
+  if (undriven.length > 0) {
+    console.warn(
+      `[pangolin serve] driving queue(s) ${queues.join(', ')}; configured but NOT driven by this ` +
+        `process: ${undriven.join(', ')}. Items submitted to those queues will sit at 'ready' ` +
+        `indefinitely unless another serve process ticks them.`,
+    );
+  }
+
   const interval = opts.tickIntervalMs ?? 2000;
   const onError = opts.onError ?? defaultServeOnError;
   const now = () => opts.now?.() ?? Date.now();
@@ -82,7 +108,7 @@ export async function serve(opts: ServeOptions): Promise<void> {
     opts.orchestrator.recoverStranded(now());
 
     // Reconcile-first: one tick before the main loop
-    await opts.orchestrator.tick(queue);
+    await tickAll();
     health.started = true;
     health.lastTickAt = now();
     health.lastTickOkAt = now();
@@ -147,7 +173,7 @@ export async function serve(opts: ServeOptions): Promise<void> {
             onError(err);
           }
         }
-        await opts.orchestrator.tick(queue);
+        await tickAll();
 
         const at = new Date(now()).toISOString();
 
