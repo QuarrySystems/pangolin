@@ -8,7 +8,7 @@ import type {
   TaskExit,
   SecretStore,
 } from '@quarry-systems/pangolin-core';
-import { buildDispatchRecordUri } from '@quarry-systems/pangolin-core';
+import { buildDispatchRecordUri, StorageNotFoundError } from '@quarry-systems/pangolin-core';
 
 /**
  * In-memory storage stub. Mirrors the helper in dispatch-fire.test.ts, plus
@@ -70,7 +70,11 @@ function makeMemoryStorage(callOrder: string[]): StorageProvider & {
     async get(uri: string) {
       callOrder.push(`storage.get:${uri}`);
       const v = blobs.get(uri);
-      if (!v) throw new Error(`memory storage: not found: ${uri}`);
+      // `StorageProvider.get` MUST signal absence with StorageNotFoundError
+      // (pangolin-core/src/storage.ts) — a plain Error here made this double
+      // claim a contract it did not honour, and `markerPresent` now depends on
+      // the distinction to tell "absent" from "could not look".
+      if (!v) throw new StorageNotFoundError(uri, `memory storage: not found: ${uri}`);
       return v;
     },
     async resolveLatest(uri: string) {
@@ -92,7 +96,13 @@ function makeMemoryStorage(callOrder: string[]): StorageProvider & {
     },
   } as StorageProvider & {
     blobs: Map<string, Uint8Array>;
-    seed(name: string, type: string, namespace: string, contentHash: string, payload: unknown): void;
+    seed(
+      name: string,
+      type: string,
+      namespace: string,
+      contentHash: string,
+      payload: unknown,
+    ): void;
   };
   return storage;
 }
@@ -252,7 +262,9 @@ describe('fireWork dedupeOnDispatchId', () => {
 
     const markerPutIdx = callOrder.indexOf(`storage.put:${markerUri}`);
     const secretStageIdx = callOrder.indexOf('store.stage:D2/MY_KEY');
-    const callbackStageIdx = callOrder.findIndex((c) => c.startsWith('store.stage:pangolin/callback-hmac/D2'));
+    const callbackStageIdx = callOrder.findIndex((c) =>
+      c.startsWith('store.stage:pangolin/callback-hmac/D2'),
+    );
 
     expect(markerPutIdx).toBeGreaterThanOrEqual(0);
     expect(secretStageIdx).toBeGreaterThanOrEqual(0);
@@ -315,6 +327,158 @@ describe('fireWork dedupeOnDispatchId', () => {
     expect(body.traceId).toBe('D4'); // default trace is { traceId: dispatchId }
     expect(typeof body.firedAt).toBe('string');
     expect(new Date(body.firedAt).toISOString()).toBe(body.firedAt);
+  });
+
+  /**
+   * The guard's failure mode is that it stops guarding *silently*. A bare
+   * `catch` cannot tell "the marker is absent" — the answer it wants — from
+   * "I am not authorised to look", so a mis-scoped storage policy turns
+   * `dedupeOnDispatchId: true` into a permanent no-op with no error and no
+   * warning. Reproduced against real MinIO before these were written: an
+   * identity with `s3:PutObject` but no `s3:GetObject` gets 403 AccessDenied
+   * on a marker that demonstrably exists, and the guard reports "not fired".
+   *
+   * Only `StorageNotFoundError` means absent. `StorageProvider.get` is
+   * contractually required to throw it (`pangolin-core/src/storage.ts`), and
+   * `readDispatchRecord` already relies on exactly that for the same
+   * `dispatches/<id>/` prefix — these pin the same posture for the guard.
+   */
+  describe('a non-not-found storage error must not read as "not fired"', () => {
+    /** Storage whose `get` always fails with `err`; `put` succeeds and records. */
+    function makeFailingGetStorage(err: unknown, callOrder: string[]): StorageProvider {
+      const blobs = new Map<string, Uint8Array>();
+      return {
+        name: 'failing-get',
+        async put(uri: string, contents: Uint8Array) {
+          callOrder.push(`storage.put:${uri}`);
+          blobs.set(uri, contents);
+          return { contentHash: 'sha256:x' };
+        },
+        async get(uri: string) {
+          callOrder.push(`storage.get:${uri}`);
+          throw err;
+        },
+        async resolveLatest() {
+          return {
+            uri: 'pangolin://ns/subagent/s/sha256:s',
+            contentHash: 'sha256:s',
+            registeredAt: new Date(0).toISOString(),
+          };
+        },
+        async list() {
+          return [];
+        },
+      } as StorageProvider;
+    }
+
+    function makeClientWith(storage: StorageProvider, compute: ComputeProvider): PangolinClient {
+      return new PangolinClient({
+        namespace: 'ns',
+        compute: { default: compute },
+        credentials: { default: makeCredentials() },
+        storage,
+        targets: { prod: { compute: 'default', credentials: 'default' } },
+      });
+    }
+
+    it('rethrows an authorization failure instead of firing (the mis-scoped-policy case)', async () => {
+      const callOrder: string[] = [];
+      const denied = Object.assign(new Error('Access Denied'), {
+        name: 'AccessDenied',
+        $metadata: { httpStatusCode: 403 },
+      });
+      const storage = makeFailingGetStorage(denied, callOrder);
+      const { compute, runMock } = makeCompute();
+      const client = makeClientWith(storage, compute);
+
+      await expect(
+        fireWork(
+          client,
+          { subagent: 's', target: 'prod', dedupeOnDispatchId: true, dispatchId: 'D6' },
+          { workerImage: 'img' },
+        ),
+      ).rejects.toThrow(/Access Denied/);
+
+      // The whole point: no container, and no marker overwriting a live one.
+      expect(runMock).not.toHaveBeenCalled();
+      expect(callOrder.some((c) => c.startsWith('storage.put:'))).toBe(false);
+    });
+
+    it('rethrows a transient network failure instead of firing', async () => {
+      const callOrder: string[] = [];
+      const storage = makeFailingGetStorage(
+        Object.assign(new Error('socket hang up'), { name: 'TimeoutError' }),
+        callOrder,
+      );
+      const { compute, runMock } = makeCompute();
+      const client = makeClientWith(storage, compute);
+
+      await expect(
+        fireWork(
+          client,
+          { subagent: 's', target: 'prod', dedupeOnDispatchId: true, dispatchId: 'D7' },
+          { workerImage: 'img' },
+        ),
+      ).rejects.toThrow(/socket hang up/);
+      expect(runMock).not.toHaveBeenCalled();
+    });
+
+    it('rethrows a generic /not found/i message rather than reading it as absent', async () => {
+      // Mirrors retention.test.ts: the check is type-based, not a string sniff,
+      // so a DNS error that merely says "not found" must not disarm the guard.
+      const callOrder: string[] = [];
+      const storage = makeFailingGetStorage(new Error('endpoint not found (DNS)'), callOrder);
+      const { compute, runMock } = makeCompute();
+      const client = makeClientWith(storage, compute);
+
+      await expect(
+        fireWork(
+          client,
+          { subagent: 's', target: 'prod', dedupeOnDispatchId: true, dispatchId: 'D8' },
+          { workerImage: 'img' },
+        ),
+      ).rejects.toThrow(/endpoint not found/);
+      expect(runMock).not.toHaveBeenCalled();
+    });
+
+    it('still treats StorageNotFoundError as absent, so a genuine first fire proceeds', async () => {
+      const callOrder: string[] = [];
+      const storage = makeFailingGetStorage(
+        new StorageNotFoundError('pangolin://ns/dispatches/D9/fired.json'),
+        callOrder,
+      );
+      const { compute, runMock } = makeCompute();
+      const client = makeClientWith(storage, compute);
+
+      await fireWork(
+        client,
+        { subagent: 's', target: 'prod', dedupeOnDispatchId: true, dispatchId: 'D9' },
+        { workerImage: 'img' },
+      );
+
+      expect(runMock).toHaveBeenCalledTimes(1);
+      const markerUri = buildDispatchRecordUri('ns', 'D9', 'fired.json');
+      expect(callOrder).toContain(`storage.put:${markerUri}`);
+    });
+
+    it('treats a duck-typed StorageNotFoundError as absent (duplicate package copies)', async () => {
+      // `isStorageNotFound`'s name check is the load-bearing leg — a provider
+      // resolved from a second copy of pangolin-core fails `instanceof`.
+      const callOrder: string[] = [];
+      const storage = makeFailingGetStorage(
+        Object.assign(new Error('storage object not found'), { name: 'StorageNotFoundError' }),
+        callOrder,
+      );
+      const { compute, runMock } = makeCompute();
+      const client = makeClientWith(storage, compute);
+
+      await fireWork(
+        client,
+        { subagent: 's', target: 'prod', dedupeOnDispatchId: true, dispatchId: 'D10' },
+        { workerImage: 'img' },
+      );
+      expect(runMock).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('the marker URI is built with buildDispatchRecordUri', async () => {

@@ -76,15 +76,43 @@ workspace. See [RELEASING.md](./RELEASING.md) for how a release is cut.
 
 ### Fixed
 
+- **`dedupeOnDispatchId` could silently stop guarding.** The dedupe marker probe in
+  `fireWork` treated *any* `storage.get` failure as "the marker is absent, proceed" —
+  so an authorization denial, a network fault or a throttle read as "not yet fired"
+  and let a duplicate dispatch through. The consequence is the one step 0 exists to
+  prevent: two containers for a single `dispatchId`, both writing
+  `dispatches/<id>/output.json`, with the second's callback HMAC key replacing the
+  first's mid-run. No error, no warning, and `dedupeOnDispatchId: true` still
+  appeared to be in force.
+
+  Only `StorageNotFoundError` now means absent; every other error is rethrown, so a
+  mis-scoped storage policy fails loudly at the first dispatch instead of quietly
+  removing the guarantee. The check is type-based (`isStorageNotFound`), never a
+  message sniff — matching what `readDispatchRecord` already did for the same
+  `dispatches/<id>/` prefix.
+
+  **Behaviour change:** a `StorageProvider` that signals absence with a bare `Error`
+  instead of `StorageNotFoundError` will now make the *first* fire throw rather than
+  silently proceed. The contract has always required `StorageNotFoundError`
+  (`StorageProvider.get`, "never return a sentinel value"); both in-tree providers
+  honour it. This only affects third-party providers that do not.
+
 - **`serve()` no longer leaves a multi-queue config half-inert.** It drove exactly
   one queue (`opts.queue ?? 'default'`) while `PangolinOrchestrator` accepted and
   validated the full queue map, so an item submitted to a configured, *validated*
   queue that the loop did not happen to tick sat at `ready` forever — with no error
   in the serve log, in `orch status`, or in the audit chain, while the loop
-  dispatched other work normally. `orch cancel` could not rescue it either, because
-  cancellation is processed by that same tick loop, and submit being idempotent by
-  id meant the id stayed occupied. Observed at 20+ minutes; the same run resubmitted
+  dispatched other work normally. Observed at 20+ minutes; the same run resubmitted
   unchanged to the ticked queue finished in 67 seconds.
+
+  *An earlier version of this entry added that "`orch cancel` could not rescue it
+  either, because cancellation is processed by that same tick loop." That was wrong
+  and the live stack disproves it: `cancelRun` is not queue-scoped — it walks
+  `store.getItems(runId)` and flips `pending`/`ready` to `cancelled` without
+  consulting a queue, and the serve loop drains control envelopes in its body before
+  calling `tick`. Cancel has always worked on a stranded run provided serve was up.
+  The one real gap was narrower and is fixed below: a cancel queued while serve was
+  **down** lost the race to the reconcile-first tick.*
 
   Naming a `queue` explicitly still drives exactly that queue, so one-process-per-queue
   deployments are unaffected. **Omitting it now drives every configured queue**

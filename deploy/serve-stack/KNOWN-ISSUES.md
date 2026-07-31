@@ -874,10 +874,24 @@ so nothing below carries a measurement the way issue 6 does. Every claim is a
 reasoned rather than observed, and 8 in particular deserves a reproduction before
 anyone acts on it.
 
+> **Update 2026-07-31.** Issue 8 got that reproduction, and it is worth reading as a
+> verdict on this whole section's method. The defect was real and reproduced. But its
+> stated *mechanism* did not reproduce (MinIO returns 404 where the entry predicts
+> 403), and its suggested *fix* named an unexported function. Both errors survived the
+> "independently verified against source" pass below, because that pass checked that
+> the cited code says what the entry claims — which is a different question from
+> whether the entry's reasoning about it holds. The remaining source-only entries
+> (9–12) should be read with that gap in mind.
+
 *Independently verified against source, 2026-07-31 — all five hold.*
 
 - **8** — `markerPresent` is verbatim as quoted, and the suggested `isNotFound`
   predicate does exist in `pangolin-storage-s3`.
+  *Amended 2026-07-31 (issue 8's fix):* "exists" was checked; **"is usable" was not**.
+  `isNotFound` is module-private, so the suggested fix could not have been written as
+  described. The exported, contract-level predicate is `isStorageNotFound` in
+  `pangolin-core`. A grep confirming a symbol exists does not confirm it is reachable —
+  which is the same class of near-miss this section was congratulating itself on avoiding.
 - **9** — `PANGOLIN_AGENT_TIMEOUT_SECONDS` and `PANGOLIN_PLUGIN_INSTALL_TIMEOUT_SECONDS`
   appear at their emit site and **nowhere else** under `packages/*/src`, so "a consumer
   that does not exist" holds as written.
@@ -902,7 +916,86 @@ is a good reason to look, not a reason to believe — and here, looking confirme
 
 ## 8. `markerPresent` swallows every error, so the dedupe guard can silently be off
 
-**Status: OPEN.** Reported from ai-os, 2026-07-31.
+**Status: FIXED — reproduced first, and the reproduction corrected two claims below.**
+
+This entry asked for a reproduction before anyone changed `fireWork`. That was the
+right instinct, and it paid: the defect is real and now has a runtime reproduction,
+but **the specific mechanism argued for below does not reproduce on this stack**, and
+the suggested fix pointed at the wrong predicate.
+
+*The defect reproduces, against real MinIO through the real `S3StorageProvider`.*
+An identity holding `s3:PutObject` but not `s3:GetObject` reads a marker that
+demonstrably exists:
+
+```
+1. marker WRITTEN by root (the "first fire")
+2. markerPresent(root)      => true   (expected true)
+3. writeonly.get            => throws name=AccessDenied status=403
+     is it StorageNotFoundError? false
+4. markerPresent(writeonly) => false   (expected true; GUARD IS OFF)
+```
+
+Step 4 is the bug entire: the marker is present, and the guard reports "not fired".
+`fireWork` would re-stage the callback HMAC key and run a second container.
+
+*Correction 1 — **MinIO does not exhibit the 403-on-missing-key behaviour**, so the
+sharp case argued below is not locally reproducible.* The claim is that S3 returns
+403 rather than 404 for `GetObject` on a *missing* key when the caller lacks
+`s3:ListBucket`. That is documented **AWS** behaviour, and it is why a mis-scoped role
+is a *permanent* silent no-op rather than a transient one — but MinIO returns
+`NoSuchKey`/404 in that case. Measured, with the policy confirmed live and narrow
+(same user, same bucket):
+
+| probe as a user with `GetObject`+`PutObject` on `bucket/*`, no `ListBucket` | result |
+|---|---|
+| `ListObjectsV2` | `AccessDenied` **403** (so the scoping is genuinely in force) |
+| `GetObject`, key present | OK |
+| `GetObject`, key **missing** | `NoSuchKey` **404** — *not* the predicted 403 |
+
+So a MinIO-based test of *that* mechanism would have passed for the wrong reason and
+given false confidence. The reproduction above reaches a real 403 by a different
+mis-scoping (no `GetObject` at all), which is at least as easy to write.
+
+This does not weaken the issue. The 403 detail was only ever one of four errors the
+bare `catch` swallowed, and the defect does not depend on it — a network fault or a
+throttle disarms the guard identically. It does mean the *urgency* argument ("easy to
+reach, permanent") rests on AWS behaviour that this dev topology cannot demonstrate.
+
+*Correction 2 — the suggested predicate is the wrong one, and a better one already
+exists.* The fix below names `isNotFound` in `pangolin-storage-s3`. That function is
+**module-private** — not exported — so it could not have been used as described.
+`pangolin-core` already exports the contract-level predicate `isStorageNotFound`
+(`errors.ts:104`), and `StorageProvider.get` is contractually required to throw
+`StorageNotFoundError` (`storage.ts:19`, "never return a sentinel value"). The S3 and
+local providers both honour that, so the s3-internal predicate was never needed:
+`isNotFound` is what *builds* the typed error, not what callers should read.
+
+Better still, the idiom was already in the same package. `readDispatchRecord`
+(`retention.ts:86`) reads the *same* `dispatches/<id>/` prefix through the *same*
+`client.storage` and does exactly the right thing — `if (isStorageNotFound(err))
+return null; throw err;` — with a test pinning that a generic `/not found/i` *message*
+must not be mistaken for absence. `markerPresent` was the odd one out, and its own doc
+comment claimed it "mirrors every other not-found convention in this file", which was
+true only of the best-effort reads and false of the one that mattered.
+
+*The fix.* `markerPresent` returns `false` only for `isStorageNotFound(err)` and
+rethrows everything else. Five tests pin it: authorization denial, transient network
+error, a generic `/not found/i` message, plus both directions of genuine absence
+(typed and duck-typed, since the name check is what survives duplicate package
+copies).
+
+*An existing test caught something, as usual.* Five pre-existing dedupe tests broke on
+the fix — because that file's in-memory `StorageProvider` double signalled absence
+with a bare `Error`, violating the contract it claimed to implement. The double was
+wrong, not the fix. Worth noting the same contract-violating stub is copied across
+~10 test files in `pangolin-client`; only this one was behaviourally relevant, and
+unifying them is left as a separate refactor rather than smuggled in here.
+
+*Deliberately not widened.* `readSubagentCapabilities` and env-bundle resolution in
+the same file still swallow everything. Those degrade to a sane default by design;
+this one decides whether to fire. Changing them is a separate judgement call.
+
+**Original report follows.** Reported from ai-os, 2026-07-31.
 
 **Symptom.** `dedupeOnDispatchId: true` appears to work — no error, no warning — while
 providing no protection whatsoever. A re-fire of an already-fired `dispatchId` runs a
