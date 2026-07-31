@@ -144,6 +144,29 @@ workspace. See [RELEASING.md](./RELEASING.md) for how a release is cut.
   it cheaply *because* terminal runs went quiet. And existing outboxes are not
   rewritten — the accumulated records stay, but reads no longer walk them.
 
+- **The report embedded in an audit bundle is now the complete verdict.**
+  `assembleBundle` built `bundle.report` with the chain-only `verify()` — chain, root,
+  signature and anchor, and nothing else. It hardcodes `handoff: { ok: 'n/a' }` and
+  never sets `authzTier`, so three checks that only `verifyBundle` performs were
+  missing from every bundle: handoff closure, authorization tier, and **manifest
+  integrity**.
+
+  The visible symptom was `orch watch` disagreeing with `pangolin verify` on the same
+  run — `watch` renders the embedded report, `pangolin verify` recomputes. The
+  manifest half was more than a disagreement: a forged manifest that `verifyBundle`
+  reports as `✗ TAMPERED` with `failure: 'manifest'` rendered as a clean bill, and
+  **`orch audit` takes its exit code from `bundle.report.intact`** (as do
+  `examples/appendable-stream` and `examples/demo-claims-appeals`), so a caught
+  forgery became a silent pass.
+
+  `assembleBundle` now computes the embedded report with `verifyBundle`. Bundles
+  assembled by earlier versions carry the old partial report; re-run `pangolin verify`
+  against them, which recomputes and was never affected.
+
+  This makes the embedded report *honest*, not *authoritative*: a report inside a
+  bundle read from disk is still attacker-controllable, and a verifier must recompute
+  rather than trust it. `pangolin verify` and `pangolin-verify`'s CLI already do.
+
 - **A verifier with no trust anchor no longer reports a healthy run as `TAMPERED`.**
   `verifySignature` returned a bare boolean, so a verifier that could not resolve a
   public key had only one way to say so: `false` — the same answer it gives for a

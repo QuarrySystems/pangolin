@@ -276,6 +276,53 @@ docker run --rm --network pangolin-serve-stack_default \
 
 ## 5. `orch watch`'s inline verify under-reports against `pangolin verify`
 
+**Status: FIXED — diagnosed, and the guess below was wrong in both directions.**
+
+*The cause.* The Cause section says "the two paths render from different inputs, and
+the inline summary appears not to have the binding data the bundle carries." The
+first half is right, the second is not: `assembleBundle` fetches the manifests into
+`bundle.manifests`, so `watch` has every byte it needs. The paths differ in **which
+report they render**:
+
+| path | renders |
+|---|---|
+| `pangolin verify` | `verifyBundle(bundle, deps)` — freshly **recomputed** (`cmd-verify.ts` renders `{...bundle, report}`) |
+| `orch watch` | `renderVerification(bundle)` — the report **embedded** in the bundle |
+
+And `assembleBundle` built that embedded report with `verify()`, the chain/store-only
+verifier: chain + root + signature + anchor, and nothing else. It hardcodes
+`handoff: { ok: 'n/a' }` and never sets `authzTier`. So three checks that only
+`verifyBundle` performs were missing from **every** bundle ever assembled.
+
+*The severity was understated.* The write-up says the disagreement "under-claims,
+which is safe in isolation." True of handoff and authorization. The third missing
+check is **manifest integrity**, and its absence is a false negative on a tamper
+check, not an under-claim. A forged manifest that `verifyBundle` reports as
+`✗ TAMPERED` with `failure: 'manifest'` rendered as a clean bill through the embedded
+report. `test/audit/bundle-report-completeness.test.ts` demonstrates exactly that.
+
+*And it was never only about `watch`.* The embedded report is what several callers
+**gate** on — `orch audit` takes its exit code from `bundle.report.intact`, as do
+`examples/appendable-stream` and `examples/demo-claims-appeals`. All were blind to
+the same three checks, so `orch audit` exited 0 on a bundle whose manifests were
+forged.
+
+*The fix* is at the source rather than in `watch`: `assembleBundle` now computes the
+embedded report with `verifyBundle`, so every consumer of `bundle.report` gets the
+complete verdict and the two paths agree check-for-check. The dead `exportStore`
+shim went with it — `verifyBundle` builds an equivalent store internally.
+
+*Still true, and deliberate:* a report embedded in a bundle **read from disk** is
+attacker-controllable, so a verifier must still recompute rather than trust it.
+`pangolin verify` and `pangolin-verify`'s CLI both already do. This fix makes the
+embedded report honest; it does not make it authoritative.
+
+*One residual divergence, by design:* `assembleBundle` takes no `verifyTimestamp`, so
+the embedded report's `time` check stays `'n/a'` even where a caller could verify a
+trusted-time token. Threading it would mean widening `OperationsApiDeps` too, and
+`time` is explicitly informational — it never gates `intact`/`failure` — so this is
+recorded rather than fixed.
+
 **Symptom.** The same run, verified two ways, disagrees.
 
 A three-item run with two `needs` handoff edges, watched inline:
