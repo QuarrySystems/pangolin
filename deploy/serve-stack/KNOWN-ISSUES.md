@@ -9,13 +9,15 @@ and an `external-immutable` S3 anchor. Issues 1–5 are about the *operator path
 the runbook, the config defaults, and the verify UX. None of those indicates a
 fault in the orchestration or audit machinery.
 
-**Issue 6 is different, and the scoping sentence above does not cover it.** It came
-later, from an unattended driver polling this stack after a long uptime, and it is a
-scaling fault in the orchestrator's publish loop and in the client read path rather
-than anything in the runbook. It is filed here because this is where the serve-stack
-findings live, but it wants a different reader.
+**Issues 6 and 7 are different, and the scoping sentence above does not cover
+them.** Both came later, from sustained use of this stack rather than from the cold
+start, and both are faults in the orchestrator itself rather than in the runbook:
+6 is a scaling fault in the publish loop and the client read path, 7 is a
+configuration surface that accepts more than the serve loop drives. They are filed
+here because this is where the serve-stack findings live, but they want a different
+reader.
 
-Line references for issues 1–5 are to this branch. Issue 6 cites
+Line references for issues 1–5 and 7 are to this branch. Issue 6 cites
 `@quarry-systems/pangolin-orchestrator@0.4.0` by compiled `dist/` path, because that
 is the artifact that was read and measured.
 
@@ -363,6 +365,70 @@ not surface it.
 Changes 1 and 2 are independent: 1 bounds what accumulates, 2 makes the existing
 accumulation cheap to read past. Doing 2 first gives immediate relief on stacks
 that already have large outboxes, since it does not require rewriting history.
+
+---
+
+## 7. `serve()` drives exactly one queue, so a multi-queue config is half-inert
+
+**Symptom.** An item submitted to a configured, validated queue other than the one
+`serve` happens to tick sits at `ready` forever. No error appears in the serve log,
+in `orch status`, or in the audit chain. The serve loop continues dispatching other
+work normally throughout.
+
+**Cause.** `packages/pangolin-orchestrator/src/serve/driver.ts:57` reads
+
+```ts
+const queue = opts.queue ?? 'default';
+```
+
+and lines 84 and 135 call `opts.orchestrator.tick(queue)` — one queue, singular.
+`ServeOptions.queue` (`:11`) is a single optional string.
+`deploy/serve-stack/serve-entrypoint.mjs` passes no `queue`, so the deployed stack
+ticks only `default`.
+
+Meanwhile `PangolinOrchestrator` accepts and validates the full map
+(`orchestrator.ts:105-110`), and this stack's own config declares two queues:
+
+```js
+const queues = {
+  default: { concurrency: 2 },
+  gated:   { concurrency: 2, pattern: pipeline },
+};
+```
+
+`gated` is declared, validated, and never driven. `tick` filters
+`i.queue === queue` (`tick.ts:50`), so nothing in that queue is ever considered
+ready, fired, or reconciled.
+
+**Impact.** Silent and total for the affected queue. Observed directly: a two-item
+run submitted to `gated` sat `ready` with `blockedBy: []` for 20+ minutes while the
+loop dispatched unrelated work; resubmitted unchanged to `default` it completed in
+67 seconds.
+
+Two things make this worse than a normal misconfiguration:
+
+- The config is *valid*. The orchestrator accepts the queue, so there is no startup
+  warning and no obvious place to look.
+- **`orch cancel` cannot rescue it.** Cancellation is processed by the same tick
+  loop, so a run stranded on an unticked queue cannot be cancelled either. The only
+  exit is to stop caring about that run id — and because submit is idempotent by id,
+  the id stays occupied.
+
+The comment in `pangolin.config.mjs` describing `gated` as "a dedicated `gated`
+queue carrying the pipeline pattern" is therefore aspirational as deployed.
+
+**Suggested fix.** Either drive every configured queue, or refuse to start when the
+config declares queues the loop will not tick.
+
+Driving all of them looks closest to intent — the orchestrator already holds the
+map, so `serve` could iterate `Object.keys` of it rather than taking a single name.
+If a single-queue serve process is deliberate (one process per queue, say), then the
+startup check is the cheaper fix: log or fail on
+`configuredQueues - {tickedQueue}` being non-empty, so the operator learns at boot
+rather than from a run that never moves.
+
+Documenting alone would not be enough here. The failure produces no signal to
+correlate with a doc, which is what makes it expensive to diagnose.
 
 ---
 
