@@ -533,6 +533,32 @@ Ticking is sequential on purpose, not a missed parallelisation: the orchestrator
 is a single-writer design (one SQLite writer, one shared lock manager), so
 concurrent ticks would race. Each `tick(q)` is a queue-filtered query.
 
+**Second follow-up: a queued cancel now beats the first dispatch.** The loop drains
+the transport before its tick, so a cancel beats the dispatch it targets. The
+reconcile-first tick that runs once before the loop did not, so a cancel queued
+while the process was down lost the race to the very item it was meant to stop.
+
+That was mostly theoretical until `serve()` began driving every configured queue.
+Items stranded on a previously-undriven queue become dispatchable on the next
+start, and cancelling them is the operator's only remedy — one that could not work,
+because cancellation is processed by the loop that had never ticked that queue. So
+the first start after upgrading was exactly the moment the remedy was needed and
+exactly the moment it failed.
+
+Ingress (submissions → extends → control) now drains once before the
+reconcile-first tick as well, as a single ordered unit. **The order is
+load-bearing:** draining control alone is the obvious fix and it silently breaks a
+cancel that arrives in the same batch as its own run, because `cancelRun` on a run
+the store has never seen iterates an empty item list and returns *without throwing*
+— so the envelope is acked and destroyed against a run that lands moments later.
+(`closeRun` throws on an unknown run, so it survives; the two diverge here.) Both
+directions are pinned by tests.
+
+*Operator note for the upgrade:* if work is sitting `ready` on a queue this stack
+did not previously drive, decide about it before starting the new build — on that
+first start it will either run or be cancelled, and now a cancel queued beforehand
+will actually be honoured.
+
 **No reader changes are needed.** `queue` is a run-level field — `WorkItem` carries
 none — so a run belongs to exactly one queue; the outbox is keyed by `runId`; and
 the driver groups a run's items by `runId` regardless of queue. `pangolin-product`

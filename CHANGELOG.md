@@ -103,6 +103,15 @@ workspace. See [RELEASING.md](./RELEASING.md) for how a release is cut.
   see identical error surfacing); several become an `AggregateError`. The pass
   still fails overall, so a broken tick does not read as a healthy iteration.
 
+  **A queued cancel is now honoured before the first dispatch.** The serve loop
+  drains the transport before its tick, so a cancel beats the dispatch it targets —
+  but the reconcile-first tick that runs once before the loop did not, so a cancel
+  queued while the process was down lost the race to the very item it was meant to
+  stop. Ingress (submissions → extends → control) now drains once before that tick
+  too, as a single ordered unit. This matters most on the first start after
+  upgrading, when work stranded on a previously-undriven queue becomes dispatchable
+  and cancelling it is the only remedy.
+
   A failure in the **reconcile-first** tick no longer rejects out of `serve()`; it
   is reported and the loop starts anyway, leaving `/readyz` at 503 `not-ready`
   until a tick succeeds while `/healthz` stays up. Previously one broken queue
