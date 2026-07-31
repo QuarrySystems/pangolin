@@ -805,6 +805,258 @@ correlate with a doc, which is what makes it expensive to diagnose.
 
 ---
 
+---
+
+# Issues 8–12: the client / Fargate dispatch path
+
+**Different provenance, and a different reader again.** Issues 1–7 came from running
+`deploy/serve-stack`. These five came from building the **consumer** side — ai-os
+wiring `pangolin-client` to `FargateProvider` for live dispatch — and none of them
+involves `serve`, the orchestrator, or the audit chain. They are filed here because
+this is the only known-issues file in the repo; they belong to `pangolin-client`,
+`pangolin-secret-store`, `pangolin-providers-fargate`, and `pangolin-worker`.
+
+**Provenance, stated plainly: these are read from source, not reproduced at
+runtime.** ai-os has not yet dispatched — that is the slice this work is preparing —
+so nothing below carries a measurement the way issue 6 does. Every claim is a
+`file:line` on `main` at `b0063b4`, and each was cross-checked against the published
+`0.4.0` dist so it is not a main-only artifact. Treat the impact estimates as
+reasoned rather than observed, and 8 in particular deserves a reproduction before
+anyone acts on it.
+
+*Independently spot-checked on landing (2026-07-31):* **8** — `markerPresent` is
+verbatim as quoted, and the suggested `isNotFound` predicate does exist in
+`pangolin-storage-s3`. **9** — `PANGOLIN_AGENT_TIMEOUT_SECONDS` and
+`PANGOLIN_PLUGIN_INSTALL_TIMEOUT_SECONDS` appear at their emit site and **nowhere
+else** under `packages/*/src`, so "a consumer that does not exist" holds as written.
+**10–12 were not re-checked** and rest on the author's reading. Worth saying because
+four separate claims elsewhere in this file turned out to be wrong when tested this
+same day — a `file:line` citation is a good reason to look, not a reason to believe.
+
+---
+
+## 8. `markerPresent` swallows every error, so the dedupe guard can silently be off
+
+**Status: OPEN.** Reported from ai-os, 2026-07-31.
+
+**Symptom.** `dedupeOnDispatchId: true` appears to work — no error, no warning — while
+providing no protection whatsoever. A re-fire of an already-fired `dispatchId` runs a
+second container.
+
+**Cause.** `packages/pangolin-client/src/dispatch.ts:520-526`:
+
+```ts
+async function markerPresent(storage: StorageProvider, uri: string): Promise<boolean> {
+  try {
+    await storage.get(uri);
+    return true;
+  } catch {
+    return false;
+  }
+}
+```
+
+The bare `catch` cannot distinguish *"the marker is absent"* — the answer it wants —
+from *"I am not authorised to look"*, *"the network failed"*, or *"S3 throttled me"*.
+All four return `false`, which `fireWork` reads as "not yet fired, proceed".
+
+The authorisation case is not hypothetical, and it is the one that persists. S3
+returns **403 rather than 404** for `GetObject` on a missing key when the caller lacks
+`s3:ListBucket` on the bucket — so a dispatch role scoped to `GetObject`/`PutObject`
+but not `ListBucket` is a *permanently* silent no-op, not a transient one. That
+mis-scoping is easy to reach: `ListBucket` is granted on the **bucket** ARN while the
+object actions are granted on `bucket/*`, so writing the policy in the obvious way
+omits it.
+
+**Impact.** A guard that silently stops guarding — the same class as issues 5a and 6b
+in this file, and the reason both were treated as real. Here the consequence is
+duplicate dispatch: two containers for one `dispatchId`, both writing
+`dispatches/<id>/output.json`, and the second's callback HMAC key replacing the
+first's mid-run (which is precisely what the step-0 comment says the guard exists to
+prevent).
+
+**Suggested fix.** Let the not-found case be the only one that returns `false`.
+`pangolin-storage-s3` already has the predicate — `isNotFound`
+(`packages/pangolin-storage-s3/src/index.ts`, used by `readIndexWithEtag`) — so the
+shape is `catch (err) { if (isNotFound(err)) return false; throw err; }`, with the
+predicate reached through the `StorageProvider` contract rather than imported
+directly. Rethrowing turns a mis-scoped policy into a loud failure at the first
+dispatch instead of a guarantee that quietly does not hold.
+
+If rethrowing is judged too strict for a guard that is opt-in, the weaker fix is to
+take a logger and warn on any non-not-found error before returning `false` — but note
+that `fireWork` has no logger today, which is itself part of why this is invisible.
+
+---
+
+## 9. Two timeout env vars are emitted to a consumer that does not exist
+
+**Status: OPEN.** Reported from ai-os, 2026-07-31.
+
+**Symptom.** A dispatch carrying an explicit `timeoutSeconds` runs unbounded. The
+agent can hang indefinitely; on Fargate that burns billed compute until someone
+notices.
+
+**Cause.** `packages/pangolin-client/src/dispatch.ts:315-321` emits two variables and
+explains itself by naming a reader:
+
+```ts
+// Emit derived worker-side timeout bounds (R4). With the 7200s floor always
+// defined, these are always emitted. The adapter's envSecondsOr defaults
+// remain a safety net for any older/standalone worker image that doesn't
+// receive them.
+if (effectiveTimeoutSeconds !== undefined) {
+  envVars.PANGOLIN_AGENT_TIMEOUT_SECONDS = String(effectiveTimeoutSeconds);
+  envVars.PANGOLIN_PLUGIN_INSTALL_TIMEOUT_SECONDS = String(...);
+}
+```
+
+There is no such reader. Three greps over `main` at `b0063b4`:
+
+| grep | result |
+|---|---|
+| `PANGOLIN_AGENT_TIMEOUT_SECONDS\|PANGOLIN_PLUGIN_INSTALL_TIMEOUT_SECONDS` over `packages/*/src/` | only the three lines above |
+| `envSecondsOr` over `packages/*/src/` | only the comment above |
+| every `PANGOLIN_*` string in `pangolin-runtime-claude-code@0.4.0/dist` | exactly two: `PANGOLIN_CLAUDE_PERMISSION_MODE`, `PANGOLIN_DISABLE_NEEDS_INPUT_HELPER` |
+
+`parseWorkerEnv` (`packages/pangolin-worker/src/env-parser.ts`) reads
+`PANGOLIN_SETUP_TIMEOUT_SECONDS` but neither of these, and `claude-spawn.ts` contains
+no `setTimeout`, no `AbortSignal`, and no `kill(`. So the values travel into the
+container and are read by nothing.
+
+**Impact.** Two layers, and the second is why this is worth filing rather than
+deleting the lines.
+
+The direct cost is an unbounded agent. `boundedAwaitExit` **does** exist and **does**
+bound — but only on the `awaitExit` path, which a fire-and-forget consumer never
+calls. For those consumers there is no bound anywhere in the stack: not in the client,
+not in the worker, not in the runtime adapter, and `FargateProvider.run` sets no ECS
+limit either (ECS has no native per-task timeout).
+
+The larger cost is that the comment asserts a safety net that is not there. A consumer
+reading `dispatch.ts` concludes the timeout it passes is enforced worker-side, and
+builds on that. That is exactly what happened here — it took three greps to establish
+otherwise, and the natural reading of the code is the wrong one.
+
+**Suggested fix.** Either honour it or stop advertising it. Honouring it is
+preferable and belongs in `pangolin-runtime-claude-code`: read
+`PANGOLIN_AGENT_TIMEOUT_SECONDS` in the adapter and enforce it around `spawnClaude`
+with a `SIGTERM`-then-`SIGKILL` escalation, so a hung agent produces a *failed*
+pipeline with a reason rather than a container that never exits. The same treatment
+for `PANGOLIN_PLUGIN_INSTALL_TIMEOUT_SECONDS` in `plugin-installer.ts`.
+
+If enforcement is out of scope, delete the emission and the comment — an env var with
+no consumer is worse than no env var, because it reads as a contract.
+
+**Note on scope.** Even with this fixed, an agent-phase timeout does not bound the
+*task* — bundle fetch, plugin install, capture, and callback all sit outside it. A
+consumer running on Fargate still needs its own task-level bound, and ai-os is
+shipping one. That is not an argument against fixing this; it is the reason the two
+are separate concerns.
+
+---
+
+## 10. `AwsSecretStore.stage` returns a random-suffixed ARN, so callers cannot scope IAM
+
+**Status: OPEN.** Reported from ai-os, 2026-07-31.
+
+**Symptom.** A caller wanting least-privilege on staged secrets has no policy to
+write except a wildcard over the whole namespace.
+
+**Cause.** `packages/pangolin-secret-store/src/aws-secret-store.ts:39-53` stages via
+`CreateSecret` and returns `res.ARN`. Secrets Manager appends **six random
+characters** to every secret ARN it mints, and that suffix is unknowable at
+policy-authoring time. Since `fireWork` names secrets `${dispatchId}/${envName}` and
+`dispatchId` is a fresh uuid per dispatch, the ARN is unpredictable on both segments.
+
+**Impact.** The tightest writable policy a caller can author is
+`arn:aws:secretsmanager:…:secret:<prefix>/*`. On a substrate where the task role is
+shared across dispatches — see issue 11 — that grant reaches **every** dispatch's
+staged secrets, including every dispatch's callback HMAC key. A compromised run can
+read the key that authenticates another run's callback.
+
+Both halves are needed for that consequence, which is why these are filed as a pair.
+
+**Suggested fix.** Offer deterministic paths. `PutSecretValue` against a
+pre-created secret, or an opt-in `stage({ deterministicName: true })` that creates
+under a caller-supplied stable name, would let a caller scope to
+`secret:<prefix>/<dispatchId>/*` — still a wildcard, but one bounded to a single
+dispatch, which is the boundary that matters.
+
+Worth noting `CreateSecret` also throws `ResourceExistsException` on a name collision,
+so a deterministic path needs a create-or-update, not a bare create.
+
+---
+
+## 11. `FargateProvider` has no per-dispatch task role, so every dispatch shares one identity
+
+**Status: OPEN.** Reported from ai-os, 2026-07-31.
+
+**Symptom.** Every dispatch on a given target runs with identical AWS permissions,
+regardless of what it was asked to do.
+
+**Cause.** `packages/pangolin-providers-fargate/src/index.ts` runs a single
+`taskDefinitionFamily` and its `RunTaskCommand` sets `overrides.containerOverrides`
+only — `environment`, `command`, `cpu`, `memory`. There is no `taskRoleArn` anywhere
+in the package (`grep -rn "taskRoleArn\|taskRole" packages/pangolin-providers-fargate/src/`
+returns nothing), and the task role is therefore whatever the task definition was
+registered with.
+
+ECS itself does support this: `RunTask` accepts `overrides.taskRoleArn`. The gap is
+that the provider does not expose it.
+
+**Impact.** Per-dispatch S3 or secret scoping is impossible on this substrate. A
+low-trust dispatch and a high-trust one get the same credential. Combined with issue
+10's wildcard, the blast radius of a single compromised run is every staged secret in
+the namespace.
+
+This also sits awkwardly against the care taken elsewhere in the stack — the env
+firewall, content-addressed bundles, and the digest pin all work to bound what a
+dispatch can do, and then the credential is shared.
+
+**Suggested fix.** Add an optional `taskRoleArn` to `TaskSpec` (or to the
+per-dispatch options that build it) and pass it through to
+`overrides.taskRoleArn`. Callers that do not set it keep today's behaviour exactly.
+The task *execution* role must stay on the task definition — only the task role is
+overridable — which is the right split anyway, since the execution role is
+infrastructure and the task role is workload identity.
+
+---
+
+## 12. `buildGitEnv` neutralises global and system git config, but not repo-local
+
+**Status: OPEN — known partial, recorded for completeness.** Reported from ai-os,
+2026-07-31.
+
+**Cause.** `packages/pangolin-worker/src/patch-capture.ts:61-62` sets:
+
+```ts
+GIT_CONFIG_GLOBAL: '/dev/null', // kills ~/.gitconfig and $XDG_CONFIG_HOME/git/config
+GIT_CONFIG_NOSYSTEM: '1',       // kills /etc/gitconfig
+```
+
+Both are correct and effective. What is absent is any relocation of `GIT_DIR`, so a
+**repo-local** `.git/config` is still read — and directives such as `core.fsmonitor`,
+`core.pager`, and `diff.*.textconv` execute arbitrary commands from it.
+
+**Impact.** Bounded, and worth stating precisely rather than alarmingly. The
+credential half is already closed: the hook runs with no `AWS_*` in its environment,
+because `buildGitEnv` is a genuine allowlist. What survives is code execution as the
+worker during patch capture, from content inside the repository being operated on.
+
+For a consumer whose workspace contains only its own trusted source this is
+approximately theoretical. It stops being theoretical for any consumer that captures
+patches against a repository it does not control — which is the case a
+review-before-merge gate exists for, since the tampering would run during the very
+step meant to inspect it.
+
+**Suggested fix.** Point `GIT_DIR` at a copy of the repo metadata outside the
+workspace, or add `-c core.fsmonitor=false -c core.pager=cat` to the capture
+invocations. The second is cheaper and closes the known directives without
+restructuring; the first is the general answer.
+
+---
+
 ## Related: CRLF on shell scripts
 
 A fifth issue — all four tracked `.sh` files checking out as CRLF on Windows and
