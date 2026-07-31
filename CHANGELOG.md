@@ -112,6 +112,28 @@ workspace. See [RELEASING.md](./RELEASING.md) for how a release is cut.
 
 ### Fixed
 
+- **`PANGOLIN_CLAUDE_PERMISSION_MODE=strict` was silently ignored — a safety
+  control failing open.** The worker's runtime env firewall is default-deny and
+  `PANGOLIN_*` is not on its allow-list, but the Claude Code adapter reads permission
+  mode out of the *post-filter* `ctx.env`. So the variable was withheld from the one
+  component that consumes it: `resolveBypassFlag` saw nothing, fell back to `bypass`,
+  and passed `--dangerously-skip-permissions` for a dispatch the operator had asked
+  to run with the tool-call gate on. No error, no warning, and no observable
+  difference from having configured nothing.
+
+  A short, explicitly-named set of non-credential **adapter config** vars now passes
+  the firewall: `PANGOLIN_CLAUDE_PERMISSION_MODE` and
+  `PANGOLIN_DISABLE_NEEDS_INPUT_HELPER`. By exact name, **never by a `PANGOLIN_`
+  prefix rule** — that would hand `PANGOLIN_CALLBACK_TOKEN_REF` to a prompt-injected
+  sub-agent and re-open the whole firewall; a test pins that. The blanket "drops all
+  `PANGOLIN_*`" assertion was replaced with a credential-by-credential one covering
+  more variables than before, so narrowing the claim did not narrow the protection.
+
+  **If you rely on `strict`:** verify rather than assume. On a worker image predating
+  this change the mode was ignored, so a dispatch you believed was gated was not.
+  Naming the variable in `PANGOLIN_RUNTIME_ENV_ALLOW` forces it through any version
+  of the filter.
+
 - **Patch capture no longer executes commands from a repo-local `.git/config`.**
   `buildGitEnv` set `GIT_CONFIG_GLOBAL=/dev/null` and `GIT_CONFIG_NOSYSTEM=1`, which
   kill `~/.gitconfig` and `/etc/gitconfig` — but neither touches the workspace's own

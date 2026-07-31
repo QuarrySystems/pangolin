@@ -333,6 +333,33 @@ the dispatch's merged env to decide whether to pass
 Unrecognized values fall back to `bypass` with a `console.warn` so a typo
 never silently leaves dispatches paralysed.
 
+### Where to set it
+
+Set it on the **worker's environment** — the task definition, the container
+env, or `docker run -e` for a local worker:
+
+```bash
+PANGOLIN_CLAUDE_PERMISSION_MODE=strict
+```
+
+The worker's runtime env firewall is default-deny, and this variable is on its
+built-in allow-list of non-credential adapter configuration, so it reaches the
+adapter from there. An env bundle also works, and takes precedence — bundle
+values are merged on top of the base env.
+
+:::caution[Worker images before this change]
+On an older worker image the firewall stripped this variable before the adapter
+saw it, so `strict` was **silently ignored** and the dispatch ran with
+`--dangerously-skip-permissions` anyway — no error, no warning. The control
+failed *open*.
+
+If you rely on `strict`, confirm your worker image includes this change, and
+verify rather than assume: a `strict` dispatch should show tool calls being
+denied in `runtime.adapter.ran` stdout. On an older image, either rebuild it or
+name the variable explicitly in `PANGOLIN_RUNTIME_ENV_ALLOW`, which forces it
+through any version of the filter.
+:::
+
 A `scoped` mode (an allow-list in `.claude/settings.json` plus the
 needs-input helper teaching "denied → write sentinel") is tracked as a
 follow-up; not shipped today.
