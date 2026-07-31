@@ -1,9 +1,9 @@
 ---
 title: Worker Environment-Block Exposure (/proc) — Finding and Candidate Mechanisms
 date: 2026-07-23
-status: draft — finding verified. C1 half 1 PASSED; C1-alt, C3, C2a FALSIFIED; C2b and C4 both converge on C1. Remaining question is a package-API decision (C1 half 2), not an experiment.
+status: draft — finding verified. **C1 AS DESCRIBED IS REFUTED (2026-07-31); C1′ VERIFIED CLOSED.** C1-alt, C3, C2a FALSIFIED; C2b and C4 both converge on C1′. C1 half 2 PASSED (injected + refreshing credentials work; the missing seam is confirmed by experiment). Remaining before design — gate §5 items 2 and 3.
 branch: security/worker-credential-custody
-authors: [human:Brett, agent:claude-opus-4-8]
+authors: [human:Brett, agent:claude-opus-4-8, agent:claude-opus-5]
 severity: high (the env firewall's stated mitigation does not hold)
 related:
   - ./2026-07-23-patch-capture-env-scoping-design.md # the sibling path, which IS ready
@@ -140,6 +140,92 @@ parent leaks: [ 'AWS_CONTAINER_CREDENTIALS_RELATIVE_URI=…', 'PANGOLIN_CALLBACK
 The premise holds: the block is built fresh at `execve` from the passed `envp`, so credentials never
 enter it. **Half 2 remains unrun**, and it is the harder half — it is constraint 2, a missing seam rather
 than an unknown behaviour, and no container test settles it.
+
+> **REFUTED 2026-07-31 — and the refutation was already printed above.**
+>
+> Read half 1's own output again: `parent leaks: [ 'AWS_CONTAINER_CREDENTIALS_RELATIVE_URI=…' ]`. That
+> line sits next to `child leaks: []` and reads as an incidental control. **It is the answer.** C1 says
+> the launcher "passes the credentials over an inherited fd" — an inherited fd requires a *live parent*,
+> and Node cannot `execve`-replace its own process image. So the launcher survives as PID 1 with the
+> credentials still in its env block, and the agent runs at the same uid.
+>
+> Run in `node:22-bookworm-slim` as uid 1000, with an "agent" that walks every readable
+> `/proc/<pid>/environ`:
+>
+> ```
+> LAUNCHER: credentials are in my environment (as the container delivers them)
+>   launcher pid 1, own env has secret? "/v2/credentials/TOPSECRET-TASK-ROLE"
+>
+>   WORKER own env has secret? null
+>   AGENT  own env has secret? null
+>   AGENT found secret in 1 process(es):
+>     - pid 1 (node c1-launcher-leak.mjs)
+>   => STILL OPEN: the credential is readable from the listed process(es)
+> ```
+>
+> The worker is clean and the agent is clean — and the credential is taken from the launcher anyway.
+> **Building C1 as written would have shipped a new entrypoint, fd plumbing and a storage-API change, and
+> closed nothing.** This is §2 happening a second time: a carefully reasoned design resting on one fact
+> nobody ran.
+
+### C1′ — shell entrypoint that `exec`s, credential handed over a file — **VERIFIED CLOSED 2026-07-31**
+
+The fix for C1's defect is to leave *no surviving process* holding the credentials. A POSIX shell can do
+what Node cannot: `exec` calls `execve()` and the kernel rebuilds the env region from the new `envp`, so
+the entrypoint does not survive to be read.
+
+The hand-off is a private file rather than an inherited pipe — **deliberately**, because a pipe needs a
+live writer, which is exactly the process being removed. The worker reads it and `unlink`s it at startup,
+before the agent exists.
+
+```sh
+# entrypoint.sh (container ENTRYPOINT)
+umask 077; printf '%s' "$AWS_CONTAINER_CREDENTIALS_RELATIVE_URI" > "$CREDS_DIR/creds"
+exec env -i PATH="$PATH" CREDS_FILE="$CREDS_DIR/creds" node worker.js
+```
+
+Same container, same uid, same agent sweep of all of `/proc`:
+
+```
+ENTRYPOINT (pid 1): credentials ambient; wrote them to /tmp/pangolin-creds/creds
+ENTRYPOINT: exec'ing the worker with env -i — this REPLACES this process
+
+  WORKER (pid 1): got credential over the file channel (len 35), unlinked it
+  WORKER: own env block has secret? null
+
+  AGENT: secret found in 0 process env block(s)
+  AGENT: hand-off file still present? false
+  => CLOSED: no process env block and no file leaks the credential
+```
+
+Note the worker is **pid 1** — `exec` replaced the image rather than forking, so there is no second
+process. Both lanes are shut: no env block carries the credential, and the file is gone before the agent
+runs.
+
+**Open question this raises for the design:** the file exists on disk between the entrypoint write and
+the worker's `unlink`. Nothing in the container should be running as the agent during that window, but
+that is currently an argument rather than an enforced property, and the design should say which.
+
+### C1 half 2 — the credentials seam — **RUN 2026-07-31. Behaviour PASSES; the missing seam is CONFIRMED.**
+
+The half the frontmatter called "a package-API decision, not an experiment". The API half is indeed a
+decision, but the *behavioural* half was testable and is now measured, against MinIO:
+
+| probe | result |
+|---|---|
+| `S3Client({ credentials: <static> })`, nothing in `process.env` | request **signed**, `NoSuchKey` |
+| `S3Client({ credentials: <async provider> })` | request **signed** |
+| provider re-invoked after `expiration` elapses | **yes — 3 → 5 invocations** |
+| `S3StorageProvider({ credentials })` | **`InvalidAccessKeyId` — silently ignored** |
+
+The refresh result is the one that mattered: Fargate hands a *pointer* to a refreshing endpoint
+(constraint 4), so a one-shot hand-off that could not refresh would break a long dispatch. It refreshes.
+
+The last row confirms constraint 2 **by experiment** rather than by reading: `S3StorageProviderOpts` has
+no `credentials` field, so the value is accepted by TypeScript's structural typing at the call site and
+then dropped on the floor. Today the only injection point is `client?: S3Client`, which makes
+`endpoint`/`forcePathStyle`/`region` inert — an all-or-nothing seam. **The package-API decision is
+therefore: add `credentials` to `S3StorageProviderOpts` so it composes with the existing options.**
 
 ### C1-alt — overwrite the env block in place via `process.title` — **FALSIFIED 2026-07-23**
 
@@ -279,12 +365,31 @@ Path 1 without either a new process boundary (C1/C2b) or a credential channel ou
 
 ## 5. Gate before this becomes a plan
 
-1. Pick a candidate and **run its falsification test first**, in a container, and record the output in
-   this document. §2 is what happens otherwise.
-2. Enumerate the actual exposed set on **both** providers (constraint 4) rather than assuming
-   `AWS_*`/`PANGOLIN_*`.
-3. State which of `process.env` or the threaded `env` parameter the mechanism acts on (constraint 7).
+1. ~~Pick a candidate and **run its falsification test first**, in a container, and record the output in
+   this document.~~ **DONE 2026-07-31.** C1 refuted, C1′ verified closed, half 2 measured — all output
+   recorded in §4. The candidate is **C1′**.
+2. **TODO — enumerate the actual exposed set on both providers** (constraint 4) rather than assuming
+   `AWS_*`/`PANGOLIN_*`. On Fargate the task definition's `secrets:[]` entries arrive ambiently too, so
+   the entrypoint must know precisely what to carry across and what to drop. This is the next task.
+3. **TODO — state which of `process.env` or the threaded `env` parameter the mechanism acts on**
+   (constraint 7). Note C1′ makes this sharper, not moot: the shell entrypoint acts on the *real* process
+   environment before `execve`, whereas every existing test passes a synthetic `env` object to
+   `runWorker`, so a test written the usual way would be vacuous. Say so explicitly in the design.
 4. Only then write the design section and hand it to a plan.
+
+**Scope note for whoever picks this up.** C1′ closes the exposure; it does not by itself deliver
+credentials to the two consumers that need them. Sequenced smallest-first:
+
+- **(a)** `credentials` on `S3StorageProviderOpts` — contained, independently useful, unblocks everything
+  else. No security change on its own.
+- **(b)** the shell entrypoint + file hand-off + `unlink`, per C1′.
+- **(c)** the secret lane. Per C4's verdict, secrets cannot be presigned at all (the AWS JS SDK presigns
+  S3 only), so they must ride the same fd/file channel.
+- **(d)** provider changes: `pangolin-providers-local-docker` supplies static `AWS_*` via `extraEnv`;
+  Fargate supplies the refreshing pointer. Different shapes, different refresh semantics (constraint 4).
+
+Also unresolved: constraint 3 — the worker declares no credential-provider dependency, and
+`pnpm check:deps` fails on undeclared bare specifiers, so adding one is a real packaging change.
 
 ---
 
