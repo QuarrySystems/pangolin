@@ -36,7 +36,7 @@ export interface OrchContext {
   transport: SubmissionTransport & ControlChannel;
   anchor?: AuditAnchor;
   storage?: { get(ref: string): Promise<Uint8Array> };
-  verifySignature?: (root: Uint8Array, sig: Signature) => boolean;
+  verifySignature?: (root: Uint8Array, sig: Signature) => boolean | 'n/a';
   /** Optional injected RFC 3161 trusted-time verifier (e.g. from @quarry-systems/pangolin-verify).
    *  Additive — when present, `pangolin verify` reports the trusted-time tier; absent leaves
    *  existing behavior unchanged (the time check stays 'n/a'/asserted). */
