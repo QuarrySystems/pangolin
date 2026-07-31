@@ -9,7 +9,7 @@ workspace. See [RELEASING.md](./RELEASING.md) for how a release is cut.
 
 ## [Unreleased]
 
-## [0.5.0] - 2026-07-31
+## [0.5.0] - 2026-07-31 — Security & audit integrity: guards that silently stopped guarding
 
 > **Scope of the env-firewall fix in this release.** Making
 > `PANGOLIN_CLAUDE_PERMISSION_MODE` reach the runtime adapter closes a
