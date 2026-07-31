@@ -12,7 +12,11 @@
 import { spawn } from 'node:child_process';
 import { readFile, access } from 'node:fs/promises';
 import { join } from 'node:path';
-import { armChildTimeout, type ChildTimeoutOptions } from './child-timeout.js';
+import {
+  armChildTimeout,
+  DETACH_FOR_GROUP_KILL,
+  type ChildTimeoutOptions,
+} from './child-timeout.js';
 
 export interface InstallPluginsOptions extends ChildTimeoutOptions {
   workspaceDir: string;
@@ -50,6 +54,9 @@ export async function installPluginsFromManifest(opts: InstallPluginsOptions): P
         // F3: capture, never inherit — the merged env carries secrets and the
         // child's output must not reach the worker's fds unredacted.
         stdio: ['ignore', 'pipe', 'pipe'],
+        // Own process group, so a timeout signals the installer's descendants
+        // (package managers, fetch helpers) and not just the direct child.
+        detached: DETACH_FOR_GROUP_KILL,
       });
       let out = '';
       let err = '';
@@ -68,7 +75,11 @@ export async function installPluginsFromManifest(opts: InstallPluginsOptions): P
       // PANGOLIN_PLUGIN_INSTALL_TIMEOUT_SECONDS describes.
       const timeout = armChildTimeout(child, `claude plugins install ${name}`, opts);
 
+      let settled = false;
+
       child.on('close', (code: number | null) => {
+        if (settled) return;
+        settled = true;
         timeout.disarm();
         const tail = `${out}${err}`.trim();
         if (timeout.timedOut()) {
@@ -83,7 +94,21 @@ export async function installPluginsFromManifest(opts: InstallPluginsOptions): P
           );
         }
       });
+
+      // Timeout-path safety net — see the equivalent in claude-spawn.ts. A
+      // surviving descendant holding the pipe would otherwise stop 'close'
+      // from ever firing, hanging the install we just tried to bound.
+      child.on('exit', () => {
+        if (settled || !timeout.timedOut()) return;
+        settled = true;
+        timeout.disarm();
+        const tail = `${out}${err}`.trim();
+        reject(new Error(`${timeout.reason()!}${tail ? `: ${tail}` : ''}`));
+      });
+
       child.on('error', (e: Error) => {
+        if (settled) return;
+        settled = true;
         timeout.disarm();
         reject(new Error(`claude plugins install ${name} failed to spawn: ${e.message}`));
       });

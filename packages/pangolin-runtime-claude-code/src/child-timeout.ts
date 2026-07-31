@@ -27,6 +27,46 @@ export interface ChildTimeoutOptions {
 /** The subset of `ChildProcess` this helper needs — keeps it trivially testable. */
 interface Killable {
   kill(signal?: NodeJS.Signals): boolean;
+  readonly pid?: number | undefined;
+}
+
+/**
+ * True on platforms where a spawned child can lead its own process group, so a
+ * negative-pid signal reaches its descendants too.
+ */
+const CAN_GROUP_KILL = process.platform !== 'win32';
+
+/**
+ * Spawn option that makes the child a process-group leader. Callers that use
+ * `killTree` MUST spawn with this, or a signal reaches only the direct child.
+ *
+ * This is load-bearing, not incidental. `claude` spawns its own subprocesses;
+ * signalling only the direct child leaves those descendants alive, still
+ * holding the inherited stdout/stderr pipes — so `'close'` never fires and the
+ * container hangs anyway, which is the exact failure this bound exists to
+ * prevent. CI caught precisely that: a bash stub running `sleep 30` outlived
+ * the SIGTERM sent to its parent and the test hung until vitest killed it.
+ */
+export const DETACH_FOR_GROUP_KILL = CAN_GROUP_KILL;
+
+/**
+ * Signal the child's whole process group, falling back to the direct child when
+ * the group signal is unavailable (Windows) or the group is already gone.
+ */
+export function killTree(child: Killable, signal: NodeJS.Signals): void {
+  if (CAN_GROUP_KILL && typeof child.pid === 'number') {
+    try {
+      process.kill(-child.pid, signal);
+      return;
+    } catch {
+      // ESRCH (group already reaped) or EPERM — fall through to the direct kill.
+    }
+  }
+  try {
+    child.kill(signal);
+  } catch {
+    // Already exited; nothing to signal.
+  }
 }
 
 export interface ArmedTimeout {
@@ -68,10 +108,10 @@ export function armChildTimeout(
 
   const timer = setTimeout(() => {
     fired = true;
-    child.kill('SIGTERM');
+    killTree(child, 'SIGTERM');
     escalationTimer = setTimeout(() => {
       killed = true;
-      child.kill('SIGKILL');
+      killTree(child, 'SIGKILL');
     }, graceSeconds * 1000);
     escalationTimer.unref?.();
   }, seconds * 1000);

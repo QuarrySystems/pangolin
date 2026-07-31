@@ -11,7 +11,11 @@
 // can distinguish operational failures from environment misconfiguration.
 
 import { spawn } from 'node:child_process';
-import { armChildTimeout, type ChildTimeoutOptions } from './child-timeout.js';
+import {
+  armChildTimeout,
+  DETACH_FOR_GROUP_KILL,
+  type ChildTimeoutOptions,
+} from './child-timeout.js';
 
 /**
  * Exit code reported when the agent overran `timeoutSeconds`. 124 is the
@@ -48,6 +52,20 @@ export interface SpawnClaudeOptions extends ChildTimeoutOptions {
   model?: string;
 }
 
+/**
+ * Result for a run the bound terminated. stdout captured before the kill is
+ * preserved — a partial transcript is often the only evidence of where the
+ * agent got stuck.
+ */
+function timedOutResult(stdout: string, stderr: string, reason: string): ClaudeSpawnResult {
+  const line = `pangolin: ${reason}`;
+  return {
+    exitCode: TIMEOUT_EXIT_CODE,
+    stdout,
+    stderr: stderr ? `${stderr}\n${line}` : line,
+  };
+}
+
 /** Pure arg construction — exported for platform-independent testing. */
 export function buildClaudeArgs(
   opts: Pick<SpawnClaudeOptions, 'prompt' | 'dangerouslySkipPermissions' | 'model' | 'extraArgs'>,
@@ -71,6 +89,9 @@ export async function spawnClaude(opts: SpawnClaudeOptions): Promise<ClaudeSpawn
     const child = spawn(bin, args, {
       cwd: opts.workspaceDir,
       env: opts.env,
+      // Own process group, so a timeout can signal `claude`'s descendants too.
+      // Without it a killed agent's children survive holding the stdout pipe.
+      detached: DETACH_FOR_GROUP_KILL,
     });
 
     let stdout = '';
@@ -88,24 +109,38 @@ export async function spawnClaude(opts: SpawnClaudeOptions): Promise<ClaudeSpawn
     // reason instead of a container that never exits.
     const timeout = armChildTimeout(child, 'claude agent', opts);
 
+    let settled = false;
+
     child.on('error', (err: Error) => {
+      if (settled) return;
+      settled = true;
       timeout.disarm();
       reject(err);
     });
+
     child.on('close', (code: number | null) => {
+      if (settled) return;
+      settled = true;
       timeout.disarm();
       if (timeout.timedOut()) {
-        // stdout captured before the kill is preserved — a partial transcript
-        // is often the only evidence of where the agent got stuck.
-        const reason = `pangolin: ${timeout.reason()!}`;
-        resolve({
-          exitCode: TIMEOUT_EXIT_CODE,
-          stdout,
-          stderr: stderr ? `${stderr}\n${reason}` : reason,
-        });
+        resolve(timedOutResult(stdout, stderr, timeout.reason()!));
         return;
       }
       resolve({ exitCode: code ?? -1, stdout, stderr });
+    });
+
+    // Timeout-path safety net. 'close' waits for every inherited pipe to be
+    // released, so a descendant that survived the kill would otherwise hang
+    // this promise forever — the very outcome the bound exists to prevent, and
+    // exactly what CI caught. 'exit' fires on process exit regardless of stdio,
+    // so once we have killed the child we settle from whichever arrives first.
+    // Only ever reached after a timeout, so the normal path still resolves on
+    // 'close' and keeps its flush guarantee.
+    child.on('exit', () => {
+      if (settled || !timeout.timedOut()) return;
+      settled = true;
+      timeout.disarm();
+      resolve(timedOutResult(stdout, stderr, timeout.reason()!));
     });
   });
 }
