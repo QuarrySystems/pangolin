@@ -229,14 +229,17 @@ it('a bad verifySignature causes intact to be false', async () => {
 // Handoff closure tests (spec §7)
 // ---------------------------------------------------------------------------
 
-it('bundle with no manifests (zero inputRefs) reports handoff ok: true, no handoff edges', async () => {
+it("bundle with no manifests (zero inputRefs) reports handoff ok: 'n/a', no handoff edges", async () => {
   const { bundle, root } = buildSealedBundle();
   // manifests: [] (default) — zero handoff edges. Signed seal + verifier so the claim is earned.
   const r = await verifyBundle(bundle, {
     anchor: anchorOf(root, 'external-immutable', SIG),
     verifySignature: () => true,
   });
-  expect(r.checks.handoff).toEqual({ ok: true, detail: 'no handoff edges' });
+  // 'n/a', not true: nothing was verified because there was nothing to verify, and a ✓
+  // here reads as a fifth passing check (KNOWN-ISSUES #5a). The VERDICT is unchanged —
+  // zero edges must not weaken the bundle's claim, only how the row renders.
+  expect(r.checks.handoff).toEqual({ ok: 'n/a', detail: 'no handoff edges' });
   expect(r.intact).toBe(true);
   expect(r.claim).toBe('tamper-evident');
 });

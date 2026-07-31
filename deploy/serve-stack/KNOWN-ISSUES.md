@@ -281,6 +281,19 @@ label; `n/a` asserts the run had no handoff edges, which was false here.
 
 ### 5a. The bundle verify gives handoff a green tick at zero edges
 
+**Status: FIXED.** `checkHandoffClosure` now returns `ok: 'n/a'` at zero edges, so
+the row renders `─ handoff  no handoff edges` instead of `✓`. The change was one
+line plus its test: the neutral state already existed end to end — `CheckResult.ok`
+is `boolean | 'n/a'` (`audit.ts:203`, commented *"prerequisite genuinely absent —
+never a false ✓"*) and the renderer already maps it to `─`
+(`pangolin-verify/src/render.ts:22`). Handoff simply was not using the state the
+type had reserved for it.
+
+The verdict is deliberately unchanged: `intact` tests `handoff.ok !== false`, so
+`'n/a'` still cannot fail a bundle. Zero edges was never a *failure* — it was a
+non-answer being rendered as a pass. Issue 5 proper (the `orch watch` inline
+summary disagreeing with `pangolin verify`) is untouched and still open.
+
 A third run (`converter-loop-proof-1785344533713`, two items, no `needs` edges)
 completes the matrix, and it contradicts a reassuring reading of the above:
 

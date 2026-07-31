@@ -102,6 +102,21 @@ workspace. See [RELEASING.md](./RELEASING.md) for how a release is cut.
   it cheaply *because* terminal runs went quiet. And existing outboxes are not
   rewritten — the accumulated records stay, but reads no longer walk them.
 
+- **`pangolin verify` no longer gives the handoff check a green tick when there
+  was nothing to check.** A bundle with zero handoff edges reported
+  `✓ handoff  no handoff edges`. The label was honest but the glyph was not: `✓`
+  renders identically to the checks above it that did real work, so the block read
+  as one more verified property. It matters in the case the check exists for — a
+  plan that was *supposed* to carry handoff edges and lost them (a converter bug, a
+  dropped `needs` block) rendered as a pass, so the check could not fail for the
+  failure it is meant to catch. Zero edges now reports `ok: 'n/a'` and renders
+  `─ handoff  no handoff edges`, the state `CheckResult` already reserved for
+  "prerequisite genuinely absent — never a false ✓".
+
+  **No verdict changes.** `intact` has always tested `handoff.ok !== false`, so
+  `'n/a'` cannot fail a bundle that previously passed. Callers that compare
+  `checks.handoff.ok === true` will now see `'n/a'` for zero-edge runs.
+
 - **`denied` now counts as terminal in the serve loop.** `TerminalStatus` gained a
   runtime companion, `TERMINAL_STATUSES`, exported from the orchestrator's contracts
   and kept beside the type. Four modules still carry private copies that omit
