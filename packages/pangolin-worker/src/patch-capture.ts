@@ -36,6 +36,11 @@ export async function computeWorkspacePatch(
     await git(workspaceDir, ['add', '-A']);
     const diff = await git(workspaceDir, [
       'diff',
+      // `diff.external` and `diff.<driver>.textconv` also execute commands, and
+      // unlike fsmonitor/pager they are per-driver, so no single `-c` disables
+      // them — these flags are the only complete answer.
+      '--no-ext-diff',
+      '--no-textconv',
       '--cached',
       baseline.treeOid,
       '--',
@@ -80,11 +85,28 @@ function git(dir: string, args: string[]): Promise<string> {
     const child = spawn(
       'git',
       [
-        '-C', dir,
-        '-c', 'safe.directory=*',
-        '-c', 'user.email=pangolin@local',
-        '-c', 'user.name=pangolin',
-        '-c', 'commit.gpgsign=false',
+        '-C',
+        dir,
+        '-c',
+        'safe.directory=*',
+        '-c',
+        'user.email=pangolin@local',
+        '-c',
+        'user.name=pangolin',
+        '-c',
+        'commit.gpgsign=false',
+        // Neutralise repo-local config directives that make git EXECUTE a
+        // command. GIT_CONFIG_GLOBAL/GIT_CONFIG_NOSYSTEM in buildGitEnv() kill
+        // ~/.gitconfig and /etc/gitconfig, but neither touches the workspace's
+        // own .git/config — and capture runs against a tree the agent (or, for
+        // a review-before-merge consumer, an untrusted contributor) controls.
+        // `-c` beats repo-local config, so these win.
+        '-c',
+        'core.fsmonitor=false',
+        '-c',
+        'core.pager=cat',
+        '-c',
+        'core.hooksPath=/dev/null',
         ...args,
       ],
       { env: buildGitEnv() },
@@ -106,14 +128,16 @@ function git(dir: string, args: string[]): Promise<string> {
 
     child.on('error', (err) => settle(() => reject(err)));
 
-    child.on('exit', (code, signal) => settle(() => {
-      if (code === 0) {
-        resolve(Buffer.concat(stdoutChunks).toString('utf8'));
-        return;
-      }
-      const stderr = Buffer.concat(stderrChunks).toString('utf8');
-      const reason = signal ? `killed by ${signal}` : `exited ${code}`;
-      reject(new Error(`git ${args.join(' ')} ${reason}: ${stderr}`));
-    }));
+    child.on('exit', (code, signal) =>
+      settle(() => {
+        if (code === 0) {
+          resolve(Buffer.concat(stdoutChunks).toString('utf8'));
+          return;
+        }
+        const stderr = Buffer.concat(stderrChunks).toString('utf8');
+        const reason = signal ? `killed by ${signal}` : `exited ${code}`;
+        reject(new Error(`git ${args.join(' ')} ${reason}: ${stderr}`));
+      }),
+    );
   });
 }

@@ -1308,8 +1308,43 @@ infrastructure and the task role is workload identity.
 
 ## 12. `buildGitEnv` neutralises global and system git config, but not repo-local
 
-**Status: OPEN — known partial, recorded for completeness.** Reported from ai-os,
-2026-07-31.
+**Status: FIXED for the known directives — still a partial, and deliberately so.**
+
+The entry's calibration was right on every point, including its restraint. The
+credential half really is closed (`buildGitEnv` is a genuine allowlist, and a static
+test pins its exact key set); what survived was code execution as the worker, from
+content inside the repository being operated on.
+
+*It was already reproduced in-tree, which the entry did not mention.*
+`patch-capture-escape.test.ts` planted a repo-local `core.fsmonitor` hook and asserted
+it **ran** — using it as a live probe that `buildGitEnv` withholds credentials. So the
+execution half had a working demonstration all along; it was simply being used to prove
+a different property.
+
+*The fix.* `git()` already threads `-c` flags, and `-c` beats repo-local config, so the
+hardening lands in one place: `core.fsmonitor=false`, `core.pager=cat`,
+`core.hooksPath=/dev/null`, plus `--no-ext-diff --no-textconv` on the diff. The last two
+are flags rather than `-c` because `diff.external` and `diff.<driver>.textconv` are
+per-driver and enabled through the repo's own `.gitattributes` — no single `-c` disables
+them.
+
+The escape test now asserts the hook does **not execute at all**, which is strictly
+stronger than "executes but sees no credential". Its sibling — a raw `git` with no
+scoping — still fires the same hook and still leaks, so the new absence is the flags
+doing work rather than a vector that quietly stopped being live.
+
+*What remains open, stated plainly.* `filter.<driver>.clean` still executes on
+`git add -A` when the repo's `.gitattributes` declares it. It is per-driver, so like
+textconv it cannot be turned off with one `-c`, and unlike textconv there is no
+equivalent flag on `add`. **The general answer remains the entry's first suggestion:
+relocate `GIT_DIR` to a copy of the repo metadata outside the workspace.** That is a
+restructure, it is not urgent for a consumer whose workspace holds only its own trusted
+source, and it is recorded here rather than half-done.
+
+So this is still correctly filed as a partial — a smaller one, with the cheap directives
+closed and the remaining hole named rather than implied.
+
+**Original report follows.** Reported from ai-os, 2026-07-31.
 
 **Cause.** `packages/pangolin-worker/src/patch-capture.ts:61-62` sets:
 
@@ -1356,8 +1391,33 @@ history is now misleading on that point and cannot be un-misled.
 
 ## 13. No supported way to mount an immutable input artifact independent of subagent identity
 
-**Feature request, not a defect** — and the mechanism is already present, so the
-ask is a contract rather than an invention.
+**Documented limitation, not a request. Nobody is blocked on it.**
+
+Filed because the analysis cost most of a day and the next person who tries to
+evaluate a pangolin subagent will hit exactly this — not because anything is
+waiting on a fix. The consumer that found it measured what it needed through a
+deliberately-labelled *simulated* boundary and then stopped: the question it was
+chasing turned out to be answerable by six hand-read trials, and the apparatus
+that would have consumed this feature was never built.
+
+**No urgency is claimed and no roadmap should move for it.** The shapes suggested
+below are conditional — *if* this is ever addressed, they are what a consumer
+would need — rather than a design being asked for.
+
+Two things here stand on their own regardless of what is decided about the
+feature:
+
+1. **The missing third identity** (end of this entry). Pangolin records agent
+   build identity and capability identity independently, and has no notion of
+   trial input identity. Every symptom below follows from that one absence.
+2. **Five undeclared plan-level carriers**, one of them explicitly
+   *"Shape guard (not trust guard)"*.
+
+On (2), stated carefully: the carriers are undeclared on `WorkItem` and
+unvalidated at submit. Whether a submitter-supplied ref pointing outside the run
+is rejected **downstream** is unverified from outside — `assertArtifactRef` does
+guard the fetch on the paths that were read. That is a question worth answering,
+not a vulnerability claim.
 
 **Verified against source, 2026-07-31 — every claim holds, and one is understated.**
 
@@ -1453,7 +1513,8 @@ that would couple an external consumer to an undeclared internal convention whos
 failure mode is silent. The ref would simply not be there, or would be someone
 else's.
 
-**Suggested fix.** Promote the carrier to a declared, validated input:
+**Shape it would need, if ever addressed.** Not a request — see the header. Written
+down so the requirements are not rediscovered alongside the problem:
 
 ```ts
 // contracts/types.d.ts
@@ -1478,14 +1539,58 @@ The audit story is unaffected and arguably improved: a literal ref is *more*
 reproducible than one resolved from a sibling dispatch, because it is stable
 across runs and can be committed alongside the plan.
 
-**Smaller alternative, if the artifact case is unwelcome.** An
-`registerArtifact` / `ArtifactRef` sibling to `registerEnv`, selectable via a
-declared `inputs.artifacts`, would solve the evaluation case without touching
-`inputRefs` or `needs` semantics at all. That may be the cleaner boundary: `needs`
-stays "products of upstream items", and artifacts are "content the submitter
-pinned", which are genuinely different things that currently share one field.
+**Smaller alternative, and probably the better boundary.** A `registerArtifact` /
+`ArtifactRef` sibling to `registerEnv`, selectable via a declared
+`inputs.artifacts`, solves the evaluation case without touching `inputRefs` or
+`needs` semantics at all. `needs` means *"products of upstream items"*; a pinned
+fixture means *"content the submitter chose"*. Those are genuinely different
+things currently sharing one field, and separating them avoids renegotiating
+handoff semantics to serve a case handoff was never about.
 
-**Who wants this.** Anyone evaluating a subagent rather than merely running it —
+**The plumbing is small; the trust boundary is not.** An earlier revision of this
+entry led with how little code it needs, which was the wrong emphasis — this
+introduces a submitter-controlled path into a worker workspace. Whichever shape is
+chosen should require:
+
+- a **public typed plan field**, not another undeclared carrier;
+- registration returning a **content-addressed input identity**;
+- **per-run selection by immutable identity**;
+- **digest verification before mounting**;
+- a **deterministic mount location and precedence** rule;
+- **rejection of path traversal** and of undeclared collisions;
+- **size and file-count limits**;
+- **no arbitrary host paths and no untrusted URLs**;
+- input identity **recorded in the manifest and the bundle**;
+- **no change to subagent or capability identity**;
+- **executor refusal** when the referenced artifact is missing or mismatched.
+
+**What this is really asking for is a third identity.** Pangolin already records
+two independently and hashes them together:
+
+```
+Agent build identity      (subagent contentHash — includes capabilities)
+Capability identity       (capability contentHash)
+Trial input identity      ← does not exist
+```
+
+Everything above follows from that gap. Because there is no third identity, the
+only way to fix an input is to fold it into one of the first two, which is why
+holding an agent constant while varying what it sees is currently impossible.
+
+**What it does and does not buy the consumer.** It lets a challenge fixture be
+mounted against the *exact production agent identity*, upgrading a **simulated**
+susceptibility measurement — `P(accept | injected defect class k)` — into a
+**production-boundary** one. It does **not** yield exposure. Exposure is
+
+```
+Exposure = Σ_k  P(defect class k) × P(accept | defect class k)
+```
+
+and the left-hand term is prevalence, which comes from production audits,
+incidents or representative sampling — not from transport. Worth stating here so
+the feature is not oversold to whoever prioritises it.
+
+**Who would want this.** Anyone evaluating a subagent rather than merely running it —
 regression-testing a reviewer against known-bad inputs, measuring an acceptance
 boundary, or pinning a golden input for a determinism check. All three need the
 same thing: the agent held constant, the input fixed, and neither expressed

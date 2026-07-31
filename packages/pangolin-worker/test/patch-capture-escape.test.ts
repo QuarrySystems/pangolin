@@ -27,7 +27,14 @@ async function plantHook(dir: string, leakDir: string): Promise<string> {
 }
 
 describe('patch-capture escape', () => {
-  it('a repo-local core.fsmonitor hook sees no credential from the worker', async () => {
+  /**
+   * KNOWN-ISSUES 12. `buildGitEnv` kills ~/.gitconfig and /etc/gitconfig, but
+   * neither touches the workspace's own `.git/config` — and capture runs against
+   * a tree the agent controls (and, for a review-before-merge consumer, one an
+   * untrusted contributor controls). This used to assert the hook ran but saw no
+   * credential; the hook now does not run at all, which is the stronger property.
+   */
+  it('a repo-local core.fsmonitor hook does not execute at all', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'escape-'));
     const leakDir = await mkdtemp(join(tmpdir(), 'escape-leak-'));
 
@@ -40,20 +47,17 @@ describe('patch-capture escape', () => {
 
     process.env.AWS_SESSION_TOKEN = AWS_VALUE;
     process.env.PANGOLIN_CALLBACK_TOKEN_REF = REF_VALUE;
-    await computeWorkspacePatch(dir, base);
+    const patch = await computeWorkspacePatch(dir, base);
 
-    // No .catch — an absent file means the hook never ran and the test must fail loudly.
-    const captured = await readFile(leak, 'utf8');
+    // The hook never ran, so its leak file was never created. The second test
+    // below is the discriminator: the same hook DOES fire under a raw git, so
+    // this absence is the `-c core.fsmonitor=false` doing work, not a broken
+    // vector.
+    await expect(readFile(leak, 'utf8')).rejects.toThrow(/ENOENT/);
 
-    // Positive controls: the hook executed, and it executed under the SCOPED env.
-    expect(captured).toMatch(/^PATH=/m);
-    expect(captured).toMatch(/^HOME=\/nonexistent$/m);
-
-    // The actual security assertions.
-    expect(captured).not.toContain(AWS_VALUE);
-    expect(captured).not.toContain(REF_VALUE);
-    expect(captured).not.toMatch(/^AWS_/m);
-    expect(captured).not.toMatch(/^PANGOLIN_/m);
+    // And capture still did its job — hardening must not cost the patch.
+    expect(patch).not.toBeNull();
+    expect(new TextDecoder().decode(patch!)).toContain('agent change');
   });
 
   it('POSITIVE CONTROL: the same hook under an unscoped spawn does leak the worker env', async () => {
