@@ -9,6 +9,18 @@ workspace. See [RELEASING.md](./RELEASING.md) for how a release is cut.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-31
+
+> **Scope of the env-firewall fix in this release.** Making
+> `PANGOLIN_CLAUDE_PERMISSION_MODE` reach the runtime adapter closes a
+> *misconfiguration* path — an operator asking for `strict` now gets it. It does
+> **not** harden the firewall against a hostile agent: the agent and the worker
+> run as the same uid, so a prompt-injected agent reads the worker's environment
+> directly from `/proc/<pid>/environ`, without needing `env`/`printenv`. That
+> exposure is verified and unfixed. See the *Identity theft* row of the
+> [threat model](https://quarrysystems.github.io/pangolin/explanation/threat-model/)
+> for the standing limit. Nothing in this release changes it.
+
 ### Breaking
 
 - **`CliContext` requires a third member, `getSyncProviders`.** This affects only
@@ -689,6 +701,7 @@ watch | cancel | audit` — a long-running driver runs a DAG of agent tasks
 - **Effect-tier policy** is computed but not yet enforced.
 - **Pre-1.0 (`0.x`):** interfaces may change between minor versions.
 
+[0.5.0]: https://github.com/QuarrySystems/pangolin/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/QuarrySystems/pangolin/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/QuarrySystems/pangolin/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/QuarrySystems/pangolin/compare/v0.2.0...v0.3.0

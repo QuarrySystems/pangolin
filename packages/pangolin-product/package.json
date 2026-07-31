@@ -1,6 +1,6 @@
 {
   "name": "@quarry-systems/pangolin-product",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "license": "BUSL-1.1",
   "description": "Consumer-side read of a dispatch's product — the output sentinel and its content-addressed artifacts. Depends only on pangolin-core.",
   "main": "dist/index.js",
