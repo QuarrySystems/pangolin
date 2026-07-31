@@ -303,9 +303,12 @@ report. `test/audit/bundle-report-completeness.test.ts` demonstrates exactly tha
 
 *And it was never only about `watch`.* The embedded report is what several callers
 **gate** on — `orch audit` takes its exit code from `bundle.report.intact`, as do
-`examples/appendable-stream` and `examples/demo-claims-appeals`. All were blind to
-the same three checks, so `orch audit` exited 0 on a bundle whose manifests were
-forged.
+`examples/demo-claims-appeals` (`:257`). Those were blind to the same three checks,
+so `orch audit` exited 0 on a bundle whose manifests were forged.
+
+*Correction to an earlier draft of this entry:* it also named
+`examples/appendable-stream`. That was wrong — it recomputes with `verifyBundle`
+before gating, so it was never affected.
 
 *The fix* is at the source rather than in `watch`: `assembleBundle` now computes the
 embedded report with `verifyBundle`, so every consumer of `bundle.report` gets the

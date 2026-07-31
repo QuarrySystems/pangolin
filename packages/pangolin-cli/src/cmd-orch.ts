@@ -30,6 +30,7 @@ import { parsePangolinUri } from '@quarry-systems/pangolin-core';
 import type { RuntimeUsage, StorageProvider } from '@quarry-systems/pangolin-core';
 import { readOutputSentinel } from '@quarry-systems/pangolin-product';
 import type { CliContext } from './index.js';
+import { verifiedView } from './verified-bundle.js';
 
 /** Config-owned operator wiring. Client verbs use transport(+anchor/storage); `serve` uses runService. */
 export interface OrchContext {
@@ -282,7 +283,8 @@ export function attachOrchCmd(program: Command, ctx: CliContext): void {
       const retryMs = Number(process.env.PANGOLIN_WATCH_AUDIT_RETRY_MS ?? AUDIT_RETRY_MS);
       for (let i = 0; i < retries; i++) {
         try {
-          const bundle = await api.audit(runId);
+          // Recompute rather than render the embedded report — see verified-bundle.ts.
+          const { bundle } = await verifiedView(await api.audit(runId), oc, 'orch watch');
           console.log(renderVerification(bundle, { color }));
           return;
         } catch {
@@ -304,7 +306,11 @@ export function attachOrchCmd(program: Command, ctx: CliContext): void {
     .action(async (runId, opts) => {
       const oc = await ctx.getOrchContext();
       const api = new OperationsApi(oc);
-      const bundle = await api.audit(runId);
+      // The exit code below is a GATE, so the verdict behind it is recomputed here
+      // against this process's own trust deps rather than read off the bundle — see
+      // verified-bundle.ts. The written JSON carries that recomputed report too, so the
+      // artifact on disk states the same verdict this command exited on.
+      const { bundle, report } = await verifiedView(await api.audit(runId), oc, 'orch audit');
 
       // Per-item evidence block (additive — printed to stderr before the JSON bundle).
       // Reads the pinned model per item straight from the sealed bundle manifests
@@ -330,7 +336,7 @@ export function attachOrchCmd(program: Command, ctx: CliContext): void {
       const json = JSON.stringify(bundle, null, 2);
       if (opts.out) await writeFile(opts.out, json);
       else console.log(json);
-      if (!bundle.report.intact) process.exitCode = 1; // audit failure → nonzero exit
+      if (!report.intact) process.exitCode = 1; // audit failure → nonzero exit
     });
 
   o.command('serve').action(async () => {

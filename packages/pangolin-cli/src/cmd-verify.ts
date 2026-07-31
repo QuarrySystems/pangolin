@@ -1,8 +1,9 @@
 import { Command } from 'commander';
 import { readFile } from 'node:fs/promises';
-import { verifyBundle, renderVerification } from '@quarry-systems/pangolin-orchestrator';
+import { renderVerification } from '@quarry-systems/pangolin-orchestrator';
 import type { AuditBundle } from '@quarry-systems/pangolin-orchestrator';
 import type { CliContext } from './index.js';
+import { recomputeVerdict } from './verified-bundle.js';
 
 export function attachVerifyCmd(program: Command, ctx: CliContext): void {
   program
@@ -15,15 +16,23 @@ export function attachVerifyCmd(program: Command, ctx: CliContext): void {
       try {
         bundle = JSON.parse(await readFile(file, 'utf8'));
       } catch (err) {
-        throw new Error(`pangolin verify: cannot read bundle at '${file}': ${(err as Error).message}`);
+        throw new Error(
+          `pangolin verify: cannot read bundle at '${file}': ${(err as Error).message}`,
+        );
       }
       const { anchor, verifySignature, verifyTimestamp } = await ctx.getOrchContext();
       if (!anchor) {
         throw new Error('pangolin verify: pangolin.config `orch` export provides no anchor');
       }
-      // verifyTimestamp is additive: threaded only if the config supplies one (e.g. from
-      // @quarry-systems/pangolin-verify). Omitted by default — existing behavior unchanged.
-      const report = await verifyBundle(bundle, { anchor, verifySignature, verifyTimestamp });
+      // Recomputed, never read off the bundle — this file is the reason that rule exists,
+      // since `bundle` here was just parsed from a file anyone could have written. Shared
+      // with the orch verbs via verified-bundle.ts. verifyTimestamp is additive: threaded
+      // only if the config supplies one (e.g. from @quarry-systems/pangolin-verify).
+      const report = await recomputeVerdict(
+        bundle,
+        { anchor, verifySignature, verifyTimestamp },
+        'pangolin verify',
+      );
       console.log(
         opts.json
           ? JSON.stringify(report, null, 2)

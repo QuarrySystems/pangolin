@@ -156,8 +156,7 @@ workspace. See [RELEASING.md](./RELEASING.md) for how a release is cut.
   manifest half was more than a disagreement: a forged manifest that `verifyBundle`
   reports as `✗ TAMPERED` with `failure: 'manifest'` rendered as a clean bill, and
   **`orch audit` takes its exit code from `bundle.report.intact`** (as do
-  `examples/appendable-stream` and `examples/demo-claims-appeals`), so a caught
-  forgery became a silent pass.
+  `examples/demo-claims-appeals`), so a caught forgery became a silent pass.
 
   `assembleBundle` now computes the embedded report with `verifyBundle`. Bundles
   assembled by earlier versions carry the old partial report; re-run `pangolin verify`
@@ -165,7 +164,17 @@ workspace. See [RELEASING.md](./RELEASING.md) for how a release is cut.
 
   This makes the embedded report *honest*, not *authoritative*: a report inside a
   bundle read from disk is still attacker-controllable, and a verifier must recompute
-  rather than trust it. `pangolin verify` and `pangolin-verify`'s CLI already do.
+  rather than trust it.
+
+- **Every CLI path that shows or gates on a verdict now recomputes it.** `orch watch`
+  and `orch audit` previously rendered and exited on the report embedded in the
+  bundle. That is sound only while the bundle was assembled moments earlier in the
+  same process — and making the embedded report complete (above) also made it *look*
+  authoritative, which is the more inviting version of the same trap. Both now
+  recompute against the config's own anchor, public key and trusted-time verifier,
+  via a shared `verified-bundle` helper that `pangolin verify` uses too. A verdict
+  with no anchor to check against now fails loudly instead of returning something
+  reassuring.
 
 - **A verifier with no trust anchor no longer reports a healthy run as `TAMPERED`.**
   `verifySignature` returned a bare boolean, so a verifier that could not resolve a
