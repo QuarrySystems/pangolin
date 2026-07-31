@@ -17,8 +17,20 @@ it('names the package @quarry-systems/pangolin-product', () => {
   expect(pkg.name).toBe('@quarry-systems/pangolin-product');
 });
 
-it('is pinned to the 0.4.0 release train, not 0.1.0', () => {
-  expect(pkg.version).toBe('0.4.0');
+it('rides the lockstep release train, not its scaffold default', () => {
+  // The invariant is lockstep with the rest of the workspace, not any one
+  // version number. This package shipped at 0.1.0 while the other fifteen were
+  // 0.3.1 (PR #97) — the drift RELEASING.md's dry-run count check now also
+  // catches — so the guard is worth keeping.
+  //
+  // Asserted RELATIVELY, against pangolin-core. Hard-coding the current version
+  // made this test fail on every single release, which turns a real guard into
+  // a release chore and trains whoever hits it to edit the number without
+  // thinking about what it is guarding.
+  const corePath = join(__dirname, '..', '..', 'pangolin-core', 'package.json');
+  const core = JSON.parse(readFileSync(corePath, 'utf8'));
+  expect(pkg.version).toBe(core.version);
+  expect(pkg.version).not.toBe('0.1.0');
 });
 
 it('is licensed BUSL-1.1', () => {
