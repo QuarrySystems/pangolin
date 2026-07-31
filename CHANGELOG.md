@@ -76,6 +76,27 @@ workspace. See [RELEASING.md](./RELEASING.md) for how a release is cut.
 
 ### Fixed
 
+- **`serve()` no longer leaves a multi-queue config half-inert.** It drove exactly
+  one queue (`opts.queue ?? 'default'`) while `PangolinOrchestrator` accepted and
+  validated the full queue map, so an item submitted to a configured, *validated*
+  queue that the loop did not happen to tick sat at `ready` forever — with no error
+  in the serve log, in `orch status`, or in the audit chain, while the loop
+  dispatched other work normally. `orch cancel` could not rescue it either, because
+  cancellation is processed by that same tick loop, and submit being idempotent by
+  id meant the id stayed occupied. Observed at 20+ minutes; the same run resubmitted
+  unchanged to the ticked queue finished in 67 seconds.
+
+  Naming a `queue` explicitly still drives exactly that queue, so one-process-per-queue
+  deployments are unaffected. **Omitting it now drives every configured queue**
+  rather than defaulting to `default`. Either way, queues that this process does not
+  drive are named in a startup warning — scoping to one queue is legitimate, so it
+  is a notice, not a refusal.
+
+  **Behaviour change:** a deployment that configures extra queues and passes no
+  `queue` will now drive them. That is the fix, but it changes what a running
+  process does; pass `queue` explicitly to keep it single-queue. New
+  `PangolinOrchestrator.getConfiguredQueues()` exposes the names.
+
 - **A long-lived `serve` stack no longer makes every client read slower.** Reading
   one completed run from a stack that had been up a while took over a minute, and
   the cost tracked how long the stack had been running rather than anything about

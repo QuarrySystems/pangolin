@@ -484,6 +484,32 @@ that already have large outboxes, since it does not require rewriting history.
 
 ## 7. `serve()` drives exactly one queue, so a multi-queue config is half-inert
 
+**Status: FIXED.** The suggested fix below offers a fork — drive every configured
+queue, or refuse to start when queues are declared that the loop will not tick.
+What landed resolves it rather than picking a side, because the two options answer
+different deployments:
+
+- **An explicit `queue` still drives exactly that one.** One serve process per
+  queue stays possible, and this path is unchanged.
+- **Omitting `queue` now drives every configured queue**, instead of silently
+  defaulting to `default`. The orchestrator already holds and validates the whole
+  map (`getConfiguredQueues()` exposes it), so a config declaring queues the loop
+  ignored was half-inert *by default* — which is exactly how this was hit.
+- **Either way, undriven queues are named at boot.** When an explicit `queue`
+  leaves others unticked — legitimate, so this is a notice and not a refusal —
+  serve warns and names them. Documenting alone would not have been enough: the
+  failure produced no signal to correlate with a doc, which is what made it
+  expensive to diagnose.
+
+`deploy/serve-stack/serve-entrypoint.mjs` passes no `queue`, so **this stack now
+drives both `default` and `gated`**, and the config comment calling `gated` "a
+dedicated queue carrying the pipeline pattern" is no longer aspirational.
+
+*Behaviour change worth flagging:* a deployment that configured extra queues and
+passed no `queue` gets those queues driven now where they were inert before. That
+is the bug being fixed, but it is a real change in what a running process does.
+Pass `queue` explicitly to keep a single-queue process.
+
 **Symptom.** An item submitted to a configured, validated queue other than the one
 `serve` happens to tick sits at `ready` forever. No error appears in the serve log,
 in `orch status`, or in the audit chain. The serve loop continues dispatching other

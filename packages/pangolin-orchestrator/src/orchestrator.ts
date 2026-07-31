@@ -441,6 +441,16 @@ export class PangolinOrchestrator {
     });
   }
 
+  /** The queue names this orchestrator was configured with.
+   *
+   *  Exposed for drivers that need to tick every configured queue rather than one
+   *  named up front: `tick(queue)` filters items by queue, so a queue nobody ticks is
+   *  one whose items are never considered ready, and the orchestrator validated that
+   *  queue at construction, so nothing else reports it as inert. */
+  getConfiguredQueues(): string[] {
+    return Object.keys(this.patterns);
+  }
+
   getStatus(runId?: string): StatusItem[] {
     const items = this.store.getItems(runId);
     // Internal lookup uses namespaced ids (as stored); output is de-namespaced.
