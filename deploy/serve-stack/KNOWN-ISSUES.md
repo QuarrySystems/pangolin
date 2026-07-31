@@ -442,16 +442,16 @@ The fixes, as landed in `packages/pangolin-orchestrator`:
    `readOutbox` fallback in `OperationsApi`, so third-party transports are
    unaffected.
 
-*Not done: change 3, `MailboxStore.listPrefixes`.* It is a real gap — enumerating
-run ids still costs one key per record rather than one per run — but it has no
-consumer in-tree today: it is a prerequisite for a client-side `listRuns()` that
-does not exist yet. Adding an SPI member with no caller is speculative, and change
-1 substantially relieves the symptom that motivated it, since the record count
-per run stops growing with uptime. Worth doing alongside `listRuns()`, not before.
+3. *`MailboxStore.listPrefixes` — **DONE**, together with the consumer that makes it
+   usable.* Deferred at first on the grounds that it had no in-tree caller, which
+   turned out to be the wrong reason: within a day the gap was hit directly, and the
+   only way to answer "what runs exist?" was opening the serve container's SQLite by
+   hand — a workaround this file had to document. Landed with `transport.listRuns()`,
+   `OperationsApi.listRuns()` and a `pangolin orch runs` verb, so the cheap query is
+   reachable from a client. Optional on both seams; callers fall back to `list`.
 
-**Existing stacks are not rewritten.** The records already accumulated stay where
-they are; what changes is that reads no longer walk them and new ones stop piling
-up.
+**Existing stacks are not rewritten by the code change** — but this one was pruned
+separately, see 6c.
 
 ### 6a. Measured again on 2026-07-31, and the numbers moved the plan
 
@@ -486,14 +486,57 @@ same reasoning as the terminal guard, since a failed publish must not be remembe
 delivered. Every distinct change is still published, including changes to `blockedBy`,
 `resultRef`, `manifestRef` and `verify` that leave the status strings untouched.
 
-**Change 2 fixed the GETs, not the LIST.** `readLatestOutbox` still lists the whole run
-prefix before scanning backward. Eliminating 23,307 sequential `get`s was the 60 s win,
-but the list stays proportional to records, and S3 cannot page backwards. Making reads
-genuinely O(1) wants a **latest pointer** — `publish` also overwriting
-`outbox/<runId>/latest.json` — which additionally removes any dependence on key
-ordering.
+**Change 2 fixed the GETs, not the LIST — and the follow-up was then NOT built,
+deliberately.** `readLatestOutbox` still lists the whole run prefix before scanning
+backward. Eliminating 23,307 sequential `get`s was the 60 s win, but the list stays
+proportional to records, and S3 cannot page backwards. The obvious next step was a
+**latest pointer** — `publish` also overwriting `outbox/<runId>/latest.json` — making
+reads O(1) and independent of key ordering.
+
+It was dropped because its own justification expired. That design was worth two extra
+writes per publish, plus a consistency surface, when a run held 23,307 records.
+Publish-on-change and the prune took a run to **~2 records**, so listing them costs
+about what one `GET` costs, and a pointer would buy close to nothing for real added
+complexity. Measured after both: `orch audit` on a historical run went 71,027 ms →
+**738 ms** without it.
+
+Recorded rather than silently skipped, because the reasoning is the reusable part: the
+fix at the source removed the need for the optimisation downstream. If a future
+workload puts many hundreds of genuine transitions on one run — a large DAG polled by
+`watch()` — the pointer becomes worth revisiting, and this is the note that says why.
 
 **A correctness bug was hiding under the ordering assumption.** See below.
+
+### 6c. The accumulated backlog was pruned (2026-07-31)
+
+The code fixes stop growth; they do not remove what had already accrued. The stack was
+pruned separately after deploying them.
+
+| | before | after |
+|---|---|---|
+| outbox objects | 1,701,236 | **193** |
+| outbox size | 1018 MiB | **360 KiB** |
+| full recursive enumeration | ~8 min | **3 s** |
+| `orch audit`, historical run | 71,027 ms | **738 ms** |
+
+1,841,819 objects were deleted across 96 runs — more than the earlier count because the
+pre-fix build kept publishing while the measurement was taken.
+
+**The rule was a key-name filter, not a heuristic**, and that mattered: delete every
+legacy 12-digit key, keep every clock-seeded 16-digit one. Safe only because the
+post-restart republish had given *every* run a current status **and** a current audit
+export in the new format — checked across all 96 before deleting anything, rather than
+assumed. Nothing outside `mailbox/orchestrator/outbox/` was listed, let alone deleted:
+submissions, control, extends, dead-letter, storage artifacts and `public-key.json` sit
+elsewhere in the bucket, and the audit *chain* is in a different bucket entirely.
+
+Verified after: `orch audit` on a pruned historical run assembles, and
+`pangolin verify` reports `✓ TAMPER-EVIDENT` with `✓ handoff 2 input refs accounted
+for`. Pruning cost nothing that verification depends on.
+
+*Nothing prunes automatically.* Growth is now proportional to work done rather than
+uptime, so this should not recur at that scale — but there is still no retention
+policy, and that remains unaddressed.
 
 ### 6b. Outbox keys collided across restarts (fixed)
 
@@ -831,14 +874,29 @@ so nothing below carries a measurement the way issue 6 does. Every claim is a
 reasoned rather than observed, and 8 in particular deserves a reproduction before
 anyone acts on it.
 
-*Independently spot-checked on landing (2026-07-31):* **8** — `markerPresent` is
-verbatim as quoted, and the suggested `isNotFound` predicate does exist in
-`pangolin-storage-s3`. **9** — `PANGOLIN_AGENT_TIMEOUT_SECONDS` and
-`PANGOLIN_PLUGIN_INSTALL_TIMEOUT_SECONDS` appear at their emit site and **nowhere
-else** under `packages/*/src`, so "a consumer that does not exist" holds as written.
-**10–12 were not re-checked** and rest on the author's reading. Worth saying because
-four separate claims elsewhere in this file turned out to be wrong when tested this
-same day — a `file:line` citation is a good reason to look, not a reason to believe.
+*Independently verified against source, 2026-07-31 — all five hold.*
+
+- **8** — `markerPresent` is verbatim as quoted, and the suggested `isNotFound`
+  predicate does exist in `pangolin-storage-s3`.
+- **9** — `PANGOLIN_AGENT_TIMEOUT_SECONDS` and `PANGOLIN_PLUGIN_INSTALL_TIMEOUT_SECONDS`
+  appear at their emit site and **nowhere else** under `packages/*/src`, so "a consumer
+  that does not exist" holds as written.
+- **10** — `stage()` does mint via `CreateSecretCommand` and return `res.ARN`, and
+  `fireWork` names secrets `${dispatchId}/${envName}` (`dispatch.ts:179`). The
+  six-random-character ARN suffix is documented Secrets Manager behaviour.
+- **11** — `RunTaskCommand`'s `overrides` carries only `containerOverrides`
+  (environment + command). No `taskRoleArn` appears anywhere in the package, so the
+  role comes from the shared task definition. The suggested fix is sound: ECS *does*
+  support `overrides.taskRoleArn`, so this is unused capability rather than a platform
+  limit.
+- **12** — `GIT_CONFIG_GLOBAL=/dev/null` and `GIT_CONFIG_NOSYSTEM=1` are set and
+  neither touches repo-local `.git/config`. The entry's calibration is right too: the
+  credential lane really is already closed by the v0.3.1 allowlist, so what remains is
+  code execution rather than exfiltration.
+
+Worth recording that this section survived checking intact, because four separate
+claims elsewhere in this file did not when tested the same day. A `file:line` citation
+is a good reason to look, not a reason to believe — and here, looking confirmed it.
 
 ---
 
@@ -1061,6 +1119,123 @@ step meant to inspect it.
 workspace, or add `-c core.fsmonitor=false -c core.pager=cat` to the capture
 invocations. The second is cheaper and closes the known directives without
 restructuring; the first is the general answer.
+
+---
+
+## 13. No supported way to mount an immutable input artifact independent of subagent identity
+
+**Feature request, not a defect** — and the mechanism is already present, so the
+ask is a contract rather than an invention.
+
+**Symptom.** A dispatch's workspace input cannot be fixed without also changing
+the subagent's identity. That makes controlled evaluation of an agent impossible:
+you cannot hold the agent constant and vary only what it is looking at, which is
+the one thing an experiment needs to do.
+
+Concretely, measuring how often a verifier subagent accepts a patch that does not
+satisfy its criterion requires the *same* verifier to see *byte-identical* patches
+across trials. Today that cannot be arranged.
+
+**Cause.** There are exactly two routes for getting a file into a dispatch
+workspace, and each rules the case out:
+
+1. **`needs`** (`contracts/types.d.ts:33`, resolved at
+   `engine/needs-resolver.js:12-24`) binds an input key to an *upstream item's*
+   product. The artifact must therefore be produced by another dispatch in the
+   same run — so it is agent-generated and varies per trial. Fixing the input this
+   way is impossible by construction.
+
+2. **Capabilities** place files at their literal workspace paths, which *can*
+   deliver a fixed artifact — but `subagent.register` hashes the capability set
+   into the subagent definition
+   (`pangolin-client/dist/subagent-register.js:38-49` hashes
+   `{name, systemPrompt, promptTemplate, model, capabilities}`). Binding a fixture
+   capability therefore mints a different subagent. Re-registering under the
+   production name to avoid that would replace the production agent for every
+   future dispatch.
+
+So identity and input cannot be varied independently. An evaluation harness is
+forced to compare a *reconstructed* boundary against production and enumerate the
+divergence, rather than measuring production directly.
+
+**This is a half-finished pattern, not a missing concept.** Two things in the
+codebase already do most of what is being asked for.
+
+**(a) Three undeclared plan-level carriers already share one posture.**
+`executors/dispatch.js` `fire()` reads all three straight off `item.inputs`:
+
+| carrier | handling in `fire()` |
+|---|---|
+| `inputs.env` | passed through to `dispatch.fire` |
+| `inputs.pipeline` | shape-guarded, commented *"matching the inputRefs posture"* |
+| `inputs.inputRefs` | shape-guarded — **"Shape guard (not trust guard)"** |
+
+None is declared on `WorkItem`, which types `inputs` as
+`Record<string, unknown>` (`contracts/types.d.ts:24`), and none is validated at
+submit. The pipeline carrier's own comment names `inputRefs` as the reference
+posture it was written to match — so this is an established internal convention,
+which is precisely why it should be a declared one.
+
+`engine/tick.js:132` guards its overwrite on `it.needs && Object.keys(it.needs).length > 0`,
+so an item with **no `needs`** is left untouched and a submitter-set
+`inputs.inputRefs` reaches the worker as-is.
+
+**(b) `registerEnv` is the shape this wants, one type over.** It is public,
+typed, documented, content-addressed to an `EnvRef`, idempotent, and — critically
+— **selectable per run through `inputs.env` without being hashed into the
+subagent definition**. That is exactly the independence evaluation needs. It
+simply carries environment *variables*; there is no artifact-typed sibling that
+carries workspace *files*.
+
+So the ask is not "add an input mechanism". It is: **finish the pattern you have
+already established twice** — give the artifact case the treatment `registerEnv`
+gets, and give the three carriers a declaration.
+
+**We did not use the carrier, deliberately.** The reason is pangolin's own
+sentence: *"Shape guard (not trust guard)."* The executor states it filters
+non-strings and does not validate trust, and the cross-dispatch artifact-fetch
+authorization behaviour for a submitter-supplied ref is unstated. Depending on
+that would couple an external consumer to an undeclared internal convention whose
+failure mode is silent. The ref would simply not be there, or would be someone
+else's.
+
+**Suggested fix.** Promote the carrier to a declared, validated input:
+
+```ts
+// contracts/types.d.ts
+export interface WorkItem {
+  /** Literal artifact refs mounted at `inputs/<key>`, independent of `needs`.
+   *  Validated at submit; refs must resolve and be authorized for this run. */
+  inputRefs?: Record<string, string>;
+}
+```
+
+with, at minimum: rejection at submit when a ref does not resolve; an explicit
+authorization rule for refs not produced within the run — the trust guard the
+executor's comment says it is *not* doing; and a documented precedence when both
+`needs` and `inputRefs` name the same key. Erroring is probably right, since
+silently preferring one would make a wiring mistake invisible.
+
+Declaring `env` and `pipeline` on `WorkItem` at the same time would cost almost
+nothing and would remove the need for a reader to discover any of the three by
+grepping the executor.
+
+The audit story is unaffected and arguably improved: a literal ref is *more*
+reproducible than one resolved from a sibling dispatch, because it is stable
+across runs and can be committed alongside the plan.
+
+**Smaller alternative, if the artifact case is unwelcome.** An
+`registerArtifact` / `ArtifactRef` sibling to `registerEnv`, selectable via a
+declared `inputs.artifacts`, would solve the evaluation case without touching
+`inputRefs` or `needs` semantics at all. That may be the cleaner boundary: `needs`
+stays "products of upstream items", and artifacts are "content the submitter
+pinned", which are genuinely different things that currently share one field.
+
+**Who wants this.** Anyone evaluating a subagent rather than merely running it —
+regression-testing a reviewer against known-bad inputs, measuring an acceptance
+boundary, or pinning a golden input for a determinism check. All three need the
+same thing: the agent held constant, the input fixed, and neither expressed
+through the other.
 
 ---
 

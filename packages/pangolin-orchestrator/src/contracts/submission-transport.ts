@@ -74,4 +74,11 @@ export interface SubmissionTransport {
    *  Optional so third-party transports keep working untouched: callers must fall back
    *  to `readOutbox` when it is absent. */
   readLatestOutbox?(runId: string, kind?: OutboxKind): Promise<OutboxRecord | undefined>;
+  /** OPTIONAL: every run this outbox knows about.
+   *
+   *  There was no way to ask this from a client at all — every other read takes a runId
+   *  you must already have, so discovering what exists meant opening the serve
+   *  container's SQLite directly. Optional for the usual reason: third-party transports
+   *  stay valid, and callers must handle its absence. */
+  listRuns?(): Promise<string[]>;
 }
