@@ -85,6 +85,47 @@ export async function serve(opts: ServeOptions): Promise<void> {
   // single-writer design (one SQLite writer, one shared lock manager), so concurrent
   // ticks would race. Each tick(q) is a queue-filtered query, so the cost is small and
   // proportional to the number of configured queues.
+  /** Drain everything arriving from the transport — submissions, then extends, then
+   *  control — and apply it to the orchestrator.
+   *
+   *  THE ORDER IS LOAD-BEARING and this runs as one unit for that reason. Control must be
+   *  applied against fully-ingested state: `cancelRun` on a run the store has never seen
+   *  iterates an empty item list and returns without throwing, so draining control ahead
+   *  of the inbox would ack and destroy a cancel that arrived in the same batch as the
+   *  run it targets. Extends sit between them because an extend names a run that must
+   *  already exist, and a close arriving with it must observe the extended item set.
+   *
+   *  Shared by the reconcile-first pass and the loop so the two cannot drift. */
+  const drainIngress = async () => {
+    for (const env of await opts.transport.pollInbox()) {
+      try {
+        await opts.orchestrator.submitRun(env.run, env.actor, env.submittedAt);
+        await opts.transport.ack(env.run.id); // consume it
+      } catch (err) {
+        onError(err);
+        await opts.transport.deadLetter(env.run.id); // poison -> dead-letter, NOT infinite re-poll
+      }
+    }
+    for (const env of (await opts.transport.pollExtends?.()) ?? []) {
+      try {
+        opts.orchestrator.producerExtend(env.runId, env.items, env.actor, env.causeItemId);
+      } catch (err) {
+        onError(err); // invalid/poison extend — surfaced. Do NOT deadLetter(runId): that targets the SUBMISSION, not this extend.
+      }
+      // ALWAYS remove the extend envelope by seq (success OR failure) so a poison extend never re-delivers.
+      if (env.seq) await opts.transport.ackExtend?.(env.runId, env.seq);
+    }
+    for (const ctl of (await opts.transport.pollControl?.()) ?? []) {
+      try {
+        if (ctl.kind === 'cancel') opts.orchestrator.cancelRun(ctl.target, ctl.actor);
+        else if (ctl.kind === 'close') opts.orchestrator.closeRun(ctl.target, ctl.actor);
+        await opts.transport.ackControl?.(ctl.target);
+      } catch (err) {
+        onError(err);
+      }
+    }
+  };
+
   const tickAll = async () => {
     const failures: unknown[] = [];
     for (const q of queues) {
@@ -151,6 +192,17 @@ export async function serve(opts: ServeOptions): Promise<void> {
     // (`not-ready`) until a tick succeeds, while /healthz stays up because liveness
     // drives restarts and a dependency outage must not cause a restart storm — the
     // split evaluateHealth() already documents.
+    // Ingress BEFORE that first tick. The loop below already drains ahead of its tick, but
+    // the reconcile-first pass did not, so a cancel queued while this process was down lost
+    // the race to the very item it was meant to stop — the operator's only remedy, defeated
+    // by the restart that was supposed to apply it. Draining the whole of ingress (not just
+    // control) is what keeps a cancel arriving alongside its own submission working.
+    try {
+      await drainIngress();
+    } catch (err) {
+      onError(err);
+    }
+
     try {
       await tickAll();
       health.lastTickOkAt = now();
@@ -180,33 +232,7 @@ export async function serve(opts: ServeOptions): Promise<void> {
 
     while (!opts.signal?.aborted) {
       try {
-        for (const env of await opts.transport.pollInbox()) {
-          try {
-            await opts.orchestrator.submitRun(env.run, env.actor, env.submittedAt);
-            await opts.transport.ack(env.run.id); // consume it
-          } catch (err) {
-            onError(err);
-            await opts.transport.deadLetter(env.run.id); // poison -> dead-letter, NOT infinite re-poll
-          }
-        }
-        for (const env of (await opts.transport.pollExtends?.()) ?? []) {
-          try {
-            opts.orchestrator.producerExtend(env.runId, env.items, env.actor, env.causeItemId);
-          } catch (err) {
-            onError(err); // invalid/poison extend — surfaced. Do NOT deadLetter(runId): that targets the SUBMISSION, not this extend.
-          }
-          // ALWAYS remove the extend envelope by seq (success OR failure) so a poison extend never re-delivers.
-          if (env.seq) await opts.transport.ackExtend?.(env.runId, env.seq);
-        }
-        for (const ctl of (await opts.transport.pollControl?.()) ?? []) {
-          try {
-            if (ctl.kind === 'cancel') opts.orchestrator.cancelRun(ctl.target, ctl.actor);
-            else if (ctl.kind === 'close') opts.orchestrator.closeRun(ctl.target, ctl.actor);
-            await opts.transport.ackControl?.(ctl.target);
-          } catch (err) {
-            onError(err);
-          }
-        }
+        await drainIngress();
         if (opts.scheduler) {
           try {
             for (const env of opts.scheduler.dueSubmissions()) {
