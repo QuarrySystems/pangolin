@@ -112,6 +112,28 @@ workspace. See [RELEASING.md](./RELEASING.md) for how a release is cut.
 
 ### Fixed
 
+- **Patch capture no longer executes commands from a repo-local `.git/config`.**
+  `buildGitEnv` set `GIT_CONFIG_GLOBAL=/dev/null` and `GIT_CONFIG_NOSYSTEM=1`, which
+  kill `~/.gitconfig` and `/etc/gitconfig` — but neither touches the workspace's own
+  `.git/config`, and capture runs against a tree the agent controls. Directives such
+  as `core.fsmonitor` and `diff.<driver>.textconv` execute arbitrary commands from
+  there.
+
+  The capture invocations now pass `-c core.fsmonitor=false -c core.pager=cat
+  -c core.hooksPath=/dev/null`, and the diff adds `--no-ext-diff --no-textconv`
+  (flags rather than `-c`, because external-diff and textconv drivers are per-driver
+  and declared through the repo's own `.gitattributes`).
+
+  The credential lane was already closed — `buildGitEnv` is a genuine allowlist, so
+  a hook ran with no `AWS_*` or `PANGOLIN_*` in its environment. What this closes is
+  code execution as the worker from repository content, which matters for any
+  consumer capturing patches against a repo it does not control.
+
+  **Still partial:** `filter.<driver>.clean` executes on `git add` when the repo's
+  `.gitattributes` declares it, and like textconv it is per-driver with no single
+  switch. The general answer — relocating `GIT_DIR` outside the workspace — is
+  recorded rather than half-done.
+
 - **`timeoutSeconds` is now enforced worker-side; before, it bounded nothing.**
   `pangolin-client` emitted `PANGOLIN_AGENT_TIMEOUT_SECONDS` and
   `PANGOLIN_PLUGIN_INSTALL_TIMEOUT_SECONDS` into the task environment and *nothing
