@@ -23,8 +23,20 @@ Thumbs.db
 .idea/
 .vscode/
 
-# Local agent / tooling config (personal, not part of the product)
-.claude/
+# Local agent / tooling config (personal, not part of the product) — except the
+# audit charter, which is deliberately shared. The parallel-lens audit reads it
+# to learn what this repo actually enforces (e.g. that `typecheck:test` is
+# opt-in per package), so it has to exist for teammates and CI runs, not just
+# on one machine.
+#
+# `.claude/*` rather than `.claude/`: git cannot re-include a file whose parent
+# DIRECTORY is excluded, so the negation below only takes effect against a glob.
+.claude/*
+!.claude/audit-charter.md
+
+# Per-lens audit reports. Working artifacts — the durable summary is the
+# `## Audit record` section written into each spec/plan. Large and regenerable.
+.audit/
 
 # RFC 3161 spike: dependencies + lockfile are throwaway (ratified versions live in FINDINGS.md)
 spike/rfc3161/node_modules/

@@ -7,6 +7,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 All packages are versioned in lockstep; this file is the changelog for the whole
 workspace. See [RELEASING.md](./RELEASING.md) for how a release is cut.
 
+## [Unreleased]
+
+### Breaking
+
+- **`CliContext` requires a third member, `getSyncProviders`.** This affects only
+  code that imports `buildProgram` to embed the CLI inside another program — if you
+  invoke the `pangolin` binary, nothing changes. Migration is one line: add
+  `getSyncProviders: defaultGetSyncProviders` (exported from
+  `@quarry-systems/pangolin-cli`) to the context you already construct. The member's
+  type is `() => Promise<{ providers: unknown; source: string } | null>`.
+
+### Added
+
+- **Sync providers can now live outside this repo.** `pangolin subagent sync` and
+  `pangolin capabilities sync` previously understood exactly two on-disk layouts:
+  Claude Code's `.claude/agents` and stoa's convention. Any other layout meant
+  forking the CLI or abandoning it for `pangolin-client` directly — the authoring
+  guide's advice was to "add an entry to the `PROVIDERS` map", which is only
+  actionable if you *are* pangolin. You can now implement `SyncProvider` yourself
+  and register it from your config:
+
+  ```javascript
+  // pangolin.config.mjs
+  import { MyProvider } from 'my-pangolin-provider';
+  export const syncProviders = [new MyProvider()];
+  ```
+
+  A provider can compose with the built-in ones and override only the half that
+  differs, so a typical one is a few dozen lines. This also unblocks conventions
+  whose prompts are Mustache templates: a provider may emit `promptTemplate`, which
+  is rendered so `{{placeholders}}` are substituted, where the built-in
+  `claude-code` provider always emits `systemPrompt`, which is passed to the model
+  verbatim.
+
+  Three things to know before writing one:
+
+  - Your provider package is imported by `pangolin.config`, and that file is
+    evaluated by the **`pangolin-mcp` server at startup** — a process that has
+    nothing to do with syncing. So the package must be a real `dependency` (not a
+    `devDependency`), must survive a pruned production install, and must not throw
+    at module scope. A provider that violates this takes the MCP server down.
+  - The config is loaded **lazily**, only when `--provider` names something the
+    built-ins do not cover, so a broken config will not break
+    `--provider claude-code`. But a *typo'd* provider name is a built-in miss, so it
+    does load the config — and you will see the config's error rather than
+    `unknown --provider`.
+  - Built-in names (`claude-code`, `stoa`) cannot be overridden. A collision is a
+    hard error naming the config file and the offending array index.
+
+  Full guide: [Sync capabilities & subagents](https://quarrysystems.github.io/pangolin/how-to/sync-capabilities-subagents/).
+
+- **`@quarry-systems/pangolin-cli/providers` subpath export**, publishing what a
+  provider author needs: the `SyncProvider`, `SubagentDef`, and `CapabilityBundle`
+  types, plus `ClaudeCodeProvider` and `StoaProvider` to compose with, and
+  `splitFrontmatter` for layouts that use YAML frontmatter. **Provisional** — this
+  surface may change on a minor release. `loadSubagents(dir)` in particular means
+  "the directory holding subagent files" to one built-in provider and "a repo root"
+  to the other; that is unresolved, and resolving it may change the signature.
+
 ## [0.4.0] - 2026-07-28
 
 ### Breaking

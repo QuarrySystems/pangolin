@@ -5,6 +5,16 @@
   "description": "The pangolin binary — a thin CLI over PangolinClient that resolves pangolin.config.{ts,js,mjs} and dispatches to subcommands.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./providers": {
+      "types": "./dist/providers/index.d.ts",
+      "default": "./dist/providers/index.js"
+    }
+  },
   "publishConfig": {
     "access": "public"
   },
