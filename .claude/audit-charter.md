@@ -24,6 +24,7 @@ as DEFERRED, so getting this wrong changes verdicts.
 | MCP tool surface | CI allowlist check per ADR-0005 | CI failure on any added tool name |
 | Undeclared deps in built output | `pnpm run check:deps` (`ci.yml:53`) → `scripts/check-declared-deps.mjs` — a static scan asserting every bare specifier in built `dist/` is a Node builtin or a declared dep | CI failure |
 | Workspace dep **cycles** | **nothing.** `check:deps` is not a cycle detector — it contains no graph traversal | drift only; surfaces as a `pnpm -r build` ordering failure on clean CI |
+| Type safety of root `test/` and `examples/manifest/` | **nothing** — and they are not merely unchecked, they are outside the workspace. `pnpm-workspace.yaml` globs `packages/*`, `examples/*`, `deploy/*`, `docs-site`; root `test/` matches none of them, and `examples/manifest/` has no `package.json` so pnpm skips it despite the glob. Root `typecheck` is `pnpm -r run typecheck` (`package.json:15`), so both are invisible to it | none at type level. Root `test/` **is executed** by `pnpm test:e2e` (`.github/workflows/e2e.yml:60`), so it fails only on a runtime error — a type error there is undetectable by any gate |
 
 **The `typecheck:test` opt-in is the highest-value row here.** Six packages have
 `tsconfig.test.json` (`pangolin-product`, `pangolin-providers-aws-creds`,
@@ -88,6 +89,34 @@ because they are exactly what a generic auditor cannot know.
   `verify` time, if at all. Instance: PR #59's `agora://` → `pangolin://`
   substitution rewrote `examples/dogfood-gated/bundle.json` and broke its hash
   chain.
+
+- **A required member is added to a widely-constructed context type, and the
+  call sites that no longer satisfy it all sit in type-check-exempt zones.**
+  *Tell:* a shared context/options interface gains a required field; existing
+  construction sites pass a partial object literal and keep building.
+  *Check:* enumerate every construction site, then ask **which tsconfig covers
+  each one** — not whether the build passes. Three zones here are covered by
+  none (see the enforcement map): `packages/*/test/` in the ten packages without
+  `tsconfig.test.json`, root `test/`, and `examples/manifest/`.
+  *Why tests miss it:* those sites are executed but never type-checked, so a
+  partial literal fails only if the missing member is actually dereferenced at
+  runtime. A site that never reaches the new code path stays green indefinitely.
+  - Instance (2026-07-30, sync-provider SPI): `CliContext` went from two required
+    members to three. Of ~46 construction sites, exactly one —
+    `packages/pangolin-cli/test/cmd-subagent.test.ts` at the `--provider made-up`
+    case — reached the new seam and went red. Fixed by widening the fixture.
+  - The durable finding is the two that did **not** go red.
+    `test/e2e/manifest-deploy.test.ts:189` and
+    `examples/manifest/test/deploy.test.ts:145` both call `buildProgram` with
+    `{ getClient }` alone. They were **already** missing the required
+    `getOrchContext` before that change — type-invalid for some time, with
+    nothing surfacing it. Both import by relative source path
+    (`../../packages/pangolin-cli/src/index.js`), so the package's `exports` map
+    does not reach them either.
+  - Consequence for a lens: **"adding a required member is safe, the compiler
+    will catch every call site" is false in this repo.** Verify per zone before
+    relying on it. The converse holds too — a partial-literal call site that
+    compiles today is not evidence the type is satisfied.
 
 ---
 
