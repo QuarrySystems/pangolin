@@ -14,7 +14,12 @@
 //   (c) No imports from pangolin-orchestrator.
 
 import type { PipelineSpec, BlockSpec } from '@quarry-systems/pangolin-core';
-import type { RuntimeAdapter, RuntimeUsage, StorageProvider, VerifyConfig } from '@quarry-systems/pangolin-core';
+import type {
+  RuntimeAdapter,
+  RuntimeUsage,
+  StorageProvider,
+  VerifyConfig,
+} from '@quarry-systems/pangolin-core';
 import { runBoundedCommand } from './bounded-command.js';
 import { runVerify } from './verify.js';
 import {
@@ -42,6 +47,13 @@ export interface BlockContext {
   adapter: RuntimeAdapter;
   subagent: { systemPrompt?: string; promptTemplate?: string; model?: string };
   inputJson?: string;
+  /**
+   * Agent-phase and plugin-install bounds, threaded to the adapter on
+   * `RuntimeContext`. Not read from `env` — that is the firewalled runtime env
+   * handed to the sub-agent, and it strips every `PANGOLIN_*` var.
+   */
+  agentTimeoutSeconds?: number;
+  pluginInstallTimeoutSeconds?: number;
   baseline: WorkspaceBaseline;
   redact(s: string): string;
   log(event: { kind: string; [k: string]: unknown }): void;
@@ -75,9 +87,7 @@ export const DEFAULT_VERIFY_TIMEOUT_SECONDS = 600;
  *   falsy/non-positive timeout → DEFAULT_VERIFY_TIMEOUT_SECONDS
  * including t = 0 → 600.
  */
-export function buildDefaultPipeline(
-  subagent: { verify?: VerifyConfig },
-): PipelineSpec {
+export function buildDefaultPipeline(subagent: { verify?: VerifyConfig }): PipelineSpec {
   const blocks: PipelineSpec['blocks'] = [];
 
   blocks.push({ kind: 'agent' });
@@ -114,20 +124,35 @@ export function buildDefaultPipeline(
 async function runAgentBlock(
   ordinal: number,
   ctx: BlockContext,
-): Promise<{ outcome: BlockOutcome; needsInputSentinelPath?: string; shouldAbort?: boolean; exitCode?: number; usage?: RuntimeUsage }> {
+): Promise<{
+  outcome: BlockOutcome;
+  needsInputSentinelPath?: string;
+  shouldAbort?: boolean;
+  exitCode?: number;
+  usage?: RuntimeUsage;
+}> {
   const startedAt = Date.now();
 
   const runtimeExit = await ctx.adapter.invoke(
     {
       systemPrompt: ctx.subagent.systemPrompt,
       promptTemplate: ctx.subagent.promptTemplate,
-      input: ctx.inputJson !== undefined ? (JSON.parse(ctx.inputJson) as Record<string, unknown>) : undefined,
+      input:
+        ctx.inputJson !== undefined
+          ? (JSON.parse(ctx.inputJson) as Record<string, unknown>)
+          : undefined,
       model: ctx.subagent.model,
       workspaceDir: ctx.workspaceDir,
     },
     {
       dispatchId: ctx.dispatchId,
       env: ctx.env,
+      ...(ctx.agentTimeoutSeconds !== undefined
+        ? { agentTimeoutSeconds: ctx.agentTimeoutSeconds }
+        : {}),
+      ...(ctx.pluginInstallTimeoutSeconds !== undefined
+        ? { pluginInstallTimeoutSeconds: ctx.pluginInstallTimeoutSeconds }
+        : {}),
     },
   );
 
@@ -145,11 +170,12 @@ async function runAgentBlock(
   const outcome: BlockOutcome = {
     kind: 'agent',
     ordinal,
-    status: runtimeExit.exitCode === 0 && !runtimeExit.needsInputSentinelPath
-      ? 'ok'
-      : runtimeExit.needsInputSentinelPath
-        ? 'ok'   // needs_input is not a failure of the block itself
-        : 'failed',
+    status:
+      runtimeExit.exitCode === 0 && !runtimeExit.needsInputSentinelPath
+        ? 'ok'
+        : runtimeExit.needsInputSentinelPath
+          ? 'ok' // needs_input is not a failure of the block itself
+          : 'failed',
     exitCode: runtimeExit.exitCode !== 0 ? runtimeExit.exitCode : undefined,
     durationMs,
   };
@@ -193,7 +219,12 @@ async function runScriptBlock(
   block: Extract<BlockSpec, { kind: 'script' }>,
   ordinal: number,
   ctx: BlockContext,
-): Promise<{ outcome: BlockOutcome; shouldAbort: boolean; exitCode?: number; verifyOutcome?: VerifyOutcome }> {
+): Promise<{
+  outcome: BlockOutcome;
+  shouldAbort: boolean;
+  exitCode?: number;
+  verifyOutcome?: VerifyOutcome;
+}> {
   const lens = block.lens ?? 'gate';
   const timeoutSeconds = block.timeoutSeconds ?? DEFAULT_VERIFY_TIMEOUT_SECONDS;
 
@@ -443,7 +474,11 @@ export async function runPipeline(
     } else {
       // Unrecognized block kind — log and fail the pipeline immediately.
       // Prevents invisible data loss when a future/corrupt spec reaches runtime.
-      ctx.log({ kind: 'pipeline.unknown-block', ordinal, blockKind: (block as { kind?: string }).kind });
+      ctx.log({
+        kind: 'pipeline.unknown-block',
+        ordinal,
+        blockKind: (block as { kind?: string }).kind,
+      });
       return { kind: 'failed', outcomes, exitCode: 1 };
     }
     // Note: 'seal' is never authored — reserved, runner-appended (validated away by validatePipelineSpec)

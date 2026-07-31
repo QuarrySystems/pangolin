@@ -9,11 +9,12 @@
 // `claudeBin` is injectable so tests (and exotic deployments) can point at
 // a stub binary instead of the real CLI.
 
-import { spawn } from "node:child_process";
-import { readFile, access } from "node:fs/promises";
-import { join } from "node:path";
+import { spawn } from 'node:child_process';
+import { readFile, access } from 'node:fs/promises';
+import { join } from 'node:path';
+import { armChildTimeout, type ChildTimeoutOptions } from './child-timeout.js';
 
-export interface InstallPluginsOptions {
+export interface InstallPluginsOptions extends ChildTimeoutOptions {
   workspaceDir: string;
   env: Record<string, string>;
   claudeBin?: string;
@@ -22,69 +23,69 @@ export interface InstallPluginsOptions {
    * (success output is discarded; failure output rides the thrown error, which
    * the worker logs through its redactor). Never written raw to fd1/fd2.
    */
-  onOutput?: (chunk: { stream: "stdout" | "stderr"; text: string }) => void;
+  onOutput?: (chunk: { stream: 'stdout' | 'stderr'; text: string }) => void;
 }
 
-export async function installPluginsFromManifest(
-  opts: InstallPluginsOptions,
-): Promise<void> {
-  const manifestPath = join(opts.workspaceDir, "pangolin-plugins.json");
+export async function installPluginsFromManifest(opts: InstallPluginsOptions): Promise<void> {
+  const manifestPath = join(opts.workspaceDir, 'pangolin-plugins.json');
   try {
     await access(manifestPath);
   } catch {
     return;
   }
 
-  const raw = await readFile(manifestPath, "utf8");
+  const raw = await readFile(manifestPath, 'utf8');
   const parsed: unknown = JSON.parse(raw);
   if (!Array.isArray(parsed)) {
-    throw new Error(
-      "pangolin-plugins.json must be a JSON array of plugin names",
-    );
+    throw new Error('pangolin-plugins.json must be a JSON array of plugin names');
   }
   const manifest = parsed as ReadonlyArray<string>;
 
-  const bin = opts.claudeBin ?? "claude";
+  const bin = opts.claudeBin ?? 'claude';
   for (const name of manifest) {
     await new Promise<void>((resolve, reject) => {
-      const child = spawn(bin, ["plugins", "install", name], {
+      const child = spawn(bin, ['plugins', 'install', name], {
         cwd: opts.workspaceDir,
         env: opts.env,
         // F3: capture, never inherit — the merged env carries secrets and the
         // child's output must not reach the worker's fds unredacted.
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: ['ignore', 'pipe', 'pipe'],
       });
-      let out = "";
-      let err = "";
-      child.stdout?.on("data", (d: Buffer | string) => {
-        const text = typeof d === "string" ? d : d.toString();
+      let out = '';
+      let err = '';
+      child.stdout?.on('data', (d: Buffer | string) => {
+        const text = typeof d === 'string' ? d : d.toString();
         out += text;
-        opts.onOutput?.({ stream: "stdout", text });
+        opts.onOutput?.({ stream: 'stdout', text });
       });
-      child.stderr?.on("data", (d: Buffer | string) => {
-        const text = typeof d === "string" ? d : d.toString();
+      child.stderr?.on('data', (d: Buffer | string) => {
+        const text = typeof d === 'string' ? d : d.toString();
         err += text;
-        opts.onOutput?.({ stream: "stderr", text });
+        opts.onOutput?.({ stream: 'stderr', text });
       });
-      child.on("close", (code: number | null) => {
-        if (code === 0) {
+      // The bound applies per plugin, not across the manifest: installs run
+      // sequentially, and a per-install bound is what the emitted
+      // PANGOLIN_PLUGIN_INSTALL_TIMEOUT_SECONDS describes.
+      const timeout = armChildTimeout(child, `claude plugins install ${name}`, opts);
+
+      child.on('close', (code: number | null) => {
+        timeout.disarm();
+        const tail = `${out}${err}`.trim();
+        if (timeout.timedOut()) {
+          reject(new Error(`${timeout.reason()!}${tail ? `: ${tail}` : ''}`));
+        } else if (code === 0) {
           resolve();
         } else {
-          const tail = `${out}${err}`.trim();
           reject(
             new Error(
-              `claude plugins install ${name} exited with code ${code}` +
-                (tail ? `: ${tail}` : ""),
+              `claude plugins install ${name} exited with code ${code}` + (tail ? `: ${tail}` : ''),
             ),
           );
         }
       });
-      child.on("error", (e: Error) => {
-        reject(
-          new Error(
-            `claude plugins install ${name} failed to spawn: ${e.message}`,
-          ),
-        );
+      child.on('error', (e: Error) => {
+        timeout.disarm();
+        reject(new Error(`claude plugins install ${name} failed to spawn: ${e.message}`));
       });
     });
   }

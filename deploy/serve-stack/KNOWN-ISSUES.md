@@ -1049,7 +1049,62 @@ that `fireWork` has no logger today, which is itself part of why this is invisib
 
 ## 9. Two timeout env vars are emitted to a consumer that does not exist
 
-**Status: OPEN.** Reported from ai-os, 2026-07-31.
+**Status: FIXED — honoured, not deleted. The suggested fix would not have worked.**
+
+Every claim in this entry verified. Both variables are emitted and read nowhere;
+`envSecondsOr` exists **only inside the comment that names it**, in `src` and in the
+published `dist` alike; the adapter contains no `setTimeout`, no `AbortSignal` and no
+`kill(`. It was a fiction described as a safety net.
+
+*But the suggested fix was wrong, and wrong in a way that matters.* It says to "read
+`PANGOLIN_AGENT_TIMEOUT_SECONDS` in the adapter". **The adapter cannot see it.** The
+worker's `filterRuntimeEnv` is a DEFAULT-DENY allow-list, and `PANGOLIN_*` is not on
+it — deliberately, since the firewall exists precisely to keep control-plane vars
+(including the callback HMAC key reference) away from a prompt-injected sub-agent.
+Measured, rather than reasoned:
+
+```
+worker process.env (what the client emitted):
+  PANGOLIN_AGENT_TIMEOUT_SECONDS, PANGOLIN_PLUGIN_INSTALL_TIMEOUT_SECONDS,
+  PANGOLIN_CLAUDE_PERMISSION_MODE, PATH
+survives into adapter ctx.env:
+  PATH
+```
+
+So implementing this entry as written produces a bound that is *always* the adapter's
+own default and never the caller's `timeoutSeconds` — a fix that reads correct,
+passes a naive test, and silently does nothing. That is the same failure mode as
+issue 8, reached by following this file's own advice. It was caught only by checking
+where the value actually travels rather than trusting the citation.
+
+*What landed instead.* The bounds are threaded **explicitly** on `RuntimeContext`
+(new optional `agentTimeoutSeconds` / `pluginInstallTimeoutSeconds`), parsed by
+`parseWorkerEnv` from the worker's own process env — where a TaskSpec env var
+actually lands. That is not an invention: `PANGOLIN_SETUP_TIMEOUT_SECONDS` already
+takes exactly this route into `cfg.setupTimeoutSeconds`. Enforcement is SIGTERM then
+SIGKILL after a grace period; a timed-out agent resolves 124 with a reason on stderr
+(preserving the partial transcript), a timed-out plugin install throws naming the
+plugin. Defaults are 7200/300 and apply even when unset — an absent bound means the
+default, never "unbounded".
+
+Allow-listing the two names in the env firewall was the one-line alternative and was
+rejected: it widens a security boundary for a non-security reason and puts
+control-plane values in the sub-agent's environment, which is the exact thing the
+firewall was built to prevent.
+
+> **Separate finding, surfaced by this work and NOT yet fixed.**
+> `PANGOLIN_CLAUDE_PERMISSION_MODE` is stripped by the very same firewall — see the
+> measurement above. `resolveBypassFlag` reads it from `ctx.env`, so unless an
+> operator routes it through an env bundle or `PANGOLIN_RUNTIME_ENV_ALLOW`, it is
+> never seen and the adapter always takes the `bypass` branch. `strict` mode is
+> documented in `docs-site/.../dispatch-lifecycle.md` as reading "the dispatch's
+> merged env" and is offered for "read-only / analytical dispatches that should make
+> no filesystem or process changes" — a safety control that may be silently inert as
+> documented. This needs its own reproduction before anyone acts on it, exactly as
+> issue 8 asked for; it is recorded here rather than fixed in passing because a
+> permission control deserves its own change and its own tests.
+
+**Original report follows.** Reported from ai-os, 2026-07-31.
 
 **Symptom.** A dispatch carrying an explicit `timeoutSeconds` runs unbounded. The
 agent can hang indefinitely; on Fargate that burns billed compute until someone

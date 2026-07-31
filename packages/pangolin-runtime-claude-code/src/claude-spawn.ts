@@ -10,7 +10,15 @@
 // non-zero exit from the child resolves with that exit code so callers
 // can distinguish operational failures from environment misconfiguration.
 
-import { spawn } from "node:child_process";
+import { spawn } from 'node:child_process';
+import { armChildTimeout, type ChildTimeoutOptions } from './child-timeout.js';
+
+/**
+ * Exit code reported when the agent overran `timeoutSeconds`. 124 is the
+ * conventional timeout status (GNU `timeout` uses it), so it is distinguishable
+ * from any exit the agent itself could plausibly produce.
+ */
+export const TIMEOUT_EXIT_CODE = 124;
 
 export interface ClaudeSpawnResult {
   exitCode: number;
@@ -18,7 +26,7 @@ export interface ClaudeSpawnResult {
   stderr: string;
 }
 
-export interface SpawnClaudeOptions {
+export interface SpawnClaudeOptions extends ChildTimeoutOptions {
   prompt: string;
   workspaceDir: string;
   env: Record<string, string>;
@@ -42,23 +50,21 @@ export interface SpawnClaudeOptions {
 
 /** Pure arg construction — exported for platform-independent testing. */
 export function buildClaudeArgs(
-  opts: Pick<SpawnClaudeOptions, "prompt" | "dangerouslySkipPermissions" | "model" | "extraArgs">,
+  opts: Pick<SpawnClaudeOptions, 'prompt' | 'dangerouslySkipPermissions' | 'model' | 'extraArgs'>,
 ): string[] {
   return [
-    "--print",
-    "--output-format",
-    "json",
-    ...(opts.dangerouslySkipPermissions ? ["--dangerously-skip-permissions"] : []),
-    ...(opts.model ? ["--model", opts.model] : []),
+    '--print',
+    '--output-format',
+    'json',
+    ...(opts.dangerouslySkipPermissions ? ['--dangerously-skip-permissions'] : []),
+    ...(opts.model ? ['--model', opts.model] : []),
     opts.prompt,
     ...(opts.extraArgs ?? []),
   ];
 }
 
-export async function spawnClaude(
-  opts: SpawnClaudeOptions,
-): Promise<ClaudeSpawnResult> {
-  const bin = opts.claudeBin ?? "claude";
+export async function spawnClaude(opts: SpawnClaudeOptions): Promise<ClaudeSpawnResult> {
+  const bin = opts.claudeBin ?? 'claude';
   const args = buildClaudeArgs(opts);
 
   return new Promise<ClaudeSpawnResult>((resolve, reject) => {
@@ -67,19 +73,38 @@ export async function spawnClaude(
       env: opts.env,
     });
 
-    let stdout = "";
-    let stderr = "";
-    child.stdout?.on("data", (d: Buffer | string) => {
-      stdout += typeof d === "string" ? d : d.toString();
+    let stdout = '';
+    let stderr = '';
+    child.stdout?.on('data', (d: Buffer | string) => {
+      stdout += typeof d === 'string' ? d : d.toString();
     });
-    child.stderr?.on("data", (d: Buffer | string) => {
-      stderr += typeof d === "string" ? d : d.toString();
+    child.stderr?.on('data', (d: Buffer | string) => {
+      stderr += typeof d === 'string' ? d : d.toString();
     });
 
-    child.on("error", (err: Error) => {
+    // A timeout is an operational failure of the run, not an environment
+    // misconfiguration, so it RESOLVES with a non-zero code per this file's
+    // documented split — the worker then reports a failed dispatch with a
+    // reason instead of a container that never exits.
+    const timeout = armChildTimeout(child, 'claude agent', opts);
+
+    child.on('error', (err: Error) => {
+      timeout.disarm();
       reject(err);
     });
-    child.on("close", (code: number | null) => {
+    child.on('close', (code: number | null) => {
+      timeout.disarm();
+      if (timeout.timedOut()) {
+        // stdout captured before the kill is preserved — a partial transcript
+        // is often the only evidence of where the agent got stuck.
+        const reason = `pangolin: ${timeout.reason()!}`;
+        resolve({
+          exitCode: TIMEOUT_EXIT_CODE,
+          stdout,
+          stderr: stderr ? `${stderr}\n${reason}` : reason,
+        });
+        return;
+      }
       resolve({ exitCode: code ?? -1, stdout, stderr });
     });
   });

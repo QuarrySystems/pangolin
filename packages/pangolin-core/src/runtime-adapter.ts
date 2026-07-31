@@ -51,6 +51,19 @@ export interface RuntimeContext {
   dispatchId: string;
   env: Record<string, string>;
   telemetry?: TelemetryHook;
+  /**
+   * Hard bound for the agent phase, in seconds. Absent means unbounded, and
+   * an adapter is free to apply its own default.
+   *
+   * Passed EXPLICITLY rather than read out of `env`, because `env` is the
+   * firewalled runtime environment handed to the sub-agent: the worker's
+   * `filterRuntimeEnv` is default-deny and strips every `PANGOLIN_*` control
+   * -plane variable, so a bound read from `env` would never arrive. Mirrors
+   * how the worker already threads `PANGOLIN_SETUP_TIMEOUT_SECONDS`.
+   */
+  agentTimeoutSeconds?: number;
+  /** Hard bound for each individual plugin install, in seconds. Same rationale. */
+  pluginInstallTimeoutSeconds?: number;
 }
 
 /**
