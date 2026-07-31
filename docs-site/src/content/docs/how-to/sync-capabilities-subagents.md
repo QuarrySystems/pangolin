@@ -186,12 +186,17 @@ from that same map. A provider outside this package never touches
 ## Registering an out-of-tree provider
 
 Implement `SyncProvider` against `@quarry-systems/pangolin-cli/providers`,
-then register it in your `pangolin.config`:
+then register it in your `pangolin.config`. Substitute your own class and
+package name — `MyProvider` / `my-pangolin-provider` below are placeholders,
+not packages you can install:
 
 ```javascript
-import { RemoraProvider } from 'remora-pangolin-provider';
-export const syncProviders = [new RemoraProvider()];
+import { MyProvider } from 'my-pangolin-provider';
+export const syncProviders = [new MyProvider()];
 ```
+
+A provider may equally be a local file in your deploy repo — npm is only the
+distribution route, `syncProviders` is the registration point.
 
 Built-in names (`claude-code`, `stoa`) cannot be overridden — a collision is
 a hard error naming the config file and the array index.
