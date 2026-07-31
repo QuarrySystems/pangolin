@@ -19,13 +19,26 @@ import type {
   RuntimeContext,
   RuntimeExit,
   RuntimeInvocation,
-} from "@quarry-systems/pangolin-core";
-import { renderPrompt } from "./prompt-renderer.js";
-import { installPluginsFromManifest } from "./plugin-installer.js";
-import { spawnClaude } from "./claude-spawn.js";
-import { detectNeedsInputSentinel } from "./sentinel-detector.js";
-import { resolveModelArg } from "./model-map.js";
-import { parseClaudeEnvelope } from "./envelope.js";
+} from '@quarry-systems/pangolin-core';
+import { renderPrompt } from './prompt-renderer.js';
+import { installPluginsFromManifest } from './plugin-installer.js';
+import { spawnClaude } from './claude-spawn.js';
+import { detectNeedsInputSentinel } from './sentinel-detector.js';
+import { resolveModelArg } from './model-map.js';
+import { parseClaudeEnvelope } from './envelope.js';
+
+/**
+ * Fallbacks used when the caller supplies no bound on `RuntimeContext` — an
+ * older worker, or the adapter driven standalone. They mirror what
+ * `pangolin-client` derives: its own 7200s dispatch-timeout floor, and
+ * `Math.min(300, timeout)` for plugin install.
+ *
+ * These are deliberately a *default*, never "unbounded": an agent with no bound
+ * anywhere is the failure this exists to prevent, and on Fargate it bills until
+ * someone notices.
+ */
+const DEFAULT_AGENT_TIMEOUT_SECONDS = 7200;
+const DEFAULT_PLUGIN_INSTALL_TIMEOUT_SECONDS = 300;
 
 export interface ClaudeCodeRuntimeAdapterOptions {
   /** Override the `claude` binary path (used by tests and exotic deploys). */
@@ -33,31 +46,29 @@ export interface ClaudeCodeRuntimeAdapterOptions {
 }
 
 export class ClaudeCodeRuntimeAdapter implements RuntimeAdapter {
-  readonly name = "claude-code";
+  readonly name = 'claude-code';
 
   readonly reservedPaths: string[] = [
-    ".claude/settings.json",
-    ".claude/skills/**",
-    "pangolin-plugins.json",
+    '.claude/settings.json',
+    '.claude/skills/**',
+    'pangolin-plugins.json',
   ];
 
   readonly mergeRules: Record<string, MergeRule> = {
-    ".claude/settings.json": { strategy: "deep-merge", arrayMode: "union" },
-    ".claude/skills/**": { strategy: "last-write-wins" },
-    "pangolin-plugins.json": { strategy: "array-union" },
+    '.claude/settings.json': { strategy: 'deep-merge', arrayMode: 'union' },
+    '.claude/skills/**': { strategy: 'last-write-wins' },
+    'pangolin-plugins.json': { strategy: 'array-union' },
   };
 
   constructor(private readonly opts: ClaudeCodeRuntimeAdapterOptions = {}) {}
 
-  async invoke(
-    spec: RuntimeInvocation,
-    ctx: RuntimeContext,
-  ): Promise<RuntimeExit> {
+  async invoke(spec: RuntimeInvocation, ctx: RuntimeContext): Promise<RuntimeExit> {
     const prompt = renderPrompt(spec);
     await installPluginsFromManifest({
       workspaceDir: spec.workspaceDir,
       env: ctx.env,
       claudeBin: this.opts.claudeBin,
+      timeoutSeconds: ctx.pluginInstallTimeoutSeconds ?? DEFAULT_PLUGIN_INSTALL_TIMEOUT_SECONDS,
     });
     const modelArg = resolveModelArg(spec.model);
     const spawnResult = await spawnClaude({
@@ -67,6 +78,7 @@ export class ClaudeCodeRuntimeAdapter implements RuntimeAdapter {
       claudeBin: this.opts.claudeBin,
       dangerouslySkipPermissions: resolveBypassFlag(ctx.env),
       model: modelArg,
+      timeoutSeconds: ctx.agentTimeoutSeconds ?? DEFAULT_AGENT_TIMEOUT_SECONDS,
     });
     const sentinelPath = await detectNeedsInputSentinel(spec.workspaceDir);
     const { text, usage } = parseClaudeEnvelope(spawnResult.stdout);

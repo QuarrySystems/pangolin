@@ -60,6 +60,16 @@ export interface WorkerConfig {
   secretStoreKind: 'aws-secrets-manager' | 'local-file';
   runtimeAdapter: string;
   setupTimeoutSeconds: number;
+  /**
+   * Hard bound for the agent phase, from `PANGOLIN_AGENT_TIMEOUT_SECONDS`.
+   * Parsed HERE — from the worker's own process env — because the runtime env
+   * firewall is default-deny and strips every `PANGOLIN_*` var before the
+   * adapter sees it. Threaded to the adapter on `RuntimeContext`, exactly as
+   * `setupTimeoutSeconds` is threaded to the setup-script runner.
+   */
+  agentTimeoutSeconds: number;
+  /** Hard bound per plugin install, from `PANGOLIN_PLUGIN_INSTALL_TIMEOUT_SECONDS`. */
+  pluginInstallTimeoutSeconds: number;
   disableNeedsInputHelper: boolean;
   /**
    * Requested model (control-plane; work.model pass-through). Opaque string — levels resolve in the adapter.
@@ -190,6 +200,19 @@ export function parseWorkerEnv(env: NodeJS.ProcessEnv = process.env): WorkerConf
   const setupTimeoutSeconds = env.PANGOLIN_SETUP_TIMEOUT_SECONDS
     ? parsePositiveInteger(env.PANGOLIN_SETUP_TIMEOUT_SECONDS, 'PANGOLIN_SETUP_TIMEOUT_SECONDS')
     : 120;
+  // Defaults mirror what pangolin-client derives (its 7200s dispatch-timeout
+  // floor, and Math.min(300, timeout) for plugin install), so an image invoked
+  // by an older client that emits neither is still bounded rather than able to
+  // hang indefinitely.
+  const agentTimeoutSeconds = env.PANGOLIN_AGENT_TIMEOUT_SECONDS
+    ? parsePositiveInteger(env.PANGOLIN_AGENT_TIMEOUT_SECONDS, 'PANGOLIN_AGENT_TIMEOUT_SECONDS')
+    : 7200;
+  const pluginInstallTimeoutSeconds = env.PANGOLIN_PLUGIN_INSTALL_TIMEOUT_SECONDS
+    ? parsePositiveInteger(
+        env.PANGOLIN_PLUGIN_INSTALL_TIMEOUT_SECONDS,
+        'PANGOLIN_PLUGIN_INSTALL_TIMEOUT_SECONDS',
+      )
+    : 300;
   const disableNeedsInputHelper = env.PANGOLIN_DISABLE_NEEDS_INPUT_HELPER === 'true';
 
   const runtimeEnvAllow = (env.PANGOLIN_RUNTIME_ENV_ALLOW ?? '')
@@ -211,6 +234,8 @@ export function parseWorkerEnv(env: NodeJS.ProcessEnv = process.env): WorkerConf
     secretStoreKind,
     runtimeAdapter,
     setupTimeoutSeconds,
+    agentTimeoutSeconds,
+    pluginInstallTimeoutSeconds,
     disableNeedsInputHelper,
     runtimeEnvAllow,
     ...(env.PANGOLIN_MODEL ? { model: env.PANGOLIN_MODEL } : {}),

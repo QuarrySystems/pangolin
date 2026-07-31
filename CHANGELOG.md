@@ -76,6 +76,40 @@ workspace. See [RELEASING.md](./RELEASING.md) for how a release is cut.
 
 ### Fixed
 
+- **`timeoutSeconds` is now enforced worker-side; before, it bounded nothing.**
+  `pangolin-client` emitted `PANGOLIN_AGENT_TIMEOUT_SECONDS` and
+  `PANGOLIN_PLUGIN_INSTALL_TIMEOUT_SECONDS` into the task environment and *nothing
+  read them* — `envSecondsOr`, which the emit-site comment named as the reader's
+  safety net, did not exist. `boundedAwaitExit` does bound, but only on the
+  `awaitExit` path, which a fire-and-forget consumer never calls. For those
+  consumers there was no bound anywhere in the stack, and on Fargate a hung agent
+  bills until someone notices.
+
+  The agent phase and each plugin install are now bounded, with SIGTERM followed by
+  SIGKILL after a grace period. A timed-out agent resolves with exit code 124 and a
+  reason on stderr (so it reports as a *failed* dispatch, keeping whatever output
+  it produced) rather than a container that never exits; a timed-out plugin install
+  throws naming the plugin, matching the existing fail-fast contract.
+
+  **The bounds travel on `RuntimeContext`, not in the runtime env** — new optional
+  `agentTimeoutSeconds` / `pluginInstallTimeoutSeconds`. Reading them from the
+  adapter's `ctx.env` (the obvious implementation, and the one originally proposed)
+  cannot work: the worker's `filterRuntimeEnv` is default-deny and strips every
+  `PANGOLIN_*` variable before the adapter sees it, so such a bound would silently
+  never apply. `parseWorkerEnv` reads them from the worker's own process env
+  instead — the same route `PANGOLIN_SETUP_TIMEOUT_SECONDS` already takes.
+
+  **Behaviour change:** every dispatch is now bounded. Defaults are 7200s for the
+  agent phase and 300s per plugin install, mirroring what the client already
+  derives, and they apply even when neither variable is set — an unset bound means
+  the default, never "unbounded". A plugin install that legitimately exceeds 5
+  minutes will now fail where it previously hung; raise `timeoutSeconds` or set
+  `PANGOLIN_PLUGIN_INSTALL_TIMEOUT_SECONDS` on the worker if so.
+
+  Note this bounds the *agent phase*, not the whole task: bundle fetch, capture and
+  callback sit outside it, so a consumer on Fargate still wants its own task-level
+  bound.
+
 - **`dedupeOnDispatchId` could silently stop guarding.** The dedupe marker probe in
   `fireWork` treated *any* `storage.get` failure as "the marker is absent, proceed" —
   so an authorization denial, a network fault or a throttle read as "not yet fired"

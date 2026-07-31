@@ -568,6 +568,11 @@ export async function runWorker(
           // BlockContext.inputJson is a string the runner JSON-parses before
           // passing to adapter.invoke — re-serialize to preserve the invariant.
           inputJson: JSON.stringify(cfg.inputJson),
+          // Bounds come from the worker's OWN env via parseWorkerEnv, not from
+          // mergedEnv — filterRuntimeEnv strips every PANGOLIN_* var, so a
+          // bound read from the runtime env would never arrive.
+          agentTimeoutSeconds: cfg.agentTimeoutSeconds,
+          pluginInstallTimeoutSeconds: cfg.pluginInstallTimeoutSeconds,
           baseline,
           redact: (s) => logger.redactString(s),
           log: (e) => logger.log(e),

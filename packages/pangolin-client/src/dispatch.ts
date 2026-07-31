@@ -313,9 +313,18 @@ export async function fireWork(
     }
   }
   // Emit derived worker-side timeout bounds (R4). With the 7200s floor always
-  // defined, these are always emitted. The adapter's envSecondsOr defaults
-  // remain a safety net for any older/standalone worker image that doesn't
-  // receive them.
+  // defined, these are always emitted.
+  //
+  // These are read by `parseWorkerEnv` in pangolin-worker — from the worker's
+  // OWN process env, which is where a TaskSpec env var lands — and threaded to
+  // the runtime adapter on `RuntimeContext` as `agentTimeoutSeconds` /
+  // `pluginInstallTimeoutSeconds`. They are deliberately NOT read from the
+  // adapter's `ctx.env`: that is the firewalled runtime env handed to the
+  // sub-agent, and `filterRuntimeEnv` is default-deny, so it strips every
+  // `PANGOLIN_*` var. A bound read from there would silently never apply.
+  //
+  // The worker's own defaults (7200 / 300) mirror these, so an older or
+  // standalone worker image that receives neither is still bounded.
   if (effectiveTimeoutSeconds !== undefined) {
     envVars.PANGOLIN_AGENT_TIMEOUT_SECONDS = String(effectiveTimeoutSeconds);
     envVars.PANGOLIN_PLUGIN_INSTALL_TIMEOUT_SECONDS = String(
