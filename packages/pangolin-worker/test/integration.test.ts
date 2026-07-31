@@ -20,13 +20,7 @@
 // the OS tmpdir; afterEach tears them down so there is zero shared state.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import {
-  mkdtemp,
-  mkdir,
-  writeFile,
-  readFile,
-  rm,
-} from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -42,10 +36,7 @@ import { runWorker } from '../src/index.js';
 // route per the task acceptance criteria.
 import type { RunWorkerDeps } from '../src/entrypoint.js';
 import { LocalStorageProvider } from '@quarry-systems/pangolin-storage-local';
-import {
-  computeContentHash,
-  type LifecycleEvent,
-} from '@quarry-systems/pangolin-core';
+import { computeContentHash, type LifecycleEvent } from '@quarry-systems/pangolin-core';
 
 // Skip the bash-spawning case on Windows runners (Node's child_process can't
 // spawn POSIX shells). Mirrors the gate in `test/setup-script.test.ts`.
@@ -60,18 +51,11 @@ const itPosix = process.platform === 'win32' ? it.skip : it;
  * `{"name", "entries":[{"path","size"}]}` (entries sorted by path), then
  * concatenated payload bytes. The worker's `unpackBundle` is the inverse.
  */
-function packBundle(
-  name: string,
-  files: Record<string, Uint8Array>,
-): Uint8Array {
+function packBundle(name: string, files: Record<string, Uint8Array>): Uint8Array {
   const paths = Object.keys(files).sort();
   const entries = paths.map((path) => ({ path, size: files[path]!.byteLength }));
-  const headerBytes = new TextEncoder().encode(
-    JSON.stringify({ name, entries }) + '\n',
-  );
-  const total =
-    headerBytes.byteLength +
-    paths.reduce((acc, p) => acc + files[p]!.byteLength, 0);
+  const headerBytes = new TextEncoder().encode(JSON.stringify({ name, entries }) + '\n');
+  const total = headerBytes.byteLength + paths.reduce((acc, p) => acc + files[p]!.byteLength, 0);
   const out = new Uint8Array(total);
   let offset = 0;
   out.set(headerBytes, 0);
@@ -106,6 +90,14 @@ export default () => ({
     const scenario = ctx.env.MOCK_ADAPTER_SCENARIO ?? 'finished';
     if (scenario === 'finished') {
       return { exitCode: 0, stdout: 'mock stdout', stderr: '' };
+    }
+    if (scenario === 'echo-env') {
+      // Dump the env the adapter was actually handed, so a test can assert
+      // what survived the firewall rather than reasoning about it.
+      const dir = join(spec.workspaceDir, '.pangolin');
+      await mkdir(dir, { recursive: true });
+      await writeFile(join(dir, 'env-seen.json'), JSON.stringify(ctx.env), 'utf-8');
+      return { exitCode: 0, stdout: '', stderr: '' };
     }
     if (scenario === 'needs-input-valid') {
       const dir = join(spec.workspaceDir, '.pangolin');
@@ -185,9 +177,7 @@ interface Harness {
   events: LifecycleEvent[];
 }
 
-async function stageDefaultBundles(
-  storage: LocalStorageProvider,
-): Promise<StagedRefs> {
+async function stageDefaultBundles(storage: LocalStorageProvider): Promise<StagedRefs> {
   // Subagent definition — minimal viable JSON the worker can hash + parse.
   //
   // Subagent bundles carry two different hashes:
@@ -341,6 +331,41 @@ describe('worker lifecycle (RuntimeAdapter seam smoke test)', () => {
     return h;
   };
 
+  /**
+   * The adapter's own configuration must survive the env firewall.
+   *
+   * `PANGOLIN_CLAUDE_PERMISSION_MODE` set on the worker's env was silently
+   * stripped, so the claude-code adapter's `resolveBypassFlag` saw nothing,
+   * fell back to `bypass`, and passed `--dangerously-skip-permissions` for a
+   * dispatch the operator had asked to run in `strict`. A safety control that
+   * failed OPEN, with no error and no warning.
+   *
+   * This is pinned at the lifecycle level rather than only on
+   * `filterRuntimeEnv`, because the unit test alone would not have caught it:
+   * the bug was never that the filter misbehaved — it did exactly what it was
+   * told — but that nothing carried this var end to end.
+   */
+  it('delivers adapter-config env vars through the firewall to ctx.env', async () => {
+    const h = harness();
+    const env = buildEnv(h, undefined, {
+      MOCK_ADAPTER_SCENARIO: 'echo-env',
+      PANGOLIN_CLAUDE_PERMISSION_MODE: 'strict',
+    });
+
+    const code = await runWorker(env, buildDeps(h));
+    expect(code).toBe(0);
+
+    const seen = JSON.parse(
+      await readFile(join(h.workspaceDir, '.pangolin', 'env-seen.json'), 'utf-8'),
+    ) as Record<string, string>;
+
+    expect(seen.PANGOLIN_CLAUDE_PERMISSION_MODE).toBe('strict');
+    // The credential lane must stay shut — that is what the firewall is for.
+    expect(seen.PANGOLIN_CALLBACK_TOKEN_REF).toBeUndefined();
+    expect(seen.PANGOLIN_BUNDLE_REFS_JSON).toBeUndefined();
+    expect(seen.PANGOLIN_STORAGE_URI).toBeUndefined();
+  });
+
   it('runs the full lifecycle with a mock adapter and exits 0', async () => {
     const h = harness();
     const env = buildEnv(h, undefined, { MOCK_ADAPTER_SCENARIO: 'finished' });
@@ -371,8 +396,7 @@ describe('worker lifecycle (RuntimeAdapter seam smoke test)', () => {
       capabilities: [
         {
           uri: h.refs.capabilities[0]!.uri,
-          contentHash:
-            'sha256:0000000000000000000000000000000000000000000000000000000000000000',
+          contentHash: 'sha256:0000000000000000000000000000000000000000000000000000000000000000',
         },
       ],
     };
@@ -385,9 +409,7 @@ describe('worker lifecycle (RuntimeAdapter seam smoke test)', () => {
     expect(code).not.toBe(0);
     const failed = h.events.find((e) => e.kind === 'dispatch.failed');
     expect(failed).toBeDefined();
-    expect(failed && 'reason' in failed && failed.reason).toBe(
-      'integrity-failed',
-    );
+    expect(failed && 'reason' in failed && failed.reason).toBe('integrity-failed');
     // dispatch.started fires before integrity check? No — per §6.2 the
     // bundle fetch + verify is step 3, started is step 5. So we expect
     // NO started event on this path.
@@ -404,9 +426,7 @@ describe('worker lifecycle (RuntimeAdapter seam smoke test)', () => {
       // sleeps longer than the configured timeout. With timeoutSeconds=1
       // and a 5-second sleep, the worker SIGKILLs the child and emits
       // `dispatch.failed` with reason 'worker-failed'.
-      const sleepScript = new TextEncoder().encode(
-        '#!/bin/bash\nsleep 5\n',
-      );
+      const sleepScript = new TextEncoder().encode('#!/bin/bash\nsleep 5\n');
       const slowCapFiles = {
         'pangolin-setup.sh': sleepScript,
         // Include README too so the bundle has the same file shape as
@@ -434,9 +454,7 @@ describe('worker lifecycle (RuntimeAdapter seam smoke test)', () => {
       expect(code).not.toBe(0);
       const failed = h.events.find((e) => e.kind === 'dispatch.failed');
       expect(failed).toBeDefined();
-      expect(failed && 'reason' in failed && failed.reason).toBe(
-        'worker-failed',
-      );
+      expect(failed && 'reason' in failed && failed.reason).toBe('worker-failed');
     },
     15_000, // generous test timeout: 1s setup-timeout + 5s sleep + overhead
   );
@@ -468,9 +486,7 @@ describe('worker lifecycle (RuntimeAdapter seam smoke test)', () => {
     expect(code).not.toBe(0);
     const failed = h.events.find((e) => e.kind === 'dispatch.failed');
     expect(failed).toBeDefined();
-    expect(failed && 'reason' in failed && failed.reason).toBe(
-      'worker-failed',
-    );
+    expect(failed && 'reason' in failed && failed.reason).toBe('worker-failed');
   });
 
   it('fails with worker-failed when partial_state exceeds 1 MiB', async () => {
@@ -484,9 +500,7 @@ describe('worker lifecycle (RuntimeAdapter seam smoke test)', () => {
     expect(code).not.toBe(0);
     const failed = h.events.find((e) => e.kind === 'dispatch.failed');
     expect(failed).toBeDefined();
-    expect(failed && 'reason' in failed && failed.reason).toBe(
-      'worker-failed',
-    );
+    expect(failed && 'reason' in failed && failed.reason).toBe('worker-failed');
     // The needs_input event must NOT have been emitted — oversized is a
     // failure outcome, not a deferred-input outcome.
     const kinds = h.events.map((e) => e.kind);

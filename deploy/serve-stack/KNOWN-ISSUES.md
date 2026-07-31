@@ -1103,6 +1103,12 @@ firewall was built to prevent.
 > documented. This needs its own reproduction before anyone acts on it, exactly as
 > issue 8 asked for; it is recorded here rather than fixed in passing because a
 > permission control deserves its own change and its own tests.
+>
+> **Update: reproduced and fixed — see issue 14.** It did fail open. The
+> two-stage reproduction (real worker lifecycle, then the real adapter) is
+> recorded there, along with the correction that it was never categorically
+> inert: two undocumented routes worked, and it was the obvious one that
+> silently did not.
 
 **Original report follows.** Reported from ai-os, 2026-07-31.
 
@@ -1595,6 +1601,96 @@ regression-testing a reviewer against known-bad inputs, measuring an acceptance
 boundary, or pinning a golden input for a determinism check. All three need the
 same thing: the agent held constant, the input fixed, and neither expressed
 through the other.
+
+---
+
+# Issue 14: a safety control that failed open
+
+**Different provenance again.** This one was not reported by a consumer. It fell
+out of the issue-9 work, when measuring where a `PANGOLIN_*` variable actually
+travels turned up a second variable taking the same doomed route — one that
+happens to be a security control.
+
+---
+
+## 14. `PANGOLIN_CLAUDE_PERMISSION_MODE` was stripped by the env firewall, so `strict` was silently ignored
+
+**Status: FIXED — and unlike 8–13, this one was reproduced before it was written up.**
+
+**Symptom.** An operator sets `PANGOLIN_CLAUDE_PERMISSION_MODE=strict` to run a
+read-only dispatch. The dispatch runs with `--dangerously-skip-permissions`
+anyway. No error, no warning, and no observable difference from having set
+nothing at all.
+
+**Cause.** The worker's `filterRuntimeEnv` is DEFAULT-DENY and `PANGOLIN_*` is
+not on its allow-list — deliberately, since the firewall exists to keep the
+callback HMAC key reference and the worker's identity away from a
+prompt-injected sub-agent. But `resolveBypassFlag` reads permission mode out of
+the adapter's `ctx.env`, which is the *post-filter* env. So the variable was
+withheld from the one component that consumes it, and `resolveBypassFlag` saw
+`undefined` and fell back to `bypass`.
+
+**Reproduced, in two stages, before any fix.** Stage 1 drove the real worker
+lifecycle (`runWorker`, real `LocalStorageProvider`) with a recording adapter
+that dumped the `ctx.env` it was handed:
+
+| route | reaches the adapter |
+|---|---|
+| set on the worker's own env — the natural operator path | **`undefined` — stripped** |
+| worker env + `PANGOLIN_RUNTIME_ENV_ALLOW` | `strict` |
+| delivered via an env bundle | `strict` |
+
+Stage 2 fed exactly that env to the real `ClaudeCodeRuntimeAdapter` with only
+the spawn mocked:
+
+```
+stripped (as measured) -> dangerouslySkipPermissions = true
+strict arrives         -> dangerouslySkipPermissions = false
+```
+
+**Impact.** A safety control that fails **open**. The fallback is the same
+`bypass` an operator who configured nothing would get, so "I asked for strict"
+and "I asked for nothing" were indistinguishable — including to the operator.
+The docs offer `strict` for "read-only / analytical dispatches that should
+produce text but make no filesystem or process changes"; that promise did not
+hold on the documented-by-implication path.
+
+Worth being precise about the severity rather than inflating it: two working
+routes existed (`PANGOLIN_RUNTIME_ENV_ALLOW`, and env bundles), neither
+documented. So this was never categorically inert — it was *the obvious way*
+being silently ineffective while two undocumented ways worked.
+
+**The fix.** A short, explicitly-named set of non-credential **adapter config**
+vars now passes the firewall (`BUILTIN_ALLOW_ADAPTER_CONFIG`):
+`PANGOLIN_CLAUDE_PERMISSION_MODE` and `PANGOLIN_DISABLE_NEEDS_INPUT_HELPER`.
+
+By exact name, **never by a `PANGOLIN_` prefix rule** — that would be the lazy
+fix and it would hand `PANGOLIN_CALLBACK_TOKEN_REF` to the sub-agent, re-opening
+the whole firewall. A test pins that specifically, so the shortcut cannot be
+taken later. The blanket "drops all `PANGOLIN_*`" assertion was replaced with a
+credential-by-credential one covering more vars than before, so narrowing the
+claim did not narrow the protection.
+
+Pinned at the **lifecycle** level, not only on `filterRuntimeEnv`. The unit test
+alone would never have caught this: the filter was not misbehaving, it was doing
+exactly what it was told. The bug lived in the gap between two components that
+each looked correct in isolation — which is why the reproduction had to run the
+whole worker.
+
+**Where this generalises.** The same shape produced issue 9: a `PANGOLIN_*`
+variable emitted into the task env and read from a place it could never arrive.
+Both were invisible because nothing fails when an env var is missing — a default
+is used instead. Any future adapter config read from `ctx.env` needs a
+lifecycle-level test, not a unit test, and any such variable needs a deliberate
+decision about which side of the firewall it lives on.
+
+*Not fixed, noticed in passing:* `isHelperDisabled` and
+`getNeedsInputHelperOverlay` are exported and unit-tested but have **no
+production caller**, and `cfg.disableNeedsInputHelper` is parsed by
+`parseWorkerEnv` and never read. `PANGOLIN_DISABLE_NEEDS_INPUT_HELPER` is
+allow-listed above so it will work once something consumes it, but today it
+configures nothing. That is issue 9's pattern a third time and wants its own
+look.
 
 ---
 
