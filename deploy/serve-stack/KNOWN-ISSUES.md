@@ -1122,10 +1122,46 @@ restructuring; the first is the general answer.
 
 ---
 
+---
+
+# Issue 13: evaluation and input pinning
+
+**Filed separately from 8–12, and it does not belong to that group.** Those five came
+from wiring `pangolin-client` to `FargateProvider` for live dispatch. This one comes
+from trying to *evaluate* a subagent rather than run it, and it is a feature request
+rather than a defect. It was sitting in the working tree during the issue-6 work and
+was swept into #128 by a `git add` on this file — so it landed on `main` under a commit
+message about `listRuns`, which mentions none of it. Recorded here because the commit
+history is now misleading on that point and cannot be un-misled.
+
+---
+
 ## 13. No supported way to mount an immutable input artifact independent of subagent identity
 
 **Feature request, not a defect** — and the mechanism is already present, so the
 ask is a contract rather than an invention.
+
+**Verified against source, 2026-07-31 — every claim holds, and one is understated.**
+
+| claim | check |
+|---|---|
+| `WorkItem.inputs` is `Record<string, unknown>` | `contracts/types.ts:52` ✓ |
+| `fire()` reads `inputs.inputRefs` / `pipeline` / `env` off the item | `executors/dispatch.ts:59,72,93` ✓ |
+| `tick` leaves a submitter-set `inputs.inputRefs` alone when `needs` is empty | `engine/tick.ts:159` ✓ |
+| the subagent hash covers `(name, systemPrompt, promptTemplate, model, capabilities)` | ✓ |
+| `registerEnv` is public, typed, content-addressed to `EnvRef`, and **absent** from that hash | ✓ |
+| `needs` can only bind to an upstream item's product | `engine/needs-resolver.ts` ✓ |
+
+The central argument therefore stands: `registerEnv` is exactly the shape being asked
+for, one type over — the combination of *content-addressed* and *not part of subagent
+identity* is precisely what lets identity and input vary independently, and it exists
+for environment variables with no artifact-typed sibling.
+
+**Understated: there are FIVE undeclared carriers, not three.** `fire()` also reads
+`item.inputs.subagent` (`:51`) and `item.inputs.workerInput` (`:94`), neither declared
+on `WorkItem` either. That strengthens the ask rather than weakening it — the two extra
+carriers are *agent identity* and *the instruction payload*, which are the ones most
+worth having typed. A reader currently discovers all five by grepping the executor.
 
 **Symptom.** A dispatch's workspace input cannot be fixed without also changing
 the subagent's identity. That makes controlled evaluation of an agent impossible:
