@@ -624,11 +624,15 @@ reconcile-first tick that runs once before the loop did not, so a cancel queued
 while the process was down lost the race to the very item it was meant to stop.
 
 That was mostly theoretical until `serve()` began driving every configured queue.
-Items stranded on a previously-undriven queue become dispatchable on the next
-start, and cancelling them is the operator's only remedy — one that could not work,
-because cancellation is processed by the loop that had never ticked that queue. So
-the first start after upgrading was exactly the moment the remedy was needed and
-exactly the moment it failed.
+Items stranded on a previously-undriven queue become dispatchable on the next start,
+so the first start after an upgrade is exactly when an operator would reach for a
+cancel — and, with serve stopped for that upgrade, exactly the case this race broke.
+
+(An earlier draft of this paragraph said cancelling stranded work "could not work,
+because cancellation is processed by the loop that had never ticked that queue." That
+repeated the mistaken claim corrected under this issue's Impact section below.
+Cancellation is not queue-scoped and always worked while serve was running; the race
+fixed here is specifically about a cancel queued while serve was **down**.)
 
 Ingress (submissions → extends → control) now drains once before the
 reconcile-first tick as well, as a single ordered unit. **The order is
@@ -639,10 +643,26 @@ the store has never seen iterates an empty item list and returns *without throwi
 (`closeRun` throws on an unknown run, so it survives; the two diverge here.) Both
 directions are pinned by tests.
 
-*Operator note for the upgrade:* if work is sitting `ready` on a queue this stack
-did not previously drive, decide about it before starting the new build — on that
-first start it will either run or be cancelled, and now a cancel queued beforehand
-will actually be honoured.
+*Operator note for the upgrade — checked, not assumed.* Work sitting `ready` on a
+queue this stack did not previously drive becomes dispatchable on the first start
+after the upgrade, so it is worth deciding about beforehand; a cancel queued in
+advance is now honoured before anything fires.
+
+**For this stack specifically, there is nothing to decide.** Queried against the live
+serve DB on 2026-07-31: `gated` holds two items, both already
+`cancelled (operator cancelled)`, and **no item in any queue is in a non-terminal
+state**. Nothing thaws on upgrade. The query, for anyone repeating it:
+
+```bash
+docker exec pangolin-serve node -e "
+const D=require('/workspace/node_modules/.pnpm/better-sqlite3@11.10.0/node_modules/better-sqlite3')('/data/pangolin.db',{readonly:true});
+console.log(D.prepare(\"SELECT queue,status,COUNT(*) n FROM items GROUP BY queue,status\").all());
+"
+```
+
+There is no client-side way to ask this — enumerating runs needs the `listRuns()`
+that issue 6's deferred `listPrefixes` would unblock, which is exactly why the check
+has to go through the serve container's DB.
 
 **No reader changes are needed.** `queue` is a run-level field — `WorkItem` carries
 none — so a run belongs to exactly one queue; the outbox is keyed by `runId`; and
@@ -690,14 +710,30 @@ run submitted to `gated` sat `ready` with `blockedBy: []` for 20+ minutes while 
 loop dispatched unrelated work; resubmitted unchanged to `default` it completed in
 67 seconds.
 
-Two things make this worse than a normal misconfiguration:
+What makes this worse than a normal misconfiguration: the config is *valid*. The
+orchestrator accepts the queue, so there is no startup warning and no obvious place
+to look.
 
-- The config is *valid*. The orchestrator accepts the queue, so there is no startup
-  warning and no obvious place to look.
-- **`orch cancel` cannot rescue it.** Cancellation is processed by the same tick
-  loop, so a run stranded on an unticked queue cannot be cancelled either. The only
-  exit is to stop caring about that run id — and because submit is idempotent by id,
-  the id stays occupied.
+> **Correction (2026-07-31).** This section originally claimed a second aggravating
+> factor — that "**`orch cancel` cannot rescue it**, [because] cancellation is
+> processed by the same tick loop, so a run stranded on an unticked queue cannot be
+> cancelled either," leaving no exit but to abandon the run id. **That is wrong, and
+> the live stack disproves it.** The two `gated` items in the serve-stack DB are
+> `status=cancelled, reason=operator cancelled` — cancelled while `gated` was never
+> being ticked.
+>
+> `cancelRun` is not queue-scoped. The serve loop drains control envelopes in its
+> **body** and only then calls `tick(queue)`; `cancelRun(runId)` walks
+> `store.getItems(runId)` and flips `pending`/`ready` straight to `cancelled` without
+> ever consulting a queue. So cancel has always worked on a stranded run, provided
+> serve was up to poll for it.
+>
+> This also downgrades the severity argued above: there *was* an exit, and it was the
+> obvious one.
+>
+> One real cancel gap did exist, and it is a different one: a cancel queued while
+> serve was **down** lost the race to the reconcile-first tick, which fired before the
+> first `pollControl`. That is fixed — see the second follow-up under issue 7's status.
 
 The comment in `pangolin.config.mjs` describing `gated` as "a dedicated `gated`
 queue carrying the pipeline pattern" is therefore aspirational as deployed.

@@ -8,17 +8,20 @@
 // dispatched unrelated work normally throughout. Observed at 20+ minutes on `gated`;
 // the same run resubmitted unchanged to `default` completed in 67 seconds.
 //
-// Two things made it worse than an ordinary misconfiguration. The config is VALID, so
-// there is no startup warning and no obvious place to look. And `orch cancel` cannot
-// rescue it — cancellation is processed by the same tick loop, so a run stranded on an
-// unticked queue cannot be cancelled either, and submit being idempotent by id means
-// the id stays occupied.
+// What made it worse than an ordinary misconfiguration: the config is VALID, so there is
+// no startup warning and no obvious place to look.
+//
+// (KNOWN-ISSUES #7 also claimed `orch cancel` could not rescue a stranded run, leaving no
+// exit but to abandon the run id. That was wrong — cancelRun walks a run's items directly
+// and is not queue-scoped, and the live stack's two `gated` items are recorded as
+// `cancelled (operator cancelled)` despite `gated` never having been ticked.)
 //
 // The contract now: an EXPLICIT `queue` drives exactly that queue (one process per
 // queue stays possible), and OMITTING it drives every configured queue.
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { PangolinOrchestrator, SqliteRunStateStore, ManualTrigger } from '../src/index.js';
 import type { SubmissionEnvelope, SubmissionTransport, OutboxRecord } from '../src/index.js';
+import type { ControlChannel } from '../src/contracts/index.js';
 import { serve } from '../src/serve/driver.js';
 import { immediateExecutor } from './fixtures/executors.js';
 
@@ -164,6 +167,44 @@ describe('#7 serve() and multi-queue configs', () => {
     );
 
     expect(log).not.toHaveBeenCalled();
+    store.close();
+  });
+
+  it('cancel reaches a run on a queue this process never ticks', async () => {
+    // Pins the correction to KNOWN-ISSUES #7, which claimed a run stranded on an
+    // unticked queue "cannot be cancelled either" and so had no exit. cancelRun walks a
+    // run's items directly and is not queue-scoped, and the serve loop drains control in
+    // its BODY before tick(queue) — so cancel reaches the run whatever is being ticked.
+    // Confirmed against the live serve DB before writing this: two `gated` items sit at
+    // `cancelled (operator cancelled)` despite `gated` never having been driven.
+    const { store, orch } = makeTwoQueueOrch();
+
+    let controlPolled = false;
+    const acked: string[] = [];
+    const transport: SubmissionTransport & ControlChannel = {
+      ...makeTransport([envFor('run-cancel-unticked', 'gated')]),
+      async control() {},
+      async pollControl() {
+        if (controlPolled) return [];
+        controlPolled = true;
+        return [
+          {
+            kind: 'cancel',
+            target: 'run-cancel-unticked',
+            actor: 'human:operator',
+            at: new Date().toISOString(),
+          },
+        ];
+      },
+      async ackControl(target: string) {
+        acked.push(target);
+      },
+    };
+
+    // Explicitly scoped to `default`: `gated` is never ticked by this process.
+    await runUntil(orch, transport, { queue: 'default' }, () => acked.length > 0);
+
+    expect(orch.getStatus('run-cancel-unticked').map((s) => s.status)).toEqual(['cancelled']);
     store.close();
   });
 
