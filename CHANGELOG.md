@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 All packages are versioned in lockstep; this file is the changelog for the whole
 workspace. See [RELEASING.md](./RELEASING.md) for how a release is cut.
 
+## [Unreleased]
+
+### Breaking
+
+- `CliContext` now requires a third member,
+  `getSyncProviders: () => Promise<{ providers: unknown; source: string } | null>`.
+  Any code constructing a `CliContext` to call `buildProgram` must supply it;
+  `defaultGetSyncProviders` is exported from `@quarry-systems/pangolin-cli` as the
+  drop-in default.
+
+### Added
+
+- `pangolin.config.{ts,js,mjs}` accepts a `syncProviders` named export — an array of
+  `SyncProvider` instances registering out-of-tree sync providers for
+  `pangolin subagent sync` / `pangolin capabilities sync`. Built-in provider names
+  (`claude-code`, `stoa`) cannot be overridden; a collision is an error.
+- `@quarry-systems/pangolin-cli/providers` subpath export, publishing the
+  `SyncProvider` / `SubagentDef` / `CapabilityBundle` types plus `ClaudeCodeProvider`,
+  `StoaProvider`, and `splitFrontmatter` for out-of-tree provider authors. Provisional
+  — may change on a minor release.
+
 ## [0.4.0] - 2026-07-28
 
 ### Breaking
