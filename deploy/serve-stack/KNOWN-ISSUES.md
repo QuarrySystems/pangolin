@@ -5,11 +5,19 @@ Docker Desktop and running `client/smoke.mjs` end to end.
 
 The run itself was healthy — `submit → dispatch → reconcile → complete` in 15.7s,
 with a 4-entry hash-linked chain, matching merkle/anchor roots, a valid signature,
-and an `external-immutable` S3 anchor. Every issue below is about the *operator
-path*: the runbook, the config defaults, and the verify UX. None indicates a fault
-in the orchestration or audit machinery.
+and an `external-immutable` S3 anchor. Issues 1–5 are about the *operator path*:
+the runbook, the config defaults, and the verify UX. None of those indicates a
+fault in the orchestration or audit machinery.
 
-Line references are to this branch.
+**Issue 6 is different, and the scoping sentence above does not cover it.** It came
+later, from an unattended driver polling this stack after a long uptime, and it is a
+scaling fault in the orchestrator's publish loop and in the client read path rather
+than anything in the runbook. It is filed here because this is where the serve-stack
+findings live, but it wants a different reader.
+
+Line references for issues 1–5 are to this branch. Issue 6 cites
+`@quarry-systems/pangolin-orchestrator@0.4.0` by compiled `dist/` path, because that
+is the artifact that was read and measured.
 
 ---
 
@@ -239,6 +247,122 @@ success. The check cannot fail for the failure it is meant to catch.
 **Suggested fix.** Render the zero-edge case as `─ no handoff edges` (neutral, as
 `authorization  not attested` already does) rather than `✓`. The reserved-glyph
 distinction already exists in this output; handoff simply is not using it.
+
+---
+
+## 6. The outbox grows without bound, and every client read walks all of it
+
+**Symptom.** Reading one completed run takes over a minute, and the cost is
+proportional to how long the stack has been up rather than to anything about the
+run. Measured 2026-07-30 against a stack with 21 historical runs:
+
+```
+run fu1-posfix2-…-f466e5b510a6   (the run itself took ~67 seconds)
+  OperationsApi.audit()          71,027 ms
+  transport.readOutbox()         60,807 ms   → 23,307 records
+
+run chain-1785341107099
+  mailbox list of its outbox                 → 34,937 keys
+
+a runId that does not exist
+  OperationsApi.audit()               5 ms
+  transport.readOutbox()              3 ms   → 0 records
+```
+
+The 5 ms case is the control: the cost is entirely the outbox scan, not the bundle
+assembly, the anchor, or the signature check.
+
+A related consequence, met first: listing the outbox root to enumerate run ids —
+`mbox.list('orchestrator/outbox/')` — did not complete within 120 s.
+
+**Cause.** Two independent things compound.
+
+*Writes are amplified per tick.* `serve/driver.js` calls
+`orchestrator.getStatus()` **with no argument**. `getStatus(runId)` passes that
+straight through:
+
+```js
+// dist/orchestrator.js
+getStatus(runId) { const items = this.store.getItems(runId); … }
+```
+
+and the SQLite store treats an absent runId as "everything":
+
+```js
+// dist/runstate/sqlite.js
+getItems(runId) {
+  const rows = (runId
+    ? this.db.prepare('SELECT * FROM items WHERE run_id=? ORDER BY rowid').all(runId)
+    : this.db.prepare('SELECT * FROM items ORDER BY rowid').all());
+  …
+}
+```
+
+The driver then groups by runId and publishes one status `OutboxRecord` **per run,
+per tick** — including for runs that reached a terminal state days earlier. Items
+are never deleted, so a run keeps accruing outbox records for the rest of the
+stack's life. That is how a 67-second run ends up with 23,307 of them.
+
+*Reads are unindexed.* `MailboxSubmissionTransport.readOutbox` lists the run's
+prefix and then issues a **sequential `get` per key**:
+
+```js
+async readOutbox(runId) {
+    const keys = (await this.mbox.list(`${this.ns}/outbox/${runId}/`)).sort();
+    const out = [];
+    for (const k of keys) {
+        const b = await this.mbox.get(k);
+        if (b?.length)
+            out.push(dec(b));
+    }
+    return out;
+}
+```
+
+Every client-facing read goes through it — `status()`, `audit()`, and `watch()`,
+which polls `status()` in a loop.
+
+**Impact.** Storage grows as O(runs × ticks) with no pruning, and client read cost
+grows with it. Three consequences worth separating:
+
+- `audit()` reads the entire outbox to find one record. It wants the last entry of
+  `kind: 'audit'`; it fetches and decodes every status record ever published for
+  that run to get there.
+- `watch()` degrades as it waits. Its per-poll cost rises with uptime, so the
+  longer a run takes, the more expensive each check on it becomes — the opposite of
+  what a polling API should do.
+- An unattended driver is the worst case, and is how this surfaced. A nightly
+  process that polls enrolled runs to terminality pays a full scan per run per
+  sweep, and the scan grows *while it waits*, because the serve loop keeps
+  publishing. At a 60-second poll interval a single sweep can exceed its own
+  interval, so a long night degenerates into back-to-back scans and makes little
+  progress. There is no cheaper readiness probe available to a client: `status()`
+  walks the same records.
+
+None of this is visible in a short-lived stack. A cold start, a smoke run, and a
+teardown never accumulate enough records to notice — which is why issues 1–5 did
+not surface it.
+
+**Suggested fix.** Three separable changes, each useful alone:
+
+1. *Stop republishing terminal runs.* Scope the publish loop — either
+   `getStatus(runId)` per active run, or skip runs whose items are all terminal.
+   This is the amplification, and fixing it bounds the growth at the source.
+2. *Let `audit()` find its record without a full scan.* Outbox keys are
+   zero-padded and lexicographically sortable by seq
+   (`String(++this.seq).padStart(12, '0')`), so scanning keys in reverse and
+   stopping at the first `kind: 'audit'` is O(1) in the common case. This works
+   even without change 1 and needs no schema change.
+3. *Give `MailboxStore` a delimited list.* Enumerating run ids needs one entry per
+   run, not per record — S3 offers this natively via `Delimiter: '/'` and
+   `CommonPrefixes`, but `MailboxStore.list(prefix): Promise<string[]>` cannot
+   express it. A `listPrefixes(prefix)` sibling would make run enumeration
+   O(runs) instead of O(records), and is a prerequisite for any client-side
+   `listRuns()`.
+
+Changes 1 and 2 are independent: 1 bounds what accumulates, 2 makes the existing
+accumulation cheap to read past. Doing 2 first gives immediate relief on stacks
+that already have large outboxes, since it does not require rewriting history.
 
 ---
 
