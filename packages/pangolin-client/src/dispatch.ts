@@ -34,6 +34,7 @@ import {
   buildPangolinUri,
   buildDispatchRecordUri,
   parsePangolinUri,
+  isStorageNotFound,
   type DispatchWork,
   type DispatchResult,
   type CapabilityRef,
@@ -513,16 +514,33 @@ function isSecretRef(v: SecretRef | InlineSecret): v is SecretRef {
 
 /**
  * Reliable existence check for a URI-addressed overwrite `put()`: `StorageProvider`
- * has no dedicated `exists()`, so this probes via `get()` and treats any throw as
- * "not present" (mirrors every other not-found convention in this file, e.g.
- * `readSubagentCapabilities`).
+ * has no dedicated `exists()`, so this probes via `get()`.
+ *
+ * Only a not-found error means "absent". Every other failure — an authorization
+ * denial, a network fault, a throttle — is rethrown, because this backs a *guard*
+ * and the alternative is a guard that silently stops guarding. A bare `catch`
+ * here read "I am not authorised to look" as "not yet fired" and let a duplicate
+ * dispatch through: a second container for the same dispatchId, whose callback
+ * HMAC key replaces the first's mid-run, which is the exact outcome step 0 exists
+ * to prevent. Reproduced against MinIO with an identity holding `s3:PutObject`
+ * but not `s3:GetObject` — 403 on a marker that demonstrably existed.
+ *
+ * The check is type-based via `isStorageNotFound`, never a message sniff:
+ * `StorageProvider.get` is contractually required to throw `StorageNotFoundError`
+ * (see `pangolin-core/src/storage.ts`), and `readDispatchRecord` already relies on
+ * exactly that for the same `dispatches/<id>/` prefix.
+ *
+ * Deliberately NOT applied to the best-effort reads elsewhere in this file
+ * (`readSubagentCapabilities`, env-bundle resolution): those degrade to a sane
+ * default on failure by design, whereas this one decides whether to fire.
  */
 async function markerPresent(storage: StorageProvider, uri: string): Promise<boolean> {
   try {
     await storage.get(uri);
     return true;
-  } catch {
-    return false;
+  } catch (err) {
+    if (isStorageNotFound(err)) return false;
+    throw err;
   }
 }
 
