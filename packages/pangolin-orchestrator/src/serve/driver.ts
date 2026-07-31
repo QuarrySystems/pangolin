@@ -65,15 +65,45 @@ export async function serve(opts: ServeOptions): Promise<void> {
   // deployments keep working. Omitting it now drives EVERY configured queue rather
   // than just 'default': the orchestrator already holds and validates the whole map,
   // so a config declaring queues the loop silently ignored was half-inert by default.
-  const queues = opts.queue !== undefined ? [opts.queue] : opts.orchestrator.getConfiguredQueues();
+  const configured = opts.orchestrator.getConfiguredQueues();
+  const queues = opts.queue !== undefined ? [opts.queue] : configured;
+
+  // Every configured queue is ATTEMPTED each pass, whatever its siblings did. Awaiting
+  // them in a bare loop would let a throw from an early queue abort the pass before the
+  // later ones are ticked — and since each pass restarts at the same failing queue, one
+  // deterministic fault would starve every queue behind it forever. That is precisely the
+  // silently-never-driven failure this whole change exists to remove, so it must not be
+  // reintroduced through the back door.
+  //
+  // Failures are collected, not swallowed: the pass still ends up throwing, because
+  // /readyz staleness is derived from iterations reaching their end cleanly and a broken
+  // tick must not read as a healthy iteration. A lone failure rethrows AS-IS so
+  // single-queue deployments see byte-identical error surfacing; several become an
+  // AggregateError naming each one, since reporting only the first would hide the rest.
+  //
+  // Sequential on purpose — not a missed parallelisation. The orchestrator is a
+  // single-writer design (one SQLite writer, one shared lock manager), so concurrent
+  // ticks would race. Each tick(q) is a queue-filtered query, so the cost is small and
+  // proportional to the number of configured queues.
   const tickAll = async () => {
-    for (const q of queues) await opts.orchestrator.tick(q);
+    const failures: unknown[] = [];
+    for (const q of queues) {
+      try {
+        await opts.orchestrator.tick(q);
+      } catch (err) {
+        failures.push(err);
+      }
+    }
+    if (failures.length === 1) throw failures[0];
+    if (failures.length > 1) {
+      throw new AggregateError(failures, `serve tick failed for ${failures.length} queues`);
+    }
   };
 
   // A single-queue process is legitimate, so this is a notice rather than a refusal —
   // but the operator has to learn it at boot. The failure it prevents produces no
   // signal to correlate with a doc, which is what made it expensive to diagnose.
-  const undriven = opts.orchestrator.getConfiguredQueues().filter((q) => !queues.includes(q));
+  const undriven = configured.filter((q) => !queues.includes(q));
   if (undriven.length > 0) {
     console.warn(
       `[pangolin serve] driving queue(s) ${queues.join(', ')}; configured but NOT driven by this ` +
@@ -107,11 +137,28 @@ export async function serve(opts: ServeOptions): Promise<void> {
     // Crash recovery: re-ready items left `running` by a crashed process
     opts.orchestrator.recoverStranded(now());
 
-    // Reconcile-first: one tick before the main loop
-    await tickAll();
+    // Reconcile-first: one tick before the main loop.
+    //
+    // A failure here is reported and the loop still starts, rather than rejecting out of
+    // serve(). With one queue those were equivalent; with several they are not — letting
+    // it throw means a single broken queue stops every healthy queue from ever being
+    // driven, and since the fault is usually deterministic the process just crash-loops
+    // under `restart: unless-stopped` and serves nothing. There is also no principled
+    // reason for the same failure to be fatal at boot but recoverable one iteration
+    // later, which is how the loop below already treats it.
+    //
+    // The failure is NOT hidden: lastTickOkAt stays unset, so /readyz reports 503
+    // (`not-ready`) until a tick succeeds, while /healthz stays up because liveness
+    // drives restarts and a dependency outage must not cause a restart storm — the
+    // split evaluateHealth() already documents.
+    try {
+      await tickAll();
+      health.lastTickOkAt = now();
+    } catch (err) {
+      onError(err);
+    }
     health.started = true;
     health.lastTickAt = now();
-    health.lastTickOkAt = now();
 
     // Tracks runs whose audit export has already been published — persists across
     // iterations so each run's audit export is emitted exactly once (idempotent).

@@ -505,6 +505,40 @@ different deployments:
 drives both `default` and `gated`**, and the config comment calling `gated` "a
 dedicated queue carrying the pipeline pattern" is no longer aspirational.
 
+**Follow-up: driving N queues reintroduced this bug's own failure mode, and that
+is now fixed too.** The first cut ticked queues in a bare
+`for (const q of queues) await tick(q)`. A throw from an early queue aborted the
+whole pass — later queues never ticked, status never published — and because each
+pass restarts at the same failing queue, one deterministic fault starved every
+queue behind it indefinitely. Worse at boot: the reconcile-first tick rejected out
+of `serve()` entirely, so a single broken queue meant *no* queue was ever driven
+and the container crash-looped under `restart: unless-stopped`, serving nothing.
+
+Now every configured queue is attempted on every pass regardless of its siblings,
+and failures are collected rather than swallowed:
+
+- A lone failure rethrows **as-is**, so single-queue deployments see byte-identical
+  error surfacing. Several become an `AggregateError` naming each, because
+  reporting only the first hides the rest.
+- The pass still ends up failing, so a broken tick does not read as a healthy
+  iteration — `/readyz` staleness depends on passes completing cleanly.
+- A reconcile-first failure now reports and starts the loop anyway instead of
+  rejecting. `lastTickOkAt` stays unset, so `/readyz` returns 503 `not-ready`
+  until a tick succeeds, while `/healthz` stays up — liveness drives restarts and
+  a dependency outage must not cause a restart storm, which is the split
+  `evaluateHealth()` already documents. There was no principled reason for the
+  same failure to be fatal at boot but recoverable one iteration later.
+
+Ticking is sequential on purpose, not a missed parallelisation: the orchestrator
+is a single-writer design (one SQLite writer, one shared lock manager), so
+concurrent ticks would race. Each `tick(q)` is a queue-filtered query.
+
+**No reader changes are needed.** `queue` is a run-level field — `WorkItem` carries
+none — so a run belongs to exactly one queue; the outbox is keyed by `runId`; and
+the driver groups a run's items by `runId` regardless of queue. `pangolin-product`
+contains no reference to `queue` at all. Driving more queues changes *which* runs
+progress, not the shape of anything a client reads.
+
 *Behaviour change worth flagging:* a deployment that configured extra queues and
 passed no `queue` gets those queues driven now where they were inert before. That
 is the bug being fixed, but it is a real change in what a running process does.

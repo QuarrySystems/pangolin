@@ -97,6 +97,18 @@ workspace. See [RELEASING.md](./RELEASING.md) for how a release is cut.
   process does; pass `queue` explicitly to keep it single-queue. New
   `PangolinOrchestrator.getConfiguredQueues()` exposes the names.
 
+  Queues are ticked sequentially and **independently**: a failure in one is
+  collected and the rest are still attempted, so a single broken queue cannot
+  starve its siblings. A lone failure is rethrown as-is (single-queue deployments
+  see identical error surfacing); several become an `AggregateError`. The pass
+  still fails overall, so a broken tick does not read as a healthy iteration.
+
+  A failure in the **reconcile-first** tick no longer rejects out of `serve()`; it
+  is reported and the loop starts anyway, leaving `/readyz` at 503 `not-ready`
+  until a tick succeeds while `/healthz` stays up. Previously one broken queue
+  prevented every healthy queue from ever being driven, and a deterministic fault
+  crash-looped the process under a restart policy while serving nothing.
+
 - **A long-lived `serve` stack no longer makes every client read slower.** Reading
   one completed run from a stack that had been up a while took over a minute, and
   the cost tracked how long the stack had been running rather than anything about
