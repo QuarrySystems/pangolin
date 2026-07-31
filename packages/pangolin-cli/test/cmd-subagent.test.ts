@@ -114,6 +114,34 @@ describe('attachSubagentCmd', () => {
     });
   });
 
+  // Every other config-provider test in this suite uses --dry-run, which returns
+  // before `getClient()` is ever called. Without this one, nothing anywhere
+  // proves a config-supplied provider's output actually reaches
+  // client.subagent.register() — the headline user story ends one step short.
+  it('sync registers a CONFIG-SUPPLIED provider output (non-dry-run)', async () => {
+    const mockRegister = vi.fn(async (def: { name: string }) => ({
+      name: def.name,
+      contentHash: `sha256:${def.name}-hash`,
+      registeredAt: '2026-05-28T00:00:00Z',
+    }));
+    const mockClient = { subagent: { register: mockRegister } };
+    const getSyncProviders = vi.fn(async () => ({
+      providers: [probeProvider],
+      source: 'pangolin.config.mjs',
+    }));
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    const program = new Command();
+    attachSubagentCmd(program, { getClient: async () => mockClient as any, getSyncProviders });
+    await program.parseAsync([
+      'node', 'pangolin', 'subagent', 'sync', '--provider', 'probe',
+    ]);
+
+    expect(getSyncProviders).toHaveBeenCalledTimes(1);
+    expect(mockRegister).toHaveBeenCalledTimes(1);
+    expect(mockRegister).toHaveBeenCalledWith({ name: 'probed-agent' });
+  });
+
   it('sync --dry-run skips registration and never calls getClient or getSyncProviders for a built-in provider', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'pangolin-sync-sub-dry-'));
     await writeFile(join(dir, 'g.md'), '---\nname: g\n---\nbody\n', 'utf8');

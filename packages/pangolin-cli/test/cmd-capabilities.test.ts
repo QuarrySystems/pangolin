@@ -59,6 +59,37 @@ describe('attachCapabilitiesCmd', () => {
     ]);
   });
 
+  // Mirrors the subagent side: every other config-provider test here uses
+  // --dry-run, which returns before `getClient()` is called, so nothing
+  // otherwise proves a config-supplied provider's bundles reach
+  // client.capabilities.register().
+  it('sync registers a CONFIG-SUPPLIED provider output (non-dry-run)', async () => {
+    const mockRegister = vi.fn(async (b: { name: string }) => ({
+      name: b.name,
+      contentHash: `sha256:${b.name}-hash`,
+      registeredAt: '2026-05-28T00:00:00Z',
+    }));
+    const mockClient = { capabilities: { register: mockRegister } };
+    const getSyncProviders = vi.fn(async () => ({
+      providers: [probeProvider],
+      source: 'pangolin.config.mjs',
+    }));
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    const program = new Command();
+    attachCapabilitiesCmd(program, {
+      getClient: async () => mockClient as any,
+      getSyncProviders,
+    });
+    await program.parseAsync([
+      'node', 'pangolin', 'capabilities', 'sync', '--provider', 'probe',
+    ]);
+
+    expect(getSyncProviders).toHaveBeenCalledTimes(1);
+    expect(mockRegister).toHaveBeenCalledTimes(1);
+    expect(mockRegister).toHaveBeenCalledWith({ name: 'probed-cap', files: {} });
+  });
+
   it('sync --dry-run skips registration and never calls getClient or getSyncProviders for a built-in provider', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'pangolin-sync-cap-dry-'));
     await mkdir(join(dir, 's'), { recursive: true });
