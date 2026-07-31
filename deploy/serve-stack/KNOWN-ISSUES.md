@@ -1171,7 +1171,49 @@ are separate concerns.
 
 ## 10. `AwsSecretStore.stage` returns a random-suffixed ARN, so callers cannot scope IAM
 
-**Status: OPEN.** Reported from ai-os, 2026-07-31.
+**Status: FIXED as a declared contract — but the symptom below is WRONG.**
+
+*The cause is accurate; the symptom it is used to argue for is not.* `stage()` does
+mint via `CreateSecret` and return `res.ARN`, and Secrets Manager does append six
+random characters. But the symptom — "a caller wanting least-privilege on staged
+secrets has no policy to write except a wildcard over the whole namespace" — does not
+follow, and is false.
+
+**The names are deterministic given `dispatchId`**, and `dispatchId` is caller-
+suppliable on `DispatchWork`:
+
+| secret | name |
+|---|---|
+| inline per-dispatch secret | `<dispatchId>/<envName>` |
+| callback HMAC key | `pangolin/callback-hmac/<dispatchId>` |
+
+So `secret:<dispatchId>/*` was writable all along. **The random suffix was never the
+blocker** — an IAM resource wildcard covers exactly that, which is why every
+least-privilege pattern for Secrets Manager ends in `*` anyway. The entry reasons from
+"the ARN is unpredictable" to "therefore the policy must be namespace-wide", and that
+step does not hold.
+
+*What was actually missing was a promise.* The naming was an undeclared internal
+convention — correct, stable, and discoverable only by reading `dispatch.ts:179` and
+`callback-hmac.ts:23`. A caller scoping IAM against it was coupling to an
+implementation detail with a silent failure mode, which is the same complaint issue 13
+makes about the undeclared `inputs.*` carriers.
+
+*The fix is therefore a contract, not an API.* `dispatchSecretName`,
+`callbackHmacSecretName`, `CALLBACK_HMAC_NAME_PREFIX` and
+`dispatchSecretPolicyPatterns` are now exported from `pangolin-client`, and the
+dispatch path builds its names through the same helpers with a test pinning that — so
+the published contract cannot drift from what is actually staged.
+`dispatchSecretPolicyPatterns(dispatchId)` returns the two patterns covering one
+dispatch (two, because the inline secrets and the callback key share no prefix), and a
+test asserts they do **not** match a sibling dispatch's key.
+
+The suggested `stage({ deterministicName: true })` / `PutSecretValue` path was **not**
+built: it solves ARN predictability, and ARN predictability was not the problem. Noted
+rather than silently skipped, because the reasoning is the reusable part — the fix that
+looked necessary was downstream of a premise that did not survive checking.
+
+**Original report follows.** Reported from ai-os, 2026-07-31.
 
 **Symptom.** A caller wanting least-privilege on staged secrets has no policy to
 write except a wildcard over the whole namespace.
@@ -1203,7 +1245,35 @@ so a deterministic path needs a create-or-update, not a bare create.
 
 ## 11. `FargateProvider` has no per-dispatch task role, so every dispatch shares one identity
 
-**Status: OPEN.** Reported from ai-os, 2026-07-31.
+**Status: FIXED.** This entry was right, including its diagnosis that the gap was
+unused capability rather than a platform limit. Checked against the installed SDK
+rather than taken on trust: `TaskOverride` really does carry `taskRoleArn`.
+
+`FargateProviderOpts.taskRoleArn` is now passed through to
+`overrides.taskRoleArn` — a string for a fixed role, or a resolver
+`(spec) => string | undefined` to vary it per dispatch, since `TaskSpec` carries
+`dispatchId`. Callers that set nothing keep today's behaviour exactly: the field is
+omitted from the override entirely rather than sent as `undefined`, and a test pins
+that.
+
+It is deliberately **not** on `TaskSpec`. That contract is provider-agnostic and shared
+with the local Docker provider, and an IAM ARN is an AWS concept; keeping it on the
+provider's own options confines AWS to the AWS package.
+
+*One correction.* The entry justifies leaving the execution role alone with "only the
+task role is overridable". That is false — `TaskOverride` exposes `executionRoleArn`
+too. The *recommendation* still stands, for the reason the entry gives second and which
+is the real one: the execution role pulls images and writes logs, so it is
+infrastructure rather than workload identity, and varying it per dispatch would break
+task launch rather than scope anything. A test asserts the provider never sets it.
+
+*On the pair.* With per-dispatch roles available, the joint consequence 10 and 11 were
+filed for — a compromised run reading another run's callback HMAC key — is closable
+today: mint a role per dispatch and scope it with
+`dispatchSecretPolicyPatterns(dispatchId)`. Note that this is a capability now offered,
+not a default; a caller that keeps one shared role still has one shared identity.
+
+**Original report follows.** Reported from ai-os, 2026-07-31.
 
 **Symptom.** Every dispatch on a given target runs with identical AWS permissions,
 regardless of what it was asked to do.
