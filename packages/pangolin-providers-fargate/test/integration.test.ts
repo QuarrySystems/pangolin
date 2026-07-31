@@ -12,11 +12,7 @@
 
 import { FargateProvider } from '../src/index.js';
 import { describe, it, expect, vi } from 'vitest';
-import {
-  DescribeTasksCommand,
-  RunTaskCommand,
-  StopTaskCommand,
-} from '@aws-sdk/client-ecs';
+import { DescribeTasksCommand, RunTaskCommand, StopTaskCommand } from '@aws-sdk/client-ecs';
 
 /**
  * Build a stand-in ECS client whose `send` discriminates by command
@@ -64,6 +60,87 @@ describe('FargateProvider', () => {
     // RunTaskCommand input therefore must NOT include `image` on the
     // container override — only env/command/cpu/memory.
     expect(calls[0].overrides.containerOverrides[0].image).toBeUndefined();
+  });
+
+  /**
+   * Per-dispatch task role (KNOWN-ISSUES 11).
+   *
+   * Every dispatch on a target previously ran with the task definition's role,
+   * so a low-trust dispatch and a high-trust one got the same credential and
+   * per-dispatch S3/secret scoping was impossible. ECS has always supported
+   * `overrides.taskRoleArn`; the provider simply never set it.
+   */
+  describe('per-dispatch task role', () => {
+    function providerWith(taskRoleArn: any, calls: any[]) {
+      return new FargateProvider({
+        cluster: 'c',
+        taskDefinitionFamily: 'pangolin-worker',
+        subnets: ['sn-1'],
+        securityGroups: ['sg-1'],
+        ...(taskRoleArn !== undefined ? { taskRoleArn } : {}),
+        ecsClient: fakeEcs({
+          RunTaskCommand: (input: any) => {
+            calls.push(input);
+            return { tasks: [{ taskArn: 'arn:t1' }] };
+          },
+        }),
+      });
+    }
+    const spec = (dispatchId = 'd1') => ({
+      image: 'foo@sha256:' + 'c'.repeat(64),
+      env: {},
+      secretRefs: {},
+      dispatchId,
+    });
+    const ctx = { credentials: { kind: 'aws' } } as any;
+
+    it('omits taskRoleArn entirely when unset, preserving today’s behaviour', async () => {
+      const calls: any[] = [];
+      await providerWith(undefined, calls).run(spec(), ctx);
+      expect(calls[0].overrides.taskRoleArn).toBeUndefined();
+      expect('taskRoleArn' in calls[0].overrides).toBe(false);
+    });
+
+    it('passes a static taskRoleArn through to overrides.taskRoleArn', async () => {
+      const calls: any[] = [];
+      await providerWith('arn:aws:iam::1:role/fixed', calls).run(spec(), ctx);
+      expect(calls[0].overrides.taskRoleArn).toBe('arn:aws:iam::1:role/fixed');
+    });
+
+    it('resolves a per-dispatch role from the spec when given a function', async () => {
+      const calls: any[] = [];
+      const provider = providerWith((s: any) => `arn:aws:iam::1:role/run-${s.dispatchId}`, calls);
+      await provider.run(spec('alpha'), ctx);
+      await provider.run(spec('beta'), ctx);
+      expect(calls[0].overrides.taskRoleArn).toBe('arn:aws:iam::1:role/run-alpha');
+      // The point of the whole change: two dispatches, two identities.
+      expect(calls[1].overrides.taskRoleArn).toBe('arn:aws:iam::1:role/run-beta');
+    });
+
+    it('treats a resolver returning undefined as "no override"', async () => {
+      const calls: any[] = [];
+      await providerWith(() => undefined, calls).run(spec(), ctx);
+      expect('taskRoleArn' in calls[0].overrides).toBe(false);
+    });
+
+    it('never overrides the execution role, which is infrastructure', async () => {
+      // ECS does permit overriding executionRoleArn at RunTask, but the
+      // execution role pulls images and writes logs — it is infrastructure,
+      // not workload identity, and is deliberately left on the task definition.
+      const calls: any[] = [];
+      await providerWith('arn:aws:iam::1:role/fixed', calls).run(spec(), ctx);
+      expect(calls[0].overrides.executionRoleArn).toBeUndefined();
+    });
+
+    it('keeps container overrides intact alongside the role', async () => {
+      const calls: any[] = [];
+      const provider = providerWith('arn:aws:iam::1:role/fixed', calls);
+      await provider.run({ ...spec(), env: { K: 'v' } }, ctx);
+      expect(calls[0].overrides.containerOverrides[0].environment).toContainEqual({
+        name: 'K',
+        value: 'v',
+      });
+    });
   });
 
   it('awaitExit polls DescribeTasks until STOPPED and reports exitCode', async () => {
@@ -145,10 +222,7 @@ describe('FargateProvider', () => {
       } as any,
     });
 
-    await provider.cancel(
-      { providerTaskId: 'arn:t1' },
-      { credentials: { kind: 'aws' } },
-    );
+    await provider.cancel({ providerTaskId: 'arn:t1' }, { credentials: { kind: 'aws' } });
 
     expect(capturedCmd).toBeInstanceOf(StopTaskCommand);
     expect(captured!.cluster).toBe('c');

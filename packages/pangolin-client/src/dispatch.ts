@@ -52,6 +52,7 @@ import {
 import type { PangolinClient } from './client.js';
 import { computeInlineSecretTtl } from './secret-ttl.js';
 import { mintCallbackHmac } from './callback-hmac.js';
+import { dispatchSecretName } from './secret-names.js';
 import { writeDispatchRecord } from './retention.js';
 import { SecretStoreMismatchError, DispatchAlreadyExistsError } from './errors.js';
 import { emitLifecycleEvent } from './lifecycle-emit.js';
@@ -177,7 +178,8 @@ export async function fireWork(
       continue;
     }
     const { ref } = await store!.stage({
-      name: `${dispatchId}/${envName}`,
+      // Declared contract — see secret-names.ts. Callers scope IAM against it.
+      name: dispatchSecretName(dispatchId, envName),
       value: entry.inline,
       ttlSeconds: computeInlineSecretTtl({
         explicit: entry.ttlSeconds,

@@ -1,5 +1,6 @@
 import { randomBytes, createHmac } from 'node:crypto';
 import type { SecretStore } from '@quarry-systems/pangolin-core';
+import { CALLBACK_HMAC_NAME_PREFIX, callbackHmacSecretName } from './secret-names.js';
 
 /**
  * Mint a per-dispatch HMAC key, stage it in the injected SecretStore with a
@@ -16,11 +17,13 @@ export async function mintCallbackHmac(opts: {
   dispatchTimeoutSeconds?: number;
   namePrefix?: string;
 }): Promise<{ ref: string; ttlSeconds: number }> {
-  const namePrefix = opts.namePrefix ?? 'pangolin/callback-hmac';
+  const namePrefix = opts.namePrefix ?? CALLBACK_HMAC_NAME_PREFIX;
   const ttlSeconds = (opts.dispatchTimeoutSeconds ?? 7200) + 300;
   const key = randomBytes(32).toString('hex');
   const { ref } = await opts.store.stage({
-    name: `${namePrefix}/${opts.dispatchId}`,
+    // Built through the declared helper so the published naming contract and
+    // what is actually staged cannot drift apart.
+    name: callbackHmacSecretName(opts.dispatchId, namePrefix),
     value: key,
     ttlSeconds,
     tags: { 'pangolin:dispatchId': opts.dispatchId },

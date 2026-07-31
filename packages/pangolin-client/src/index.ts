@@ -31,6 +31,16 @@ export { SecretStoreMismatchError } from './errors.js';
 // ── Callback HMAC ──────────────────────────────────────────────────────────
 export { mintCallbackHmac, signCallback } from './callback-hmac.js';
 
+// The staged-secret naming contract. Public so a caller building a
+// least-privilege per-dispatch IAM policy can scope against a declared shape
+// instead of hardcoding one it has no promise about.
+export {
+  CALLBACK_HMAC_NAME_PREFIX,
+  dispatchSecretName,
+  callbackHmacSecretName,
+  dispatchSecretPolicyPatterns,
+} from './secret-names.js';
+
 // ── Capabilities registration ──────────────────────────────────────────────
 export { registerCapability, type RegisterCapabilityOpts } from './capabilities-register.js';
 

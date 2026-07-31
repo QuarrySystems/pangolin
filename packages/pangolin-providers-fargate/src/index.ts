@@ -51,6 +51,29 @@ export interface FargateProviderOpts {
    */
   assignPublicIp?: 'ENABLED' | 'DISABLED';
   /**
+   * Workload identity for the task — ECS `overrides.taskRoleArn`.
+   *
+   * Without it every dispatch on this target runs with whatever role the task
+   * definition was registered with, so a low-trust dispatch and a high-trust
+   * one hold the same credential and per-dispatch S3 / secret scoping is
+   * impossible. ECS has always accepted this override; the provider simply
+   * never set it.
+   *
+   * Pass a string for a fixed role, or a resolver to vary it per dispatch —
+   * the `TaskSpec` carries `dispatchId`, which is the natural key for a
+   * per-dispatch role. A resolver returning `undefined` means "no override",
+   * identical to omitting this option.
+   *
+   * Deliberately NOT on `TaskSpec`: that contract is provider-agnostic and
+   * shared with the local Docker provider, and an IAM ARN is an AWS concept.
+   *
+   * The task EXECUTION role stays on the task definition and is not
+   * overridable here. ECS does permit overriding it, but it pulls images and
+   * writes logs — infrastructure, not workload identity — and varying it per
+   * dispatch would break task launch rather than scope anything.
+   */
+  taskRoleArn?: string | ((spec: TaskSpec) => string | undefined);
+  /**
    * Inject a pre-constructed ECSClient. Defaults to a new `new ECSClient({})`
    * which picks up region + credentials from the ambient AWS SDK chain.
    */
@@ -97,6 +120,14 @@ export class FargateProvider implements ComputeProvider {
     this.assertImagePinned(spec.image);
     this.assertSecretRefsHandledByTaskDefinition(spec.secretRefs);
 
+    // Resolved per run() so a resolver can key off this dispatch. Spread
+    // conditionally: an absent role must leave the field off the override
+    // entirely, not send `taskRoleArn: undefined`.
+    const taskRoleArn =
+      typeof this.opts.taskRoleArn === 'function'
+        ? this.opts.taskRoleArn(spec)
+        : this.opts.taskRoleArn;
+
     const res = await this.ecs.send(
       new RunTaskCommand({
         cluster: this.opts.cluster,
@@ -110,6 +141,7 @@ export class FargateProvider implements ComputeProvider {
           },
         },
         overrides: {
+          ...(taskRoleArn !== undefined ? { taskRoleArn } : {}),
           containerOverrides: [
             {
               name: CONTAINER_NAME,

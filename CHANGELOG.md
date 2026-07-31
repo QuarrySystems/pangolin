@@ -74,6 +74,42 @@ workspace. See [RELEASING.md](./RELEASING.md) for how a release is cut.
   sound because its outbox keys are zero-padded to a fixed width, so lexical key
   order is publication order.
 
+### Added
+
+- **`FargateProvider` can give each dispatch its own AWS identity.** New optional
+  `taskRoleArn` on `FargateProviderOpts`, passed through to ECS
+  `overrides.taskRoleArn`. Previously every dispatch on a target ran with whatever
+  role the task definition was registered with, so a low-trust dispatch and a
+  high-trust one held the same credential and per-dispatch S3 / secret scoping was
+  impossible. ECS has always accepted this override; the provider never set it.
+
+  Pass a string for a fixed role, or a resolver `(spec) => string | undefined` to
+  vary it per dispatch — `TaskSpec` carries `dispatchId`, the natural key for a
+  per-dispatch role. Callers that set nothing keep today's behaviour exactly: the
+  field is omitted from the override entirely, not sent as `undefined`.
+
+  Deliberately not on `TaskSpec`: that contract is provider-agnostic and shared with
+  the local Docker provider, and an IAM ARN is an AWS concept. The task *execution*
+  role stays on the task definition — ECS does permit overriding it, but it pulls
+  images and writes logs, so varying it per dispatch breaks launch rather than
+  scoping anything.
+
+- **The staged-secret naming contract is now declared and exported.**
+  `dispatchSecretName`, `callbackHmacSecretName`, `CALLBACK_HMAC_NAME_PREFIX` and
+  `dispatchSecretPolicyPatterns` from `@quarry-systems/pangolin-client`. `fireWork`
+  stages per-dispatch secrets as `<dispatchId>/<envName>` and the callback HMAC key
+  as `pangolin/callback-hmac/<dispatchId>`; both were correct and stable but
+  undeclared, so a caller writing a least-privilege IAM policy had to hardcode a
+  shape it had no promise about. The dispatch path now builds those names through
+  the same helpers, and a test pins that, so the published contract cannot drift
+  from what is actually staged.
+
+  `dispatchSecretPolicyPatterns(dispatchId)` returns the two Secrets Manager
+  resource patterns covering exactly one dispatch — two rather than one because the
+  inline secrets and the callback key do not share a prefix. Combined with a
+  per-dispatch `taskRoleArn`, that is the boundary that stops one run reading
+  another run's callback key.
+
 ### Fixed
 
 - **`timeoutSeconds` is now enforced worker-side; before, it bounded nothing.**
