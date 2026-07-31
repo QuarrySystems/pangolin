@@ -6,9 +6,14 @@
 //
 // Harmless while it stayed theoretical, and sharply not once serve() began driving
 // every configured queue (KNOWN-ISSUES #7): items stranded on a previously-undriven
-// queue become dispatchable on the next start, and cancelling them was the operator's
-// only remedy — one that could not work, because cancellation is processed by the same
-// loop that had never ticked that queue.
+// queue become dispatchable on the next start, so that start is exactly when an
+// operator reaches for a cancel — and, with serve stopped for the upgrade, exactly the
+// case this race broke.
+//
+// Note the scope. While serve is UP, cancel was never at risk: control is drained in the
+// loop body and cancelRun is not queue-scoped, so it reaches a stranded run regardless of
+// which queue is ticked. (KNOWN-ISSUES #7 claimed otherwise; the live stack disproved it.)
+// The gap was only ever a cancel queued while the process was DOWN.
 //
 // A cancel that arrived before the process did must be honoured before anything fires.
 import { describe, it, expect } from 'vitest';

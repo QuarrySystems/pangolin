@@ -58,8 +58,9 @@ export async function serve(opts: ServeOptions): Promise<void> {
   // Which queues this process drives. `tick()` filters items by queue, so a configured
   // queue nobody ticks is one whose items are never considered ready, fired or
   // reconciled — they sit `ready` with `blockedBy: []` forever, with no error in the
-  // serve log, in `orch status`, or in the audit chain. `orch cancel` cannot rescue
-  // them either, because cancellation is processed by this same loop.
+  // serve log, in `orch status`, or in the audit chain. (`orch cancel` DOES still reach
+  // them: cancelRun walks a run's items directly and is not queue-scoped. An earlier
+  // version of this comment said otherwise.)
   //
   // Naming a queue explicitly still drives exactly that one, so one-process-per-queue
   // deployments keep working. Omitting it now drives EVERY configured queue rather
@@ -193,10 +194,11 @@ export async function serve(opts: ServeOptions): Promise<void> {
     // drives restarts and a dependency outage must not cause a restart storm — the
     // split evaluateHealth() already documents.
     // Ingress BEFORE that first tick. The loop below already drains ahead of its tick, but
-    // the reconcile-first pass did not, so a cancel queued while this process was down lost
-    // the race to the very item it was meant to stop — the operator's only remedy, defeated
-    // by the restart that was supposed to apply it. Draining the whole of ingress (not just
-    // control) is what keeps a cancel arriving alongside its own submission working.
+    // the reconcile-first pass did not, so a cancel queued while this process was DOWN lost
+    // the race to the very item it was meant to stop — defeated by the restart that was
+    // supposed to apply it. (While serve is UP, cancel was never at risk: control is drained
+    // in the loop body and cancelRun is not queue-scoped.) Draining the whole of ingress,
+    // not just control, is what keeps a cancel arriving alongside its own submission working.
     try {
       await drainIngress();
     } catch (err) {
