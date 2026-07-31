@@ -4,6 +4,7 @@ import type {
   SubmissionTransport,
   SubmissionEnvelope,
   OutboxRecord,
+  OutboxKind,
   ControlEnvelope,
   ControlChannel,
   AppendChannel,
@@ -63,6 +64,26 @@ export class MailboxSubmissionTransport
       if (b?.length) out.push(dec(b) as OutboxRecord);
     }
     return out;
+  }
+  /** Newest record of `kind` (any kind when omitted), without reading the whole outbox.
+   *
+   *  Safe because outbox keys are zero-padded to a fixed width by `outbox()` above, so
+   *  lexical key order IS publication order — seq 10 sorts after seq 9, not between 1
+   *  and 2. Scanning back from the newest key and stopping at the first match costs one
+   *  `get` in the common case instead of one per record.
+   *
+   *  Still O(keys) in the worst case — a `kind` that was never published reads
+   *  everything. Both real callers ask for a kind that is normally the newest or nearly
+   *  so, which is what makes this a fast path in practice rather than only in theory. */
+  async readLatestOutbox(runId: string, kind?: OutboxKind): Promise<OutboxRecord | undefined> {
+    const keys = (await this.mbox.list(`${this.ns}/outbox/${runId}/`)).sort();
+    for (let i = keys.length - 1; i >= 0; i--) {
+      const b = await this.mbox.get(keys[i]);
+      if (!b?.length) continue;
+      const rec = dec(b) as OutboxRecord;
+      if (kind === undefined || rec.kind === kind) return rec;
+    }
+    return undefined;
   }
   async control(env: ControlEnvelope): Promise<void> {
     try {

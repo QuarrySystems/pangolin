@@ -265,6 +265,19 @@ docker run --rm -v /var/run/docker.sock:/var/run/docker.sock alpine stat -c '%g'
 
 Paste that number as `DOCKER_GID=` in `deploy/serve-stack/.env`. No export step is needed — compose reads the file directly.
 
+Run the one-liner even if you think you know the answer, and **do not stat the socket from the host** — under Docker Desktop the socket the containers actually see lives inside Desktop's VM, so the host's view of `/var/run/docker.sock` is not the value compose needs. The one-liner is correct on both topologies because it stats from inside a container.
+
+Two answers are common, and the compose default fits only one of them:
+
+| Host | Typical output | Notes |
+|---|---|---|
+| Docker Engine on Linux/WSL2 (Step 1) | `999` / `998` | The `docker` group. Matches the `${DOCKER_GID:-999}` default in `docker-compose.yml`. |
+| Docker Desktop | `0` | The socket is `root:root` mode `660`. |
+
+If you are on Docker Desktop, set `DOCKER_GID=0` explicitly. Leaving the `999` default gives `serve` (uid 1000) no write access to the socket, and the failure is quiet in the worst way: the stack comes up, reports healthy, and simply never launches a worker container. Nothing in the serve log names the socket.
+
+`DOCKER_GID=0` is not an extra privilege worth worrying about. Mounting the Docker socket at all is already root-equivalent on the host — the group is not what grants the power, so the value looks more alarming than it is.
+
 ### 4.4 Pull the worker image
 
 The worker image is config-level (`DispatchExecutor.workerImage` in `pangolin.config.mjs`), not a compose service. `docker compose pull` does NOT refresh it. Pull it explicitly:
@@ -331,12 +344,23 @@ The serve container publishes its signing public key to `s3://pangolin-data/publ
 ```bash
 AWS_ACCESS_KEY_ID=minioadmin AWS_SECRET_ACCESS_KEY=minioadmin \
   aws s3 cp \
-    --endpoint-url http://localhost:9000 \
+    --endpoint-url http://127.0.0.1:9000 \
     s3://pangolin-data/public-key.json \
     deploy/serve-stack/client/public-key.json
 ```
 
+If you do not have the AWS CLI installed, fetch it with `minio/mc` in a container instead — run from `deploy/serve-stack`:
+
+```bash
+docker run --rm --network pangolin-serve-stack_default \
+  -e MC_HOST_m="http://minioadmin:minioadmin@minio:9000" \
+  -v "$PWD/client:/out" minio/mc \
+  cp m/pangolin-data/public-key.json /out/public-key.json
+```
+
 This file is read by `deploy/serve-stack/client/pangolin.config.mjs` via a relative `./public-key.json` URL — it must live next to that config file.
+
+**Do not skip this step.** `client/public-key.json` is gitignored and no other step creates it. Without it `verifySignature` returns `false`, and a completely healthy run verifies as `✗ TAMPERED` with `✗ signature false` — the tool currently cannot distinguish "I have no trust anchor" from "this signature does not match". If you see `TAMPERED` on a run you just watched succeed, check that this file exists before concluding anything about the bundle.
 
 ### 5.4 Run the smoke check
 
@@ -355,17 +379,24 @@ The `pangolin` CLI resolves `pangolin.config.mjs` from the current working direc
 
 ```bash
 cd deploy/serve-stack/client
-pnpm exec pangolin orch watch <run-id>
+../node_modules/.bin/pangolin orch watch <run-id>
 ```
 
 This shows the live run view (streaming updates while the worker executes).
+
+> **Do not use `pnpm exec` here.** It normalizes the working directory to the
+> package root (`deploy/serve-stack`), so the CLI loads the *serve* config rather
+> than the client one — defeating the cwd rule this step depends on. Invoking the
+> bin directly is what keeps cwd intact. Since the serve config now refuses to run
+> outside its container, the mistake fails loudly rather than sending requests to
+> real AWS, but the direct-bin form is still the one that works.
 
 ### 5.6 Audit and verify
 
 ```bash
 # Still in deploy/serve-stack/client/
-pnpm exec pangolin orch audit <run-id> --out bundle.json
-pnpm exec pangolin verify bundle.json
+../node_modules/.bin/pangolin orch audit <run-id> --out bundle.json
+../node_modules/.bin/pangolin verify bundle.json
 ```
 
 `pangolin verify` checks the five audit-log rows against the persisted ed25519 signature using the `public-key.json` you fetched in step 5.3.
@@ -407,12 +438,14 @@ Expected: serve restarts, logs `[serve] starting tick+inbox loop`, then `recover
 
 ```bash
 cd deploy/serve-stack/client
-pnpm exec pangolin orch watch <run-id>
-pnpm exec pangolin orch audit <run-id> --out bundle.json
-pnpm exec pangolin verify bundle.json
+../node_modules/.bin/pangolin orch watch <run-id>
+../node_modules/.bin/pangolin orch audit <run-id> --out bundle.json
+../node_modules/.bin/pangolin verify bundle.json
 ```
 
 Expected: verification passes; bundle is sealed intact.
+
+(Direct bin path, not `pnpm exec` — see the note in §5.5.)
 
 ### 6.5 Two honest nuances
 

@@ -1,0 +1,19 @@
+{
+  "id": "chain-PLACEHOLDER",
+  "queue": "default",
+  "items": [
+    { "id": "chain-edit-1", "executor": "dispatch-a", "trigger": "manual",
+      "inputs": { "subagent": "chain-edit" },
+      "depends_on": [], "resourceLocks": ["chain.ts"] },
+
+    { "id": "chain-verify-1", "executor": "dispatch-a", "trigger": "manual",
+      "inputs": { "subagent": "chain-verify" },
+      "needs": { "work": { "from": "chain-edit-1", "select": { "kind": "patch" } } },
+      "depends_on": [], "resourceLocks": [] },
+
+    { "id": "chain-announce-1", "executor": "dispatch-b", "trigger": "manual",
+      "inputs": { "subagent": "chain-announce" },
+      "needs": { "work": { "from": "chain-edit-1", "select": { "kind": "patch" } } },
+      "depends_on": [], "resourceLocks": ["NOTES.md"] }
+  ]
+}

@@ -60,4 +60,18 @@ export interface SubmissionTransport {
   deadLetter(runId: string): Promise<void>; // quarantine an un-ingestable submission
   publish(rec: OutboxRecord): Promise<void>; // service → outbox
   readOutbox(runId: string): Promise<OutboxRecord[]>; // client: read status/completion
+  /** OPTIONAL fast path: the newest record of `kind` (or of any kind when omitted),
+   *  without materialising the whole outbox.
+   *
+   *  Every client-facing read wants exactly one record — `status()` the latest status,
+   *  `audit()` the latest audit export — but `readOutbox` fetches and decodes every
+   *  record ever published for the run to get there, and outbox keys are append-only.
+   *  Reading one completed run was measured at over 60s against a stack with 23,307
+   *  records for it. Implementations whose keys are ordered (see
+   *  MailboxSubmissionTransport's zero-padded seq) should scan in reverse and stop at
+   *  the first match.
+   *
+   *  Optional so third-party transports keep working untouched: callers must fall back
+   *  to `readOutbox` when it is absent. */
+  readLatestOutbox?(runId: string, kind?: OutboxKind): Promise<OutboxRecord | undefined>;
 }

@@ -25,6 +25,13 @@ is the artifact that was read and measured.
 
 ## 1. `DOCKER_GID` default of `999` is wrong under Docker Desktop
 
+**Status: FIXED** (docs). `RUNBOOK.md` §4.3 now carries the per-topology table
+(`999`/`998` for Engine, `0` for Docker Desktop), states that the socket must not
+be statted from the host under Desktop, describes the silent-healthy-but-never-dispatches
+failure, and explains why group `0` is not a meaningful additional privilege. The
+compose default is unchanged: `999` is correct for the Engine-on-WSL2 topology
+Step 1 actually builds.
+
 **Symptom.** `serve` starts, reports healthy, but cannot launch worker containers.
 
 **Cause.** `docker-compose.yml` sets `group_add: - "${DOCKER_GID:-999}"`, and
@@ -56,6 +63,16 @@ grants the power. Worth stating explicitly so the value doesn't look alarming.
 ---
 
 ## 2. `smoke.mjs` prints follow-up commands that cannot work as written
+
+**Status: FIXED.** `client/smoke.mjs` now prints `../node_modules/.bin/pangolin …`
+and carries a comment explaining why `pnpm exec` cannot be used. `RUNBOOK.md` §5.5
+and §6.4 use the same form, with the reason stated once in §5.5. The cwd rewrite
+was re-confirmed on this branch before the change:
+
+```
+$ cd deploy/serve-stack/client && pnpm exec node -e "console.log(process.cwd())"
+C:\Users\brett\Documents\Knowledge\agora\deploy\serve-stack
+```
 
 **Symptom.** Copy-pasting the commands the smoke script prints fails with an S3
 error that mentions neither pangolin nor MinIO:
@@ -94,6 +111,21 @@ cwd") is defeated by the command it recommends.
 
 ## 3. Serve config's S3 endpoint has no fallback, so it silently targets real AWS
 
+**Status: FIXED** — fail-fast, as the suggested fix below argues for.
+
+The fix had to respect a constraint the original write-up missed: this config
+documents itself as IMPORT-SAFE when `PANGOLIN_S3_ENDPOINT` is absent (header,
+lines 7–8), and that property is load-bearing. The CLI imports whichever
+`pangolin.config.mjs` sits in cwd for *every* verb, including offline ones like
+`pangolin verify bundle.json` that never touch S3. A module-level throw would
+break those.
+
+So `endpoint` is now a lazy provider rather than a bare `process.env` read —
+import stays clean, and the throw happens on the first S3 call, which is exactly
+when an absent endpoint has become a real problem. Verified against the real
+config with the variable unset: import succeeds, `readOutbox()` throws
+`PANGOLIN_S3_ENDPOINT is not set…`, and nothing reaches `amazonaws.com`.
+
 **Symptom.** The confusing error in issue 2 comes from **Amazon**, not MinIO.
 
 **Cause.** `pangolin.config.mjs:53` (serve):
@@ -128,6 +160,28 @@ outcome.
 ---
 
 ## 4. A missing local public key reports `TAMPERED`, not "unverifiable"
+
+**Status: PARTIALLY FIXED — and one premise below was wrong.**
+
+*Correction.* The Impact section claims "the runbook never instructs the operator
+to fetch the key." That is false, and was false when written. `RUNBOOK.md` §5.3
+("Fetch the serve public key") has existed since the serve-stack landed in #57 —
+`git log -S "Fetch the serve public key"` confirms it. The documented happy path
+did include the fetch; the cold-start operator skipped it. The most likely reason
+is that §5.3's only recipe used `aws s3 cp`, so anyone without the AWS CLI hit a
+dead end at exactly that step and moved on.
+
+*What is fixed.* §5.3 now also gives a `minio/mc` container recipe needing no
+local AWS CLI, and states plainly that skipping it makes a healthy run verify as
+`TAMPERED` — so an operator who sees that verdict checks the key before
+concluding anything about the bundle.
+
+*What remains open, and is the real issue.* The tri-state reporting.
+`verifySignature` still returns `false` for both "no trust anchor" and "signature
+does not match", and the verify output still renders both as `✗ signature false`.
+Documentation cannot fix that; it needs the change described under Suggested fix.
+Being unable to distinguish an unconfigured verifier from a genuine tamper is the
+part that matters, and it is untouched.
 
 **Symptom.** A perfectly good run verifies as:
 
@@ -227,6 +281,19 @@ label; `n/a` asserts the run had no handoff edges, which was false here.
 
 ### 5a. The bundle verify gives handoff a green tick at zero edges
 
+**Status: FIXED.** `checkHandoffClosure` now returns `ok: 'n/a'` at zero edges, so
+the row renders `─ handoff  no handoff edges` instead of `✓`. The change was one
+line plus its test: the neutral state already existed end to end — `CheckResult.ok`
+is `boolean | 'n/a'` (`audit.ts:203`, commented *"prerequisite genuinely absent —
+never a false ✓"*) and the renderer already maps it to `─`
+(`pangolin-verify/src/render.ts:22`). Handoff simply was not using the state the
+type had reserved for it.
+
+The verdict is deliberately unchanged: `intact` tests `handoff.ok !== false`, so
+`'n/a'` still cannot fail a bundle. Zero edges was never a *failure* — it was a
+non-answer being rendered as a pass. Issue 5 proper (the `orch watch` inline
+summary disagreeing with `pangolin verify`) is untouched and still open.
+
 A third run (`converter-loop-proof-1785344533713`, two items, no `needs` edges)
 completes the matrix, and it contradicts a reassuring reading of the above:
 
@@ -253,6 +320,53 @@ distinction already exists in this output; handoff simply is not using it.
 ---
 
 ## 6. The outbox grows without bound, and every client read walks all of it
+
+**Status: FIXED** — changes 1 and 2 below. Change 3 (`listPrefixes`) deferred;
+see the note at the end of this section.
+
+**One correction to the plan below.** It claims change 2 "works even without
+change 1". That is true for `status()`/`watch()`, and false for `audit()`. The
+audit export is published exactly once, on the tick after the epoch seals
+(`driver.ts`, the `publishedAudit` guard) — and under fault 1 the loop kept
+publishing status records for that run *forever afterwards*. So the audit record
+was buried under an ever-growing pile of **newer** records, and a reverse scan
+would have walked back over every one of them to reach it. Change 2 only makes
+`audit()` cheap because change 1 stops burying it. The order of the fixes matters
+more than the write-up suggests, and `test/outbox-growth.test.ts` encodes that
+dependency so it cannot be silently reintroduced.
+
+The fixes, as landed in `packages/pangolin-orchestrator`:
+
+1. *Publish loop scoped.* `serve/driver.ts` now publishes a run's final
+   all-terminal status **once** and then goes quiet about that run, instead of
+   republishing every visible run every tick. The terminal-status set is now
+   exported once from the contracts (`TERMINAL_STATUSES`) rather than re-declared
+   — worth noting because the driver needs the 5-member set including `denied`,
+   and four other modules carry 4-member copies that omit it.
+
+   The guard marks a run as announced only **after** the publish resolves. Marking
+   first is the obvious way to write it and it is wrong: a transient publish
+   failure would retire the run permanently, so the final status would never land
+   and no later tick would retry it. The existing error-resilience test in
+   `serve-driver.test.ts` caught exactly that during this change.
+
+2. *Reads take one record, not all of them.* New optional
+   `SubmissionTransport.readLatestOutbox(runId, kind?)`, implemented on
+   `MailboxSubmissionTransport` as a reverse scan that stops at the first match.
+   `status()`, `audit()` and `watch()` use it. Optional on the interface, with a
+   `readOutbox` fallback in `OperationsApi`, so third-party transports are
+   unaffected.
+
+*Not done: change 3, `MailboxStore.listPrefixes`.* It is a real gap — enumerating
+run ids still costs one key per record rather than one per run — but it has no
+consumer in-tree today: it is a prerequisite for a client-side `listRuns()` that
+does not exist yet. Adding an SPI member with no caller is speculative, and change
+1 substantially relieves the symptom that motivated it, since the record count
+per run stops growing with uptime. Worth doing alongside `listRuns()`, not before.
+
+**Existing stacks are not rewritten.** The records already accumulated stay where
+they are; what changes is that reads no longer walk them and new ones stop piling
+up.
 
 **Symptom.** Reading one completed run takes over a minute, and the cost is
 proportional to how long the stack has been up rather than to anything about the

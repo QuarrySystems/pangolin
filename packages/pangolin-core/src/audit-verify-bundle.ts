@@ -179,7 +179,10 @@ function manifestRefMatches(m: DispatchManifest, manifestRef: string): boolean {
  *  producer side to them (mirroring how the consumed side / inputRefs is bound via the manifest-
  *  integrity check) closes the producer lane. Both `resultRef` (select:'patch') and `outputRefs`
  *  (select:'output') are sealed into the reconcile entry, so both consumption lanes are covered. */
-function checkHandoffClosure(bundle: AuditBundle, entries: AuditBundle['auditLog']['entries']): CheckResult {
+function checkHandoffClosure(
+  bundle: AuditBundle,
+  entries: AuditBundle['auditLog']['entries'],
+): CheckResult {
   const produced = new Set<string>();
   for (const e of entries) {
     if (e.kind !== 'item.reconciled' || e.status !== 'done') continue; // only completed producers
@@ -201,7 +204,16 @@ function checkHandoffClosure(bundle: AuditBundle, entries: AuditBundle['auditLog
       }
     }
   }
+  // Zero edges is 'n/a', NOT a pass. The label was always honest, but a ✓ renders
+  // identically to the checks above it that did real work, so a reader scanning the
+  // block for ✓/✗ counts it as one more verified property. Nothing was verified;
+  // there was nothing to verify. That matters most in the case this check exists for
+  // — a plan that was SUPPOSED to carry handoff edges and lost them (a converter bug,
+  // a hand-edit, a refactor that dropped a `needs` block) produced `✓ no handoff
+  // edges` and read as success, so the check could not fail for the failure it is
+  // meant to catch. 'n/a' is the state audit.ts already reserves for exactly this:
+  // "prerequisite genuinely absent — never a false ✓".
   return edges === 0
-    ? { ok: true, detail: 'no handoff edges' }
+    ? { ok: 'n/a' as const, detail: 'no handoff edges' }
     : { ok: true, detail: `${edges} input ref${edges === 1 ? '' : 's'} accounted for` };
 }

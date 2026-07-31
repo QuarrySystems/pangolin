@@ -66,6 +66,64 @@ workspace. See [RELEASING.md](./RELEASING.md) for how a release is cut.
   "the directory holding subagent files" to one built-in provider and "a repo root"
   to the other; that is unresolved, and resolving it may change the signature.
 
+- **`SubmissionTransport.readLatestOutbox(runId, kind?)` — an optional fast path**
+  for "the newest record of this kind", which is all any client-facing read
+  actually wants. Optional on the interface, so third-party transports keep
+  working untouched; callers fall back to `readOutbox` when it is absent.
+  `MailboxSubmissionTransport` implements it by scanning keys in reverse, which is
+  sound because its outbox keys are zero-padded to a fixed width, so lexical key
+  order is publication order.
+
+### Fixed
+
+- **A long-lived `serve` stack no longer makes every client read slower.** Reading
+  one completed run from a stack that had been up a while took over a minute, and
+  the cost tracked how long the stack had been running rather than anything about
+  the run. Two faults compounded.
+
+  Writes were amplified: the serve loop asked for *all* run status each tick and
+  published one outbox record per run per tick — forever, including for runs that
+  had reached a terminal state days earlier. Nothing is ever deleted, so a
+  67-second run was measured holding 23,307 outbox records. The loop now publishes
+  a run's final all-terminal status once and then stays quiet about it, so storage
+  grows with work done instead of with uptime.
+
+  Reads were unindexed: `status()`, `audit()` and `watch()` each want a single
+  record, but fetched and decoded every record ever published for the run to find
+  it. They now use `readLatestOutbox` where the transport offers it.
+
+  Together these fix a polling API that got more expensive the longer it waited —
+  `watch()`'s per-poll cost rose with uptime, so a long run degraded while running,
+  and an unattended driver polling runs to terminality could spend longer on one
+  sweep than its own poll interval.
+
+  Two notes on scope. The fixes are ordered: the audit export is published once and
+  status records used to keep landing on top of it, so the reverse scan only reaches
+  it cheaply *because* terminal runs went quiet. And existing outboxes are not
+  rewritten — the accumulated records stay, but reads no longer walk them.
+
+- **`pangolin verify` no longer gives the handoff check a green tick when there
+  was nothing to check.** A bundle with zero handoff edges reported
+  `✓ handoff  no handoff edges`. The label was honest but the glyph was not: `✓`
+  renders identically to the checks above it that did real work, so the block read
+  as one more verified property. It matters in the case the check exists for — a
+  plan that was *supposed* to carry handoff edges and lost them (a converter bug, a
+  dropped `needs` block) rendered as a pass, so the check could not fail for the
+  failure it is meant to catch. Zero edges now reports `ok: 'n/a'` and renders
+  `─ handoff  no handoff edges`, the state `CheckResult` already reserved for
+  "prerequisite genuinely absent — never a false ✓".
+
+  **No verdict changes.** `intact` has always tested `handoff.ok !== false`, so
+  `'n/a'` cannot fail a bundle that previously passed. Callers that compare
+  `checks.handoff.ok === true` will now see `'n/a'` for zero-edge runs.
+
+- **`denied` now counts as terminal in the serve loop.** `TerminalStatus` gained a
+  runtime companion, `TERMINAL_STATUSES`, exported from the orchestrator's contracts
+  and kept beside the type. Four modules still carry private copies that omit
+  `denied` (`operations-api`, `patterns/quorum`, `patterns/scan`, `view/build`);
+  those are unchanged, since folding them in would widen what each treats as
+  terminal. New code should use the exported set.
+
 ## [0.4.0] - 2026-07-28
 
 ### Breaking
