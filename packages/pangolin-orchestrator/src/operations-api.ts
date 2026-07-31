@@ -64,8 +64,24 @@ export class OperationsApi {
 
   /** Return the latest status outbox record for a run; falls back to the latest record of any kind. */
   async status(runId: string): Promise<OutboxRecord | undefined> {
-    const recs = await this.deps.transport.readOutbox(runId);
-    return recs.filter((r) => r.kind === 'status').at(-1) ?? recs.at(-1);
+    const latest = await this.readLatest(runId, 'status');
+    return latest ?? (await this.readLatest(runId));
+  }
+
+  /** One record off the outbox, via the transport's reverse-scan fast path when it has
+   *  one and a full read when it does not (readLatestOutbox is optional on the contract).
+   *
+   *  This is the whole of the read-cost fix: status(), audit() and watch() each want a
+   *  single record, and reading the run's entire outbox to find it made every client read
+   *  scale with how long the stack had been up rather than with the run. */
+  private async readLatest(
+    runId: string,
+    kind?: OutboxRecord['kind'],
+  ): Promise<OutboxRecord | undefined> {
+    const t = this.deps.transport;
+    if (t.readLatestOutbox) return t.readLatestOutbox(runId, kind);
+    const recs = await t.readOutbox(runId);
+    return kind === undefined ? recs.at(-1) : recs.filter((r) => r.kind === kind).at(-1);
   }
 
   /** Send a cancel control envelope for a target run or item; captures actor (§6.4). */
@@ -81,8 +97,7 @@ export class OperationsApi {
     if (!this.deps.anchor || !this.deps.storage) {
       throw new Error('audit requires anchor + storage in the orch context');
     }
-    const recs = await this.deps.transport.readOutbox(runId);
-    const rawBody = recs.filter((r) => r.kind === 'audit').at(-1)?.body;
+    const rawBody = (await this.readLatest(runId, 'audit'))?.body;
     if (
       rawBody === null || rawBody === undefined ||
       typeof rawBody !== 'object' ||

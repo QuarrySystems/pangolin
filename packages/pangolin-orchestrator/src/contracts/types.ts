@@ -15,6 +15,22 @@ export type RunStatus = (typeof RUN_STATUSES)[number];
 /** The subset of RunStatus an item can hold once it stops moving. */
 export type TerminalStatus = 'done' | 'failed' | 'skipped' | 'cancelled' | 'denied';
 
+/** Runtime companion to TerminalStatus, kept beside the type so the two cannot
+ *  drift. Use this for "has this item stopped moving?" checks.
+ *
+ *  Several modules still carry private 4-member copies that omit 'denied'
+ *  (operations-api.ts, patterns/quorum.ts, patterns/scan.ts, view/build.ts).
+ *  Folding those in would widen what each treats as terminal, which is a
+ *  behaviour change in four separate subsystems — deliberately left alone here.
+ *  New code should import this one. */
+export const TERMINAL_STATUSES: ReadonlySet<string> = new Set<TerminalStatus>([
+  'done',
+  'failed',
+  'skipped',
+  'cancelled',
+  'denied',
+]);
+
 export type EffectTier = 'pure' | 'read-impure' | 'write-impure';
 
 /** Selects WHICH typed product of an upstream item a binding consumes (spec §3). */

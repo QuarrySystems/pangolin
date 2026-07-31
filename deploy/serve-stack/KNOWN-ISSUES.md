@@ -308,6 +308,53 @@ distinction already exists in this output; handoff simply is not using it.
 
 ## 6. The outbox grows without bound, and every client read walks all of it
 
+**Status: FIXED** — changes 1 and 2 below. Change 3 (`listPrefixes`) deferred;
+see the note at the end of this section.
+
+**One correction to the plan below.** It claims change 2 "works even without
+change 1". That is true for `status()`/`watch()`, and false for `audit()`. The
+audit export is published exactly once, on the tick after the epoch seals
+(`driver.ts`, the `publishedAudit` guard) — and under fault 1 the loop kept
+publishing status records for that run *forever afterwards*. So the audit record
+was buried under an ever-growing pile of **newer** records, and a reverse scan
+would have walked back over every one of them to reach it. Change 2 only makes
+`audit()` cheap because change 1 stops burying it. The order of the fixes matters
+more than the write-up suggests, and `test/outbox-growth.test.ts` encodes that
+dependency so it cannot be silently reintroduced.
+
+The fixes, as landed in `packages/pangolin-orchestrator`:
+
+1. *Publish loop scoped.* `serve/driver.ts` now publishes a run's final
+   all-terminal status **once** and then goes quiet about that run, instead of
+   republishing every visible run every tick. The terminal-status set is now
+   exported once from the contracts (`TERMINAL_STATUSES`) rather than re-declared
+   — worth noting because the driver needs the 5-member set including `denied`,
+   and four other modules carry 4-member copies that omit it.
+
+   The guard marks a run as announced only **after** the publish resolves. Marking
+   first is the obvious way to write it and it is wrong: a transient publish
+   failure would retire the run permanently, so the final status would never land
+   and no later tick would retry it. The existing error-resilience test in
+   `serve-driver.test.ts` caught exactly that during this change.
+
+2. *Reads take one record, not all of them.* New optional
+   `SubmissionTransport.readLatestOutbox(runId, kind?)`, implemented on
+   `MailboxSubmissionTransport` as a reverse scan that stops at the first match.
+   `status()`, `audit()` and `watch()` use it. Optional on the interface, with a
+   `readOutbox` fallback in `OperationsApi`, so third-party transports are
+   unaffected.
+
+*Not done: change 3, `MailboxStore.listPrefixes`.* It is a real gap — enumerating
+run ids still costs one key per record rather than one per run — but it has no
+consumer in-tree today: it is a prerequisite for a client-side `listRuns()` that
+does not exist yet. Adding an SPI member with no caller is speculative, and change
+1 substantially relieves the symptom that motivated it, since the record count
+per run stops growing with uptime. Worth doing alongside `listRuns()`, not before.
+
+**Existing stacks are not rewritten.** The records already accumulated stay where
+they are; what changes is that reads no longer walk them and new ones stop piling
+up.
+
 **Symptom.** Reading one completed run takes over a minute, and the cost is
 proportional to how long the stack has been up rather than to anything about the
 run. Measured 2026-07-30 against a stack with 21 historical runs:

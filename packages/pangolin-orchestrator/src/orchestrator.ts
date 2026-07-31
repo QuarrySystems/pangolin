@@ -16,6 +16,7 @@ import type {
   Trigger,
   WorkItem,
 } from './contracts/index.js';
+import { TERMINAL_STATUSES } from './contracts/index.js';
 import type { PackRegistry } from './packs/registry.js';
 import type { AuditLog } from './audit/audit-log.js';
 import type { Pattern } from './contracts/pattern.js';
@@ -73,8 +74,6 @@ export interface StatusItem {
   manifestRef?: string;
   verify?: VerifyOutcome;
 }
-
-const TERMINAL_STATUSES = new Set(['done', 'failed', 'skipped', 'cancelled', 'denied']);
 
 export class PangolinOrchestrator {
   private readonly store: RunStateStore;

@@ -1,6 +1,7 @@
 // packages/pangolin-orchestrator/src/serve/driver.ts
-import type { PangolinOrchestrator } from '../orchestrator.js';
+import type { PangolinOrchestrator, StatusItem } from '../orchestrator.js';
 import type { SubmissionTransport, ControlChannel, AppendChannel } from '../contracts/index.js';
+import { TERMINAL_STATUSES } from '../contracts/index.js';
 import type { CronScheduler } from '../scheduling/cron-scheduler.js';
 import { startHealthServer, type ServeHealth, type HealthServerHandle } from './http.js';
 import type { MetricsSnapshot } from '@quarry-systems/pangolin-core';
@@ -90,6 +91,20 @@ export async function serve(opts: ServeOptions): Promise<void> {
     // iterations so each run's audit export is emitted exactly once (idempotent).
     const publishedAudit = new Set<string>();
 
+    // Tracks runs whose FINAL (all-items-terminal) status has been published, so the
+    // loop announces completion once and then goes quiet about that run.
+    //
+    // Without this the loop republished every run it could see on every tick, forever:
+    // getStatus() below takes no runId, and the store reads that as "everything", so a
+    // run kept accruing one outbox record per tick for the rest of the stack's life.
+    // A 67-second run was measured holding 23,307 records, and since every client read
+    // walks the run's prefix, read cost grew with uptime rather than with the run.
+    //
+    // In-memory, like publishedAudit: a serve restart re-announces each terminal run
+    // once. That is bounded by restarts rather than by uptime, and it is the safer
+    // direction — a client that missed the announcement gets another one.
+    const publishedTerminal = new Set<string>();
+
     while (!opts.signal?.aborted) {
       try {
         for (const env of await opts.transport.pollInbox()) {
@@ -137,7 +152,7 @@ export async function serve(opts: ServeOptions): Promise<void> {
         const at = new Date(now()).toISOString();
 
         // Group status items by runId — one OutboxRecord per run
-        const byRun = new Map<string, unknown[]>();
+        const byRun = new Map<string, StatusItem[]>();
         for (const s of opts.orchestrator.getStatus()) {
           let arr = byRun.get(s.runId);
           if (!arr) {
@@ -148,7 +163,16 @@ export async function serve(opts: ServeOptions): Promise<void> {
         }
 
         for (const [runId, items] of byRun) {
+          // A run whose items have all stopped moving has nothing left to report. Publish
+          // that final state once so clients can observe completion, then stay quiet —
+          // republishing it every tick is what made the outbox grow without bound.
+          const terminal = items.every((i) => TERMINAL_STATUSES.has(i.status));
+          if (terminal && publishedTerminal.has(runId)) continue;
           await opts.transport.publish({ runId, kind: 'status', body: items, at });
+          // Marked only AFTER the publish resolves, matching publishedAudit below. Marking
+          // first would let a transient publish failure retire the run permanently — the
+          // final status would never land and no later tick would retry it.
+          if (terminal) publishedTerminal.add(runId);
         }
 
         // Publish sealed audit exports — once per run, after the epoch seals (root defined).
