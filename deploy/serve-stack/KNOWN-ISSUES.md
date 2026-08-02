@@ -538,6 +538,48 @@ for`. Pruning cost nothing that verification depends on.
 uptime, so this should not recur at that scale — but there is still no retention
 policy, and that remains unaddressed.
 
+### 6d. The fix held — confirmed 42 hours later (2026-08-02)
+
+6c closes on a prediction: *"Growth is now proportional to work done rather than
+uptime, so this should not recur at that scale."* That is the one claim in this
+issue a measurement taken at deploy time cannot support, because **a prune alone
+looks identical to a fix when you measure immediately after both.** Level and
+slope are only separable by waiting.
+
+Measured from a consumer against the same deployment after 42 hours of
+continuous uptime — `pangolin-serve` reporting orchestrator `0.4.0`, image built
+2026-07-31. Five runs spanning that whole window, three `audit()` repetitions
+each, medians, first call discarded as warm-up:
+
+| run | stack uptime SINCE it was created | `audit()` |
+|---|---|---|
+| `loop1-guard-…` | ~42 h | 24 ms |
+| `loop2-charter-…` | ~37 h | 22 ms |
+| `loop3-sealed-…` | ~2.3 h | 19 ms |
+| `loop5-layout-…` | ~0.8 h | 20 ms |
+| `loop6-runbook-…` | ~0.05 h | 22 ms |
+| a runId that does not exist | — | 2 ms |
+
+**No slope.** The amplification's signature was cost rising with how long the
+stack stayed up *after* a run was created; under the old mechanism `loop1` had 42
+hours in which to accumulate and `loop6` had three minutes, and they differ by
+noise. A reset level with the mechanism intact would have re-accumulated
+measurably over that window. It did not.
+
+The nonexistent-runId floor of 2 ms is carried because it is what makes the rest
+meaningful: it shows the remaining cost is the round trip rather than a scan, so
+19–24 ms is not a smaller scan but effectively no scan.
+
+**What this does not establish.** One deployment, one consumer, 42 hours. It says
+the mechanism is not re-accumulating at this scale of use; it says nothing about a
+busier stack, and 6c's closing point stands unchanged — there is still no
+retention policy, so growth proportional to *work done* is unbounded over a long
+enough horizon. This confirms the shape of the curve, not that it has a ceiling.
+
+Filed by the consumer that reported the original 71,027 ms, which had been telling
+its operators to raise their poll interval on the strength of it for two days
+after it stopped being true.
+
 ### 6b. Outbox keys collided across restarts (fixed)
 
 `seq` was a per-instance counter seeded at 0, and mailbox writes are overwrites, so
