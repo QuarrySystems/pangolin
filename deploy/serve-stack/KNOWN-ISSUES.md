@@ -1864,6 +1864,98 @@ and because the field's two siblings both made it through.
 
 ---
 
+# Issue 16: a dispatch can succeed and lose its work
+
+## 16. `capturePatch` omits `--binary`, so a change to any git-binary file is captured as an unappliable stub
+
+**The most consequential of the findings this consumer has filed, because it is
+the only one where a run reports success and the work is gone.**
+
+**Symptom.** A dispatch edits a file git classifies as binary. The item reconciles
+`done`, `capturePatch` returns a `resultRef`, the artifact is content-addressed
+and stored, and the audit chain seals it. The patch cannot be applied and cannot
+be reviewed. Nothing anywhere reports a problem.
+
+```
+$ git apply --check the-exported.patch
+error: cannot apply binary patch to 'scripts/isolation-oracle.ts' without full index line
+error: scripts/isolation-oracle.ts: patch does not apply
+
+$ git apply --numstat the-exported.patch
+-       -       scripts/isolation-oracle.ts        <- git's marker for binary
+64      0       src/core/source-hygiene.test.ts    <- the text file in the same run, fine
+```
+
+The patch's entire record of the change is one line:
+
+```
+diff --git a/scripts/isolation-oracle.ts b/scripts/isolation-oracle.ts
+index 3e7f443..cb4f231 100644
+Binary files a/scripts/isolation-oracle.ts and b/scripts/isolation-oracle.ts differ
+```
+
+**Cause.** `packages/pangolin-worker/src/patch-capture.ts:37-49`:
+
+```ts
+const diff = await git(workspaceDir, [
+  'diff',
+  '--no-ext-diff',
+  '--no-textconv',
+  '--cached',
+  baseline.treeOid,
+  '--',
+  '.',
+  ':(exclude).pangolin',
+]);
+```
+
+No `--binary`, and no `--full-index`. Git's default for a binary path is the stub
+above: a header, an abbreviated index line, and no payload.
+
+**This is not only about images, and that is the part worth pausing on.**
+"Binary" here is git's own content heuristic, and a single stray control byte is
+enough to trigger it. The file in the reproduction is an 8,874-byte TypeScript
+source whose only offence was two delimiter characters — `0x00` and `0x01` —
+written as raw bytes instead of escapes. It reads as ordinary source in an editor.
+Any repository with a `.ts`, `.py` or `.go` file containing one stray control byte
+has dispatches that cannot return their work, and no way to find that out except
+by trying to apply the result.
+
+**Observed end to end**, run `loop7-ctlbytes-47738cb-1785693717`, 2026-08-02. The
+task edited two files. The text one came back intact; the other came back as the
+stub. The consumer's own verifier reached the right conclusion unaided —
+
+> "the hunk in inputs/work is only 'Binary files a/… and b/… differ' with no GIT
+> binary patch payload, so the patch contains no evidence of what actually
+> changed"
+
+— and failed the item. That is the correct verdict, and it is also why the
+failure is easy to misattribute: it presents as a worker that did not do the job.
+
+**Proposed fix.** Add `--binary` to that argument list. It implies `--full-index`,
+so one flag covers both errors above. The output is base85-encoded ASCII, so the
+existing `new TextEncoder().encode(diff)` on line 50 stays correct with no change.
+
+If emitting full binary payloads is unwanted — a large asset would inflate the
+artifact — then the alternative is to **refuse loudly rather than emit a stub**:
+detect the `Binary files … differ` shape and surface it as a capture failure, so
+the dispatch does not report a `resultRef` that cannot represent what happened.
+Either is fine. Silently returning an unusable patch is the thing to stop.
+
+**Why the tests do not catch it.** `packages/pangolin-worker/test/` has five
+`patch-capture*` test files. Every fixture in them is text. The fixture set
+encodes the same assumption as the code, so the suite is green over a path no
+real binary change survives — the same shape as this file's existing
+"item-status polarity" entry, where the fixture was written from the same wrong
+belief as the predicate.
+
+A regression test wants a fixture containing one control byte in an otherwise
+ordinary source file, not a `.png`. The `.png` case is the one people remember to
+write; the stray-byte case is the one that actually happens.
+
+
+---
+
 ## Related: CRLF on shell scripts
 
 A fifth issue — all four tracked `.sh` files checking out as CRLF on Windows and
