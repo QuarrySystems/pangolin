@@ -1604,6 +1604,57 @@ through the other.
 
 ---
 
+### 13a. `DispatchInput.capabilities` already exists — `DispatchExecutor.fire` just never forwards it
+
+**Narrows 13 rather than extending it.** 13 asks for a way to vary workspace input
+independently of subagent identity, and reasons about what shape that might take.
+For the *capability* half specifically the shape is already in the contract, and
+has been since at least `0.4.0` — `dispatch.d.ts` is byte-identical between
+`0.4.0` and `0.5.0`. Only the wiring is missing.
+
+```ts
+// core dispatch.d.ts:31-36 — DispatchInput
+/** `capabilities` replaces the subagent's bound set; `addCapabilities`
+ *  augments it. Callers typically pick one or the other, not both. */
+subagent: string | SubagentRef;
+capabilities?: Array<string | CapabilityRef>;
+addCapabilities?: Array<string | CapabilityRef>;
+```
+
+`DispatchExecutor.fire` (`executors/dispatch.js:45-59`) passes `subagent`, `env`,
+`input`, `target`, `workerImage`, `secrets`, and conditionally `model`,
+`inputRefs`, `pipelineRef`, `trace`, `timeoutSeconds`. Neither capability field is
+among them, so the selection is unreachable from a plan.
+
+**Consequence for a consumer.** A plan names its subagent by bare string; that
+resolves through `storage.resolveLatest`; the workspace overlay comes from the
+resolved blob's own capability list. So changing a worker's workspace substrate
+requires re-registering the subagent — mutating a registration shared by every
+plan referencing that name. Two runs against different workspace snapshots cannot
+coexist.
+
+Sharper, and the part that is hard to notice: `resolveLatest` resolves per
+*dispatch*, not per run, so a re-registration while a run is in flight can change
+worker identity **between two items of the same run**. Nothing afterwards reports
+it — each manifest is internally consistent and the bundle verifies intact.
+
+**Proposed, and small.** Accept an optional `capabilities` (and/or
+`addCapabilities`) on a work item's `inputs`, forward it in `fire()` with the same
+conditional-spread pattern its neighbours already use, and accept the field in
+`validateRun`.
+
+The audit trail needs no change: `DispatchExecutorManifest.capabilities` already
+records the resolved `{name, contentHash}` set per dispatch, and `manifestRef` is
+sealed by `canonEntry`. A per-item override is captured by existing machinery.
+
+**Not blocking.** The consumer that found this works around it with immutable
+per-snapshot capability names plus per-cycle subagent registrations, which
+preserves reproducibility at the cost of a registry that grows with cycles. Noted
+because 13's "if this is ever addressed" framing reads as a design problem, and
+for this half it is a wiring problem.
+
+---
+
 # Issue 14: a safety control that failed open
 
 **Different provenance again.** This one was not reported by a consumer. It fell
@@ -1691,6 +1742,83 @@ production caller**, and `cfg.disableNeedsInputHelper` is parsed by
 allow-listed above so it will work once something consumes it, but today it
 configures nothing. That is issue 9's pattern a third time and wants its own
 look.
+
+---
+
+# Issue 15: the self-verify signal has nowhere to go
+
+## 15. `VerifyOutcome` is unreachable from the audit bundle — exported by `getStatus`, absent from `getAuditExport`
+
+**Defect-shaped, low urgency, and it looks like an omission rather than a
+decision.** A worker's self-verify result reaches the run-state store and
+`getStatus()`, but never enters the audit export. A client whose read path is
+`audit()` — the only path that works without run enumeration (issue 7's
+neighbourhood) — cannot see it at all.
+
+**Symptom.** A subagent registered with a `VerifyConfig` runs its own
+language-agnostic check (`cargo test`, `pytest`, `tsc && vitest`) over its edit.
+The orchestrator records the result. A supervisor reading the sealed evidence has
+no channel to learn it.
+
+**Cause — the asymmetry.** Three values arrive together, on one return from a
+single `readSentinel`:
+
+```js
+// executors/dispatch.js:125
+return { status, output: result, resultRef: patchRef, verify, outputRefs };
+```
+
+All three are stored symmetrically:
+
+```js
+// engine/tick.js:81,83,85
+store.setResultRef(it.id, res.resultRef);
+store.setVerify(it.id, res.verify);
+store.setOutputRefs(it.id, res.outputRefs);
+```
+
+Two of the three are sealed into the chain at reconcile:
+
+```js
+// engine/tick.js:93,96 — item.reconciled
+...(res.resultRef  ? { resultRef:  res.resultRef  } : {}),
+...(res.outputRefs ? { outputRefs: res.outputRefs } : {}),
+// verify: absent
+```
+
+And two of the three reach the export:
+
+| surface | carries `verify`? |
+|---|---|
+| `getStatus()` — `orchestrator.js:385` | yes: `...(i.verify !== undefined ? { verify: i.verify } : {})` |
+| `getAuditExport()` — `orchestrator.js:393` | **no** — rows are `id, status, attempts, actor, resultRef?, manifestRef?, outputRefs?` |
+| `AuditItemOutcome` — core `audit.d.ts:201-209` | no field to put it in |
+| `AuditEntry` (sealed chain) | no field to put it in |
+
+`verify` is the only one of the three siblings that stops at the store.
+
+**Proposed change.** Additive, mirroring what `outputRefs` already does:
+
+1. Add `verify?: VerifyOutcome` to `AuditItemOutcome`.
+2. Include it in `getAuditExport()`'s item rows with the same conditional spread
+   as its siblings.
+
+Optionally and separately: seal it at `item.reconciled` the way `outputRefs` is.
+`canonEntry` already carries the conditional-append pattern for exactly this, so
+legacy entries keep serializing byte-identically. Without sealing, an exported
+`verify` is readable but no more trustworthy than the rest of the untrusted export
+rows; with it, "the worker's own suite passed" becomes tamper-evident.
+
+**What is NOT being asked for.** `VerifyOutcome` staying **report-only** — "it
+never changes the dispatch outcome" — is the right call and should not move. A
+failing self-verify is information, not a dispatch failure. The issue is only that
+the information has nowhere to go.
+
+**Priority, honestly: low.** The consumer that found this is not unblocked by it.
+Its workers receive a `git archive` of tracked files, so `node_modules/` is absent
+and the suite cannot run inside a dispatch regardless — a worker-image question on
+the consumer's side, not pangolin's. Filed because the export gap is in this tree,
+and because the field's two siblings both made it through.
 
 ---
 
