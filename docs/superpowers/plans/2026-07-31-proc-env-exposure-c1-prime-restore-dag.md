@@ -83,7 +83,7 @@ depends_on: []
 files:
   - packages/pangolin-worker/src/runtime-env-filter.ts
   - packages/pangolin-worker/test/runtime-env-filter.test.ts
-status: pending
+status: done
 quality_reviewer_hint: opus
 ```
 
@@ -181,7 +181,7 @@ id: task-lifecycle-pin
 depends_on: [task-hard-deny]
 files:
   - packages/pangolin-worker/test/entrypoint.test.ts
-status: pending
+status: done
 ```
 
 Pin the hard-deny at the **lifecycle** level, not only on the filter. Repo convention, and it exists for

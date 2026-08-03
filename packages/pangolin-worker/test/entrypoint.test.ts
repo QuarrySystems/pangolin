@@ -621,6 +621,43 @@ describe('runWorker', () => {
     expect(captured).not.toHaveProperty('LOG_LEVEL');
   });
 
+  /**
+   * The unit test in runtime-env-filter.test.ts pins the hard-deny on the filter.
+   * This pins it through the real worker lifecycle, which is a different claim:
+   * KNOWN-ISSUES 14 records a case where the filter behaved correctly and the var
+   * still failed to reach `ctx.env`, because the wiring in between was wrong. A
+   * safety control is only closed at the level it is asserted at.
+   */
+  it('a hard-denied credential does not reach the adapter even with PANGOLIN_RUNTIME_ENV_ALLOW=*', async () => {
+    const h = await setupHarness();
+    cleanupDirs.push(h.workDir, h.adaptersRoot);
+
+    h.env.PANGOLIN_RUNTIME_ENV_ALLOW = '*';
+    h.env.AWS_SECRET_ACCESS_KEY = 'super-secret-task-role-key';
+    h.env.AWS_CONTAINER_AUTHORIZATION_TOKEN = 'bearer-super-secret';
+    h.env.PANGOLIN_CALLBACK_TOKEN_REF = 'arn:aws:secretsmanager:us-east-1:1:secret:hmac';
+    h.env.BENIGN_PASSTHROUGH = 'yes';
+
+    let captured: Record<string, string> | undefined;
+    const deps = makeDeps(h);
+    deps.adapter = {
+      name: 'claude-code',
+      reservedPaths: [],
+      invoke: async (_spec, ctx) => {
+        captured = ctx.env;
+        return { exitCode: 0, stdout: '', stderr: '' };
+      },
+    };
+
+    expect(await runWorker(h.env, deps)).toBe(0);
+    // Control, and it is load-bearing: without it this test passes identically if
+    // PANGOLIN_RUNTIME_ENV_ALLOW were silently dropped and no allow-list ran at all.
+    expect(captured!.BENIGN_PASSTHROUGH).toBe('yes');
+    expect(captured).not.toHaveProperty('AWS_SECRET_ACCESS_KEY');
+    expect(captured).not.toHaveProperty('AWS_CONTAINER_AUTHORIZATION_TOKEN');
+    expect(captured).not.toHaveProperty('PANGOLIN_CALLBACK_TOKEN_REF');
+  });
+
   it('resolves per-dispatch secrets, injects them into the runtime env, and registers them for log redaction', async () => {
     const h = await setupHarness();
     cleanupDirs.push(h.workDir, h.adaptersRoot);

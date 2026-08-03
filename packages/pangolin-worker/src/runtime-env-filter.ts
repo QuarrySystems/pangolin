@@ -82,6 +82,44 @@ const BUILTIN_ALLOW: ReadonlySet<string> = new Set([
 ]);
 const BUILTIN_ALLOW_PREFIXES: ReadonlyArray<string> = ['LC_'];
 
+/**
+ * Credential-bearing names that NO operator allow-list entry may pass. Consulted
+ * BEFORE `matchesAllow`, so a bare `*` — a valid glob with an empty prefix that
+ * otherwise re-opens the whole firewall — cannot reach them.
+ *
+ * Drawn from the measured enumeration in the worker /proc exposure spec §3a
+ * rather than written from memory. That distinction is the point: the names the
+ * AWS SDK's own chain reads are mostly NOT `AWS_ACCESS_*`-shaped, and a
+ * hand-written list reliably misses them.
+ *
+ * AWS_REGION / AWS_DEFAULT_REGION are deliberately absent: non-credential, and
+ * the runtime needs them (they are in BUILTIN_ALLOW). A test pins that.
+ */
+const HARD_DENY: ReadonlySet<string> = new Set([
+  // @aws-sdk/credential-provider-env
+  'AWS_ACCESS_KEY_ID',
+  'AWS_SECRET_ACCESS_KEY',
+  'AWS_SESSION_TOKEN',
+  'AWS_CREDENTIAL_EXPIRATION',
+  'AWS_CREDENTIAL_SCOPE',
+  // Pangolin credential pointers — named targets of the /proc finding
+  'PANGOLIN_CALLBACK_TOKEN_REF',
+  'PANGOLIN_CALLBACK_BEARER_REF',
+  'PANGOLIN_PER_DISPATCH_SECRET_REFS_JSON',
+]);
+
+/**
+ * `AWS_CONTAINER_`, not `AWS_CONTAINER_CREDENTIALS_`: the container credential
+ * lane is three names and only two of them carry the `CREDENTIALS_` infix —
+ * `AWS_CONTAINER_AUTHORIZATION_TOKEN` does not, and the narrower prefix passes
+ * it straight through. A test pins all three.
+ */
+const HARD_DENY_PREFIXES: ReadonlyArray<string> = ['AWS_CONTAINER_'];
+
+function isHardDenied(key: string): boolean {
+  return HARD_DENY.has(key) || HARD_DENY_PREFIXES.some((p) => key.startsWith(p));
+}
+
 export interface FilterRuntimeEnvOpts {
   /**
    * Operator passthrough: exact names or `PREFIX_*` trailing-glob. Empty/whitespace
@@ -113,6 +151,7 @@ export function filterRuntimeEnv(
   const allow = opts.allow ?? [];
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(env)) {
+    if (isHardDenied(key)) continue; // before the allow-list, deliberately
     if (
       BUILTIN_ALLOW.has(key) ||
       BUILTIN_ALLOW_PREFIXES.some((p) => key.startsWith(p)) ||
