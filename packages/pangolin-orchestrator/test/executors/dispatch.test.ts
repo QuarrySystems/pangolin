@@ -1895,4 +1895,83 @@ describe('DispatchExecutor', () => {
       finishedAt: new Date(1),
     });
   });
+
+  /**
+   * KNOWN-ISSUES 13a. `DispatchWork.capabilities` / `.addCapabilities` have been in
+   * the core contract since at least 0.4.0, but `fire()` never forwarded them, so
+   * the selection was unreachable from a plan. Without it, changing a worker's
+   * workspace substrate means re-registering the subagent — mutating a
+   * registration shared by every plan that names it, so two runs against different
+   * workspace snapshots cannot coexist.
+   */
+  function capabilityHarness() {
+    const { compute, resolveExit } = makeDeferredCompute();
+    const storage = makeMemoryStorage();
+    storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
+    // A bare-string capability resolves through resolveLatest, so it must exist —
+    // otherwise the client throws "capability not found" and the assertion below
+    // would be measuring the wrong failure.
+    storage.seed('ws-snapshot-1', 'capability', 'ns', 'sha256:ws1', { name: 'ws-snapshot-1' });
+    storage.seed('extra-tool', 'capability', 'ns', 'sha256:xt', { name: 'extra-tool' });
+    const client = new PangolinClient({
+      namespace: 'ns',
+      compute: { default: compute },
+      credentials: { default: makeCredentials() },
+      storage,
+      targets: { prod: { compute: 'default', credentials: 'default' } },
+    });
+    const captured = captureDispatchFire(client);
+    const executor = new DispatchExecutor({ client, target: 'prod', workerImage: 'img' });
+    const settle = () =>
+      resolveExit({
+        exitCode: 0,
+        stdout: '',
+        stderr: '',
+        startedAt: new Date(0),
+        finishedAt: new Date(1),
+      });
+    return { executor, captured, settle };
+  }
+
+  it('forwards inputs.capabilities to the dispatched work', async () => {
+    const { executor, captured, settle } = capabilityHarness();
+    await executor.fire(
+      { ...baseItem, inputs: { subagent: 's', capabilities: ['ws-snapshot-1'] } },
+      { runId: 'r1', actor: 'human:x' },
+    );
+    expect(captured.work?.capabilities).toEqual(['ws-snapshot-1']);
+    settle();
+  });
+
+  it('forwards inputs.addCapabilities to the dispatched work', async () => {
+    const { executor, captured, settle } = capabilityHarness();
+    await executor.fire(
+      { ...baseItem, inputs: { subagent: 's', addCapabilities: ['extra-tool'] } },
+      { runId: 'r1', actor: 'human:x' },
+    );
+    expect(captured.work?.addCapabilities).toEqual(['extra-tool']);
+    settle();
+  });
+
+  it('omits both capability fields entirely when the item declares neither', async () => {
+    const { executor, captured, settle } = capabilityHarness();
+    await executor.fire(baseItem, { runId: 'r1', actor: 'human:x' });
+    // Absent, not `undefined` — the conditional-spread posture its neighbours use.
+    // A present-but-undefined key would replace the subagent's bound set with nothing.
+    expect('capabilities' in captured.work!).toBe(false);
+    expect('addCapabilities' in captured.work!).toBe(false);
+    settle();
+  });
+
+  it('ignores a non-array capabilities value rather than throwing', async () => {
+    const { executor, captured, settle } = capabilityHarness();
+    // Shape guard, not a trust guard — matches how inputRefs and pipeline treat
+    // malformed carriers: ignored, never thrown, so one bad field cannot fail an item.
+    await executor.fire(
+      { ...baseItem, inputs: { subagent: 's', capabilities: 'not-an-array' } },
+      { runId: 'r1', actor: 'human:x' },
+    );
+    expect('capabilities' in captured.work!).toBe(false);
+    settle();
+  });
 });
