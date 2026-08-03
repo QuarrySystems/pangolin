@@ -1,7 +1,7 @@
 ---
 title: Packs, the Two Dispatch Paths, and What Is Marooned in the Orchestration Layer — Decision Spec
 date: 2026-08-03
-status: **OPEN QUESTION — deliberately not decided.** Frames the problem and the options; the choice needs consumer evidence (see §7). No design is committed here.
+status: **OPEN QUESTION — A is unblocked; B and C are unevidenced.** First consumer answered §7 on 2026-08-03: orchestrator-only, asks not to be counted as evidence for both-paths. A stands on §2 (layering), not on both-paths coverage.
 branch: spec/packs-on-both-paths
 authors: [human:Brett, agent:claude-opus-5]
 severity: n/a (architecture question; nothing is broken by today's behaviour, but one consequence is already recorded)
@@ -130,21 +130,37 @@ guess — §7.
 - **The `capability` block is inert today**, so relocating its fields breaks no
   behaviour — there is none to break. That makes A unusually cheap for its value.
 
-## 7. What evidence would settle this
+## 7. Evidence — asked and partly answered (2026-08-03)
 
 The open half (B and C) turns on whether a real consumer dispatching via `fire()`
-actually wants pack governance. That question has been put to the consumer directly;
-the answers that change the decision:
+wants pack governance. Asked directly. **The first consumer's answer removes them as
+evidence, in either direction:**
 
-1. Do they dispatch via `fire()`, the orchestrator, or both?
-2. On the `fire()` path, do they want input-schema validation and effect tier — or
-   do they already do it in their own code and prefer Pangolin stay out?
-3. Is the missing authorization gate on `fire()` a problem they have *hit*, or a
-   theoretical one? (It is recorded as bypassed; it is not recorded as harmful.)
+> Verified: no `pangolin-client` import anywhere in remora. `sync/register.ts` says
+> it's "deliberately not an import." I've never called `fireWork`/`dispatchWork`. So
+> I get zero benefit from the both-paths design. Don't count remora as a reason to do
+> it — if covering `fire()` complicates the orchestrator path, that's cost I pay for
+> benefit I don't receive. If you have another consumer on `fire()`, decide on their
+> evidence, not mine.
 
-**Do not decide B or C before those answers.** Two asks this month turned out to be
-already-possible with existing mechanisms (17b, 19a); a third built on a guess would
-be worse than waiting.
+Three consequences, and the third is the one to be careful about:
+
+1. **B and C have no demand behind them today.** Not "rejected" — unevidenced. They
+   stay open pending a `fire()`-path consumer, and this consumer explicitly asks not
+   to be counted as one.
+2. **C acquires a stated cost.** An orchestrator-only consumer pays any complexity
+   that both-paths coverage adds to the orchestrator path, for benefit they do not
+   receive. C now needs to show it does not do that.
+3. **This does NOT change option A, and the distinction matters.** A's placement
+   argument never rested on both-paths coverage. It rests on §2: the worker is the
+   only thing that can observe a workspace, and per D11 the worker cannot see
+   `SubagentShape`. That argument is unaffected by which paths a consumer uses — an
+   orchestrator-only consumer still needs the *worker* to do the checking. Do not
+   read "remora is orchestrator-only" as "so put it back on `SubagentShape`."
+
+Question 3 — whether the missing `fire()` authorization gate has been *hit* rather
+than merely being bypassable — remains unanswered by a consumer who does not use
+that path. B still waits.
 
 ## 8. Not in scope
 
