@@ -108,3 +108,83 @@ describe('filterRuntimeEnv (default-deny allow-list)', () => {
     expect(input).toEqual({ PANGOLIN_DISPATCH_ID: 'd-1', PATH: '/usr/bin' });
   });
 });
+
+/**
+ * The allow-list above is default-deny, but the operator can widen it, and a bare
+ * `*` widens it all the way back to default-allow. These pin a set of names that
+ * NO allow-list entry may pass, checked before the allow-list rather than after.
+ *
+ * The module docstring already forbids extending adapter-config by a `PANGOLIN_`
+ * prefix precisely so the callback HMAC key reference cannot be re-exposed. That
+ * reasoning was advisory; this makes it enforceable.
+ *
+ * Every test here carries a var that DOES pass, as a positive control. Without
+ * one, each would pass identically if the allow-list had silently stopped running
+ * altogether — an absence assertion on a dead instrument proves nothing.
+ */
+describe('filterRuntimeEnv hard-deny (not overridable by any allow-list)', () => {
+  it('a bare * allow-list cannot pass a credential', () => {
+    const out = filterRuntimeEnv(
+      {
+        AWS_ACCESS_KEY_ID: 'AKIA...',
+        AWS_SECRET_ACCESS_KEY: 'secret',
+        AWS_SESSION_TOKEN: 'token',
+        PANGOLIN_CALLBACK_TOKEN_REF: 'arn:...:hmac',
+        PANGOLIN_CALLBACK_BEARER_REF: 'secretref://b',
+        PANGOLIN_PER_DISPATCH_SECRET_REFS_JSON: '{}',
+        MY_APP_FLAG: 'true',
+      },
+      { allow: ['*'] },
+    );
+    // Control: `*` genuinely is in force, so the absences below mean something.
+    expect(out.MY_APP_FLAG).toBe('true');
+    expect(Object.keys(out)).toEqual(['MY_APP_FLAG']);
+  });
+
+  it('prefix globs cannot pass a credential either', () => {
+    const env = {
+      AWS_SECRET_ACCESS_KEY: 'secret',
+      PANGOLIN_CALLBACK_TOKEN_REF: 'arn:...:hmac',
+      AWS_REGION: 'us-east-1',
+    };
+    // AWS_REGION is the control in both: non-credential, and a built-in, so it
+    // must survive a hard-deny that is scoped correctly.
+    expect(filterRuntimeEnv(env, { allow: ['AWS_*'] })).toEqual({ AWS_REGION: 'us-east-1' });
+    expect(filterRuntimeEnv(env, { allow: ['PANGOLIN_*'] })).toEqual({ AWS_REGION: 'us-east-1' });
+  });
+
+  /**
+   * `AWS_CONTAINER_AUTHORIZATION_TOKEN` does NOT start with
+   * `AWS_CONTAINER_CREDENTIALS_`, so a prefix rule written to that narrower
+   * string misses it. Spec §3a enumerates it as one of the names the SDK's own
+   * chain reads, alongside the two `AWS_CONTAINER_CREDENTIALS_*` URIs — and
+   * warns in the same breath that the non-`AWS_ACCESS_*`-shaped ones are exactly
+   * what gets missed when the list is written from memory.
+   */
+  it('covers the whole AWS_CONTAINER_ family, not just the CREDENTIALS_ ones', () => {
+    const out = filterRuntimeEnv(
+      {
+        AWS_CONTAINER_CREDENTIALS_RELATIVE_URI: '/v2/credentials/x',
+        AWS_CONTAINER_CREDENTIALS_FULL_URI: 'http://169.254.170.2/x',
+        AWS_CONTAINER_AUTHORIZATION_TOKEN: 'bearer-x',
+        MY_APP_FLAG: 'true',
+      },
+      { allow: ['*'] },
+    );
+    expect(out.MY_APP_FLAG).toBe('true');
+    expect(Object.keys(out)).toEqual(['MY_APP_FLAG']);
+  });
+
+  it('denies the credential-provider-env names that are not AWS_ACCESS_*-shaped', () => {
+    const out = filterRuntimeEnv(
+      {
+        AWS_CREDENTIAL_EXPIRATION: '2026-08-03T00:00:00Z',
+        AWS_CREDENTIAL_SCOPE: 'scope',
+        MY_APP_FLAG: 'true',
+      },
+      { allow: ['*'] },
+    );
+    expect(out.MY_APP_FLAG).toBe('true');
+    expect(Object.keys(out)).toEqual(['MY_APP_FLAG']);
+  });
+});
