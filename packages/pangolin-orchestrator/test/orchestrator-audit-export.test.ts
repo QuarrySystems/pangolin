@@ -12,8 +12,13 @@ function makeResultExecutor(resultRef: string): Executor {
   let fired = false;
   return {
     id: 'result-exec',
-    async fire() { fired = true; return { dispatchHash: `h-${resultRef}` }; },
-    async reconcile() { return fired ? { status: 'done' as const, resultRef } : null; },
+    async fire() {
+      fired = true;
+      return { dispatchHash: `h-${resultRef}` };
+    },
+    async reconcile() {
+      return fired ? { status: 'done' as const, resultRef } : null;
+    },
   };
 }
 
@@ -32,9 +37,7 @@ function makeOrchWithAudit(store: SqliteRunStateStore) {
 const oneItemRun: Run = {
   id: 'run-export-test',
   queue: 'default',
-  items: [
-    { id: 'step-a', executor: 'result-exec', inputs: {}, depends_on: [], resourceLocks: [] },
-  ],
+  items: [{ id: 'step-a', executor: 'result-exec', inputs: {}, depends_on: [], resourceLocks: [] }],
 };
 
 /** Wraps a SqliteRunStateStore but exposes it as a plain RunStateStore — no audit methods. */
@@ -65,9 +68,35 @@ function makeOutputRefsExecutor(outputRefs: Record<string, string>): Executor {
   let fired = false;
   return {
     id: 'output-refs-exec',
-    async fire() { fired = true; return { dispatchHash: 'h-outputrefs' }; },
+    async fire() {
+      fired = true;
+      return { dispatchHash: 'h-outputrefs' };
+    },
     async reconcile() {
-      return fired ? { status: 'done' as const, resultRef: 'pangolin://ns/result/r1', outputRefs } : null;
+      return fired
+        ? { status: 'done' as const, resultRef: 'pangolin://ns/result/r1', outputRefs }
+        : null;
+    },
+  };
+}
+
+/** Executor that fires and reconciles done WITH a self-verify outcome. */
+function makeVerifyExecutor(verify: {
+  passed: boolean;
+  report?: string;
+  durationMs?: number;
+}): Executor {
+  let fired = false;
+  return {
+    id: 'verify-exec',
+    async fire() {
+      fired = true;
+      return { dispatchHash: 'h-verify' };
+    },
+    async reconcile() {
+      return fired
+        ? { status: 'done' as const, resultRef: 'pangolin://ns/result/r1', verify }
+        : null;
     },
   };
 }
@@ -89,7 +118,13 @@ describe('getAuditExport', () => {
       id: 'run-export-test',
       queue: 'default',
       items: [
-        { id: 'step-a', executor: 'output-refs-exec', inputs: {}, depends_on: [], resourceLocks: [] },
+        {
+          id: 'step-a',
+          executor: 'output-refs-exec',
+          inputs: {},
+          depends_on: [],
+          resourceLocks: [],
+        },
       ],
     };
 
@@ -99,8 +134,9 @@ describe('getAuditExport', () => {
     await orch.tick('default');
 
     const exp = orch.getAuditExport('run-export-test');
-    expect(exp.items.find((i) => i.id === 'step-a')!.outputRefs)
-      .toEqual({ 'report.txt': 'pangolin://ns/artifact/d/sha256:ab' });
+    expect(exp.items.find((i) => i.id === 'step-a')!.outputRefs).toEqual({
+      'report.txt': 'pangolin://ns/artifact/d/sha256:ab',
+    });
 
     store.close();
   });
@@ -117,6 +153,88 @@ describe('getAuditExport', () => {
     const exp = orch.getAuditExport(runId);
     const outcome = exp.items.find((i) => i.id === 'step-a')!;
     expect('outputRefs' in outcome).toBe(false);
+
+    store.close();
+  });
+
+  /**
+   * KNOWN-ISSUES 15. `verify`, `resultRef` and `outputRefs` arrive together on one
+   * return from `readSentinel` and are stored symmetrically, but only two of the
+   * three reach the export. A client whose read path is `audit()` — the only one
+   * that works without run enumeration — could not see the self-verify result at
+   * all. These mirror the two `outputRefs` tests directly above.
+   */
+  it('audit export items carry verify when the item produced a self-verify result', async () => {
+    const store = new SqliteRunStateStore();
+    const verify = { passed: true, report: 'all suites green', durationMs: 1234 };
+    const auditLog = new AuditLog({ store, signer: NoneSigner, anchor: new LocalAnchor(store) });
+    const orch = new PangolinOrchestrator({
+      store,
+      executors: { 'verify-exec': makeVerifyExecutor(verify) },
+      triggers: { manual: new ManualTrigger() },
+      queues: { default: { concurrency: 5 } },
+      auditLog,
+    });
+
+    const run: Run = {
+      id: 'run-verify-export',
+      queue: 'default',
+      items: [
+        { id: 'step-a', executor: 'verify-exec', inputs: {}, depends_on: [], resourceLocks: [] },
+      ],
+    };
+
+    await orch.submitRun(run);
+    await orch.tick('default');
+    await orch.tick('default');
+
+    const exp = orch.getAuditExport('run-verify-export');
+    expect(exp.items.find((i) => i.id === 'step-a')!.verify).toEqual(verify);
+
+    store.close();
+  });
+
+  it('items without a verify result have no verify key in their outcome', async () => {
+    const store = new SqliteRunStateStore();
+    const { orch } = makeOrchWithAudit(store);
+
+    const runId = await orch.submitRun(oneItemRun, 'human:brett');
+    for (let i = 0; i < 8; i++) await orch.tick('default');
+
+    const outcome = orch.getAuditExport(runId).items.find((i) => i.id === 'step-a')!;
+    // Absent, not undefined — the conditional-spread posture of both siblings.
+    expect('verify' in outcome).toBe(false);
+
+    store.close();
+  });
+
+  it('a FAILED self-verify still reaches the export — it is information, not a dispatch failure', async () => {
+    const store = new SqliteRunStateStore();
+    const verify = { passed: false, report: '3 tests failed', durationMs: 99 };
+    const auditLog = new AuditLog({ store, signer: NoneSigner, anchor: new LocalAnchor(store) });
+    const orch = new PangolinOrchestrator({
+      store,
+      executors: { 'verify-exec': makeVerifyExecutor(verify) },
+      triggers: { manual: new ManualTrigger() },
+      queues: { default: { concurrency: 5 } },
+      auditLog,
+    });
+
+    await orch.submitRun({
+      id: 'run-verify-failed',
+      queue: 'default',
+      items: [
+        { id: 'step-a', executor: 'verify-exec', inputs: {}, depends_on: [], resourceLocks: [] },
+      ],
+    });
+    await orch.tick('default');
+    await orch.tick('default');
+
+    const outcome = orch.getAuditExport('run-verify-failed').items.find((i) => i.id === 'step-a')!;
+    expect(outcome.verify).toEqual(verify);
+    // VerifyOutcome is report-only and must stay that way: a failing self-verify
+    // does not fail the dispatch. This pins that alongside the export change.
+    expect(outcome.status).toBe('done');
 
     store.close();
   });
@@ -140,7 +258,9 @@ describe('getAuditExport', () => {
 
     // Must not throw even though store has no getAuditEntries / getAuditRoot
     let exp: ReturnType<typeof orch.getAuditExport> | undefined;
-    expect(() => { exp = orch.getAuditExport(runId); }).not.toThrow();
+    expect(() => {
+      exp = orch.getAuditExport(runId);
+    }).not.toThrow();
 
     expect(exp!.runId).toBe(runId);
     expect(exp!.entries).toEqual([]);
@@ -180,7 +300,7 @@ describe('getAuditExport', () => {
     // items: one item with DE-NAMESPACED logical id
     expect(exp.items.length).toBe(1);
     const item = exp.items[0]!;
-    expect(item.id).toBe('step-a');           // logical id, not namespaced
+    expect(item.id).toBe('step-a'); // logical id, not namespaced
     expect(item.status).toBe('done');
     expect(item.resultRef).toBe('pangolin://artifacts/result-1');
 
