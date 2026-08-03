@@ -41,6 +41,12 @@ export async function computeWorkspacePatch(
       // them — these flags are the only complete answer.
       '--no-ext-diff',
       '--no-textconv',
+      // Without this a git-binary path is captured as a three-line stub with no
+      // payload, so the dispatch reports success and the work is unrecoverable.
+      // "Binary" is git's content heuristic, not a file extension: one stray NUL
+      // is enough to classify ordinary source. Implies --full-index, which the
+      // stub also lacks. Output is base85 ASCII, so the utf8 round-trip below holds.
+      '--binary',
       '--cached',
       baseline.treeOid,
       '--',
