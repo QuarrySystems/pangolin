@@ -8,8 +8,12 @@ it('the union admits all three observable kinds and rejects an intent claim', ()
     { kind: 'git', needs: 'history' },
   ];
   expect(reqs.map((r) => r.kind)).toEqual(['paths', 'exec', 'git']);
-  // This guard is type-level only and unenforced at runtime in this package
-  // until it has a tsconfig.test.json wired into typecheck.
+  // This guard is type-level only. It has no runtime dimension at all — a
+  // @ts-expect-error is erased before execution — and it is not enforced by any
+  // typecheck in this package either, since pangolin-core has no
+  // tsconfig.test.json wired into `pnpm -r typecheck`. The union itself IS
+  // enforced wherever `src/` constructs one; pangolin-worker's context-check
+  // does exactly that.
   // @ts-expect-error — 'patch-applied' is deliberately NOT expressible
   const _rejected: ContextRequirement = { kind: 'patch-applied' };
 });

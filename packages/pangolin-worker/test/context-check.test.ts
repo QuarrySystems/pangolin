@@ -65,7 +65,9 @@ it('never throws for a nonexistent workspaceDir, resolving all three kinds', asy
 
 it('exec: a binary in a directory named by the passed env.PATH is met:true', async () => {
   const binDir = await mkdtemp(join(tmpdir(), 'cc-bin-'));
-  await writeFile(join(binDir, 'planted-bin'), '');
+  // mode 0o755: access() now asks X_OK, so a non-executable file must NOT satisfy
+  // an `exec` requirement. No-op on Windows, which has no execute bit.
+  await writeFile(join(binDir, 'planted-bin'), '', { mode: 0o755 });
   const res = await checkContextRequirements(binDir, [{ kind: 'exec', bin: 'planted-bin' }], {
     PATH: binDir,
   });
@@ -74,7 +76,9 @@ it('exec: a binary in a directory named by the passed env.PATH is met:true', asy
 
 it('exec: the same binary is met:false when env.PATH is /nonexistent', async () => {
   const binDir = await mkdtemp(join(tmpdir(), 'cc-bin-'));
-  await writeFile(join(binDir, 'planted-bin'), '');
+  // mode 0o755: access() now asks X_OK, so a non-executable file must NOT satisfy
+  // an `exec` requirement. No-op on Windows, which has no execute bit.
+  await writeFile(join(binDir, 'planted-bin'), '', { mode: 0o755 });
   const res = await checkContextRequirements(binDir, [{ kind: 'exec', bin: 'planted-bin' }], {
     PATH: '/nonexistent',
   });
@@ -83,7 +87,9 @@ it('exec: the same binary is met:false when env.PATH is /nonexistent', async () 
 
 it('exec: planting the binary on the REAL process.env.PATH does not help — the passed env is used, no fallback', async () => {
   const binDir = await mkdtemp(join(tmpdir(), 'cc-bin-'));
-  await writeFile(join(binDir, 'planted-bin'), '');
+  // mode 0o755: access() now asks X_OK, so a non-executable file must NOT satisfy
+  // an `exec` requirement. No-op on Windows, which has no execute bit.
+  await writeFile(join(binDir, 'planted-bin'), '', { mode: 0o755 });
   const original = process.env.PATH;
   process.env.PATH = binDir + delimiter + (original ?? '');
   try {
@@ -201,6 +207,19 @@ it("git needs:'history' is met:false in a zero-commit dir and met:true once a co
   expect(after[0].met).toBe(true);
 });
 
+it('exec: a DIRECTORY named like the binary on PATH does not satisfy the requirement', async () => {
+  const binDir = await mkdtemp(join(tmpdir(), 'cc-exec-dir-'));
+  await mkdir(join(binDir, 'planted-bin'), { recursive: true });
+  // X_OK alone does NOT catch this: on a directory the execute bit means
+  // "traversable", so access(dir, X_OK) succeeds — measured in the Linux worker
+  // image. The isFile() stat is what rejects it, which is why both checks are
+  // present and why this case needs its own test.
+  const res = await checkContextRequirements(binDir, [{ kind: 'exec', bin: 'planted-bin' }], {
+    PATH: binDir,
+  });
+  expect(res[0].met).toBe(false);
+});
+
 it('git is fail-closed: with a PATH from which git is unresolvable, met:false naming the cause, no throw', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'cc-git-'));
   await execGit(dir, ['init', '-q']);
@@ -209,7 +228,10 @@ it('git is fail-closed: with a PATH from which git is unresolvable, met:false na
     PATH: '/nonexistent',
   });
   expect(res[0].met).toBe(false);
-  expect(res[0].observed.length).toBeGreaterThan(0);
+  // The test's name promises the cause is NAMED. `length > 0` is satisfied by
+  // any non-empty string, including a generic `exited 128` that explains
+  // nothing — so assert the specific unavailable-branch prefix instead.
+  expect(res[0].observed).toMatch(/^git unavailable:/);
 });
 
 it('git: ignores GIT_DIR/GIT_WORK_TREE riding on the passed env — a workspace with no .git stays met:false even when the env points at a real, committed repo elsewhere', async () => {
@@ -224,7 +246,10 @@ it('git: ignores GIT_DIR/GIT_WORK_TREE riding on the passed env — a workspace 
 
   const res = await checkContextRequirements(workspaceDir, [{ kind: 'git', needs: 'worktree' }], {
     PATH: process.env.PATH ?? '',
+    // Both, because the test's name claims both. GIT_DIR alone would leave
+    // GIT_WORK_TREE unexercised while the title asserted otherwise.
     GIT_DIR: join(otherRepo, '.git'),
+    GIT_WORK_TREE: otherRepo,
   });
   // If the merged env's GIT_DIR reached the child process, git would answer
   // about otherRepo (which DOES have a worktree) instead of workspaceDir,

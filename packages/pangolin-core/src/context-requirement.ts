@@ -20,12 +20,39 @@
 export type ContextRequirement =
   | {
       kind: 'paths';
-      /** Matched relative to the workspace root. */
+      /**
+       * Matched against each entry's path relative to the workspace root, with
+       * `/` separators on every platform.
+       *
+       * Dialect, pinned so an evaluator cannot invent its own: `**` matches any
+       * number of path segments, `*` matches any characters EXCEPT `/`, and
+       * everything else is literal. There is no brace expansion, no character
+       * class, and no special treatment of dotfiles — `.git/**` matches.
+       *
+       * DIRECTORIES COUNT AS MATCHES, not only files. `logs/**` is satisfied by
+       * an empty `logs/sub/` directory. Require a file explicitly (`logs/*.txt`)
+       * when that distinction matters.
+       */
       glob: string;
-      /** Minimum number of matches required. Omitted means 1 — never 0; a
-       *  requirement that zero matches satisfy is not a requirement. */
+      /**
+       * Minimum number of matching entries required. Omitted means 1.
+       *
+       * A value below 1 is MALFORMED, not a permissive setting: a requirement
+       * that zero matches satisfy is not a requirement. An evaluator must reject
+       * it rather than clamp it — clamping would silently turn a typo into a
+       * gate that can never fail, which is the failure mode this whole type
+       * exists to remove.
+       */
       minCount?: number;
     }
-  /** `bin` is resolved through PATH, not treated as a filesystem path. */
-  | { kind: 'exec'; bin: string }
+  | {
+      kind: 'exec';
+      /**
+       * Resolved through the runtime `PATH`, NOT treated as a filesystem path —
+       * `pnpm`, never `/usr/local/bin/pnpm`. The question asked is "can the
+       * agent run this", so resolution uses the environment the agent will
+       * receive, not the worker's own.
+       */
+      bin: string;
+    }
   | { kind: 'git'; needs: 'history' | 'worktree' };

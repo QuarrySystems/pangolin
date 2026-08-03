@@ -22,6 +22,7 @@
 //   - bundle integrity mismatch     → `reason: 'integrity-failed'`
 //   - secret resolution error       → `reason: 'fetch-failed'`
 //   - setup-script non-zero/timeout → `reason: 'worker-failed'`
+//   - unmet `contextRequires`       → `reason: 'worker-failed'`
 //   - malformed/oversized sentinel  → `reason: 'worker-failed'`
 //   - valid needs_input sentinel    → `dispatch.needs_input`, exit 0
 //   - adapter exit 0, no sentinel   → `dispatch.finished`, exit 0

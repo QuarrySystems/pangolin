@@ -132,9 +132,11 @@ must satisfy before the agent runs — the worker checks them after
 requirement fails the dispatch with `reason: 'worker-failed'`, and it is only
 present in the stored definition when set (so subagents without it keep their
 content hash, mirroring `verify`). Three kinds: `paths` (at least `minCount`
-files, default 1, match `glob`), `exec` (`bin` resolves on the runtime `PATH`),
-and `git` (`needs: 'worktree'` — a usable `.git`; `needs: 'history'` — at
-least one commit). It cannot express "a patch was applied" or "workspace is
+entries, default 1, match `glob` — **directories count, not only files**, so
+`logs/**` is satisfied by an empty `logs/sub/`; require a file explicitly with
+`logs/*.txt` when that matters), `exec` (`bin` resolves on the runtime `PATH`,
+and must be executable), and `git` (`needs: 'worktree'` — a usable `.git`;
+`needs: 'history'` — at least one commit). It cannot express "a patch was applied" or "workspace is
 at revision X" — neither is observable without redoing the work, so it is
 deliberately absent rather than an unreliable check. See
 [Dispatch lifecycle](/pangolin/reference/dispatch-lifecycle/) for where the

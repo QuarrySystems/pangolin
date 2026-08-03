@@ -22,9 +22,11 @@
 // between Node 20 (worker image) and Node 22 (CI), which is exactly the
 // Node-version hazard called out above for `fs.promises.glob`.
 
-import { access, readdir } from 'node:fs/promises';
+import { access, readdir, stat } from 'node:fs/promises';
+import { constants } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { join, delimiter } from 'node:path';
+import type { Dirent } from 'node:fs';
 import type { ContextRequirement } from '@quarry-systems/pangolin-core';
 import { matchesGlob } from './overlay-engine.js';
 import { buildGitEnv } from './patch-capture.js';
@@ -59,12 +61,25 @@ export async function checkContextRequirements(
   for (const requirement of reqs) {
     switch (requirement.kind) {
       case 'exec': {
+        // The question is "can the agent RUN this", so BOTH checks are needed
+        // and neither alone is sufficient. Measured in the Linux worker image:
+        //   access(0644 file, F_OK) -> pass   (why the default is wrong)
+        //   access(0644 file, X_OK) -> fail   (X_OK catches the non-executable)
+        //   access(directory,  X_OK) -> PASS  (X_OK does NOT catch a directory —
+        //                                      on a dir the bit means traversable)
+        // so the isFile() stat is what rejects a directory named `pnpm` sitting
+        // on PATH. Platform caveat: Windows has no execute bit and degrades
+        // X_OK to F_OK, so only the isFile() half is observable there; the full
+        // distinction holds on the Linux image, which is where it matters.
         const dirs = (env.PATH ?? '').split(delimiter).filter(Boolean);
         let found = '';
         for (const d of dirs) {
+          const candidate = join(d, requirement.bin);
           try {
-            await access(join(d, requirement.bin));
-            found = join(d, requirement.bin);
+            const st = await stat(candidate);
+            if (!st.isFile()) continue;
+            await access(candidate, constants.X_OK);
+            found = candidate;
             break;
           } catch {
             /* next */
@@ -113,10 +128,25 @@ export async function checkContextRequirements(
         // Both arms fail CLOSED when git cannot run at all.
         const base = buildGitEnv();
         const gitEnv: Record<string, string> = { ...base, PATH: env.PATH ?? base.PATH };
-        const args =
-          requirement.needs === 'worktree'
-            ? ['-C', workspaceDir, '-c', 'safe.directory=*', 'rev-parse', '--is-inside-work-tree']
-            : ['-C', workspaceDir, '-c', 'safe.directory=*', 'rev-parse', 'HEAD'];
+        // The three hardening flags mirror patch-capture.ts's `git()`. Verified
+        // NOT live for `rev-parse` specifically — a repo-local
+        // `core.fsmonitor` is not executed by either arm — but carried anyway
+        // so the asymmetry is not a trap for whoever adds a `status`/`log`/
+        // `diff` arm later, where it WOULD be live.
+        const args = [
+          '-C',
+          workspaceDir,
+          '-c',
+          'safe.directory=*',
+          '-c',
+          'core.fsmonitor=false',
+          '-c',
+          'core.pager=cat',
+          '-c',
+          'core.hooksPath=/dev/null',
+          'rev-parse',
+          requirement.needs === 'worktree' ? '--is-inside-work-tree' : 'HEAD',
+        ];
 
         let met = false;
         let observed = '';
@@ -168,7 +198,11 @@ function runGit(
         reject(err);
       }
     });
-    child.on('exit', (code, signal) => {
+    // 'close' rather than 'exit': 'exit' can fire before the stderr stream has
+    // finished flushing, and stderr IS the user-facing diagnostic here — losing
+    // it would fall back to a bare `exited 128`. patch-capture.ts uses 'exit',
+    // but there stderr is only error text; here it is the product.
+    child.on('close', (code, signal) => {
       if (!settled) {
         settled = true;
         resolve({ code, signal, stderr: Buffer.concat(stderrChunks).toString('utf8') });
@@ -193,13 +227,23 @@ function runGit(
  * matches for that subtree — fail closed, consistent with the rest of this
  * module, rather than throwing and discarding matches already found
  * elsewhere in the tree.
+ *
+ * COST, stated because the short-circuit only helps one direction: a MET
+ * requirement stops at the first `want` matches and is cheap. An UNMET one
+ * necessarily walks the entire tree — `.git` and `node_modules` included —
+ * with no depth cap, entry cap, or timeout, on the pre-agent critical path.
+ * That is bounded by one failing dispatch (the run fails immediately after),
+ * so it is accepted rather than optimised; do not read the short-circuit as
+ * making the miss case cheap. If that ever becomes a problem, the fix is to
+ * prune descent using the glob's literal leading segment — `sub/**` need only
+ * enter `sub`.
  */
 async function countGlobMatches(baseDir: string, glob: string, want: number): Promise<number> {
   let n = 0;
 
   async function walk(dir: string, prefix: string): Promise<void> {
     if (n >= want) return;
-    let entries;
+    let entries: Dirent[];
     try {
       entries = await readdir(dir, { withFileTypes: true });
     } catch {
