@@ -2197,6 +2197,91 @@ one-flag fix a consumer was waiting on.
 is so far only a measured property of the capture path.
 
 
+## 19. A dispatch workspace has no repository history, so no agent can reason about what changed
+
+**A feature request, and the narrower half of what 17 asks for.** 17 wants
+`dev.verify`'s "repo snapshot + patch applied" context to become reachable. This
+one is about a property that context does not obviously include and that a whole
+class of agent needs: **the workspace is a tar of tracked files, not a checkout.**
+
+**What the consumer observes.** `git archive --format=tar <rev>` produces the
+workspace payload, so it contains tracked file content and no `.git` at all. The
+only repository a dispatched agent sees is the one `patch-capture.ts` creates for
+itself:
+
+```
+git init -q
+git add -A
+…
+git add -A
+git diff ':(exclude).pangolin'
+```
+
+That repository exists to compute a diff. It has no history, no remote, and no
+relationship to the commit the workspace was built from. So inside a dispatch:
+
+```
+git log <baseRev>..HEAD     -> impossible; that history does not exist here
+git show <any prior commit> -> impossible
+git blame <file>            -> answers only about the synthetic baseline
+```
+
+**Why an implementer does not care and a planner does.** An implementer is given
+instructions and a tree, and the tree is enough. But an agent asked *what should
+happen next* needs the one thing an archive cannot carry: what already happened.
+"Which of the objective's criteria did the last cycle actually satisfy", "what
+landed since the snapshot", "did this approach get tried and rejected" are all
+history questions, and every one of them is unanswerable in a workspace built this
+way.
+
+The consumer's coordinator prompt (`coordinator/next-action.md`) opens by
+instructing the reader to consult `git log <baseRev>..HEAD` as its second input.
+That prompt is therefore local-only by construction — not by preference. It cannot
+be dispatched to a worker, no matter what else improves.
+
+**What does survive the archive**, and it is more than expected: anything TRACKED
+is present. The consumer's machine-written cycle logs
+(`coordinator/objectives/*.cycles.json`), its morning reports, its plans and its
+objectives all ride along, because they were deliberately kept in git rather than
+in a gitignored state root. So a dispatched planner would not be blind — it would
+be missing precisely the commit graph.
+
+Gitignored evidence is absent by the same rule: the consumer's run ledger lives
+under `state/` and does not appear.
+
+### The ask
+
+Make it possible for a dispatch to receive a workspace **with history** — a
+checkout at the pinned revision rather than an archive of it. Shallow is almost
+certainly enough: `--depth` deep enough to cover the objective's own cycles, not
+the whole project.
+
+It should be opt-in per dispatch rather than the default. History costs bytes and
+most dispatches do not need it, and the archive's determinism is a property worth
+keeping where it is not needed — a tar of tracked files at a rev is trivially
+reproducible in a way a clone is not.
+
+### Why the consumer cannot work around it
+
+Bundling history as a capability does not work. A capability is bytes at paths, so
+shipping `.git` would mean shipping a directory of packfiles and refs and hoping
+git accepts it — and the consumer already found that the same format cannot
+represent symlinks, which `.git` uses for neither but pnpm's store does, so the
+format's limits are real rather than theoretical.
+
+Passing a rendered `git log` as an input would work, and is what the consumer will
+do if this is not wanted. It is worse in a specific way: the consumer then CHOOSES
+what history the agent sees, which biases the decision the agent is being asked to
+make. A checkout lets the agent ask its own questions.
+
+### Relationship to 17
+
+Independent, and both are needed for different agents. 17 unblocks a verifier that
+can run gates against the patch. This unblocks a planner that can see what came
+before. Neither implies the other: a workspace with `node_modules` and no history
+still cannot answer "what changed since last cycle", and a workspace with history
+and no toolchain still cannot run a test.
+
 ## Related: CRLF on shell scripts
 
 A fifth issue — all four tracked `.sh` files checking out as CRLF on Windows and
