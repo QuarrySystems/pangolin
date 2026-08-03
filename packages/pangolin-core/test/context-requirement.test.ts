@@ -1,4 +1,4 @@
-import type { ContextRequirement } from '../src/context-requirement.js';
+import type { ContextRequirement } from '../src/index.js';
 import { it, expect } from 'vitest';
 
 it('the union admits all three observable kinds and rejects an intent claim', () => {
@@ -8,7 +8,8 @@ it('the union admits all three observable kinds and rejects an intent claim', ()
     { kind: 'git', needs: 'history' },
   ];
   expect(reqs.map((r) => r.kind)).toEqual(['paths', 'exec', 'git']);
+  // This guard is type-level only and unenforced at runtime in this package
+  // until it has a tsconfig.test.json wired into typecheck.
   // @ts-expect-error — 'patch-applied' is deliberately NOT expressible
-  const rejected: ContextRequirement = { kind: 'patch-applied' };
-  expect(rejected).toBeDefined();
+  const _rejected: ContextRequirement = { kind: 'patch-applied' };
 });

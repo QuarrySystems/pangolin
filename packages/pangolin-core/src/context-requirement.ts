@@ -11,11 +11,21 @@
  *   'worktree' — a `.git` entry exists and the directory is usable as a working
  *                tree. TRUE for a freshly `git init`-ed directory with no commits.
  *   'history'  — the repository has at least ONE COMMIT. FALSE for a freshly
- *                `git init`-ed directory. This distinction is load-bearing: the
- *                worker's own `captureBaseline` runs `git init` without committing,
- *                so the two values differ precisely across that call.
+ *                `git init`-ed directory. This distinction is load-bearing: on a
+ *                workspace that is not already a git repository, the worker's own
+ *                `captureBaseline` (which runs `git init` without committing) makes
+ *                'worktree' satisfiable while leaving 'history' unsatisfiable — the
+ *                two values diverge exactly there.
  */
 export type ContextRequirement =
-  | { kind: 'paths'; glob: string; minCount?: number }
+  | {
+      kind: 'paths';
+      /** Matched relative to the workspace root. */
+      glob: string;
+      /** Minimum number of matches required. Omitted means 1 — never 0; a
+       *  requirement that zero matches satisfy is not a requirement. */
+      minCount?: number;
+    }
+  /** `bin` is resolved through PATH, not treated as a filesystem path. */
   | { kind: 'exec'; bin: string }
   | { kind: 'git'; needs: 'history' | 'worktree' };
