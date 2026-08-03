@@ -16,3 +16,8 @@ examples/**/verify-context.json -text
 # fails on the stray carriage return — the serve stack's minio-init exits 2 before
 # the stack can start. Pin them to LF regardless of the local autocrlf setting.
 *.sh text eol=lf
+
+# Plans and specs are hashed by the audit pipeline (normalized `rev` in each
+# `## Audit record`). A CRLF rewrite on checkout moves every hash and silently
+# disables the re-audit short-circuit, so pin them to LF.
+docs/superpowers/**/*.md text eol=lf

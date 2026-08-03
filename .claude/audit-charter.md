@@ -118,6 +118,44 @@ because they are exactly what a generic auditor cannot know.
     relying on it. The converse holds too — a partial-literal call site that
     compiles today is not evidence the type is satisfied.
 
+- **A task claims to mirror an existing field's route, without opening every file
+  that route touches.** *Tell:* task prose says "exactly as `X` already is" or
+  "mirroring `X` one-for-one", and its `files:` list is shorter than `X`'s actual
+  path. *Check:* grep the mirrored symbol across `packages/*/src` and enumerate
+  every file it appears in; compare that set to the task's `files:`. *Why review
+  misses it:* each task reads correct in isolation, the DAG validates clean, and
+  the omission is a file **nobody declared** — so file-disjointness checks, which
+  compare declared sets, cannot see it.
+  - Instance (2026-08-03, dependency-cache gate-2 audit): four blocking findings
+    in one plan, all this shape. The plan mirrored `verify`'s route to the audit
+    export and declared two of its five files. The missing three were
+    `packages/pangolin-core/src/product.ts` (the actual home of `OutputSentinel`,
+    which the plan placed in `pangolin-worker`),
+    `packages/pangolin-orchestrator/src/contracts/types.ts` (`ItemState`), and —
+    the one that would have made the whole feature inert —
+    `packages/pangolin-product/src/sentinel-parse.ts`.
+  - **`parseOutputSentinel` is an allowlist reconstructor.** It rebuilds
+    `patchRef`, `summary`, `verify`, `outputs`, `usage`, `blocks` by hand from
+    type-guarded reads and **discards every other field** (`sentinel-parse.ts:119-138`,
+    per its own header rule). Any new sentinel field without a `build<Field>`
+    counterpart is silently dropped on every orchestrator-side read, while the
+    worker writes it correctly and every test on both sides passes.
+
+---
+
+## Named reference implementations
+
+The file to mirror, per layer. A blanket "follow the existing pattern" is a
+finding; so is pointing at the wrong one of several plausible candidates.
+
+| Layer | Mirror this | Not this |
+|---|---|---|
+| Self-verifying container script | `scripts/verify-patch-capture-env.mjs` — carries the Arm-A positive control (the probe must *find* a planted value in the same run, or the run is void) | `scripts/verify-proc-exposure.mjs` — same family, but its arms are shaped for a security tripwire rather than a measurement |
+| Sentinel field reconstructor | `buildVerify`, `packages/pangolin-product/src/sentinel-parse.ts:31-41` — per-field type guards, partial input yields `undefined` rather than a half-built object | a spread or `Object.assign` of the parsed input |
+| Client env-emission test | the stub-`ComputeProvider` capturing `TaskSpec.env` from a real `fire()`, `packages/pangolin-client/test/dispatch-model.test.ts:100-159` | there is **no** `buildWorkerEnv` symbol in this repo (`grep` across `packages/**/*.ts` → 0); the dispatched env is only observable through a real `fire()` |
+| Run-state migration test | a **file-backed** DB created with the pre-change schema via raw `better-sqlite3`, closed, then reopened through `SqliteRunStateStore` | `:memory:`, which cannot express a pre-existing schema and so cannot go red when a migration entry is missing |
+| POSIX-only lifecycle test | the `itPosix` idiom at `packages/pangolin-worker/test/setup-script.test.ts:30` | a bare `it` that fails on Windows contributors' machines |
+
 ---
 
 ## Verification gotchas
@@ -134,3 +172,18 @@ Commands that can report success while having failed, and what to run instead.
 - A missing-export or stale-type failure after a worktree switch or branch sync —
   frequently a stale `dist/`, not a real defect → `pnpm install && pnpm -r build`
   before believing it.
+- **A `grep -c` acceptance criterion.** It returns `0` **and exits 1** when there
+  are no matches, so under `set -e` it aborts the surrounding script rather than
+  reporting a clean result — and it is case-sensitive, so `grep -c binds` misses
+  `Binds`. It is also frequently satisfied *before any work is done*, making it a
+  criterion that cannot fail. → scope the grep to the new content
+  (`grep -A6 '<anchor>'`) and name any pre-existing matches as expected and
+  out of scope, or satisfying the criterion literally means deleting correct
+  content. Instance: 2026-08-03 dependency-cache audit, findings B10 and M24.
+- **A byte-level absence probe that reports nothing.** `grep -qP '\x00'` reported
+  no NUL bytes in a file that contains two (`packages/pangolin-worker/src/overlay-engine.ts`,
+  before #145) — `-P` is unavailable in some builds and the check fails silently
+  rather than erroring. → confirm an absence result with a byte-level read
+  (`node -e` over a `Buffer`) before believing it, and pair it with a positive
+  control. Same lesson the `/proc` spec §3a records for `wc -c < /proc/self/environ`,
+  which reads 0 bytes with the credential plainly present.
