@@ -413,3 +413,50 @@ every workspace has a `.git`.
 
 Test file: `docs-site/src/content/docs/reference/pangolin-client-api.md` is prose;
 the check is the docs build plus the two content assertions above.
+
+## Audit record
+
+- **2026-08-03** · rev `beec7b54d544` · commit `f2d61ef` · lenses:
+  coverage, dag-integrity, grounding, charter, context-sufficiency, verifiability,
+  coherence (7/7 dispatched, 7/7 ran — no gaps) · **NOT READY — 8 blocking**
+  - **No severity was downgraded.** All ten lens-proposed BLOCKING findings upheld,
+    merged into B1–B8. Two DEFERRED were *promoted* (charter's ordering finding;
+    coverage's §6.4 positive half) because a second lens falsified the detection
+    story each rested on.
+  - Baseline for round two: **8 blocking, 5 tasks, 401 lines**. The count overstates
+    the work — the 8 collapse into **5 edit sites (R-A…R-E)**, and 6 of 8 sit in
+    `task-worker-check-module` and `task-entrypoint-check-wire`, which between them
+    do four jobs.
+  - **The worst finding is that the check fails OPEN (B1).** The evaluator's
+    `out.push` is reachable only inside the `exec` branch, so a `paths` or `git`
+    requirement produces no result at all — `unmet.length === 0` and the dispatch
+    proceeds with the requirement silently unchecked. That is a sixth unread
+    declaration, precisely what spec §1 exists to remove. Root cause: an elided
+    sibling (`// 'paths' and 'git' follow the same shape`).
+  - **The ordering pin does not discriminate (B3).** `captureBaseline` runs
+    `git init`/`add`/`write-tree` and **never commits**, so under the plan's own
+    definition of `history` ("at least one commit") the criterion is `met:false`
+    both before *and* after it — the test passes identically under either ordering.
+    Spec §7 asked for the order to be pinned; it is not.
+  - **A cited fence was fabricated (B5).** The plan named six client test files as
+    asserting subagent content hashes; re-counted, five of the six never call
+    `registerSubagent` at all (0,0,0,0,0,7) and their hashes are literals. The real
+    fence — `subagent-register.test.ts`, 20 register calls, an equality at `:136` —
+    was omitted, and the demonstrating snippet is tautological.
+  - **A runtime split no test would catch (B4).** No glob engine is declared
+    anywhere in the repo; `fs.promises.glob` typechecks against `@types/node` 25 and
+    passes on CI's Node 22, then throws on the worker image's Node 20. Charter bug
+    class "green tests, dead runnable artifact".
+  - **AC1 asserts on a surface that does not exist (B8).** `dispatch.failed`'s
+    lifecycle event carries `{kind, dispatchId, reason, at}` — `detail` goes only to
+    the worker's stdout log, deliberately, so redacted secrets never reach a webhook.
+  - **Interaction worth more than any single finding:** R-B × R-E is NOT benign — a
+    fix for B7 (a bundle-carried `.git` to bind `workspaceDir`) would make B3's
+    ordering pin stop discriminating. The fix-A-becomes-finding-B cycle, caught
+    inside the audit's own output rather than in round two.
+  - Empirical unknown opened: **E1** does `readdir(recursive:true)` exist in the
+    pinned `node:20-slim` worker image (R-C rests on it). Owned by
+    `task-worker-check-module`; does not gate the verdict.
+  - Provenance: `2026-08-03-packs-on-both-paths-decision.md` is cited by this plan
+    but exists only on `spec/packs-on-both-paths` — content verified cross-branch and
+    accurate, availability is the gap. Merge alongside, or inline the argument.
