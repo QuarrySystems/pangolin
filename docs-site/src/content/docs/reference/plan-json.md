@@ -92,12 +92,56 @@ How a binding flows through a run:
 
 For the `dispatch` executor, a handful of `inputs` keys are reserved carriers
 rather than free-form worker input: `subagent`, `env`, `workerInput`,
-`inputRefs` (engine-written, never authored), and `pipeline`. Setting
+`capabilities`, `addCapabilities`, `inputRefs` (engine-written, never
+authored), and `pipeline`. Setting
 `inputs.pipeline` to a registered pipeline ref pins a **declared
 block-pipeline**: the worker fetches the spec by its content hash, re-validates
 it, and runs *that* pipeline instead of the default execution steps — see
 [Dispatch lifecycle → The block-pipeline runner](/pangolin/reference/dispatch-lifecycle/#the-block-pipeline-runner)
 and [`pangolin pipeline`](/pangolin/reference/cli/#pangolin-pipeline).
+
+### Per-item capability selection
+
+`inputs.capabilities` **replaces** the subagent's bound capability set for this
+item; `inputs.addCapabilities` **appends** to it. Both take an array of
+capability names or `CapabilityRef`s, and both are optional — omit them and the
+item runs with exactly the set bound at subagent-registration time.
+
+```json
+{
+  "id": "verify",
+  "executor": "dispatch",
+  "inputs": {
+    "subagent": "reviewer",
+    "capabilities": ["workspace@snapshot-2026-08-01"]
+  },
+  "depends_on": ["implement"],
+  "resourceLocks": []
+}
+```
+
+Without this, varying a worker's workspace substrate means **re-registering the
+subagent** — mutating a registration shared by every plan that names it, so two
+runs against different snapshots cannot coexist. Sharper: `resolveLatest`
+resolves per *dispatch*, not per run, so a re-registration while a run is in
+flight can change worker identity between two items of the same run, and nothing
+downstream reports it (each manifest stays internally consistent and the bundle
+still verifies).
+
+The audit trail needs nothing extra: `DispatchExecutorManifest.capabilities`
+already records the resolved `{name, contentHash}` set per dispatch, sealed via
+`canonEntry`, so a per-item override is captured by existing machinery.
+
+**Set one or the other, never both.** They are forwarded independently, and the
+client rejects the combination at fire time with
+`dispatchWork: cannot combine \`capabilities\` (replace) with \`addCapabilities\`
+(append) on the same call`. The item fails on its first dispatch, so a plan that
+sets both is a plan that cannot run.
+
+A malformed value (anything that is not an array) is **ignored, not rejected** —
+matching how `inputRefs` and `pipeline` treat malformed carriers, so one bad
+field cannot fail an item. Note the asymmetry: a *malformed* value is silently
+dropped, but a *well-formed pair* throws.
 
 ### Pattern payloads: `inputs.gate` and `inputs.mapReduce`
 
