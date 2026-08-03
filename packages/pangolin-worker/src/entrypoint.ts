@@ -44,6 +44,7 @@ import type {
   NotificationConfig,
   SecretStore,
   PipelineSpec,
+  ContextRequirement,
 } from '@quarry-systems/pangolin-core';
 import { validatePipelineSpec } from '@quarry-systems/pangolin-core';
 import { storeFromConfig } from '@quarry-systems/pangolin-secret-store';
@@ -51,6 +52,7 @@ import { SecretsManagerClient } from '@aws-sdk/client-secrets-manager';
 
 import { parseWorkerEnv, type WorkerConfig } from './env-parser.js';
 import { loadRuntimeAdapter } from './adapter-loader.js';
+import { checkContextRequirements } from './context-check.js';
 import {
   constructStorageProvider,
   fetchBundles,
@@ -506,6 +508,29 @@ export async function runWorker(
         );
       }
       return failWith('worker-failed', `setup-script failed: ${(err as Error).message}`);
+    }
+
+    // Context requirements: evaluate what the subagent def declares it needs from
+    // the staged workspace, AFTER the setup script (step 9, so an installed binary
+    // or generated file counts) and BEFORE captureBaseline below — captureBaseline
+    // runs `git init`, which would make a `{kind:'git',needs:'worktree'}`
+    // requirement `met:true` for a workspace that never had a real `.git` at all.
+    // A local cast, deliberately separate from the `subagent` cast ~20 lines below
+    // (which reads `bundles.subagentDef` for pipeline construction): that one is
+    // read AFTER captureBaseline and cannot serve this earlier read.
+    const ctxRequires = (bundles.subagentDef as { contextRequires?: ContextRequirement[] })
+      .contextRequires;
+    if (ctxRequires?.length) {
+      const results = await checkContextRequirements(workspaceDir, ctxRequires, mergedEnv);
+      const unmet = results.filter((r) => !r.met);
+      if (unmet.length > 0) {
+        return failWith(
+          'worker-failed',
+          `unmet context requirements: ${unmet
+            .map((u) => `${JSON.stringify(u.requirement)} — ${u.observed}`)
+            .join('; ')}`,
+        );
+      }
     }
 
     // Capture workspace baseline BEFORE the adapter runs (post-overlay, post-setup).
