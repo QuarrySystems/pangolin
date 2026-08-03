@@ -141,8 +141,7 @@ exactly the shape §6 rejects. Pangolin still never creates or manages a mount.
 ```
 
 The worker reads it **twice** — after setup (step 9) and after the agent block
-(step 11) — content-hashes each, and seals both into
-`DispatchExecutorManifest`:
+(step 11) — content-hashes each, and emits both on the **output sentinel**:
 
 ```ts
 deps?: {
@@ -151,6 +150,25 @@ deps?: {
   tier: 'recorded';
 };
 ```
+
+**It travels as a fourth sibling of `patchRef` / `verify` / `outputs`, not on
+`DispatchExecutorManifest`.** This correction was made during DAG authoring and
+matters: the executor manifest is built at **fire time**
+(`executors/dispatch.ts:141`), immediately after `client.dispatch.fire()` and
+sealing `firedAt` plus the pre-fire resolution — a moment at which the worker has
+not run setup or the agent, so dependency evidence provably cannot exist yet.
+Sealing it there would have been unimplementable.
+
+The reconcile path already carries exactly this shape of post-run evidence:
+
+- worker writes it into `.pangolin/output.json` (`output-sentinel.ts`);
+- `readSentinel` (`executors/dispatch.ts:225`) surfaces it alongside `patchRef` /
+  `verify` / `outputs`;
+- `reconcile` returns it, `tick` stores it, `item.reconciled` seals it, and
+  `getAuditExport` exports it — the same route `verify` took in #144.
+
+Reusing that path is the whole reason this design stays small: no new storage,
+no new audit entry kind, no new export shape.
 
 **Two entries rather than one is load-bearing.** An agent may add a package
 mid-plan; a single setup-time seal would then describe a dependency set the
@@ -288,12 +306,13 @@ These are part of "done", not follow-ups:
    `captureBaseline` — asserted through a real `runWorker` lifecycle, not on a
    synthetic env object, since every existing test passes a synthetic one and a
    test written the usual way would be vacuous.
-3. A dispatch with no `.pangolin/deps.json` seals **no** `deps` key — absent, not
-   `undefined`.
-4. A dispatch whose sentinel is unchanged across the agent block seals
+3. A dispatch with no `.pangolin/deps.json` emits **no** `deps` key on the output
+   sentinel — absent, not `undefined` — and `getAuditExport` carries no `deps`
+   for that item.
+4. A dispatch whose sentinel is unchanged across the agent block reports
    `atSetup === atFinish`.
-5. A dispatch whose agent rewrites the sentinel seals `atSetup !== atFinish`, and
-   the captured patch still contains the lockfile change and **no**
+5. A dispatch whose agent rewrites the sentinel reports `atSetup !== atFinish`,
+   and the captured patch still contains the lockfile change and **no**
    `node_modules` content.
 6. A malformed, unreadable or oversized sentinel is treated **exactly as absent**
    — no `deps` key is sealed, the dispatch proceeds, and the worker emits a
