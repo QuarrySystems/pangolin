@@ -2069,6 +2069,55 @@ that duplication is fine — it is working today and is not what this issue is
 about.
 
 
+## 18. `git()` decodes stdout as UTF-8, so a *text* file with non-UTF-8 bytes is captured corrupted
+
+**Sibling of 16, and not fixed by 16's fix.** Found while verifying that fix, by
+checking its correctness argument rather than accepting it.
+
+16's proposed fix reasons: *"The output is base85-encoded ASCII, so the existing
+`new TextEncoder().encode(diff)` on line 50 stays correct with no change."* That
+is true, and it is true only for the binary payload. It does not cover the rest of
+the diff, and the gap it leaves is a separate defect.
+
+**Cause.** `packages/pangolin-worker/src/patch-capture.ts:134` resolves every
+`git()` call through `Buffer.concat(stdoutChunks).toString('utf8')`, and
+`computeWorkspacePatch` re-encodes the result at line 50. Bytes that are not valid
+UTF-8 do not survive that round trip — `toString('utf8')` replaces each one with
+U+FFFD, and `TextEncoder` then writes `EF BF BD` where the original byte was.
+
+**Why `--binary` does not reach it.** Git's binary heuristic is essentially "a NUL
+byte in the first 8 KB". A file with high-bit bytes and *no* NUL — Latin-1 text,
+a UTF-16 fragment without a BOM, a stray `0xE9` in an otherwise-ASCII source — is
+classified as **text**. Git emits its bytes raw in an ordinary hunk, `--binary`
+never engages, and the round trip corrupts them.
+
+**Measured** on `fix/capture-patch-binary`, i.e. with 16 already fixed. A file
+changed from `hi\n` to `caf<0xE9>\n`:
+
+```
+binary path taken?   false      <- --binary did not engage; git called this text
+raw 0xE9 preserved?  false
+U+FFFD corruption?   true       <- 0xE9 rewritten as EF BF BD
+```
+
+**Severity: lower than 16, and the difference is worth stating.** 16 loses the
+change entirely and `git apply` refuses the patch, so the failure is at least
+detectable by trying. 18 produces a patch that **applies cleanly** and writes
+subtly wrong bytes. It is quieter, but the blast radius is narrower — corrupted
+content in files that carry non-UTF-8 bytes, rather than every binary-classified
+path.
+
+**Fix sketch, not attempted.** `git()` would resolve `Buffer` rather than `string`,
+with `computeWorkspacePatch` returning those bytes untouched and `captureBaseline`
+decoding its own result (a tree OID is ASCII hex, so that decode is safe). That is
+a signature change touching both callers, which is why it was not folded into the
+one-flag fix a consumer was waiting on.
+
+**Not verified:** whether any dispatch has actually hit this in practice. Unlike
+16 — reproduced end to end in run `loop7-ctlbytes-47738cb-1785693717` — this one
+is so far only a measured property of the capture path.
+
+
 ## Related: CRLF on shell scripts
 
 A fifth issue — all four tracked `.sh` files checking out as CRLF on Windows and
