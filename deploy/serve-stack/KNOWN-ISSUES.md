@@ -2298,6 +2298,58 @@ of these it includes. If it is specified as opt-in dimensions, history should be
 one of them — and this consumer would take history alone, without a toolchain,
 as the thing that unblocks a dispatched planner.
 
+### 19a. Verified — and bundling history as a capability DOES work (2026-08-02)
+
+**The need in 19 is real; one of its supporting claims is not, and that changes
+the size of the ask.** 19 states that "Bundling history as a capability does not
+work", on the grounds that shipping `.git` means "shipping a directory of
+packfiles and refs and hoping git accepts it". Measured: git accepts it.
+
+**What was confirmed true.**
+
+- `captureBaseline` really does build a synthetic repository — `git init -q`,
+  `git add -A`, `write-tree` (`patch-capture.ts:17-26`). No history, no remote.
+- A workspace containing only tracked file content cannot answer history
+  questions. Trivially so.
+
+**What is NOT true, measured end to end.** Two probes against the real code:
+
+1. **A workspace WITH history survives capture unchanged.** Given a repo with two
+   real commits, `captureBaseline`'s `git init -q` is idempotent and preserves it —
+   `git log`, `git log <rev>..HEAD` and `git show <prior commit>` all work
+   afterwards, and `computeWorkspacePatch` still produces a correct patch of the
+   agent's edit. Capture and history are not in conflict.
+2. **The overlay engine materialises a `.git` from a bundle into a working
+   repository.** A 30-file bundle including `.git` was overlaid into an empty
+   workspace; `git log` in the result matched the source repo exactly and
+   `git status` reported a clean tree. No symlinks were required — 19 already
+   concedes `.git` uses none, and the bundle shape is
+   `files: Record<path, Uint8Array>` written byte-for-byte
+   (`overlay-engine.ts`).
+
+**And Pangolin does not impose the archive.** There is no `git archive` anywhere
+in this source tree, and no tar handling in the worker. The archive is the
+consumer's own bundling choice on their side; nothing in the product requires it.
+
+**So the ask is smaller than filed.** "Make it possible for a dispatch to receive
+a workspace with history" is already possible today, with no product change: ship
+`.git` in a capability bundle. What is genuinely missing is not capability but
+**ergonomics and documentation** — a supported, documented way to do it, ideally
+with shallow-depth support, rather than a consumer discovering it works by trying.
+
+**Caveats, stated rather than glossed.**
+
+- Size is a real cost and 19's own shallow-clone suggestion still applies; these
+  probes used tiny repos and measured feasibility, not bytes.
+- The overlay engine re-serialises payloads it can parse as JSON, and writes
+  everything else byte-for-byte. No `.git` file in the probe hit that path, but a
+  ref file whose content parsed as JSON would be rewritten. Astronomically
+  unlikely for a hex SHA and not observed — noted so it is not discovered the hard
+  way.
+- This does not touch 19's argument about *choosing* what history the agent sees.
+  A real checkout still lets the agent ask its own questions; that reasoning is
+  unaffected.
+
 ## Related: CRLF on shell scripts
 
 A fifth issue — all four tracked `.sh` files checking out as CRLF on Windows and
