@@ -20,6 +20,7 @@ import {
   canonicalJsonString,
   computeContentHash,
   type CapabilityRef,
+  type ContextRequirement,
   type SubagentRef,
   type SubagentHandle,
   type VerifyConfig,
@@ -41,6 +42,9 @@ export interface RegisterSubagentOpts {
    * subagents that don't use it).
    */
   verify?: VerifyConfig;
+  /** Observable properties the staged workspace must satisfy. Verified by the
+   *  worker before the agent runs; an unmet requirement fails the dispatch. */
+  contextRequires?: ContextRequirement[];
 }
 
 /**
@@ -77,6 +81,7 @@ export async function registerSubagent(
   // Additive + hash-stable: only present when set, so existing subagents
   // (no verify) keep their exact content hash.
   if (opts.verify) def.verify = opts.verify;
+  if (opts.contextRequires) def.contextRequires = opts.contextRequires;
   const contentHash = computeContentHash(def);
 
   const baseUri = buildPangolinUri({
@@ -107,10 +112,7 @@ export async function registerSubagent(
     // The worker's bundle-fetcher re-parses these bytes as JSON and
     // re-hashes the resulting object via canonical JSON, so the round-trip
     // remains coherent on both sides.
-    await client.storage.put(
-      pinnedUri,
-      new TextEncoder().encode(canonicalJsonString(def)),
-    );
+    await client.storage.put(pinnedUri, new TextEncoder().encode(canonicalJsonString(def)));
     // The storage layer is the authority on registeredAt — re-read it.
     // If resolveLatest returns null here, the storage provider is inconsistent
     // (a put just succeeded for this name); fail fast rather than inventing a
@@ -132,7 +134,11 @@ export async function registerSubagent(
       const evolved = await registerSubagent(client, { ...opts, capabilities });
       // Strip the assign() function so the returned value is a plain SubagentRef
       // (handles are not serializable; refs are).
-      return { name: evolved.name, registeredAt: evolved.registeredAt, contentHash: evolved.contentHash };
+      return {
+        name: evolved.name,
+        registeredAt: evolved.registeredAt,
+        contentHash: evolved.contentHash,
+      };
     },
   };
   return handle;
