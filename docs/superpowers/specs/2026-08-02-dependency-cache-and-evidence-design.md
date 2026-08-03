@@ -99,14 +99,21 @@ manager and owns no mount abstraction.
 
 Pangolin tells the dispatch **where** the cache is and does nothing else.
 
-This is forced rather than chosen. `LocalDockerProviderOpts` exposes
-`extraHosts` but **no binds option** — binds are constructed internally for
-secret staging only. And on Fargate, Pangolin **cannot create a mount at dispatch
-time**: the provider already records that RunTask can override neither the image
-nor `secrets:[]` entries — *"both are locked"*
+This is forced rather than chosen. On Fargate, Pangolin **cannot create a mount at
+dispatch time**: the provider already records that RunTask can override neither
+the image nor `secrets:[]` entries — *"both are locked"*
 (`providers-fargate/src/index.ts:149`). Volumes are task-definition-owned, the
 same class of constraint. *The volume limitation specifically is an AWS platform
 constraint and was NOT measured here.*
+
+**Correction (gate-2 audit, 2026-08-03).** An earlier draft of this section
+claimed `LocalDockerProviderOpts` has "no binds option". That is false:
+`extraBinds?: string[]` already ships (`providers-local-docker/src/index.ts:74`,
+seeded at `:161`), documented as *"Additional bind mounts to apply to every
+container `run()`… `<host>:<container>[:ro]`"* — precisely this use case. **No
+provider change is required for the local path**, and the plan task that would
+have added a second, near-synonymous field to a published package was dropped.
+The local/dev cache mount is a documentation item, not a code item.
 
 A design in which Pangolin owns mount creation would therefore be a local-only
 feature wearing a provider-agnostic interface — the same trap issue 17 records
