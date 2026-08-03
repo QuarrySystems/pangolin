@@ -1,5 +1,4 @@
 import { describe, it, expect } from 'vitest';
-import { computeContentHash } from '@quarry-systems/pangolin-core';
 import type { StorageProvider } from '@quarry-systems/pangolin-core';
 import { registerSubagent } from '../src/subagent-register.js';
 import { PangolinClient } from '../src/client.js';
@@ -72,20 +71,18 @@ function makeClient(storage: StorageProvider): PangolinClient {
 }
 
 describe('registerSubagent contextRequires', () => {
-  it('a def without contextRequires hashes to the PRE-EDIT literal', () => {
-    // Mirrors subagent-register.ts:70-77 exactly. This literal was derived from the
-    // code BEFORE this change; if the guarded assignment regresses to `?? []` the
-    // hash becomes sha256:1ba525f0cea7e0f980bdc333e89de66b0df868395ad84ec437c7a0c0adbe0fbe
-    // and this goes red. Comparing two live registrations would NOT — both would move
-    // together and stay equal.
-    const def = {
-      name: 'a',
-      systemPrompt: 'x',
-      promptTemplate: null,
-      model: null,
-      capabilities: [],
-    };
-    expect(computeContentHash(def)).toBe(
+  it('a def without contextRequires hashes to the PRE-EDIT literal', async () => {
+    // Drives the real registerSubagent code path (no capabilities, no verify,
+    // no contextRequires) and pins the resulting handle's content hash. This
+    // literal was derived from the code BEFORE this change; if the guarded
+    // assignment at subagent-register.ts regresses to `?? []` for
+    // contextRequires (or any other optional field gains an unconditional
+    // default), the def object picks up a spurious key, its canonical JSON
+    // changes, and this hash changes too — this test goes red.
+    const storage = makeMemoryStorage();
+    const client = makeClient(storage);
+    const handle = await registerSubagent(client, { name: 'a', systemPrompt: 'x' });
+    expect(handle.contentHash).toBe(
       'sha256:5001767f43a3fc2eaa7b7664acf684e9ea3236f36aac000a9738fc15e879318f',
     );
   });
