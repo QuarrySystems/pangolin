@@ -2456,6 +2456,81 @@ with shallow-depth support, rather than a consumer discovering it works by tryin
   A real checkout still lets the agent ask its own questions; that reasoning is
   unaffected.
 
+## 20. `env.register()` with an inline secret always throws `IntegrityMismatchError`
+
+**Unconditional, not flaky, and it affects both shipped secret stores.** A
+registration carrying `secrets: { KEY: { inline: … } }` cannot succeed against a
+real `StorageProvider`. Found 2026-08-03 while running the Docker-gated E2E lane
+against a freshly-built worker image; root-caused with a minimal reproduction.
+
+**The mechanism — one value asked to be two incompatible things.**
+
+```
+env-register.ts:165   contentHash = computeContentHash(def)   // hashes the PLACEHOLDER ref
+env-register.ts:205   secretRefs[key] = ref                   // mutates def to the REAL ref
+env-register.ts:228   put(pinnedUri, canonicalJsonString(def))
+storage-local:249     computeContentHash(contents) !== parsed.contentHash  →  throw
+```
+
+`computeContentHash` hashes `canonicalize(object)` for an object and the raw bytes
+for a `Uint8Array` (`content-hash.ts:82-90`), so the two agree only if `def` is
+unchanged between `:165` and `:228`. It is not: `:205` replaces every placeholder
+with the store's real ref.
+
+**Why they can never match.** `LocalSecretStore.stage:63` does
+`const id = randomUUID()` and returns `local-secret://<uuid>`. The placeholder is
+`pangolin/inline/env-<bundle>/<key>` (`env-register.ts:86-88`). `AwsSecretStore`
+returns a random-suffixed ARN, so it has the same shape — *this half was NOT
+verified here; there are no AWS credentials in this environment.*
+
+`env-register.ts:83-85` states the situation outright: the hash uses the name
+"rather than the store-returned ref (**which would be fresh on every staging**)".
+And `:176-179` names the conflict before walking into it: staging earlier "would
+… hand back a fresh ref that breaks hash equality."
+
+**The conflict is structural, and no amount of care resolves it as written:**
+
+| Role | Needs | Therefore |
+|---|---|---|
+| Idempotency key (`:180`) | stable across stagings | must **exclude** the fresh ref |
+| Content address (`putBlob`) | equals the bytes stored | must **include** the fresh ref |
+
+One hash cannot be both. The placeholder was invented for the first role and then
+handed to the second; `putBlob` correctly rejects it.
+
+**Reproduction** (minimal, with a control):
+
+```
+ref === placeholder  → object-hash === byte-hash        (control: mechanism is coherent)
+ref === random uuid  → sha256:0e9f122f… vs sha256:5f929124…   (diverges → throw)
+```
+
+**Why no test caught it.** The unit suite's storage stub reads the hash out of the
+URI and never re-hashes the contents (`env-register.test.ts:34-37`), so the
+divergence is invisible there. Only the real `LocalStorageProvider` enforces it —
+and that path lives in the Docker-gated E2E lane, which **CI never runs**
+(`e2e.yml:10`: the container suites are "behind `PANGOLIN_E2E_DOCKER=1` (not set
+here)"). Same shape as the dangling-digest issue in 17: the check exists, and
+nothing executes it.
+
+**Not a regression from anything recent.** `env-register.ts` last changed
+2026-06-10 and `storage-local/src/index.ts` 2026-07-29; the failure is entirely
+client-side and occurs before any container starts.
+
+**Recommended direction — keep the UUID; split the conflated key.** The randomness
+is load-bearing: it keeps the ref opaque in a blob that content-addressed storage
+will hand to anything that can read it (`:190` calls them "real opaque refs"), it
+avoids overwriting a value an in-flight dispatch is mid-`resolve()` on, and it
+gives each staging its own TTL. Address the blob by the hash of what is actually
+written, and keep the placeholder-derived hash as a **separate** idempotency key.
+Design in
+[`../../docs/superpowers/specs/2026-08-03-env-register-split-key-design.md`](../../docs/superpowers/specs/2026-08-03-env-register-split-key-design.md).
+
+**Rejected alternatives**, both worse: a deterministic ref
+(`local-secret://hmac(name)`) fixes the hash but trades it for overwrite-in-place;
+exempting this type from `putBlob`'s check deletes the only detector, in the one
+subsystem whose entire pitch is tamper-evidence.
+
 ## Related: CRLF on shell scripts
 
 A fifth issue — all four tracked `.sh` files checking out as CRLF on Windows and
