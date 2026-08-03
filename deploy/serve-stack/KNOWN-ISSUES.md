@@ -2087,6 +2087,66 @@ consumer expresses as `needs: { work: { from, select: { kind: "patch" } } }`, an
 that duplication is fine — it is working today and is not what this issue is
 about.
 
+### 17a. The placeholder digest is not the blocker — dev shapes dispatch today (2026-08-02)
+
+**Corrects 17's central premise, and the correction changes what should be
+built.** 17 states that because `capability.imageDigest` is `sha256:PLACEHOLDER`,
+"no dev-shaped item can be dispatched", and asks first for a real digest to be
+pinned. That is false, and pinning the digest would be a no-op dressed as a fix —
+it would read as the blocker being cleared while changing nothing.
+
+**Verified three ways.**
+
+1. **`imageDigest` has exactly one reader**, `validateShape`
+   (`contracts/subagent-shape.ts:30-31`), and it is a truthiness check:
+   `if (!s.capability?.imageDigest) throw`. `"sha256:PLACEHOLDER"` is truthy, so
+   it passes.
+2. **Nothing at dispatch time consults it.** `DispatchExecutor.fire` never
+   references `subagentShape` or `capability` at all; `workerImage` comes from
+   executor config, which an existing test already pins ("target and workerImage
+   come only from executor config, not from WorkItem inputs").
+3. **Measured end to end.** A `dev.verify`-shaped item with valid inputs, run
+   through the real `tick` with `devRegistry()` and the placeholder in place,
+   **fires** — `fired: true`, item status `running`. Now a permanent regression
+   test in `test/packs/dev.test.ts`.
+
+**The deeper finding, and the one that matters.** `contextShape` is a free-text
+string that **no code reads** — it appears only in the interface declaration, the
+pack definitions, and a test helper. So `"repo snapshot + patch applied"` is a
+statement of intent, not a behaviour: nothing stages a repo snapshot or applies a
+patch because of it.
+
+That inverts 17's framing. 17 calls this "the last mile of work that is already
+done", with "one placeholder constant and one missing parameter" in the way. The
+declaration is done; the work is not. A verifier that receives the base tree with
+the patch applied and a runnable toolchain — the thing that would have caught the
+consumer's two `tsc` failures — **is unimplemented**, and no amount of digest
+pinning or registry plumbing reaches it.
+
+**Ask 2 is also partly misdiagnosed.** `OperationsApi.submit` is a pass-through
+(`transport.submit({ run, actor, submittedAt })`) — it neither validates nor
+strips, so an item's `subagentShape` already survives submission intact. And
+`Orchestrator` already accepts `packs?: PackRegistry`. The real gap is that the
+**service** has no configured way to register a pack, not that the consumer
+cannot supply one.
+
+**What was done here.** Only the record correction: this entry, the two
+regression tests above, and replacing the actively-wrong `TODO(PR6)` comments in
+`packs/dev.ts` and `packs/data.ts` (both read "pin the real worker image digest
+before … shapes are dispatched", implying a gate that does not exist).
+
+**What was deliberately not done, and needs a decision.** Two candidate follow-ups,
+neither started:
+
+- **Enforce `imageDigest` at dispatch**, making the shape's pin a real governance
+  property — a shape claims its code runs in a specific image and nothing verifies
+  that. Needs a digest strategy first: every dev *and* data shape carries the
+  placeholder, so naive enforcement breaks all five, and hardcoded digests go
+  dangling (#135 fixed exactly that).
+- **Specify and build the staged context** `contextShape` describes: materialized
+  tree, patch application order relative to `overlayCapabilities`, toolchain
+  presence. This is the consumer's actual need.
+
 
 ## 18. `git()` decodes stdout as UTF-8, so a *text* file with non-UTF-8 bytes is captured corrupted
 

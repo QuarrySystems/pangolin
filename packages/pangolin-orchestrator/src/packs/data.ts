@@ -1,48 +1,52 @@
-import { z } from "zod";
-import type { SubagentShape } from "../contracts/subagent-shape.js";
-import { PackRegistry } from "./registry.js";
+import { z } from 'zod';
+import type { SubagentShape } from '../contracts/subagent-shape.js';
+import { PackRegistry } from './registry.js';
 
-const WORKER_IMAGE = "sha256:PLACEHOLDER"; // TODO(PR6): pin the real worker image digest before data shapes are dispatched
+// NOT a dispatch gate — same as packs/dev.ts, and for the same measured reason:
+// `imageDigest` is only truthiness-checked by `validateShape`, and nothing at
+// dispatch time reads it. Data shapes are dispatchable with this placeholder in
+// place. See KNOWN-ISSUES 17a.
+const WORKER_IMAGE = 'sha256:PLACEHOLDER';
 
 export const dataSplit: SubagentShape = {
-  id: "data.split",
-  effectTier: "pure",
+  id: 'data.split',
+  effectTier: 'pure',
   inputSchema: z.object({ dataset: z.string() }),
   outputSchema: z.object({ chunks: z.array(z.string()) }),
   capability: {
     imageDigest: WORKER_IMAGE,
     permissions: {},
-    contextShape: "dataset at inputs/dataset",
+    contextShape: 'dataset at inputs/dataset',
   },
-  outputEdgeType: "dataset-ref",
-  inputEdgeTypes: { dataset: "dataset-ref" },
+  outputEdgeType: 'dataset-ref',
+  inputEdgeTypes: { dataset: 'dataset-ref' },
 };
 
 export const dataTransform: SubagentShape = {
-  id: "data.transform",
-  effectTier: "pure",
+  id: 'data.transform',
+  effectTier: 'pure',
   inputSchema: z.object({ input: z.string() }),
   outputSchema: z.object({ output: z.string() }),
   capability: {
     imageDigest: WORKER_IMAGE,
     permissions: {},
-    contextShape: "dataset at inputs/input",
+    contextShape: 'dataset at inputs/input',
   },
-  outputEdgeType: "dataset-ref",
-  inputEdgeTypes: { input: "dataset-ref" },
+  outputEdgeType: 'dataset-ref',
+  inputEdgeTypes: { input: 'dataset-ref' },
 };
 
 export const dataAggregate: SubagentShape = {
-  id: "data.aggregate",
-  effectTier: "pure",
+  id: 'data.aggregate',
+  effectTier: 'pure',
   inputSchema: z.record(z.string()),
   outputSchema: z.object({ result: z.string() }),
   capability: {
     imageDigest: WORKER_IMAGE,
     permissions: {},
-    contextShape: "dataset parts at inputs/",
+    contextShape: 'dataset parts at inputs/',
   },
-  outputEdgeType: "dataset-ref",
+  outputEdgeType: 'dataset-ref',
   // inputEdgeTypes deliberately OMITTED:
   // reduce needs-keys are dynamic ('<prefix>-<key>'), and validateRun's tag check is
   // permissive per-key — dynamic keys simply aren't tag-checked. Explicit note > silent magic.
