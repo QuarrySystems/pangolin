@@ -187,3 +187,18 @@ Commands that can report success while having failed, and what to run instead.
   (`node -e` over a `Buffer`) before believing it, and pair it with a positive
   control. Same lesson the `/proc` spec §3a records for `wc -c < /proc/self/environ`,
   which reads 0 bytes with the credential plainly present.
+- **A green local run of a suite containing a `itPosix`/Docker-gated test.** On
+  Windows those tests do not run, so a *newly authored* one has never executed
+  anywhere — its first execution is its first CI run, with no prior green to
+  regress from. Local output reports this honestly and it is easy to read past:
+  `6 passed | 1 skipped` where the 1 was the only test covering the new path. →
+  read the **skip count**, not just the pass count, and treat a nonzero skip in
+  the suite you just wrote as "unverified", not "passed". Instance: 2026-08-03,
+  #152's `entrypoint-context.test.ts` — the setup script it staged died with 127
+  because the test's own env bundle replaces `PATH`, leaving bare `mkdir`/`chmod`
+  unresolvable; the dispatch failed at step 9 and never reached the check under
+  test. Reproducible in seconds under `docker run node:20`, which is the cheap
+  move when the gated test cannot run locally. (Note the near-miss: the obvious
+  fix — widening the bundle's `PATH` — also goes green while destroying the
+  test, since a real `pnpm` on a system dir would then satisfy the `exec`
+  requirement with the setup script having done nothing.)
