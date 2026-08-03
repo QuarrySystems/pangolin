@@ -12,7 +12,7 @@ flowchart TD
     task-client-accept-requires["task-client-accept-requires: accept contextRequires at registration<br/>files: packages/pangolin-client/src/subagent-register.ts +1 more"]:::done
     task-worker-check-module["task-worker-check-module: evaluate requirements vs a workspace<br/>files: packages/pangolin-worker/src/context-check.ts +2 more"]:::done
     task-entrypoint-check-wire["task-entrypoint-check-wire: check in the worker lifecycle<br/>files: packages/pangolin-worker/src/entrypoint.ts +1 more"]:::done
-    task-docs-context-requires["task-docs-context-requires: document the registration surface<br/>files: docs-site/src/content/docs/reference/pangolin-client-api.md +1 more"]:::running
+    task-docs-context-requires["task-docs-context-requires: document the registration surface<br/>files: docs-site/src/content/docs/reference/pangolin-client-api.md +1 more"]:::done
 
     task-core-requirement-type --> task-client-accept-requires
     task-core-requirement-type --> task-worker-check-module
@@ -470,7 +470,7 @@ depends_on: [task-client-accept-requires, task-entrypoint-check-wire]
 files:
   - docs-site/src/content/docs/reference/pangolin-client-api.md
   - docs-site/src/content/docs/reference/dispatch-lifecycle.md
-status: running
+status: done
 ```
 
 Documents `contextRequires` on `subagent.register` and the lifecycle step that
