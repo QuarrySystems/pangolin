@@ -18,7 +18,9 @@ export async function captureBaseline(workspaceDir: string): Promise<WorkspaceBa
   try {
     await git(workspaceDir, ['init', '-q']);
     await git(workspaceDir, ['add', '-A']);
-    const treeOid = (await git(workspaceDir, ['write-tree'])).trim();
+    // Decoding is safe HERE and only here: a tree oid is ASCII hex. The diff path
+    // below must not decode — see the note on `git()`.
+    const treeOid = (await git(workspaceDir, ['write-tree'])).toString('utf8').trim();
     return { treeOid };
   } catch {
     return { unavailable: true };
@@ -53,7 +55,12 @@ export async function computeWorkspacePatch(
       '.',
       ':(exclude).pangolin',
     ]);
-    return diff.length === 0 ? null : new TextEncoder().encode(diff);
+    // Hand back git's bytes unchanged. Decoding to a string and re-encoding would
+    // rewrite every byte that is not valid UTF-8 as EF BF BD — and git emits raw
+    // bytes for any file it classifies as TEXT, which is any file without a NUL,
+    // including Latin-1 and BOM-less UTF-16 fragments. `--binary` does not cover
+    // those: it only engages once git has already decided the file is binary.
+    return diff.length === 0 ? null : new Uint8Array(diff);
   } catch {
     return null;
   }
@@ -82,12 +89,18 @@ export function buildGitEnv(): Record<string, string> {
  *   -c safe.directory=* -c user.email=pangolin@local -c user.name=pangolin
  *   -c commit.gpgsign=false
  *
- * Resolves with stdout (utf-8) on exit code 0; rejects on nonzero exit
+ * Resolves with raw stdout BYTES on exit code 0; rejects on nonzero exit
  * (includes stderr in the error message). Uses spawn (not exec) to avoid
  * shell quoting issues with the ':(exclude).pangolin' pathspec.
+ *
+ * Deliberately returns Buffer rather than a decoded string: git's diff output is
+ * not text. It carries the raw bytes of every file it treats as text, and a utf8
+ * decode/re-encode round trip silently replaces each invalid byte with U+FFFD,
+ * producing a patch that applies cleanly and writes the wrong content. Callers
+ * that genuinely receive ASCII (`write-tree`) decode for themselves.
  */
-function git(dir: string, args: string[]): Promise<string> {
-  return new Promise<string>((resolve, reject) => {
+function git(dir: string, args: string[]): Promise<Buffer> {
+  return new Promise<Buffer>((resolve, reject) => {
     const child = spawn(
       'git',
       [
@@ -137,7 +150,7 @@ function git(dir: string, args: string[]): Promise<string> {
     child.on('exit', (code, signal) =>
       settle(() => {
         if (code === 0) {
-          resolve(Buffer.concat(stdoutChunks).toString('utf8'));
+          resolve(Buffer.concat(stdoutChunks));
           return;
         }
         const stderr = Buffer.concat(stderrChunks).toString('utf8');
