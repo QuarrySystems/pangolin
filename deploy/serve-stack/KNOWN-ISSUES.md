@@ -2263,11 +2263,23 @@ reproducible in a way a clone is not.
 
 ### Why the consumer cannot work around it
 
-Bundling history as a capability does not work. A capability is bytes at paths, so
-shipping `.git` would mean shipping a directory of packfiles and refs and hoping
-git accepts it — and the consumer already found that the same format cannot
-represent symlinks, which `.git` uses for neither but pnpm's store does, so the
-format's limits are real rather than theoretical.
+**WITHDRAWN — this paragraph was wrong, see 19a.** It claimed bundling history as
+a capability "does not work", reasoning that shipping `.git` means shipping
+packfiles and refs "and hoping git accepts it". 19a measured it: git accepts it.
+A 30-file bundle including `.git` overlays into a working repository with
+matching `git log` and a clean `git status`, and `captureBaseline`'s `git init`
+is idempotent, so a workspace WITH history survives capture unchanged.
+
+The claim was asserted from reading rather than from running, which is precisely
+the standard this document exists to hold. Left in place rather than deleted so
+the correction is legible.
+
+19a also establishes the root framing error: **there is no `git archive` anywhere
+in pangolin's source.** The archive is the consumer's own bundling choice
+(`scripts/snapshot.ts`), not a product constraint. So the ask below is smaller
+than filed — shipping history is possible today with no product change, and what
+is genuinely missing is a documented, supported way to do it with shallow-depth
+support, rather than each consumer discovering it works by trying.
 
 Passing a rendered `git log` as an input would work, and is what the consumer will
 do if this is not wanted. It is worse in a specific way: the consumer then CHOOSES
