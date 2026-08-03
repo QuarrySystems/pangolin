@@ -2147,6 +2147,100 @@ neither started:
   tree, patch application order relative to `overlayCapabilities`, toolchain
   presence. This is the consumer's actual need.
 
+### 17b. The toolchain dimension already has an answer: `pangolin-setup.sh` (2026-08-02)
+
+**Measured in the real image, and it narrows 17 further.** 17 argues the
+`node_modules` workaround is unattractive partly because it "would also need
+`pnpm`, which is absent from `pangolin-worker:main` (node v20.20.2, npm 10.8.2,
+git 2.39.5, no pnpm)". That inventory is exactly right — confirmed — but the
+conclusion does not follow. A dispatch can install its own toolchain today, with
+no new worker image and no 100 MB capability.
+
+**The mechanism.** `pangolin-setup.sh`, shipped at a capability's root, runs as
+**step 9 of the worker's 14-step lifecycle** (`entrypoint.ts:487`) via
+`/bin/bash`. It is already documented (`how-to/worker-file-layout`, "Recipe:
+install a tool in the worker").
+
+**The ordering is the part that matters, and it is already correct.** Setup runs
+*before* `captureBaseline` (`entrypoint.ts:514`, "post-overlay, post-setup"), so
+everything it installs is in the baseline and **does not appear in the captured
+patch**. Installing dependencies does not pollute the diff.
+
+**Egress — verified per provider, because the answer differs.**
+
+- **local-docker: available.** `NetworkMode` is never set; the provider's
+  `HostConfig` is typed `{ Binds?, ExtraHosts? }` (`providers-local-docker/src/index.ts:131`),
+  so containers get Docker's default bridge. Measured inside
+  `pangolin-worker:main`: DNS for `registry.npmjs.org` resolves and installs
+  succeed.
+- **Fargate: operator-dependent, and the default is the restrictive one.** The
+  provider passes `awsvpcConfiguration` with operator-supplied subnets and
+  security groups, and `assignPublicIp` **defaults to `'DISABLED'`**
+  (`providers-fargate/src/index.ts:136-141`). A private subnet with no NAT
+  gateway has no egress and any install will fail. Not measured — read from the
+  provider; there is no AWS access here.
+
+**Two traps, both measured, and a recipe that clears them.**
+
+1. **The worker runs as uid 1000 (`pangolin`), and npm's global prefix is
+   root-owned `/usr/local`.** A plain `npm i -g pnpm` fails in about a second:
+
+   ```
+   npm error code EACCES
+   npm error syscall mkdir
+   npm error path /usr/local/lib/node_modules/pnpm
+   ```
+
+   `$HOME` (`/home/pangolin`) and `/workspace` are both writable, so pointing the
+   prefix at `$HOME` works — pnpm 10.34.5 installed in **2 seconds**.
+
+2. **`pangolin-setup.sh` is a separate process, so its `export PATH` dies with
+   it.** Measured: after a setup script that installs successfully and exits 0,
+   the binary is present at `$HOME/.npm-global/bin/{pnpm,pnpx}` but a subsequent
+   process with the inherited PATH gets `pnpm: command not found`. The agent sees
+   PATH from its own environment, not the setup script's.
+
+   The second half is therefore an **env bundle** setting PATH. That works
+   because `baseEnv = filterRuntimeEnv(...)` is built first and env bundles are
+   merged *on top* (`entrypoint.ts:474-478`, `env-merger.ts:27-31`), so a
+   bundle-supplied PATH wins and is not re-filtered. Verified in-image: the same
+   binary resolves as `pnpm 10.34.5` once PATH carries `$HOME/.npm-global/bin`.
+
+   **Both halves are required.** Either alone silently yields a worker with no
+   usable pnpm — the install half fails loudly, the PATH half fails as
+   "command not found" at agent time.
+
+```sh
+# pangolin-setup.sh — half one
+#!/bin/bash
+set -e
+export NPM_CONFIG_PREFIX="$HOME/.npm-global"
+mkdir -p "$NPM_CONFIG_PREFIX"
+npm i -g pnpm --silent
+# half two: an env bundle must set
+#   PATH=/home/pangolin/.npm-global/bin:/usr/local/bin:/usr/bin:/bin
+```
+
+**Constraints to size the approach against.**
+
+- **`PANGOLIN_SETUP_TIMEOUT_SECONDS` defaults to 120** (`env-parser.ts:200-202`).
+  Installing the pnpm binary is 2s and fine. A cold `pnpm install` over a real
+  lockfile is the actual risk and was **not** measured here; raise the bound
+  before relying on it.
+- **Failure is hard, not best-effort.** Non-zero exit or timeout fails the
+  dispatch with `reason: 'worker-failed'`. A flaky registry kills the run.
+- **Single slot.** `pangolin-setup.sh` is last-write-wins on that exact filename;
+  if two bound capabilities each ship one, the others silently disappear.
+- **50 MiB per capability** (ADR-0015) — which is the reason to script the
+  install rather than ship the tree.
+
+**What this changes for 17.** The toolchain dimension of the staged context has a
+working answer today; it needs documenting as a supported recipe, not building.
+Combined with 19a — history is also already shippable via a capability bundle —
+17's remaining ask narrows to the two dimensions that genuinely are unimplemented:
+a materialized repo snapshot, and patch application ordered relative to
+`overlayCapabilities`.
+
 
 ## 18. `git()` decodes stdout as UTF-8, so a *text* file with non-UTF-8 bytes is captured corrupted
 
