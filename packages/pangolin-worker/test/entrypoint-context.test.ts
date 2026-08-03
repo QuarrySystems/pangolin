@@ -345,8 +345,17 @@ describe('worker context-requirements gate (task-entrypoint-check-wire)', () => 
         contextRequires: [{ kind: 'exec', bin: 'pnpm' }],
       });
 
+      // `/bin/mkdir` and `/bin/chmod` are absolute DELIBERATELY. The env bundle
+      // below REPLACES PATH with `$HOME/bin` — a directory whose only occupant
+      // is the stub this script is trying to create — so bare `mkdir`/`chmod`
+      // are unresolvable and the script dies with 127 before creating anything.
+      // The dispatch then fails at step 9 (setup script), never reaching the
+      // context check this test exists to exercise. Widening the bundle's PATH
+      // would fix that too, but at the cost of the test's teeth: a real pnpm on
+      // a system dir would satisfy the `exec` requirement and the assertion
+      // would pass without the setup script having done anything.
       const setupScript = new TextEncoder().encode(
-        '#!/bin/bash\nmkdir -p "$HOME/bin"\nprintf \'#!/bin/bash\\necho stub\\n\' > "$HOME/bin/pnpm"\nchmod +x "$HOME/bin/pnpm"\n',
+        '#!/bin/bash\n/bin/mkdir -p "$HOME/bin"\nprintf \'#!/bin/bash\\necho stub\\n\' > "$HOME/bin/pnpm"\n/bin/chmod +x "$HOME/bin/pnpm"\n',
       );
       const capRef = await putCapability(h.storage, 'setup-cap', {
         'pangolin-setup.sh': setupScript,
