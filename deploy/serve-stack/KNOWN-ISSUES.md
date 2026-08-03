@@ -538,6 +538,48 @@ for`. Pruning cost nothing that verification depends on.
 uptime, so this should not recur at that scale — but there is still no retention
 policy, and that remains unaddressed.
 
+### 6d. The fix held — confirmed 42 hours later (2026-08-02)
+
+6c closes on a prediction: *"Growth is now proportional to work done rather than
+uptime, so this should not recur at that scale."* That is the one claim in this
+issue a measurement taken at deploy time cannot support, because **a prune alone
+looks identical to a fix when you measure immediately after both.** Level and
+slope are only separable by waiting.
+
+Measured from a consumer against the same deployment after 42 hours of
+continuous uptime — `pangolin-serve` reporting orchestrator `0.4.0`, image built
+2026-07-31. Five runs spanning that whole window, three `audit()` repetitions
+each, medians, first call discarded as warm-up:
+
+| run | stack uptime SINCE it was created | `audit()` |
+|---|---|---|
+| `loop1-guard-…` | ~42 h | 24 ms |
+| `loop2-charter-…` | ~37 h | 22 ms |
+| `loop3-sealed-…` | ~2.3 h | 19 ms |
+| `loop5-layout-…` | ~0.8 h | 20 ms |
+| `loop6-runbook-…` | ~0.05 h | 22 ms |
+| a runId that does not exist | — | 2 ms |
+
+**No slope.** The amplification's signature was cost rising with how long the
+stack stayed up *after* a run was created; under the old mechanism `loop1` had 42
+hours in which to accumulate and `loop6` had three minutes, and they differ by
+noise. A reset level with the mechanism intact would have re-accumulated
+measurably over that window. It did not.
+
+The nonexistent-runId floor of 2 ms is carried because it is what makes the rest
+meaningful: it shows the remaining cost is the round trip rather than a scan, so
+19–24 ms is not a smaller scan but effectively no scan.
+
+**What this does not establish.** One deployment, one consumer, 42 hours. It says
+the mechanism is not re-accumulating at this scale of use; it says nothing about a
+busier stack, and 6c's closing point stands unchanged — there is still no
+retention policy, so growth proportional to *work done* is unbounded over a long
+enough horizon. This confirms the shape of the curve, not that it has a ceiling.
+
+Filed by the consumer that reported the original 71,027 ms, which had been telling
+its operators to raise their poll interval on the strength of it for two days
+after it stopped being true.
+
 ### 6b. Outbox keys collided across restarts (fixed)
 
 `seq` was a per-instance counter seeded at 0, and mailbox writes are overwrites, so
@@ -1604,6 +1646,57 @@ through the other.
 
 ---
 
+### 13a. `DispatchInput.capabilities` already exists — `DispatchExecutor.fire` just never forwards it
+
+**Narrows 13 rather than extending it.** 13 asks for a way to vary workspace input
+independently of subagent identity, and reasons about what shape that might take.
+For the *capability* half specifically the shape is already in the contract, and
+has been since at least `0.4.0` — `dispatch.d.ts` is byte-identical between
+`0.4.0` and `0.5.0`. Only the wiring is missing.
+
+```ts
+// core dispatch.d.ts:31-36 — DispatchInput
+/** `capabilities` replaces the subagent's bound set; `addCapabilities`
+ *  augments it. Callers typically pick one or the other, not both. */
+subagent: string | SubagentRef;
+capabilities?: Array<string | CapabilityRef>;
+addCapabilities?: Array<string | CapabilityRef>;
+```
+
+`DispatchExecutor.fire` (`executors/dispatch.js:45-59`) passes `subagent`, `env`,
+`input`, `target`, `workerImage`, `secrets`, and conditionally `model`,
+`inputRefs`, `pipelineRef`, `trace`, `timeoutSeconds`. Neither capability field is
+among them, so the selection is unreachable from a plan.
+
+**Consequence for a consumer.** A plan names its subagent by bare string; that
+resolves through `storage.resolveLatest`; the workspace overlay comes from the
+resolved blob's own capability list. So changing a worker's workspace substrate
+requires re-registering the subagent — mutating a registration shared by every
+plan referencing that name. Two runs against different workspace snapshots cannot
+coexist.
+
+Sharper, and the part that is hard to notice: `resolveLatest` resolves per
+*dispatch*, not per run, so a re-registration while a run is in flight can change
+worker identity **between two items of the same run**. Nothing afterwards reports
+it — each manifest is internally consistent and the bundle verifies intact.
+
+**Proposed, and small.** Accept an optional `capabilities` (and/or
+`addCapabilities`) on a work item's `inputs`, forward it in `fire()` with the same
+conditional-spread pattern its neighbours already use, and accept the field in
+`validateRun`.
+
+The audit trail needs no change: `DispatchExecutorManifest.capabilities` already
+records the resolved `{name, contentHash}` set per dispatch, and `manifestRef` is
+sealed by `canonEntry`. A per-item override is captured by existing machinery.
+
+**Not blocking.** The consumer that found this works around it with immutable
+per-snapshot capability names plus per-cycle subagent registrations, which
+preserves reproducibility at the cost of a registry that grows with cycles. Noted
+because 13's "if this is ever addressed" framing reads as a design problem, and
+for this half it is a wiring problem.
+
+---
+
 # Issue 14: a safety control that failed open
 
 **Different provenance again.** This one was not reported by a consumer. It fell
@@ -1693,6 +1786,356 @@ configures nothing. That is issue 9's pattern a third time and wants its own
 look.
 
 ---
+
+# Issue 15: the self-verify signal has nowhere to go
+
+## 15. `VerifyOutcome` is unreachable from the audit bundle — exported by `getStatus`, absent from `getAuditExport`
+
+**Defect-shaped, low urgency, and it looks like an omission rather than a
+decision.** A worker's self-verify result reaches the run-state store and
+`getStatus()`, but never enters the audit export. A client whose read path is
+`audit()` — the only path that works without run enumeration (issue 7's
+neighbourhood) — cannot see it at all.
+
+**Symptom.** A subagent registered with a `VerifyConfig` runs its own
+language-agnostic check (`cargo test`, `pytest`, `tsc && vitest`) over its edit.
+The orchestrator records the result. A supervisor reading the sealed evidence has
+no channel to learn it.
+
+**Cause — the asymmetry.** Three values arrive together, on one return from a
+single `readSentinel`:
+
+```js
+// executors/dispatch.js:125
+return { status, output: result, resultRef: patchRef, verify, outputRefs };
+```
+
+All three are stored symmetrically:
+
+```js
+// engine/tick.js:81,83,85
+store.setResultRef(it.id, res.resultRef);
+store.setVerify(it.id, res.verify);
+store.setOutputRefs(it.id, res.outputRefs);
+```
+
+Two of the three are sealed into the chain at reconcile:
+
+```js
+// engine/tick.js:93,96 — item.reconciled
+...(res.resultRef  ? { resultRef:  res.resultRef  } : {}),
+...(res.outputRefs ? { outputRefs: res.outputRefs } : {}),
+// verify: absent
+```
+
+And two of the three reach the export:
+
+| surface | carries `verify`? |
+|---|---|
+| `getStatus()` — `orchestrator.js:385` | yes: `...(i.verify !== undefined ? { verify: i.verify } : {})` |
+| `getAuditExport()` — `orchestrator.js:393` | **no** — rows are `id, status, attempts, actor, resultRef?, manifestRef?, outputRefs?` |
+| `AuditItemOutcome` — core `audit.d.ts:201-209` | no field to put it in |
+| `AuditEntry` (sealed chain) | no field to put it in |
+
+`verify` is the only one of the three siblings that stops at the store.
+
+**Proposed change.** Additive, mirroring what `outputRefs` already does:
+
+1. Add `verify?: VerifyOutcome` to `AuditItemOutcome`.
+2. Include it in `getAuditExport()`'s item rows with the same conditional spread
+   as its siblings.
+
+Optionally and separately: seal it at `item.reconciled` the way `outputRefs` is.
+`canonEntry` already carries the conditional-append pattern for exactly this, so
+legacy entries keep serializing byte-identically. Without sealing, an exported
+`verify` is readable but no more trustworthy than the rest of the untrusted export
+rows; with it, "the worker's own suite passed" becomes tamper-evident.
+
+**What is NOT being asked for.** `VerifyOutcome` staying **report-only** — "it
+never changes the dispatch outcome" — is the right call and should not move. A
+failing self-verify is information, not a dispatch failure. The issue is only that
+the information has nowhere to go.
+
+**Priority, honestly: low.** The consumer that found this is not unblocked by it.
+Its workers receive a `git archive` of tracked files, so `node_modules/` is absent
+and the suite cannot run inside a dispatch regardless — a worker-image question on
+the consumer's side, not pangolin's. Filed because the export gap is in this tree,
+and because the field's two siblings both made it through.
+
+---
+
+# Issue 16: a dispatch can succeed and lose its work
+
+## 16. `capturePatch` omits `--binary`, so a change to any git-binary file is captured as an unappliable stub
+
+**The most consequential of the findings this consumer has filed, because it is
+the only one where a run reports success and the work is gone.**
+
+**Symptom.** A dispatch edits a file git classifies as binary. The item reconciles
+`done`, `capturePatch` returns a `resultRef`, the artifact is content-addressed
+and stored, and the audit chain seals it. The patch cannot be applied and cannot
+be reviewed. Nothing anywhere reports a problem.
+
+```
+$ git apply --check the-exported.patch
+error: cannot apply binary patch to 'scripts/isolation-oracle.ts' without full index line
+error: scripts/isolation-oracle.ts: patch does not apply
+
+$ git apply --numstat the-exported.patch
+-       -       scripts/isolation-oracle.ts        <- git's marker for binary
+64      0       src/core/source-hygiene.test.ts    <- the text file in the same run, fine
+```
+
+The patch's entire record of the change is one line:
+
+```
+diff --git a/scripts/isolation-oracle.ts b/scripts/isolation-oracle.ts
+index 3e7f443..cb4f231 100644
+Binary files a/scripts/isolation-oracle.ts and b/scripts/isolation-oracle.ts differ
+```
+
+**Cause.** `packages/pangolin-worker/src/patch-capture.ts:37-49`:
+
+```ts
+const diff = await git(workspaceDir, [
+  'diff',
+  '--no-ext-diff',
+  '--no-textconv',
+  '--cached',
+  baseline.treeOid,
+  '--',
+  '.',
+  ':(exclude).pangolin',
+]);
+```
+
+No `--binary`, and no `--full-index`. Git's default for a binary path is the stub
+above: a header, an abbreviated index line, and no payload.
+
+**This is not only about images, and that is the part worth pausing on.**
+"Binary" here is git's own content heuristic, and a single stray control byte is
+enough to trigger it. The file in the reproduction is an 8,874-byte TypeScript
+source whose only offence was two delimiter characters — `0x00` and `0x01` —
+written as raw bytes instead of escapes. It reads as ordinary source in an editor.
+Any repository with a `.ts`, `.py` or `.go` file containing one stray control byte
+has dispatches that cannot return their work, and no way to find that out except
+by trying to apply the result.
+
+**Observed end to end**, run `loop7-ctlbytes-47738cb-1785693717`, 2026-08-02. The
+task edited two files. The text one came back intact; the other came back as the
+stub. The consumer's own verifier reached the right conclusion unaided —
+
+> "the hunk in inputs/work is only 'Binary files a/… and b/… differ' with no GIT
+> binary patch payload, so the patch contains no evidence of what actually
+> changed"
+
+— and failed the item. That is the correct verdict, and it is also why the
+failure is easy to misattribute: it presents as a worker that did not do the job.
+
+**Proposed fix.** Add `--binary` to that argument list. It implies `--full-index`,
+so one flag covers both errors above. The output is base85-encoded ASCII, so the
+existing `new TextEncoder().encode(diff)` on line 50 stays correct with no change.
+
+If emitting full binary payloads is unwanted — a large asset would inflate the
+artifact — then the alternative is to **refuse loudly rather than emit a stub**:
+detect the `Binary files … differ` shape and surface it as a capture failure, so
+the dispatch does not report a `resultRef` that cannot represent what happened.
+Either is fine. Silently returning an unusable patch is the thing to stop.
+
+**Why the tests do not catch it.** `packages/pangolin-worker/test/` has five
+`patch-capture*` test files. Every fixture in them is text. The fixture set
+encodes the same assumption as the code, so the suite is green over a path no
+real binary change survives — the same shape as this file's existing
+"item-status polarity" entry, where the fixture was written from the same wrong
+belief as the predicate.
+
+A regression test wants a fixture containing one control byte in an otherwise
+ordinary source file, not a `.png`. The `.png` case is the one people remember to
+write; the stray-byte case is the one that actually happens.
+
+
+---
+
+## 17. Dev shapes are defined, registered and schema-validated, but pinned to a placeholder image — so `dev.verify`'s "repo snapshot + patch applied" context is unreachable
+
+**This is a feature request rather than a defect, and it asks for the last mile
+of work that is already done.** `packs/dev.ts` describes exactly the verifier
+context a consumer needs; one placeholder constant and one missing parameter keep
+it from being dispatchable.
+
+**What ships today.** `packages/pangolin-orchestrator/src/packs/dev.ts`:
+
+```ts
+const WORKER_IMAGE = "sha256:PLACEHOLDER"; // TODO(PR6): pin the real worker image digest before dev shapes are dispatched
+
+export const devVerify: SubagentShape = {
+  id: "dev.verify",
+  effectTier: "read-impure",
+  inputSchema: z.object({ patch: patchSchema }),
+  outputSchema: z.object({ passed: z.boolean(), report: z.string() }),
+  capability: { imageDigest: WORKER_IMAGE, permissions: {}, contextShape: "repo snapshot + patch applied" },
+  inputEdgeTypes: { patch: "patch-ref" },
+};
+```
+
+`engine/tick.ts` resolves a shape, validates inputs against its zod schema, and
+derives the effect class from it:
+
+```ts
+effectClass = shape.effectTier; // shape-authoritative; replaces the TODO(PR6) discard
+```
+
+with the invariant stated in the surrounding comment — *"NEVER from item.inputs —
+submitters must not be able to claim their own effect tier"*. That is a real
+governance property and it works.
+
+**Why the placeholder makes it unreachable.** `capability.imageDigest` is
+`sha256:PLACEHOLDER` for both dev shapes, so no dev-shaped item can be dispatched.
+`WorkItem.subagentShape` exists in `contracts/types.d.ts` and ships in 0.4.0, and
+`packs/` ships compiled in `dist/` — but `OperationsApi.submit` takes no
+`PackRegistry`, so a consumer holding this package has no way to supply one.
+Verified against the installed 0.4.0: `dist/packs/{dev,data,registry}.js` are all
+present and `subagentShape?: string` is on the item type.
+
+So the door and the room both exist; there is no handle on the consumer side.
+
+### What the consumer is doing instead, and what it costs
+
+A verifier is dispatched with the implementer's patch as an input and an
+acceptance criterion as prose. **It never receives the base tree.** Every refusal
+message in the consumer's snapshot tooling says so, because it is the reason a
+stale snapshot is unrecoverable downstream:
+
+> A worker would receive source without the commits in between, and nothing
+> downstream would notice — the verifier is shown a patch and a criterion, never
+> the base.
+
+Two measured consequences from 20 runs:
+
+**1. The verifier cannot run anything, and this is now a pattern rather than an
+anecdote.** The workspace is a `git archive` of tracked files, so
+`node_modules/` is absent and no gate can execute. **Two consecutive cycles
+passed verification with a full green suite and were then rejected by `tsc` on
+the consumer's machine.** Both are type errors in otherwise-correct logic — the
+class a compiler catches instantly and a reviewer reading a patch does not.
+
+First, on an optional-property construction:
+
+```
+error TS2379: Argument of type '{ authzTier: string | undefined; }' is not
+assignable to parameter of type '{ authzTier?: string }' with
+'exactOptionalPropertyTypes: true'
+```
+
+Then, on the very next cycle, a `readonly` tuple membership test:
+
+```
+error TS2345: Argument of type 'string' is not assignable to parameter of type
+'"passed" | "inconclusive" | "red"'
+```
+
+Neither is subtle to a compiler. Both survived a verifier that read the patch
+and a test suite that passed — 807 tests in the first case, 755 in the second —
+because neither the implementer nor the verifier can execute a type check. Each
+cost a full paid cycle plus a hand fix, for something `pnpm typecheck` answers
+in ten seconds.
+
+That is the shape of the argument: the failures reaching this consumer are not
+reasoning failures a verifier could have caught by reading more carefully. They
+are failures only running the toolchain detects, and no participant in the
+dispatch can run it. With `contextShape: "repo snapshot + patch applied"`,
+`dev.verify` is by construction in a position to.
+
+**2. Patch-integrity failures are the dominant red.** 3 of 20 runs went red, and
+all three were the verifier correctly refusing to certify a patch it could not
+read (see #16) — not logic errors. A verifier that could apply the patch would
+distinguish "this patch does not apply" from "this change is wrong", which are
+different findings with different fixes.
+
+### The ask, smallest first
+
+1. **Pin a real worker image digest** for `devCodeEdit` and `devVerify` — the
+   `TODO(PR6)` on line 6 of `packs/dev.ts`.
+2. **Expose a pack registry through the submit path**, so a consumer can pass
+   `devRegistry()` (or its own) and reference `subagentShape: "dev.verify"` on an
+   item. `PackRegistry` is already exported; only the plumbing into
+   `OperationsApi` is missing.
+3. **Document what `contextShape` guarantees.** "repo snapshot + patch applied" is
+   the phrase that makes this valuable, and a consumer needs to know whether it
+   means the tree is materialized and writable, whether a toolchain is present,
+   and whether the patch is applied before or after capabilities are overlaid.
+   `patch-capture.ts` captures its baseline AFTER `overlayCapabilities`, which
+   suggests the answer, but it should be stated rather than inferred.
+
+### Why this is worth more than the workaround
+
+The consumer's alternative is shipping `node_modules` as a capability so the agent
+can run its own gates. That is ~100 MB and 5,615 files per lockfile change, and it
+does not work naively: pnpm's store is symlink-based — 4 of 6 top-level entries in
+that tree are symlinks — and the capability format is bytes-at-paths with no
+symlink representation, so the bundle either dereferences into something far
+larger or lands broken. It would also need `pnpm`, which is absent from
+`pangolin-worker:main` (node v20.20.2, npm 10.8.2, git 2.39.5, no pnpm).
+
+Finishing `dev.verify` removes the need for all of that, and it is upstream's own
+design rather than a consumer's workaround.
+
+### Not asked for
+
+Typed edges. `outputEdgeType: "patch-ref"` and `inputEdgeTypes` overlap what the
+consumer expresses as `needs: { work: { from, select: { kind: "patch" } } }`, and
+that duplication is fine — it is working today and is not what this issue is
+about.
+
+
+## 18. `git()` decodes stdout as UTF-8, so a *text* file with non-UTF-8 bytes is captured corrupted
+
+**Sibling of 16, and not fixed by 16's fix.** Found while verifying that fix, by
+checking its correctness argument rather than accepting it.
+
+16's proposed fix reasons: *"The output is base85-encoded ASCII, so the existing
+`new TextEncoder().encode(diff)` on line 50 stays correct with no change."* That
+is true, and it is true only for the binary payload. It does not cover the rest of
+the diff, and the gap it leaves is a separate defect.
+
+**Cause.** `packages/pangolin-worker/src/patch-capture.ts:134` resolves every
+`git()` call through `Buffer.concat(stdoutChunks).toString('utf8')`, and
+`computeWorkspacePatch` re-encodes the result at line 50. Bytes that are not valid
+UTF-8 do not survive that round trip — `toString('utf8')` replaces each one with
+U+FFFD, and `TextEncoder` then writes `EF BF BD` where the original byte was.
+
+**Why `--binary` does not reach it.** Git's binary heuristic is essentially "a NUL
+byte in the first 8 KB". A file with high-bit bytes and *no* NUL — Latin-1 text,
+a UTF-16 fragment without a BOM, a stray `0xE9` in an otherwise-ASCII source — is
+classified as **text**. Git emits its bytes raw in an ordinary hunk, `--binary`
+never engages, and the round trip corrupts them.
+
+**Measured** on `fix/capture-patch-binary`, i.e. with 16 already fixed. A file
+changed from `hi\n` to `caf<0xE9>\n`:
+
+```
+binary path taken?   false      <- --binary did not engage; git called this text
+raw 0xE9 preserved?  false
+U+FFFD corruption?   true       <- 0xE9 rewritten as EF BF BD
+```
+
+**Severity: lower than 16, and the difference is worth stating.** 16 loses the
+change entirely and `git apply` refuses the patch, so the failure is at least
+detectable by trying. 18 produces a patch that **applies cleanly** and writes
+subtly wrong bytes. It is quieter, but the blast radius is narrower — corrupted
+content in files that carry non-UTF-8 bytes, rather than every binary-classified
+path.
+
+**Fix sketch, not attempted.** `git()` would resolve `Buffer` rather than `string`,
+with `computeWorkspacePatch` returning those bytes untouched and `captureBaseline`
+decoding its own result (a tree OID is ASCII hex, so that decode is safe). That is
+a signature change touching both callers, which is why it was not folded into the
+one-flag fix a consumer was waiting on.
+
+**Not verified:** whether any dispatch has actually hit this in practice. Unlike
+16 — reproduced end to end in run `loop7-ctlbytes-47738cb-1785693717` — this one
+is so far only a measured property of the capture path.
+
 
 ## Related: CRLF on shell scripts
 
