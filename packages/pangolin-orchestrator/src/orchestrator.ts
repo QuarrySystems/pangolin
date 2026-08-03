@@ -488,6 +488,10 @@ export class PangolinOrchestrator {
       ...(i.resultRef !== undefined ? { resultRef: i.resultRef } : {}),
       ...(i.manifestRef !== undefined ? { manifestRef: i.manifestRef } : {}),
       ...(i.outputRefs !== undefined ? { outputRefs: i.outputRefs } : {}),
+      // Same conditional spread as its two siblings above. `verify` arrives on the
+      // same readSentinel return and is stored symmetrically; only the export
+      // dropped it, which left it invisible to any client reading via audit().
+      ...(i.verify !== undefined ? { verify: i.verify } : {}),
     }));
     return { runId, entries, root, items };
   }

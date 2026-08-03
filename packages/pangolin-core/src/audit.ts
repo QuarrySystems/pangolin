@@ -8,6 +8,10 @@
 // Cross-system byte-parity: Guarantee/GUARANTEE_RANK/Signature/AnchorReceipt/AnchoredRoot/Signer/AuditAnchor
 // are verbatim from Mneme src/audit/types.ts.
 
+// Type-only, so this file keeps its no-runtime-import-surface property: the
+// import is erased at compile time and adds no dependency edge at runtime.
+import type { VerifyOutcome } from './verify.js';
+
 // ── Manifest types ────────────────────────────────────────────────────────
 // Moved into core alongside the audit types because `AuditBundle` references
 // `DispatchManifest`, and core must NOT depend on the orchestrator package. These
@@ -249,6 +253,24 @@ export interface AuditItemOutcome {
   /** Producer-side handoff evidence (spec §7): outputs/ deliverable refs, keyed by
    *  posix path. Refs only — content-addressed. */
   outputRefs?: Record<string, string>;
+  /**
+   * The worker's own self-verify result, when the subagent declared a VerifyConfig.
+   *
+   * Its two siblings — `resultRef` and `outputRefs` — arrive on the same
+   * `readSentinel` return and are stored symmetrically, but only they reached this
+   * export; `verify` stopped at the store, leaving it invisible to any client whose
+   * read path is `audit()`.
+   *
+   * Note this is the one field here that carries a VALUE rather than a ref:
+   * `VerifyOutcome.report` is command output (already truncated and
+   * secret-redacted by the worker). It is the same object `getStatus()` has always
+   * returned, so this exposes nothing new — but it is why the row's "references
+   * only" framing is approximate rather than literal.
+   *
+   * Report-only by design: a failing self-verify is information, never a dispatch
+   * failure. A test pins that.
+   */
+  verify?: VerifyOutcome;
 }
 
 /** Refs-only audit export the service publishes to the outbox on epoch seal (§6.5). */
