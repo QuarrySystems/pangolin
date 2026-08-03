@@ -1956,6 +1956,119 @@ write; the stray-byte case is the one that actually happens.
 
 ---
 
+## 17. Dev shapes are defined, registered and schema-validated, but pinned to a placeholder image — so `dev.verify`'s "repo snapshot + patch applied" context is unreachable
+
+**This is a feature request rather than a defect, and it asks for the last mile
+of work that is already done.** `packs/dev.ts` describes exactly the verifier
+context a consumer needs; one placeholder constant and one missing parameter keep
+it from being dispatchable.
+
+**What ships today.** `packages/pangolin-orchestrator/src/packs/dev.ts`:
+
+```ts
+const WORKER_IMAGE = "sha256:PLACEHOLDER"; // TODO(PR6): pin the real worker image digest before dev shapes are dispatched
+
+export const devVerify: SubagentShape = {
+  id: "dev.verify",
+  effectTier: "read-impure",
+  inputSchema: z.object({ patch: patchSchema }),
+  outputSchema: z.object({ passed: z.boolean(), report: z.string() }),
+  capability: { imageDigest: WORKER_IMAGE, permissions: {}, contextShape: "repo snapshot + patch applied" },
+  inputEdgeTypes: { patch: "patch-ref" },
+};
+```
+
+`engine/tick.ts` resolves a shape, validates inputs against its zod schema, and
+derives the effect class from it:
+
+```ts
+effectClass = shape.effectTier; // shape-authoritative; replaces the TODO(PR6) discard
+```
+
+with the invariant stated in the surrounding comment — *"NEVER from item.inputs —
+submitters must not be able to claim their own effect tier"*. That is a real
+governance property and it works.
+
+**Why the placeholder makes it unreachable.** `capability.imageDigest` is
+`sha256:PLACEHOLDER` for both dev shapes, so no dev-shaped item can be dispatched.
+`WorkItem.subagentShape` exists in `contracts/types.d.ts` and ships in 0.4.0, and
+`packs/` ships compiled in `dist/` — but `OperationsApi.submit` takes no
+`PackRegistry`, so a consumer holding this package has no way to supply one.
+Verified against the installed 0.4.0: `dist/packs/{dev,data,registry}.js` are all
+present and `subagentShape?: string` is on the item type.
+
+So the door and the room both exist; there is no handle on the consumer side.
+
+### What the consumer is doing instead, and what it costs
+
+A verifier is dispatched with the implementer's patch as an input and an
+acceptance criterion as prose. **It never receives the base tree.** Every refusal
+message in the consumer's snapshot tooling says so, because it is the reason a
+stale snapshot is unrecoverable downstream:
+
+> A worker would receive source without the commits in between, and nothing
+> downstream would notice — the verifier is shown a patch and a criterion, never
+> the base.
+
+Two measured consequences from 20 runs:
+
+**1. The verifier cannot run anything.** The workspace is a `git archive` of
+tracked files, so `node_modules/` is absent and no gate can execute. Concretely,
+one cycle passed review and all 807 tests, then failed `tsc` on the consumer's
+machine:
+
+```
+error TS2379: Argument of type '{ authzTier: string | undefined; }' is not
+assignable to parameter of type '{ authzTier?: string }' with
+'exactOptionalPropertyTypes: true'
+```
+
+A full paid cycle for something `pnpm typecheck` answers in ten seconds. With
+`contextShape: "repo snapshot + patch applied"` the verifier is in a position to
+run it.
+
+**2. Patch-integrity failures are the dominant red.** 3 of 20 runs went red, and
+all three were the verifier correctly refusing to certify a patch it could not
+read (see #16) — not logic errors. A verifier that could apply the patch would
+distinguish "this patch does not apply" from "this change is wrong", which are
+different findings with different fixes.
+
+### The ask, smallest first
+
+1. **Pin a real worker image digest** for `devCodeEdit` and `devVerify` — the
+   `TODO(PR6)` on line 6 of `packs/dev.ts`.
+2. **Expose a pack registry through the submit path**, so a consumer can pass
+   `devRegistry()` (or its own) and reference `subagentShape: "dev.verify"` on an
+   item. `PackRegistry` is already exported; only the plumbing into
+   `OperationsApi` is missing.
+3. **Document what `contextShape` guarantees.** "repo snapshot + patch applied" is
+   the phrase that makes this valuable, and a consumer needs to know whether it
+   means the tree is materialized and writable, whether a toolchain is present,
+   and whether the patch is applied before or after capabilities are overlaid.
+   `patch-capture.ts` captures its baseline AFTER `overlayCapabilities`, which
+   suggests the answer, but it should be stated rather than inferred.
+
+### Why this is worth more than the workaround
+
+The consumer's alternative is shipping `node_modules` as a capability so the agent
+can run its own gates. That is ~100 MB and 5,615 files per lockfile change, and it
+does not work naively: pnpm's store is symlink-based — 4 of 6 top-level entries in
+that tree are symlinks — and the capability format is bytes-at-paths with no
+symlink representation, so the bundle either dereferences into something far
+larger or lands broken. It would also need `pnpm`, which is absent from
+`pangolin-worker:main` (node v20.20.2, npm 10.8.2, git 2.39.5, no pnpm).
+
+Finishing `dev.verify` removes the need for all of that, and it is upstream's own
+design rather than a consumer's workaround.
+
+### Not asked for
+
+Typed edges. `outputEdgeType: "patch-ref"` and `inputEdgeTypes` overlap what the
+consumer expresses as `needs: { work: { from, select: { kind: "patch" } } }`, and
+that duplication is fine — it is working today and is not what this issue is
+about.
+
+
 ## Related: CRLF on shell scripts
 
 A fifth issue — all four tracked `.sh` files checking out as CRLF on Windows and
