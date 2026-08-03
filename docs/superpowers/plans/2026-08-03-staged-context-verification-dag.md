@@ -8,9 +8,9 @@ default_quality_reviewer_hint: standard
 
 ```mermaid
 flowchart TD
-    task-core-requirement-type["task-core-requirement-type: ContextRequirement contract<br/>files: packages/pangolin-core/src/context-requirement.ts +2 more"]
-    task-client-accept-requires["task-client-accept-requires: accept contextRequires at registration<br/>files: packages/pangolin-client/src/subagent-register.ts +1 more"]
-    task-worker-check-module["task-worker-check-module: evaluate requirements vs a workspace<br/>files: packages/pangolin-worker/src/context-check.ts +2 more"]
+    task-core-requirement-type["task-core-requirement-type: ContextRequirement contract<br/>files: packages/pangolin-core/src/context-requirement.ts +2 more"]:::done
+    task-client-accept-requires["task-client-accept-requires: accept contextRequires at registration<br/>files: packages/pangolin-client/src/subagent-register.ts +1 more"]:::running
+    task-worker-check-module["task-worker-check-module: evaluate requirements vs a workspace<br/>files: packages/pangolin-worker/src/context-check.ts +2 more"]:::running
     task-entrypoint-check-wire["task-entrypoint-check-wire: check in the worker lifecycle<br/>files: packages/pangolin-worker/src/entrypoint.ts +1 more"]
     task-docs-context-requires["task-docs-context-requires: document the registration surface<br/>files: docs-site/src/content/docs/reference/pangolin-client-api.md +1 more"]
 
@@ -76,7 +76,7 @@ files:
   - packages/pangolin-core/src/context-requirement.ts
   - packages/pangolin-core/src/index.ts
   - packages/pangolin-core/test/context-requirement.test.ts
-status: pending
+status: done
 quality_reviewer_hint: opus
 ```
 
@@ -158,7 +158,7 @@ depends_on: [task-core-requirement-type]
 files:
   - packages/pangolin-client/src/subagent-register.ts
   - packages/pangolin-client/test/context-requires.test.ts
-status: pending
+status: running
 ```
 
 Adds `contextRequires?: ContextRequirement[]` to `RegisterSubagentOpts`
@@ -233,7 +233,7 @@ files:
   - packages/pangolin-worker/src/context-check.ts
   - packages/pangolin-worker/src/overlay-engine.ts
   - packages/pangolin-worker/test/context-check.test.ts
-status: pending
+status: running
 quality_reviewer_hint: opus
 ```
 
