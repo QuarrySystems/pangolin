@@ -108,8 +108,12 @@ function pickMergeRule(path: string, adapter: RuntimeAdapter): MergeRule {
  * `*` (any chars except `/`), and literal segments. Sufficient for
  * adapter `reservedPaths` patterns like `.claude/settings.json` and
  * `.claude/skills/**`.
+ *
+ * Exported for reuse by `context-check.ts`: a third glob matcher inside
+ * this package would diverge in semantics, so this is the de facto
+ * dialect for anything in pangolin-worker that needs one.
  */
-function matchesGlob(path: string, pattern: string): boolean {
+export function matchesGlob(path: string, pattern: string): boolean {
   // Build a regex by escaping regex metachars then expanding glob tokens.
   // Order matters: ** must be expanded before *.
   const placeholder = "\u0000DOUBLE_STAR\u0000";
