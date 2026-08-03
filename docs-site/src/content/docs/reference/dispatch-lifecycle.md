@@ -260,7 +260,7 @@ stateDiagram-v2
   state dispatch_failed {
     [*] --> integrity_failed: step 3 — bundle sha256 mismatch / overlay
     [*] --> fetch_failed: step 4 / 7 — secret ref resolution failed
-    [*] --> worker_failed: step 1b/2/9/13 — storage/adapter/setup/sentinel
+    [*] --> worker_failed: step 1b/2/9/9a/13 — storage/adapter/setup/contextRequires/sentinel
     [*] --> provider_failed: step 11 — runtime adapter exited non-zero, no sentinel
   }
   dispatch_finished --> [*]
@@ -273,8 +273,11 @@ The diagram follows the code (`packages/pangolin-worker/src/entrypoint.ts`):
 `fetch-failed` covers both the step-4 callback-HMAC-key resolution and the
 step-7 env-bundle secret resolution, and `worker-failed` is the catch-all for
 several infra steps (storage construction 1b, adapter load 2, setup-script 9,
-and a malformed/oversized needs_input sentinel 13) — the single-step mappings in
-the table above are the most common case for each reason, not the only one.
+an unmet `contextRequires` check 9a — an unnumbered note between the setup
+script and the pre-agent baseline capture, not itself one of the 14 numbered
+steps — and a malformed/oversized needs_input sentinel 13) — the single-step
+mappings in the table above are the most common case for each reason, not the
+only one.
 
 ## What `dispatch.failed.reason` means
 
@@ -282,7 +285,7 @@ the table above are the most common case for each reason, not the only one.
 |---|---|---|
 | `integrity-failed` | Step 3 | A bundle's actual sha256 didn't match its declared `contentHash`. Storage tampering or a backend bug. |
 | `fetch-failed` | Step 7 | A secret reference couldn't be resolved (typo, missing IAM, AWS outage). |
-| `worker-failed` | Step 9 / 13 | `pangolin-setup.sh` exited non-zero or timed out; OR the needs_input sentinel was malformed (unparseable JSON, missing `question`, >1 MiB serialized). |
+| `worker-failed` | Step 9 / 9a / 13 | `pangolin-setup.sh` exited non-zero or timed out; OR an unmet `contextRequires` check (evaluated between the setup script and the pre-agent baseline capture); OR the needs_input sentinel was malformed (unparseable JSON, missing `question`, >1 MiB serialized). |
 | `provider-failed` | Step 11 | Runtime adapter (claude binary) exited non-zero with no sentinel. Most common cause in dev: missing `ANTHROPIC_API_KEY`. |
 
 Each terminal event includes `durationMs` measured from worker start

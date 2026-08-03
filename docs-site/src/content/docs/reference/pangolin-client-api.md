@@ -105,6 +105,7 @@ interface RegisterSubagentOpts {
   model?: string;
   capabilities?: Array<string | CapabilityRef>;  // bare names or full refs
   verify?: VerifyConfig;  // self-verify config (Gap A): { command: string; timeout?: number }
+  contextRequires?: ContextRequirement[];  // observable workspace properties, verified pre-agent
 }
 ```
 
@@ -124,6 +125,20 @@ is recorded in the output sentinel and surfaced on the dispatch result. It is
 report-only (a failed verify never fails the dispatch) and only present in the
 stored definition when set (so subagents without it keep their content hash).
 See [Dispatch lifecycle → Self-verify](/pangolin/reference/dispatch-lifecycle/#self-verify-optional).
+
+`contextRequires`, when set, lists observable properties the staged workspace
+must satisfy before the agent runs — the worker checks them after
+`pangolin-setup.sh` and before it captures the pre-agent baseline. An unmet
+requirement fails the dispatch with `reason: 'worker-failed'`, and it is only
+present in the stored definition when set (so subagents without it keep their
+content hash, mirroring `verify`). Three kinds: `paths` (at least `minCount`
+files, default 1, match `glob`), `exec` (`bin` resolves on the runtime `PATH`),
+and `git` (`needs: 'worktree'` — a usable `.git`; `needs: 'history'` — at
+least one commit). It cannot express "a patch was applied" or "workspace is
+at revision X" — neither is observable without redoing the work, so it is
+deliberately absent rather than an unreliable check. See
+[Dispatch lifecycle](/pangolin/reference/dispatch-lifecycle/) for where the
+check sits in the worker's step order.
 
 ## `client.env`
 
