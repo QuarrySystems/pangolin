@@ -792,3 +792,35 @@ operator's mount configuration.
 
 Test file: `docs-site/src/content/docs/explanation/threat-model.md` is prose; the
 check is the `grep` assertion above plus the docs build.
+
+## Audit record
+
+- **2026-08-03** · rev `e9531c67f1e3` · commit `ce913d0` · lenses: coverage,
+  dag-integrity, grounding, charter, context-sufficiency, verifiability, coherence
+  (7/7 dispatched, 7/7 ran — no gaps) · **NOT READY — 13 blocking**
+  - Baseline for round two: **13 blocking, 795 lines**; resolutions would land it
+    near 965. If round two returns ~13 again and the plan crosses ~1100 lines, stop
+    auditing and build — 6 of 13 (B1, B2, B3, B5, B6) are compiler-detectable in
+    the first hour.
+  - Blocking clusters, resolved jointly (A–I): three unowned contract files
+    (`pangolin-product/src/sentinel-parse.ts`, `pangolin-core/src/product.ts`,
+    `orchestrator/src/contracts/types.ts`); the `atFinish` seal living in
+    `pipeline-runner.ts` which no task owns; `PANGOLIN_DEP_CACHE_DIR` stripped by
+    the worker's own default-deny env firewall; `extraBinds` already shipping;
+    a missing `tick → export` edge; and four acceptance criteria that cannot fail.
+  - Deferred, accepted (15): D6 `@ts-expect-error` has no enforcer in this repo —
+    the `'recorded'` literal is still enforced at every `src/` assignment site, so
+    the requirement is not lost, only its guard. D7 the `readDepsEvidence` "is
+    logged" claim is unimplementable in its own stated signature — no branch breaks
+    the build; folded into joint resolution B. D8 the asymmetric-null case defeats
+    the plan's own headline mid-run-change scenario — **closing it fully is a spec
+    §4.2 amendment (`atSetup` optional), which gate 2 may not make.**
+  - Empirical unknowns opened: **E1** cold `pnpm install` vs the 120 s setup
+    timeout — probe task `task-measure-install-cost` already exists and owns it;
+    **E2** concurrent store access under dispatch concurrency — no owning task,
+    deliberately, since read-only mounting makes it non-blocking here.
+  - **`rev` durability caveat:** `git check-attr` reports `text: unspecified` and
+    `eol: unspecified` for this path. `.gitattributes` pins only
+    `examples/**/bundle.json -text`. On a Windows checkout with `core.autocrlf` on,
+    this file can be rewritten CRLF and every hash moves, silently disabling the
+    step-3 short-circuit. Fix is one line: `docs/superpowers/**/*.md text eol=lf`.
