@@ -5,20 +5,29 @@
 // name which requirement failed and what was observed instead.
 //
 // Glob engine decision, made here rather than left open: reuse the existing
-// `matchesGlob` from `overlay-engine.ts` (exported by this task for reuse)
-// paired with `readdir(dir, { recursive: true })`. Rationale: a third glob
-// matcher inside one package would diverge in semantics, and adding a
-// dependency would put `package.json` + `pnpm-lock.yaml` in scope and route
-// through `check:deps` (`ci.yml:53`). Do NOT reach for `fs.promises.glob` —
-// it typechecks against the repo's `@types/node` and passes on CI's Node 22,
-// then throws at runtime in the worker image, which is pinned to Node 20
-// (`Dockerfile:23`).
+// `matchesGlob` from `overlay-engine.ts` (exported by this task for reuse).
+// Rationale: a third glob matcher inside one package would diverge in
+// semantics, and adding a dependency would put `package.json` +
+// `pnpm-lock.yaml` in scope and route through `check:deps` (`ci.yml:53`).
+// Do NOT reach for `fs.promises.glob` — it typechecks against the repo's
+// `@types/node` and passes on CI's Node 22, then throws at runtime in the
+// worker image, which is pinned to Node 20 (`Dockerfile:23`).
+//
+// The `paths` walk (below, `countGlobMatches`) reads one directory at a time
+// via `readdir(dir, { withFileTypes: true })` rather than a single
+// `readdir(dir, { recursive: true })` call, so it can return as soon as
+// `minCount` is reached instead of materializing every path in the tree
+// first. It builds each relative path by hand (`prefix + '/' + entry.name`)
+// instead of reading `Dirent.parentPath` / `Dirent.path` — those two differ
+// between Node 20 (worker image) and Node 22 (CI), which is exactly the
+// Node-version hazard called out above for `fs.promises.glob`.
 
 import { access, readdir } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { join, delimiter } from 'node:path';
 import type { ContextRequirement } from '@quarry-systems/pangolin-core';
 import { matchesGlob } from './overlay-engine.js';
+import { buildGitEnv } from './patch-capture.js';
 
 export interface RequirementResult {
   requirement: ContextRequirement;
@@ -70,20 +79,7 @@ export async function checkContextRequirements(
       }
       case 'paths': {
         const want = requirement.minCount ?? 1;
-        let n = 0;
-        try {
-          // Short-circuit at `want`: the flagship glob is `node_modules/**`,
-          // and continuing to walk matches past the point the requirement is
-          // already decided would cost the cycle this check exists to save.
-          for (const rel of await readdir(workspaceDir, { recursive: true })) {
-            if (matchesGlob(String(rel).split('\\').join('/'), requirement.glob) && ++n >= want) {
-              break;
-            }
-          }
-        } catch {
-          // workspaceDir does not exist or is unreadable — zero matches,
-          // fail closed rather than throwing.
-        }
+        const n = await countGlobMatches(workspaceDir, requirement.glob, want);
         out.push({
           requirement,
           met: n >= want,
@@ -95,13 +91,28 @@ export async function checkContextRequirements(
         // worktree: `.git` present and usable, via `git rev-parse
         // --is-inside-work-tree` — TRUE for a freshly `git init`-ed dir with
         // no commits, per the type's pinned semantics.
-        // history: >=1 commit, via `git rev-parse HEAD` — patch-capture.ts's
-        // spawn is the repo's precedent for shelling out to git, but this
-        // check runs against the CALLER'S env (mirroring the `exec` case
-        // above), not a hardened env, because the question is "can the agent
-        // resolve git", not "run git safely against untrusted content".
+        // history: >=1 commit, via `git rev-parse HEAD`.
+        //
+        // Spawned with `buildGitEnv()` (patch-capture.ts) — the SAME narrow,
+        // credential-free six-key env `captureBaseline`/`computeWorkspacePatch`
+        // use, NOT the merged runtime env `exec` above resolves against.
+        // Two reasons this diverges from `exec`:
+        //   1. `GIT_DIR`/`GIT_WORK_TREE`/`GIT_COMMON_DIR` riding on the merged
+        //      env override `-C workspaceDir`, so git would answer about a
+        //      DIFFERENT repository than the one being checked — a
+        //      false-satisfied `met:true` for a workspace with no git at
+        //      all, which is exactly the failure this module exists to
+        //      prevent. A test pins this.
+        //   2. it avoids handing the agent's credentials to a child process
+        //      run against an agent-controlled `.git` tree —
+        //      `patch-capture.ts`'s `git()` deliberately does the same.
+        // The only thing carried over from the passed `env` is `PATH`,
+        // because the question is still "can the agent resolve git", same
+        // as the `exec` case above — not "run git safely against untrusted
+        // content", which `buildGitEnv()`'s other five keys handle.
         // Both arms fail CLOSED when git cannot run at all.
-        const gitEnv: Record<string, string> = { ...env };
+        const base = buildGitEnv();
+        const gitEnv: Record<string, string> = { ...base, PATH: env.PATH ?? base.PATH };
         const args =
           requirement.needs === 'worktree'
             ? ['-C', workspaceDir, '-c', 'safe.directory=*', 'rev-parse', '--is-inside-work-tree']
@@ -112,9 +123,10 @@ export async function checkContextRequirements(
         try {
           const result = await runGit(args, gitEnv);
           met = result.code === 0;
+          const reason = result.signal ? `killed by ${result.signal}` : `exited ${result.code}`;
           observed = met
             ? `git ${requirement.needs} check passed`
-            : `git ${requirement.needs} check failed: ${result.stderr.trim() || `exited ${result.code}`}`;
+            : `git ${requirement.needs} check failed: ${result.stderr.trim() || reason}`;
         } catch (err) {
           observed = `git unavailable: ${err instanceof Error ? err.message : String(err)}`;
         }
@@ -130,13 +142,16 @@ export async function checkContextRequirements(
   return out;
 }
 
-/** Spawn `git` with `args` against `env`. Resolves with the exit code and
- *  stderr text on ANY exit (including nonzero) so callers can distinguish
- *  "git ran and said no" from "git could not run at all" (which rejects). */
+/** Spawn `git` with `args` against `env`. Resolves with the exit code,
+ *  signal, and stderr text on ANY exit (including nonzero) so callers can
+ *  distinguish "git ran and said no" from "git could not run at all" (which
+ *  rejects). Mirrors `killed by ${signal}` from patch-capture.ts's `git()`:
+ *  a signal-killed process reports `code: null`, which reads misleadingly as
+ *  `exited null` unless the signal is carried separately. */
 function runGit(
   args: string[],
   env: Record<string, string>,
-): Promise<{ code: number | null; stderr: string }> {
+): Promise<{ code: number | null; signal: NodeJS.Signals | null; stderr: string }> {
   return new Promise((resolve, reject) => {
     const child = spawn('git', args, { env });
     const stderrChunks: Buffer[] = [];
@@ -153,11 +168,56 @@ function runGit(
         reject(err);
       }
     });
-    child.on('exit', (code) => {
+    child.on('exit', (code, signal) => {
       if (!settled) {
         settled = true;
-        resolve({ code, stderr: Buffer.concat(stderrChunks).toString('utf8') });
+        resolve({ code, signal, stderr: Buffer.concat(stderrChunks).toString('utf8') });
       }
     });
   });
+}
+
+/**
+ * Count entries (files AND directories) beneath `baseDir` whose
+ * workspace-relative path matches `glob`, stopping as soon as `want`
+ * matches are found. A REAL short-circuit: each directory is read one at a
+ * time, so an early match skips reading the rest of the tree entirely,
+ * rather than the earlier approach of materializing every path up front and
+ * only skipping further `matchesGlob` calls.
+ *
+ * Builds each relative path by hand with `/` as the separator — see the
+ * module header for why this reads `Dirent.name` rather than
+ * `Dirent.parentPath`/`Dirent.path`.
+ *
+ * An unreadable directory (including a nonexistent `baseDir`) counts as zero
+ * matches for that subtree — fail closed, consistent with the rest of this
+ * module, rather than throwing and discarding matches already found
+ * elsewhere in the tree.
+ */
+async function countGlobMatches(baseDir: string, glob: string, want: number): Promise<number> {
+  let n = 0;
+
+  async function walk(dir: string, prefix: string): Promise<void> {
+    if (n >= want) return;
+    let entries;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return; // unreadable / nonexistent — zero matches for this subtree
+    }
+    for (const entry of entries) {
+      if (n >= want) return;
+      const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+      if (matchesGlob(rel, glob)) {
+        n++;
+        if (n >= want) return;
+      }
+      if (entry.isDirectory()) {
+        await walk(join(dir, entry.name), rel);
+      }
+    }
+  }
+
+  await walk(baseDir, '');
+  return n;
 }

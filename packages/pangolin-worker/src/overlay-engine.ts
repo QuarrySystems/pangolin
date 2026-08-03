@@ -23,10 +23,10 @@
 // `MergeTypeConflictError` (re-thrown from `applyMergeRule`). The caller
 // is expected to convert this into `reason: 'integrity-failed'` per §6.3.
 
-import { writeFile, mkdir } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
-import type { RuntimeAdapter, MergeRule } from '@quarry-systems/pangolin-core';
-import { applyMergeRule } from './merge-rules.js';
+import { writeFile, mkdir } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import type { RuntimeAdapter, MergeRule } from "@quarry-systems/pangolin-core";
+import { applyMergeRule } from "./merge-rules.js";
 
 /**
  * A decoded capability bundle: the bundle name (for diagnostics) plus a
@@ -40,9 +40,9 @@ export interface CapabilityBundle {
 }
 
 const PANGOLIN_MANIFEST_RULES: Record<string, MergeRule> = {
-  'pangolin-channel.json': { strategy: 'last-write-wins' },
-  'pangolin-setup.sh': { strategy: 'last-write-wins' },
-  'pangolin-notifications.json': { strategy: 'array-union' },
+  "pangolin-channel.json": { strategy: "last-write-wins" },
+  "pangolin-setup.sh": { strategy: "last-write-wins" },
+  "pangolin-notifications.json": { strategy: "array-union" },
 };
 
 /**
@@ -62,7 +62,8 @@ export async function overlayCapabilities(opts: {
   for (const bundle of opts.bundles) {
     for (const [path, bytes] of Object.entries(bundle.files)) {
       const rule = pickMergeRule(path, opts.adapter);
-      const incoming = rule.strategy === 'last-write-wins' ? bytes : parseForMerge(bytes);
+      const incoming =
+        rule.strategy === "last-write-wins" ? bytes : parseForMerge(bytes);
 
       if (!accumulated.has(path)) {
         accumulated.set(path, incoming);
@@ -85,7 +86,7 @@ export async function overlayCapabilities(opts: {
 function pickMergeRule(path: string, adapter: RuntimeAdapter): MergeRule {
   // 1. Pangolin Scale-defined manifest paths win over any adapter claim.
   for (const [name, rule] of Object.entries(PANGOLIN_MANIFEST_RULES)) {
-    if (path === name || path.endsWith('/' + name)) return rule;
+    if (path === name || path.endsWith("/" + name)) return rule;
   }
 
   // 2. Adapter-reserved paths: try each reserved glob in declared order.
@@ -99,7 +100,7 @@ function pickMergeRule(path: string, adapter: RuntimeAdapter): MergeRule {
   }
 
   // 3. Default: last-write-wins.
-  return { strategy: 'last-write-wins' };
+  return { strategy: "last-write-wins" };
 }
 
 /**
@@ -115,13 +116,13 @@ function pickMergeRule(path: string, adapter: RuntimeAdapter): MergeRule {
 export function matchesGlob(path: string, pattern: string): boolean {
   // Build a regex by escaping regex metachars then expanding glob tokens.
   // Order matters: ** must be expanded before *.
-  const placeholder = '\u0000DOUBLE_STAR\u0000';
+  const placeholder = "\u0000DOUBLE_STAR\u0000";
   const escaped = pattern
     .replace(/\*\*/g, placeholder)
-    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
-    .replace(/\*/g, '[^/]*')
-    .replace(new RegExp(placeholder, 'g'), '.*');
-  const re = new RegExp('^' + escaped + '$');
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*/g, "[^/]*")
+    .replace(new RegExp(placeholder, "g"), ".*");
+  const re = new RegExp("^" + escaped + "$");
   return re.test(path);
 }
 
@@ -142,6 +143,6 @@ function parseForMerge(bytes: Uint8Array): unknown {
 
 function valueToBytes(v: unknown): Uint8Array {
   if (v instanceof Uint8Array) return v;
-  if (typeof v === 'string') return new TextEncoder().encode(v);
+  if (typeof v === "string") return new TextEncoder().encode(v);
   return new TextEncoder().encode(JSON.stringify(v, null, 2));
 }

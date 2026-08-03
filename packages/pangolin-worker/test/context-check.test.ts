@@ -1,5 +1,5 @@
 import { it, expect } from 'vitest';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, delimiter } from 'node:path';
@@ -147,6 +147,22 @@ it('paths: short-circuits at minCount, reporting exactly that many matches rathe
   expect(res[0].observed).not.toContain('10 match');
 });
 
+it('paths: matches a nested file via ** recursion, and a sibling-prefixed glob does not match', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'cc-paths-'));
+  await mkdir(join(dir, 'sub', 'nested'), { recursive: true });
+  await writeFile(join(dir, 'sub', 'nested', 'a.txt'), 'x');
+
+  const matched = await checkContextRequirements(dir, [{ kind: 'paths', glob: 'sub/**' }], {
+    PATH: process.env.PATH ?? '',
+  });
+  expect(matched[0].met).toBe(true);
+
+  const unmatched = await checkContextRequirements(dir, [{ kind: 'paths', glob: 'other/**' }], {
+    PATH: process.env.PATH ?? '',
+  });
+  expect(unmatched[0].met).toBe(false);
+});
+
 // --- git --------------------------------------------------------------
 
 it("git needs:'worktree' is met:true in a git-init-ed dir with no commits, met:false with no .git", async () => {
@@ -194,4 +210,24 @@ it('git is fail-closed: with a PATH from which git is unresolvable, met:false na
   });
   expect(res[0].met).toBe(false);
   expect(res[0].observed.length).toBeGreaterThan(0);
+});
+
+it('git: ignores GIT_DIR/GIT_WORK_TREE riding on the passed env — a workspace with no .git stays met:false even when the env points at a real, committed repo elsewhere', async () => {
+  // workspaceDir deliberately has NO .git of its own.
+  const workspaceDir = await mkdtemp(join(tmpdir(), 'cc-git-noenv-'));
+
+  const otherRepo = await mkdtemp(join(tmpdir(), 'cc-git-other-'));
+  await execGit(otherRepo, ['init', '-q']);
+  await writeFile(join(otherRepo, 'a.txt'), 'x');
+  await execGit(otherRepo, ['add', '-A']);
+  await execGit(otherRepo, ['commit', '-q', '-m', 'first']);
+
+  const res = await checkContextRequirements(workspaceDir, [{ kind: 'git', needs: 'worktree' }], {
+    PATH: process.env.PATH ?? '',
+    GIT_DIR: join(otherRepo, '.git'),
+  });
+  // If the merged env's GIT_DIR reached the child process, git would answer
+  // about otherRepo (which DOES have a worktree) instead of workspaceDir,
+  // reporting a false met:true for a workspace with no git at all.
+  expect(res[0].met).toBe(false);
 });
