@@ -2274,13 +2274,29 @@ do if this is not wanted. It is worse in a specific way: the consumer then CHOOS
 what history the agent sees, which biases the decision the agent is being asked to
 make. A checkout lets the agent ask its own questions.
 
-### Relationship to 17
+### Relationship to 17, revised after 17a
 
-Independent, and both are needed for different agents. 17 unblocks a verifier that
-can run gates against the patch. This unblocks a planner that can see what came
-before. Neither implies the other: a workspace with `node_modules` and no history
-still cannot answer "what changed since last cycle", and a workspace with history
-and no toolchain still cannot run a test.
+17a corrected 17's central premise — the placeholder digest gates nothing, dev
+shapes dispatch today, and `contextShape` is free text no code reads. This entry
+was written before that correction landed and **is strengthened by it**, not
+weakened.
+
+17 asked for the last mile of something it believed was nearly built. 17a
+establishes that the staged context is unimplemented and asks for it to be
+specified. **History is one of the dimensions that specification has to settle**,
+alongside the three 17a already names: materialized tree, patch application order
+relative to `overlayCapabilities`, and toolchain presence.
+
+The four are independent and serve different agents. A workspace with
+`node_modules` and no history still cannot answer "what changed since last
+cycle". A workspace with history and no toolchain still cannot run a test. An
+implementer needs the tree; a verifier needs the tree plus the patch plus a
+toolchain; a planner needs the commit graph and needs neither of the others.
+
+If the staged context is specified as a single fixed shape, it should say which
+of these it includes. If it is specified as opt-in dimensions, history should be
+one of them — and this consumer would take history alone, without a toolchain,
+as the thing that unblocks a dispatched planner.
 
 ## Related: CRLF on shell scripts
 
