@@ -73,6 +73,22 @@ export class DispatchExecutor implements Executor {
     const pipelineRef =
       typeof rawPipeline === 'string' && rawPipeline.length > 0 ? rawPipeline : undefined;
 
+    // Per-item capability selection. `capabilities` REPLACES the subagent's bound
+    // set, `addCapabilities` augments it — the core contract has carried both since
+    // 0.4.0; only this forward was missing, which made the selection unreachable
+    // from a plan and forced a subagent re-registration to change workspace
+    // substrate. Same shape-guard posture as the two carriers above: a non-array is
+    // IGNORED, never thrown, so one malformed field cannot fail an item.
+    //
+    // Spread conditionally: a present-but-undefined `capabilities` would read as
+    // "replace the bound set with nothing" rather than "not specified".
+    const capabilities = Array.isArray(item.inputs.capabilities)
+      ? (item.inputs.capabilities as DispatchWork['capabilities'])
+      : undefined;
+    const addCapabilities = Array.isArray(item.inputs.addCapabilities)
+      ? (item.inputs.addCapabilities as DispatchWork['addCapabilities'])
+      : undefined;
+
     // Pre-fire model resolution (authorization side): resolve the subagent's
     // latest def blob and read its pinned model; fall back to the executor's
     // configured defaultModel. Best-effort — any failure here yields just the
@@ -96,6 +112,8 @@ export class DispatchExecutor implements Executor {
       workerImage: this.opts.workerImage,
       secrets: this.opts.secrets,
       ...(requestedModel !== undefined ? { model: requestedModel } : {}),
+      ...(capabilities !== undefined ? { capabilities } : {}),
+      ...(addCapabilities !== undefined ? { addCapabilities } : {}),
       ...(inputRefs && Object.keys(inputRefs).length ? { inputRefs } : {}),
       ...(pipelineRef !== undefined ? { pipelineRef } : {}),
       ...(ctx?.runId ? { trace: { traceId: ctx.runId, runId: ctx.runId, itemId: item.id } } : {}),
