@@ -2012,10 +2012,14 @@ stale snapshot is unrecoverable downstream:
 
 Two measured consequences from 20 runs:
 
-**1. The verifier cannot run anything.** The workspace is a `git archive` of
-tracked files, so `node_modules/` is absent and no gate can execute. Concretely,
-one cycle passed review and all 807 tests, then failed `tsc` on the consumer's
-machine:
+**1. The verifier cannot run anything, and this is now a pattern rather than an
+anecdote.** The workspace is a `git archive` of tracked files, so
+`node_modules/` is absent and no gate can execute. **Two consecutive cycles
+passed verification with a full green suite and were then rejected by `tsc` on
+the consumer's machine.** Both are type errors in otherwise-correct logic — the
+class a compiler catches instantly and a reviewer reading a patch does not.
+
+First, on an optional-property construction:
 
 ```
 error TS2379: Argument of type '{ authzTier: string | undefined; }' is not
@@ -2023,9 +2027,24 @@ assignable to parameter of type '{ authzTier?: string }' with
 'exactOptionalPropertyTypes: true'
 ```
 
-A full paid cycle for something `pnpm typecheck` answers in ten seconds. With
-`contextShape: "repo snapshot + patch applied"` the verifier is in a position to
-run it.
+Then, on the very next cycle, a `readonly` tuple membership test:
+
+```
+error TS2345: Argument of type 'string' is not assignable to parameter of type
+'"passed" | "inconclusive" | "red"'
+```
+
+Neither is subtle to a compiler. Both survived a verifier that read the patch
+and a test suite that passed — 807 tests in the first case, 755 in the second —
+because neither the implementer nor the verifier can execute a type check. Each
+cost a full paid cycle plus a hand fix, for something `pnpm typecheck` answers
+in ten seconds.
+
+That is the shape of the argument: the failures reaching this consumer are not
+reasoning failures a verifier could have caught by reading more carefully. They
+are failures only running the toolchain detects, and no participant in the
+dispatch can run it. With `contextShape: "repo snapshot + patch applied"`,
+`dev.verify` is by construction in a position to.
 
 **2. Patch-integrity failures are the dominant red.** 3 of 20 runs went red, and
 all three were the verifier correctly refusing to certify a patch it could not
