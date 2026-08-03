@@ -56,10 +56,24 @@ it('computeWorkspacePatch returns null without throwing when baseline is unavail
   expect(result).toBeNull();
 });
 
-/** `git -C dir` for test-side replay. Mirrors the safe.directory flag src/ passes. */
+/** `git -C dir` for test-side replay. Mirrors the safe.directory flag src/ passes.
+ *  autocrlf/eol are pinned because the replay runs on the developer's machine, not
+ *  in the Linux worker image: with Windows defaults `git apply` rewrites LF to CRLF
+ *  on checkout and the byte comparison fails on line endings rather than on the
+ *  bytes under test. */
 function execGit(dir: string, args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
-    const child = spawn('git', ['-C', dir, '-c', 'safe.directory=*', ...args]);
+    const child = spawn('git', [
+      '-C',
+      dir,
+      '-c',
+      'safe.directory=*',
+      '-c',
+      'core.autocrlf=false',
+      '-c',
+      'core.eol=lf',
+      ...args,
+    ]);
     const err: Buffer[] = [];
     child.stderr.on('data', (c: Buffer) => err.push(c));
     child.on('error', reject);
@@ -106,4 +120,39 @@ it('captures a git-binary file as a patch that still applies', async () => {
   await execGit(replay, ['apply', 'work.patch']);
 
   expect(await readFile(join(replay, 'oracle.ts'))).toEqual(after);
+});
+
+it('preserves non-UTF-8 bytes in a file git classifies as TEXT', async () => {
+  // KNOWN-ISSUES 18. 0xE9 is 'e-acute' in Latin-1. There is no NUL byte, so git
+  // calls this file TEXT, `--binary` never engages, and the bytes land raw in an
+  // ordinary hunk — where a utf8 decode/re-encode round trip rewrites each one as
+  // EF BF BD. The patch then applies cleanly and writes the wrong bytes.
+  const dir = await mkdtemp(join(tmpdir(), 'pc-latin1-'));
+  const before = Buffer.from('hi\n', 'utf8');
+  const after = Buffer.concat([
+    Buffer.from('caf', 'utf8'),
+    Buffer.from([0xe9]),
+    Buffer.from('\n', 'utf8'),
+  ]);
+  await writeFile(join(dir, 'notes.txt'), before);
+  const base = await captureBaseline(dir);
+  await writeFile(join(dir, 'notes.txt'), after);
+
+  const patch = Buffer.from((await computeWorkspacePatch(dir, base))!);
+
+  // Control: this really did take the TEXT path, so the assertions below are about
+  // the round trip and not about binary-payload encoding.
+  expect(patch.includes('GIT binary patch')).toBe(false);
+  expect(patch.includes(Buffer.from([0xef, 0xbf, 0xbd]))).toBe(false); // no U+FFFD
+  expect(patch.includes(Buffer.from([0xe9]))).toBe(true); // the byte itself survived
+
+  // And the property that matters: replaying the patch reproduces the exact bytes.
+  const replay = await mkdtemp(join(tmpdir(), 'pc-latin1-replay-'));
+  await writeFile(join(replay, 'notes.txt'), before);
+  await execGit(replay, ['init', '-q']);
+  await execGit(replay, ['add', '-A']);
+  await writeFile(join(replay, 'work.patch'), patch);
+  await execGit(replay, ['apply', 'work.patch']);
+
+  expect(await readFile(join(replay, 'notes.txt'))).toEqual(after);
 });
