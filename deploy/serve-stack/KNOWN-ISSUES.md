@@ -36,9 +36,11 @@ reader does not have to scroll 2500 lines to find the one thing still broken.
 | **17** | dev shapes pinned to a placeholder image | **PREMISE FALSE** (17a, 17b) — base-tree/patch half still open |
 | **18** | `git()` decodes stdout as UTF-8 | **FIXED** (#145) |
 | **19** | no repository history in the workspace | **WITHDRAWN** (19a) — capabilities *can* carry `.git`, measured |
-| **20** | `env.register()` + inline secret always throws | **OPEN** — root-caused, fix designed, not implemented |
+| **20** | `env.register()` + inline secret always throws | **FIXED** (#157) — and the unit stub that hid it was corrected |
 
-**If you read one line: issue 20 is the only outright breakage left.**
+**Nothing in this file is currently known-broken.** What remains is one open
+feature request (17's base-tree/patch half) and one unverified claim (whether
+`AwsSecretStore` behaves identically under 20's fix — no AWS credentials here).
 
 Two entries — 17 and 19 — were filed on premises that did not survive
 verification. They are kept rather than deleted, with the original text intact
@@ -2527,15 +2529,34 @@ with shallow-depth support, rather than a consumer discovering it works by tryin
 
 ## 20. `env.register()` with an inline secret always throws `IntegrityMismatchError`
 
-**Status: OPEN — root-caused, fix designed, NOT implemented.** The only
-outright-broken item left in this file. Reproduced with a minimal case plus a
-control; the cause is a conflated key at `pangolin-client/src/env-register.ts`,
-where `computeContentHash(def)` serves as BOTH the content address and the
-idempotency key. The content address must INCLUDE the freshly-staged secret ref;
-the idempotency key must EXCLUDE it. Splitting the two is the fix
-([#148](https://github.com/QuarrySystems/pangolin/pull/148) files it and specs
-the split). Keeping the UUID suffix was decided deliberately — for opacity,
-non-clobbering re-stage, and per-staging TTL.
+**Status: FIXED** ([#157](https://github.com/QuarrySystems/pangolin/pull/157);
+filed and spec'd in [#148](https://github.com/QuarrySystems/pangolin/pull/148)).
+The two roles are now separate values in `registerEnv`: `idempotencyKey` remains
+the placeholder-derived hash, and `contentHash` is the hash of the bytes actually
+written — so a `sha256:` URI describes its own contents again and `putBlob`'s
+check passes because it is true, not because it was relaxed. That also aligns the
+client with the worker, which already re-hashes the fetched BYTES
+(`bundle-fetcher.ts:113`); the placeholder hash was wrong at both ends.
+
+The key is persisted in the blob, since after the split `resolveLatest` reports
+the content address and there is nowhere else to read it from. Bundles registered
+before the change carry no key, read as `undefined`, and re-register once.
+
+The UUID stayed, as the design argued: opacity in a blob that content-addressed
+storage hands to any reader, no clobbering of a value an in-flight dispatch is
+mid-`resolve()` on, and a per-staging TTL.
+
+**The instrument was fixed too, and that is the more durable half.** The unit
+stub read the content hash out of the URI and never recomputed it, so it accepted
+a pinned URI whose hash did not match its bytes — which is exactly how an
+unconditionally-broken path shipped under a green suite. It now enforces what a
+real provider enforces. Mutation-verified: re-introducing the defect turns the
+PRE-EXISTING tests red, where before they stayed green.
+
+**Still unverified:** that `AwsSecretStore` fails and is fixed identically. Its
+ref is a random-suffixed ARN so the mechanism is the same by construction, but
+there are no AWS credentials in this environment and the claim rests on reading,
+not running.
 
 **Unconditional, not flaky, and it affects both shipped secret stores.** A
 registration carrying `secrets: { KEY: { inline: … } }` cannot succeed against a
