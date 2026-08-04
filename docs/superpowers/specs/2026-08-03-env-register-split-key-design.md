@@ -1,7 +1,7 @@
 ---
 title: Split the Conflated Content Hash in `registerEnv` — Design
 date: 2026-08-03
-status: **DESIGNED — ready for a plan.** Root cause confirmed by minimal reproduction with a control. One half is explicitly NOT verified and is marked inline.
+status: **IMPLEMENTED (2026-08-03, #157).** The split shipped; the AwsSecretStore half remains unverified (no AWS credentials in this environment). **Originally:** DESIGNED — ready for a plan. Root cause confirmed by minimal reproduction with a control. One half is explicitly NOT verified and is marked inline.
 branch: fix/env-register-split-key-spec
 authors: [human:Brett, agent:claude-opus-5]
 severity: high (a documented, shipped API path cannot succeed against real storage)

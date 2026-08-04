@@ -100,10 +100,7 @@ function inlineSecretPlaceholder(envBundleName: string, secretKey: string): stri
  * Idempotent: re-registering with identical inputs returns the existing
  * `EnvRef` without bumping `registeredAt` or writing a new blob.
  */
-export async function registerEnv(
-  client: PangolinClient,
-  opts: RegisterEnvOpts,
-): Promise<EnvRef> {
+export async function registerEnv(client: PangolinClient, opts: RegisterEnvOpts): Promise<EnvRef> {
   // 1. Scan `values:` entries for credential patterns. First match throws
   //    so the caller fixes one finding and re-runs.
   const values = opts.values ?? {};
@@ -142,9 +139,7 @@ export async function registerEnv(
   let store: SecretStore | undefined;
   if (inlineSecretKeys.length > 0) {
     if (!opts.secretStore) {
-      throw new Error(
-        'registerEnv: secretStore is required when the bundle has inline secrets',
-      );
+      throw new Error('registerEnv: secretStore is required when the bundle has inline secrets');
     }
     store = client.secretStores[opts.secretStore];
     if (!store) {
@@ -162,7 +157,19 @@ export async function registerEnv(
     // Undefined for pure-values / ref-only bundles (no staging needed).
     store: store?.name,
   };
-  const contentHash = computeContentHash(def);
+  // The IDEMPOTENCY KEY, not the content address. Hashed from the def while its
+  // secretRefs still hold PLACEHOLDER names, so it is stable across stagings —
+  // which is exactly what an idempotency key needs and exactly what a content
+  // address must not be.
+  //
+  // These were one value until KNOWN-ISSUES 20. They cannot be: staging below
+  // replaces every placeholder with a store-returned ref that is fresh on every
+  // call (`local-secret://<uuid>`, or a random-suffixed ARN), so a hash taken
+  // before staging can never describe the bytes written after it. `putBlob`
+  // re-hashes what it stores and correctly rejected the mismatch, making
+  // `env.register()` with an inline secret fail unconditionally against any real
+  // StorageProvider.
+  const idempotencyKey = computeContentHash(def);
 
   const baseUri = buildPangolinUri({
     namespace: client.namespace,
@@ -176,12 +183,19 @@ export async function registerEnv(
   //    before this check would crash on the second identical call
   //    (ResourceExistsException) or hand back a fresh ref that breaks
   //    hash equality.
+  //    The comparison is against the key PERSISTED IN THE PREVIOUS BLOB, not
+  //    against `latest.contentHash` — since the split, that is the hash of the
+  //    stored bytes (post-staging) and so is not comparable to a key computed
+  //    pre-staging. A bundle registered before this change carries no key and
+  //    reads as `undefined`, which is treated as "not idempotent": it
+  //    re-registers once, re-stages once, and is stable thereafter.
   const latest = await client.storage.resolveLatest(baseUri);
-  if (latest && latest.contentHash === contentHash) {
+  if (latest && (await readIdempotencyKey(client, latest.uri)) === idempotencyKey) {
     return {
       name: opts.name,
       registeredAt: latest.registeredAt,
-      contentHash,
+      // The stored blob's real content address, NOT the idempotency key.
+      contentHash: latest.contentHash,
     };
   }
 
@@ -206,30 +220,60 @@ export async function registerEnv(
     }
   }
 
-  // 5. Write the bundle payload at the pinned URI. The pinned URI uses
-  //    the placeholder-derived contentHash (stable across calls); the
-  //    blob body carries the real opaque refs.
+  // 5. Write the bundle payload at the pinned URI.
+  //
+  //    The payload carries the idempotency key alongside the real opaque refs,
+  //    because the next `registerEnv` call has nowhere else to read it from:
+  //    `resolveLatest` reports the content address, which by construction now
+  //    reflects post-staging bytes.
+  //
+  //    Write the CANONICAL JSON bytes (sorted-key serialization) — not
+  //    `JSON.stringify`. The storage provider recomputes the byte-hash and
+  //    compares against the pinned URI's hash, and the worker's bundle-fetcher
+  //    re-hashes the fetched BYTES the same way, so insertion-order JSON would
+  //    diverge on both sides.
+  const payload = { ...def, idempotencyKey };
+  const bytes = new TextEncoder().encode(canonicalJsonString(payload));
+
+  //    The content address is the hash of the bytes ACTUALLY WRITTEN. A
+  //    `sha256:` URI therefore describes its own contents again, and `putBlob`'s
+  //    check passes because it is true — not because it was relaxed.
+  const contentHash = computeContentHash(bytes);
   const pinnedUri = buildPangolinUri({
     namespace: client.namespace,
     type: 'env',
     name: opts.name,
     contentHash,
   });
-  // Write the CANONICAL JSON bytes (sorted-key serialization) — not
-  // `JSON.stringify(def)`. The storage provider recomputes the byte-hash
-  // and compares against the pinned URI's hash; if we wrote insertion-
-  // order JSON, the byte-hash would diverge from the canonical-object
-  // hash embedded in the URI and `put` would throw IntegrityMismatchError.
-  // The worker's bundle-fetcher re-parses these bytes as JSON and
-  // re-hashes the resulting object via canonical JSON, so the round-trip
-  // remains coherent on both sides.
-  await client.storage.put(
-    pinnedUri,
-    new TextEncoder().encode(canonicalJsonString(def)),
-  );
+  await client.storage.put(pinnedUri, bytes);
 
   // The storage layer is the authority on registeredAt — re-read it.
   const after = await client.storage.resolveLatest(baseUri);
   const registeredAt = after?.registeredAt ?? new Date().toISOString();
   return { name: opts.name, registeredAt, contentHash };
+}
+
+/**
+ * Read the idempotency key persisted in a previously-registered env blob.
+ *
+ * NEVER throws: a missing blob, unreadable bytes, non-JSON content, or a blob
+ * predating this field all yield `undefined`, which the caller treats as "not
+ * idempotent". Failing closed here would turn an unreadable prior registration
+ * into a hard error on a path whose whole job is to skip redundant work.
+ */
+async function readIdempotencyKey(
+  client: PangolinClient,
+  pinnedUri: string,
+): Promise<string | undefined> {
+  try {
+    const bytes = await client.storage.get(pinnedUri);
+    const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
+    if (parsed && typeof parsed === 'object') {
+      const key = (parsed as Record<string, unknown>).idempotencyKey;
+      if (typeof key === 'string') return key;
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
 }

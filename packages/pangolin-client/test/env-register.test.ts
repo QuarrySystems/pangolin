@@ -3,6 +3,7 @@ import { registerEnv } from '../src/env-register.js';
 import { PangolinClient } from '../src/client.js';
 import {
   CredentialsInEnvError,
+  computeContentHash,
   type StorageProvider,
   type SecretStore,
   type StageSecretArgs,
@@ -16,10 +17,7 @@ import {
  */
 function makeMemoryStorage(): StorageProvider & {
   blobs: Map<string, Uint8Array>;
-  registry: Map<
-    string,
-    Array<{ contentHash: string; registeredAt: string; pinnedUri: string }>
-  >;
+  registry: Map<string, Array<{ contentHash: string; registeredAt: string; pinnedUri: string }>>;
 } {
   const blobs = new Map<string, Uint8Array>();
   const registry = new Map<
@@ -35,6 +33,20 @@ function makeMemoryStorage(): StorageProvider & {
       const parts = uri.split('/');
       const contentHash = parts[parts.length - 1];
       const baseUri = parts.slice(0, -1).join('/');
+      // Enforce the invariant a REAL provider enforces: a `sha256:` URI must
+      // describe its own contents. This stub previously read the hash out of the
+      // URI and never recomputed it, so it accepted a pinned URI whose hash did
+      // not match the bytes — which is precisely how serve-stack KNOWN-ISSUES 20
+      // (registerEnv with an inline secret throwing IntegrityMismatchError
+      // against any real StorageProvider) survived a green unit suite. The
+      // instrument was lying; every test built on it was blind to that class of
+      // defect.
+      if (contentHash?.startsWith('sha256:')) {
+        const actual = computeContentHash(contents);
+        if (actual !== contentHash) {
+          throw new Error(`stub put: content hash mismatch: uri ${contentHash}, bytes ${actual}`);
+        }
+      }
       blobs.set(uri, contents);
       const list = registry.get(baseUri) ?? [];
       monotonic += 1;
@@ -117,9 +129,7 @@ describe('registerEnv', () => {
       throw new Error('expected CredentialsInEnvError to be thrown');
     } catch (err) {
       expect(err).toBeInstanceOf(CredentialsInEnvError);
-      expect((err as CredentialsInEnvError).field).toBe(
-        'env-bundle:leaky:AWS_KEY',
-      );
+      expect((err as CredentialsInEnvError).field).toBe('env-bundle:leaky:AWS_KEY');
     }
   });
 
@@ -253,7 +263,9 @@ describe('registerEnv', () => {
         async stage(_args: StageSecretArgs): Promise<StagedSecret> {
           return { ref: 'local-secret://fixed', ttlSeconds: 7500 };
         },
-        async resolve(_ref: string): Promise<string> { return ''; },
+        async resolve(_ref: string): Promise<string> {
+          return '';
+        },
         async cleanupByTag(_tagKey: string, _tagValue: string): Promise<void> {},
       },
     });
@@ -263,7 +275,9 @@ describe('registerEnv', () => {
         async stage(_args: StageSecretArgs): Promise<StagedSecret> {
           return { ref: 'local-secret://fixed', ttlSeconds: 7500 };
         },
-        async resolve(_ref: string): Promise<string> { return ''; },
+        async resolve(_ref: string): Promise<string> {
+          return '';
+        },
         async cleanupByTag(_tagKey: string, _tagValue: string): Promise<void> {},
       },
     });
