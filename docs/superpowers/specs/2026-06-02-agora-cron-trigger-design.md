@@ -1,7 +1,7 @@
 ---
 title: "Agora Offload — Cron Scheduling (recurring submission, no refactor)"
 date: 2026-06-02
-status: draft
+status: "**SHIPPED — status corrected 2026-08-03.** Built as designed, including D1 (cron is a submission PRODUCER, not a `Trigger`). Verified on main: `src/scheduling/cron-scheduler.ts` (coalesced catch-up via `it.prev()`, deterministic runId `${id}@${slot}`), `src/contracts/schedule-store.ts` + `schedule.ts`, `src/runstate/sqlite-schedule-store.ts`, drained each tick at `src/serve/driver.ts:259`, CLI `schedule add|list|rm` at `pangolin-cli/src/cmd-orch.ts:373`, and six test files green in the orchestrator suite. The §0.2 deferrals (per-schedule timezone, sub-minute schedules, concurrency policy beyond the runId dedup, an MCP surface) remain deferred and are the only open work here. **Originally:** draft"
 authors: [human:Brett, agent:claude-opus-4-8]
 builds_on:
   - "[[docs/superpowers/specs/2026-05-28-agora-orchestrator-design.md]]"

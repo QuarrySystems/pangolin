@@ -27,6 +27,15 @@ agent or a consumer scanning for work takes these lines literally.
 - Correcting a stale marker? Say what you verified (`Verified on main: <path>`)
   and keep the original text under **Originally:**. What was believed, and when
   it stopped being true, is part of the record.
+- **Pick the marker from what the spec DESIGNED, not from its title.** The
+  2026-08-03 sweep got this wrong on the cron spec and left it marked `draft`
+  while it was fully shipped: the file is titled "cron **trigger**", so the check
+  looked in `src/triggers/`, found only `manual.ts`, and concluded correctly
+  about that directory and wrongly about the feature. The spec's own §0.1 decides
+  that cron is deliberately **not** a `Trigger` — it is a submission producer, and
+  it lives in `src/scheduling/`. Reasoning from the title picked the one location
+  the design guaranteed would be empty. Read far enough into a spec to know what
+  it claims to have built before deciding where to look for it.
 - A plan that shipped is **historical**. Mark it so at the top, and do not
   silently flip its per-task markers — those describe the plan at authoring time,
   and rewriting them fakes a verification nobody performed.
