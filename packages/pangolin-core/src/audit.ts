@@ -11,6 +11,7 @@
 // Type-only, so this file keeps its no-runtime-import-surface property: the
 // import is erased at compile time and adds no dependency edge at runtime.
 import type { VerifyOutcome } from './verify.js';
+import type { DepsEvidence } from './deps.js';
 
 // ── Manifest types ────────────────────────────────────────────────────────
 // Moved into core alongside the audit types because `AuditBundle` references
@@ -271,6 +272,19 @@ export interface AuditItemOutcome {
    * failure. A test pins that.
    */
   verify?: VerifyOutcome;
+  /**
+   * The dispatch's own report of the dependency set it ran against, hashed
+   * after setup and again after the agent block.
+   *
+   * Like `verify` above, this row carries a SELF-REPORTED value, not a
+   * reference — and it is self-reported in the strongest sense: the sentinel is
+   * written inside the workspace, in the same environment the agent runs in, so
+   * an agent can forge it. The tier literal is `'recorded'` precisely so no
+   * reader mistakes this row for an attestation. It travels the same route
+   * `verify` took: sentinel → readSentinel → reconcile → store → item.reconciled
+   * → here.
+   */
+  deps?: DepsEvidence;
 }
 
 /** Refs-only audit export the service publishes to the outbox on epoch seal (§6.5). */

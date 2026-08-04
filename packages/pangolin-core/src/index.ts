@@ -23,6 +23,7 @@ export * from './runtime-adapter.js';
 export * from './dispatch.js';
 export * from './result-sink.js';
 export * from './verify.js';
+export * from './deps.js';
 export * from './context-requirement.js';
 export * from './pipeline.js';
 export * from './s3-clients.js';

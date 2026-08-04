@@ -31,7 +31,8 @@ import {
   type OutputSentinel,
 } from './output-sentinel.js';
 import type { WorkspaceBaseline } from './patch-capture.js';
-import type { VerifyOutcome } from '@quarry-systems/pangolin-core';
+import type { VerifyOutcome, DepsEvidence } from '@quarry-systems/pangolin-core';
+import { readDepsEvidence } from './deps-evidence.js';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -55,6 +56,17 @@ export interface BlockContext {
   agentTimeoutSeconds?: number;
   pluginInstallTimeoutSeconds?: number;
   baseline: WorkspaceBaseline;
+  /**
+   * Hash of `.pangolin/deps.json` as observed AFTER the setup script and before
+   * the agent ran, or undefined when no usable evidence was offered then.
+   *
+   * Carried in rather than re-read here because by the time this runner exists
+   * the agent has already had the workspace; a read taken now could not
+   * distinguish setup's evidence from the agent's. The matching `atFinish` read
+   * happens at the seal below, which is the last moment the workspace is still
+   * the one the dispatch ran in.
+   */
+  depsAtSetup?: string;
   redact(s: string): string;
   log(event: { kind: string; [k: string]: unknown }): void;
 }
@@ -485,6 +497,32 @@ export async function runPipeline(
   }
 
   // All blocks completed — auto-append seal (best-effort)
+
+  // The `atFinish` half of the dependency evidence, read here because this is
+  // the last point at which the workspace is still the one the agent ran in.
+  // Never throws (deps-evidence.ts), so it cannot turn a completed dispatch
+  // into a failed one.
+  const depsAtFinish = await readDepsEvidence(ctx.workspaceDir);
+  if (depsAtFinish.kind === 'unusable') {
+    ctx.log({
+      kind: 'deps.evidence.unusable',
+      phase: 'finish',
+      dispatchId: ctx.dispatchId,
+      reason: depsAtFinish.reason,
+    });
+  }
+  // BOTH halves required. Spec §4.2 types atSetup/atFinish as required strings,
+  // so a half-present pair is omitted entirely rather than reported
+  // asymmetrically — the alternative would be inventing a hash for a phase that
+  // produced none. The documented consequence, accepted deliberately: this
+  // guarantees "changes to an EXISTING sentinel are visible", not the broader
+  // "a mid-run `pnpm add` is always visible", since a sentinel created for the
+  // first time mid-run has no atSetup to pair with.
+  const deps: DepsEvidence | undefined =
+    ctx.depsAtSetup !== undefined && depsAtFinish.kind === 'ok'
+      ? { atSetup: ctx.depsAtSetup, atFinish: depsAtFinish.hash, tier: 'recorded' }
+      : undefined;
+
   let sentinel: OutputSentinel | undefined;
   try {
     sentinel = await writeSentinel({
@@ -494,6 +532,10 @@ export async function runPipeline(
       dispatchId: ctx.dispatchId,
       patchRef: lastPatchRef,
       verify: firstVerifyOutcome,
+      // Conditional spread, matching `blocks` below: `deps: undefined` would put
+      // the key in the object and JSON.stringify would drop it, but the explicit
+      // spread keeps the intent — absent means absent — visible at the call site.
+      ...(deps !== undefined ? { deps } : {}),
       outputs: lastOutputs,
       usage: aggregatedUsage,
       ...(opts.declared && outcomes.length > 0 ? { blocks: outcomes } : {}),

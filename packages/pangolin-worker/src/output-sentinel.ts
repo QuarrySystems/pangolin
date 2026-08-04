@@ -20,6 +20,7 @@ import {
 import type { StorageProvider } from '@quarry-systems/pangolin-core';
 import type {
   VerifyOutcome,
+  DepsEvidence,
   RuntimeUsage,
   OutputEntry,
   BlockOutcome,
@@ -149,6 +150,13 @@ export async function writeSentinel(opts: {
   patchRef?: string;
   summary?: string;
   verify?: VerifyOutcome;
+  /**
+   * Dependency evidence, hashed after setup and again after the agent block.
+   * Declared on `OutputSentinel` in `pangolin-core/src/product.ts`, not here.
+   * Optional + additive: absence leaves the sentinel byte-identical to its
+   * pre-deps shape, so the hash is unchanged for every dispatch that offers none.
+   */
+  deps?: DepsEvidence;
   /** Wave A (§5): content-addressed deliverables from workspace/outputs/. */
   outputs?: OutputEntry[];
   /** Wave: model-cost-evidence — best-effort actual usage. Optional + additive. */
@@ -164,6 +172,7 @@ export async function writeSentinel(opts: {
     patchRef,
     summary,
     verify,
+    deps,
     outputs,
     usage,
     blocks,
@@ -173,6 +182,7 @@ export async function writeSentinel(opts: {
   if (patchRef !== undefined) sentinel.patchRef = patchRef;
   if (summary !== undefined) sentinel.summary = summary;
   if (verify !== undefined) sentinel.verify = verify;
+  if (deps !== undefined) sentinel.deps = deps;
   if (outputs !== undefined) sentinel.outputs = outputs;
   if (usage !== undefined) sentinel.usage = usage;
   if (blocks !== undefined) sentinel.blocks = blocks;
