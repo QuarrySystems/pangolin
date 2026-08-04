@@ -5,7 +5,7 @@ type: spec
 created: 2026-05-21
 updated: 2026-05-21
 wiki: _meta
-status: draft
+status: **SHIPPED — status corrected 2026-08-03.** Verified on main: `packages/pangolin-{core,client,worker}`. This line previously read "draft", which was stale: the work landed and the marker was never updated. **Originally:** draft
 summary: "Caller-side SDK that lets integrators register versioned subagents, capabilities, and env bundles, then dispatch a containerized Claude Code sub-agent to a compute target by reference. Worker fetches registered artifacts at boot, overlays capabilities as filesystem layers, invokes the sub-agent, returns the result. Pluggable interfaces for compute, credentials, storage, channels, result sinks, and telemetry. Strict orthogonality: agora knows nothing about Stoa, Bedrock, RaState, or any other Quarry Systems library."
 author: agent:claude-code
 ---

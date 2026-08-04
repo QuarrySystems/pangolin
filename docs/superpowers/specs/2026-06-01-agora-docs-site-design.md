@@ -1,7 +1,7 @@
 ---
 title: Agora Documentation Site — Architecture & Structure Spec
 date: 2026-06-01
-status: draft
+status: **SHIPPED — status corrected 2026-08-03.** Verified on main: `docs-site/ (deployed by the Deploy docs site workflow)`. This line previously read "draft", which was stale: the work landed and the marker was never updated. **Originally:** draft
 branch: docs/agora-docs-site-spec
 authors: [human:Brett, agent:claude-opus-4-8]
 builds_on: "[[docs/superpowers/specs/2026-05-29-agora-offload-v1-design.md]]"

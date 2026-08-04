@@ -3,6 +3,15 @@ title: agora-orchestrator skeleton (PR2)
 created: 2026-05-29
 ---
 
+> **HISTORICAL — this plan shipped. Do NOT execute it.** (Added 2026-08-03.)
+> The per-task `status: pending` markers below were never updated when the work
+> landed; verified on main: `packages/pangolin-orchestrator/src/engine/tick.ts`
+> and the surrounding orchestrator are live and have been extended many times
+> since. The markers are kept as authored so the plan still reads as the record
+> of how the work was decomposed — but they describe the plan's state at
+> authoring time, **not** the state of the codebase. An agent reading the line
+> below and executing this plan would re-implement shipped code.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use parallel-dag-execution:executing-dag-plans to execute this plan with continuous parallel subagent dispatch. Per-task `status` frontmatter is the source of truth; the mermaid block is regenerated on every save.
 
 ```mermaid

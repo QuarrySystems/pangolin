@@ -1,7 +1,7 @@
 ---
 title: Worker Termination on SIGTERM — Design (slice C of 3)
 date: 2026-07-23
-status: designed — Q1/Q2 resolved 2026-07-24 (flush-only; set-on-start); spec-audit findings resolved (guarded claim closes the handler-first race; signal threaded through deliver.ts); ready for a plan
+status: **SHIPPED — status corrected 2026-08-03.** Verified on main: `terminationSignal wired in pangolin-worker/src/entrypoint.ts`. This line previously read "designed — Q1/Q2 resolved 2026-07-24 (flush-only; set-on-start); spec-audit findings resolved (guarded claim closes the handler-first race; signal threaded through deliver.ts); ready for a plan", which was stale: the work landed and the marker was never updated. **Originally:** designed — Q1/Q2 resolved 2026-07-24 (flush-only; set-on-start); spec-audit findings resolved (guarded claim closes the handler-first race; signal threaded through deliver.ts); ready for a plan
 branch: fix/callback-delivery-reliability
 authors: [human:Brett, agent:claude-opus-4-8]
 severity: medium-high (a cancelled dispatch loses its terminal event; a documented behaviour has never existed)

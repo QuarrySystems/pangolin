@@ -1,7 +1,7 @@
 ---
 title: Agora Offload — offload-launch wave design (acceptance demo + BSL + docs)
 date: 2026-06-01
-status: design (approved direction; DAG plan pending)
+status: **SHIPPED — status corrected 2026-08-03.** Verified on main: `16 packages carry publishConfig; repo public`. This line previously read "design (approved direction; DAG plan pending)", which was stale: the work landed and the marker was never updated. **Originally:** design (approved direction; DAG plan pending)
 branch: offload-launch (stacked on offload-surface / PR #22)
 authors: [human:Brett, agent:claude-opus-4-8]
 builds_on:

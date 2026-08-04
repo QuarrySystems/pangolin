@@ -1,7 +1,7 @@
 ---
 title: Agora Offload — Mailbox Seam (real submission backend)
 date: 2026-05-31
-status: design (approved direction; implementation plan pending)
+status: **SHIPPED — status corrected 2026-08-03.** Verified on main: `pangolin-orchestrator/src/mailbox/local-dir.ts`. This line previously read "design (approved direction; implementation plan pending)", which was stale: the work landed and the marker was never updated. **Originally:** design (approved direction; implementation plan pending)
 branch: docs/agora-offload-v1-spec
 authors: [human:Brett, agent:claude-opus-4-8]
 builds_on: "[[docs/superpowers/specs/2026-05-29-agora-offload-v1-design.md]]"
