@@ -202,3 +202,26 @@ Commands that can report success while having failed, and what to run instead.
   fix — widening the bundle's `PATH` — also goes green while destroying the
   test, since a real `pnpm` on a system dir would then satisfy the `exec`
   requirement with the setup script having done nothing.)
+- **A test double that DERIVES its answer from its input instead of computing
+  it.** Such a double can never disagree with the code under test, so every
+  assertion resting on it is vacuous — and it fails silently, because the suite
+  stays green. Instance: 2026-08-03, issue 20. The `registerEnv` storage stub
+  read the content hash out of the URI (`parts[parts.length - 1]`) rather than
+  hashing the bytes, so it accepted a pinned URI whose hash did not describe its
+  own contents. `env.register()` with an inline secret was **unconditionally
+  broken against every real `StorageProvider`** and shipped anyway, under a
+  green suite, because the only component that would have objected was the
+  double. → when a double stands in for something that VALIDATES, make it
+  perform the validation; a double may simplify *behaviour*, but never the
+  *check the real component exists to perform*. Confirm by mutation: reintroduce
+  the defect and watch the pre-existing tests go red (they did, in #157 — the
+  same file that stayed green through the original bug).
+
+  **This is the third instance of one pattern, and the pattern is the entry
+  worth remembering: a check that cannot fail is not a check.** The other two
+  are directly above (a gated test that never executes) and at the top of this
+  section (a `grep -c` criterion satisfied before any work is done). All three
+  read as passing coverage and all three let a real defect through. When adding
+  a test, ask what would have to break for it to go red — and if the honest
+  answer is "nothing reachable", the test is documentation, not verification.
+  Say so in the test rather than letting a future reader count it.
