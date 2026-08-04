@@ -91,6 +91,12 @@ COPY --from=adapter-deploy /deploy/adapter/node_modules /opt/pangolin/adapters/c
 # Entrypoint stub.
 COPY docker/pangolin-worker/bin/pangolin-worker-entry.mjs /opt/pangolin/worker/bin/pangolin-worker-entry.mjs
 
+# C1'-restore (spec §7.2): the credential hand-off shell. It captures the ambient
+# environment, hands it over an unlinked fd, and `exec`s CMD with a clean envp so
+# that /proc/<pid>/environ carries no credential. Must be executable by the
+# non-root user that runs it.
+COPY --chmod=0755 docker/pangolin-worker/entrypoint.sh /opt/pangolin/entrypoint.sh
+
 # /workspace must be writable: mkdtemp under os.tmpdir() handles the workspace
 # overlay but capability code that cd's into the working directory expects a
 # real writable WORKDIR. Set ownership to pangolin:pangolin so the non-root user can
@@ -104,4 +110,10 @@ USER pangolin:pangolin
 ENV PANGOLIN_RUNTIME_ADAPTER=claude-code \
     NODE_ENV=production
 
+# ENTRYPOINT runs for EVERY container start, including `docker run <image> sh -c …`,
+# which is what makes the tripwire's `full` arm meaningful: it exercises exactly
+# what the compute providers launch. CMD stays a separate vector so `"$@"` in the
+# script still selects what runs, and an operator can override the command
+# without bypassing the credential hand-off.
+ENTRYPOINT ["/opt/pangolin/entrypoint.sh"]
 CMD ["node", "/opt/pangolin/worker/bin/pangolin-worker-entry.mjs"]

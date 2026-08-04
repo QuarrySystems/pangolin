@@ -249,7 +249,7 @@ depends_on: []
 files:
   - packages/pangolin-worker/src/credential-restore.ts
   - packages/pangolin-worker/test/credential-restore.test.ts
-status: pending
+status: done
 quality_reviewer_hint: opus
 ```
 
@@ -348,7 +348,7 @@ id: task-tripwire-script
 depends_on: []
 files:
   - scripts/verify-proc-exposure.mjs
-status: pending
+status: done
 quality_reviewer_hint: opus
 ```
 
@@ -449,7 +449,7 @@ id: task-entrypoint-script
 depends_on: [task-tripwire-script]
 files:
   - docker/pangolin-worker/entrypoint.sh
-status: pending
+status: done
 quality_reviewer_hint: opus
 ```
 
@@ -520,7 +520,7 @@ id: task-entry-wire
 depends_on: [task-restore-module]
 files:
   - docker/pangolin-worker/bin/pangolin-worker-entry.mjs
-status: pending
+status: done
 ```
 
 Call `restoreCredentials()` as the first statement of the container entry stub — before `runWorker`, and
@@ -589,7 +589,7 @@ id: task-dockerfile-entrypoint
 depends_on: [task-entrypoint-script, task-entry-wire]
 files:
   - docker/pangolin-worker/Dockerfile
-status: pending
+status: done
 is_wiring_task: true
 ```
 
@@ -625,7 +625,7 @@ id: task-tripwire-ci
 depends_on: [task-dockerfile-entrypoint, task-tripwire-script]
 files:
   - .github/workflows/proc-exposure.yml
-status: pending
+status: done
 ```
 
 Wire the verifier to its own workflow, which **builds the worker image** and runs every arm. Deliberately
@@ -696,7 +696,7 @@ id: task-threat-model
 depends_on: [task-tripwire-ci]
 files:
   - docs-site/src/content/docs/explanation/threat-model.md
-status: pending
+status: done
 model_hint: cheap
 review_mode: merged
 ```
