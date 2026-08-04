@@ -1,4 +1,4 @@
-import type { VerifyOutcome } from '@quarry-systems/pangolin-core';
+import type { VerifyOutcome, DepsEvidence } from '@quarry-systems/pangolin-core';
 import type { ItemState, Run, TerminalStatus } from './types.js';
 
 /**
@@ -27,6 +27,7 @@ export interface RunStateStore {
   requeue(itemId: string, notBeforeMs: number): void; // status -> 'ready', nextAttemptAt = notBeforeMs
   setResultRef(itemId: string, ref: string): void; // persist opaque result artifact ref
   setVerify(itemId: string, verify: VerifyOutcome): void; // persist self-verify signal
+  setDeps(itemId: string, deps: DepsEvidence): void; // persist self-reported dependency evidence
   setOutputRefs(itemId: string, outputRefs: Record<string, string>): void; // persist deliverable refs
   setManifestRef(itemId: string, ref: string): void; // persist opaque dispatch-manifest ref
   close(): void;

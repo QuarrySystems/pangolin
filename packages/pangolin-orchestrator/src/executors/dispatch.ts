@@ -189,8 +189,8 @@ export class DispatchExecutor implements Executor {
     entry.inflight.cleanup();
     const status = result.exitCode === 0 ? 'done' : 'failed';
     if (status === 'done') {
-      const { patchRef, verify, outputRefs } = await this.readSentinel(dispatchHash);
-      return { status, output: result, resultRef: patchRef, verify, outputRefs };
+      const { patchRef, verify, deps, outputRefs } = await this.readSentinel(dispatchHash);
+      return { status, output: result, resultRef: patchRef, verify, deps, outputRefs };
     }
     return { status, output: result };
   }
@@ -225,6 +225,7 @@ export class DispatchExecutor implements Executor {
   private async readSentinel(dispatchId: string): Promise<{
     patchRef?: string;
     verify?: ExecutionResult['verify'];
+    deps?: ExecutionResult['deps'];
     outputRefs?: ExecutionResult['outputRefs'];
   }> {
     const res = await readOutputSentinel(
@@ -232,14 +233,16 @@ export class DispatchExecutor implements Executor {
       dispatchId,
     ).catch(() => ({ status: 'absent' as const }));
     if (res.status !== 'ok') return {}; // absent | malformed -> {}
-    const { patchRef, verify, outputs } = res.sentinel;
+    const { patchRef, verify, deps, outputs } = res.sentinel;
     const out: {
       patchRef?: string;
       verify?: ExecutionResult['verify'];
+      deps?: ExecutionResult['deps'];
       outputRefs?: ExecutionResult['outputRefs'];
     } = {};
     if (patchRef) out.patchRef = patchRef;
     if (verify) out.verify = verify;
+    if (deps) out.deps = deps;
     if (outputs?.length) {
       const outputRefs = Object.create(null) as Record<string, string>;
       for (const e of outputs) outputRefs[e.path] = e.ref;

@@ -3,6 +3,7 @@
 // StorageProvider, no I/O.
 
 import type { VerifyOutcome } from './verify.js';
+import type { DepsEvidence } from './deps.js';
 import type { RuntimeUsage } from './runtime-adapter.js';
 
 /** Maximum number of output entries captured per run. Walk stops after this cap. */
@@ -52,6 +53,21 @@ export interface OutputSentinel {
    * change the dispatch outcome, only this signal.
    */
   verify?: VerifyOutcome;
+  /**
+   * Dependency evidence the dispatch reports about itself, hashed after the
+   * setup script and again after the agent block. Optional + additive — absence
+   * leaves the sentinel hash unchanged, matching its neighbours here.
+   *
+   * RECORDED, never attested: written inside the workspace in the same
+   * environment the agent runs in, so the worker seals whatever it reads. Never
+   * describe it as attested — see {@link DepsEvidence}.
+   *
+   * Informational only, and more strictly so than `verify`: a malformed,
+   * unreadable or oversized sentinel is treated exactly as absent, because
+   * neither the run's success nor its correctness depends on this evidence, so
+   * it must never become a new way for a dispatch to die.
+   */
+  deps?: DepsEvidence;
   /**
    * Wave A (§5 output side): content-addressed deliverables captured from
    * workspace/outputs/. Optional + additive — absence leaves the hash

@@ -133,6 +133,38 @@ The designed resolution to the [signing-key-custody gap](#non-goals--roadmap) fo
 | **Inbound attack surface** | A remote attacker scans for a port to hit | **There is no inbound listener.** Submission is a storage-prefix mailbox the service **polls**; the MCP server is **stdio**, not a network port. The attack surface is the storage backend, not a Pangolin socket. | Security shifts to the **storage backend's ACLs**: anyone who can write the submissions prefix can inject a run. `actor` is an identity stamp, **not** authorization. |
 | **Malicious channel adapter** | A capability names a channel adapter that throws or hangs | Adapter failures are isolated (logged, never fail the dispatch) and teardown is bounded at 10s. | Adapters run **in-process, unsandboxed**, loaded from the image (not per-dispatch hash-verified). Trust is "it's baked into your image." |
 
+### Dependency evidence is recorded, not attested
+
+A dispatch may write `.pangolin/deps.json` describing the dependency set it ran
+against. The worker hashes that file after the setup script and again after the
+agent, and seals both hashes as
+`deps: { atSetup, atFinish, tier: "recorded" }`.
+
+**`tier` is `recorded`, and that word is doing real work.** The sentinel is
+written *inside the workspace*, in the same environment the agent runs in, so
+**an agent can forge it**. The worker seals whatever it reads. This proves a
+dependency claim was *made and sealed at a point in time*, not that the claim is
+true — the same trust level as a worker's self-verify result, and the same
+distinction the [authorizer seam](#audit-integrity) draws when it proves a
+decision was sealed rather than that an actor was authenticated.
+
+What it is genuinely good for: **detecting change**. Because the same claim is
+hashed twice, `atSetup !== atFinish` shows the dispatch altered its own
+dependency set mid-run — which a single setup-time seal would have described
+exactly wrongly. That signal is meaningful even though the underlying claim is
+self-reported, because both readings come from the same untrusted source.
+
+The type carries only the literal `'recorded'`; there is no attested tier, and a
+forged `"tier": "attested"` in the sentinel bytes is dropped at the read
+boundary rather than promoted. Reaching a genuinely attested tier would require
+the *worker* to run ecosystem-specific verification itself, which Pangolin Scale
+deliberately does not do — it learns no package manager. That is a possible
+future tier, not a gap being papered over.
+
+| Threat | Where it shows up | Mitigation | Honest limit |
+|---|---|---|---|
+| **Forged dependency claim** | An agent writes a `deps.json` describing packages it never installed | Nothing prevents it. The tier literal is `recorded` everywhere — in the type, the export, and this page — so no reader can mistake the row for an attestation. | The claim is worth exactly what the agent's honesty is worth. Use it to detect *change*, not to establish *fact*. |
+
 ## Non-goals & roadmap
 
 Stated plainly, because overclaiming is the one thing an audit tool can't afford.

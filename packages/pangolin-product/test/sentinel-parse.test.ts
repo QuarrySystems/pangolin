@@ -326,3 +326,90 @@ it('malformed results carry only the reason enum, with no detail field', () => {
   expect(Object.keys(res)).toEqual(['status', 'reason']);
   expect(JSON.stringify(res)).not.toContain('super-secret-payload-marker');
 });
+
+// --- deps -----------------------------------------------------------------
+// This parser is an allowlist reconstructor: it rebuilds named fields by hand
+// and DISCARDS everything else. Without a buildDeps counterpart, `deps` is
+// silently dropped on every orchestrator-side read no matter what the worker
+// writes — the whole evidence chain would be inert while every other task
+// passed. The first test below is the one that would catch that.
+
+it('reconstructs a well-formed deps field', () => {
+  const res = parseOutputSentinel(
+    enc({
+      schemaVersion: 1,
+      deps: { atSetup: 'sha256:aaa', atFinish: 'sha256:bbb', tier: 'recorded' },
+    }),
+  );
+  expect(res.status).toBe('ok');
+  if (res.status !== 'ok') return;
+  expect(res.sentinel.deps).toEqual({
+    atSetup: 'sha256:aaa',
+    atFinish: 'sha256:bbb',
+    tier: 'recorded',
+  });
+});
+
+it('drops deps when either hash is missing or not a string', () => {
+  for (const bad of [
+    { atSetup: 'sha256:a', tier: 'recorded' },
+    { atFinish: 'sha256:b', tier: 'recorded' },
+    { atSetup: 'sha256:a', atFinish: 123, tier: 'recorded' },
+    { atSetup: null, atFinish: 'sha256:b', tier: 'recorded' },
+  ]) {
+    const res = parseOutputSentinel(enc({ schemaVersion: 1, deps: bad }));
+    expect(res.status).toBe('ok');
+    if (res.status !== 'ok') return;
+    expect(res.sentinel.deps).toBeUndefined();
+  }
+});
+
+it("refuses any tier other than 'recorded' — a forged 'attested' must not survive the read", () => {
+  // The security property, not a typing detail: the type system cannot police
+  // bytes arriving from an untrusted worker, so the runtime guard is the only
+  // thing standing between a forged tier and an audit row that overclaims.
+  for (const tier of ['attested', 'authority-attested', '', 'RECORDED', 1, null, undefined]) {
+    const res = parseOutputSentinel(
+      enc({ schemaVersion: 1, deps: { atSetup: 'sha256:a', atFinish: 'sha256:b', tier } }),
+    );
+    expect(res.status).toBe('ok');
+    if (res.status !== 'ok') return;
+    expect(res.sentinel.deps).toBeUndefined();
+  }
+});
+
+it('drops deps for non-object shapes, and omits the key entirely when absent', () => {
+  for (const bad of [null, 'x', 42, [], true]) {
+    const res = parseOutputSentinel(enc({ schemaVersion: 1, deps: bad }));
+    expect(res.status).toBe('ok');
+    if (res.status !== 'ok') return;
+    expect(res.sentinel.deps).toBeUndefined();
+  }
+  const none = parseOutputSentinel(enc({ schemaVersion: 1 }));
+  expect(none.status).toBe('ok');
+  if (none.status !== 'ok') return;
+  // Absent, not present-and-undefined — the sentinel is content-hashed.
+  expect('deps' in none.sentinel).toBe(false);
+});
+
+it('ignores unknown sibling keys inside deps rather than forwarding them', () => {
+  const res = parseOutputSentinel(
+    enc({
+      schemaVersion: 1,
+      deps: {
+        atSetup: 'sha256:a',
+        atFinish: 'sha256:b',
+        tier: 'recorded',
+        ecosystem: 'pnpm',
+        packageCount: 1432,
+      },
+    }),
+  );
+  expect(res.status).toBe('ok');
+  if (res.status !== 'ok') return;
+  expect(res.sentinel.deps).toEqual({
+    atSetup: 'sha256:a',
+    atFinish: 'sha256:b',
+    tier: 'recorded',
+  });
+});

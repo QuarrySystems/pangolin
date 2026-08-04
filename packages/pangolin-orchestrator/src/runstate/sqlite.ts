@@ -6,7 +6,7 @@
 // separate processes are unsupported and will corrupt run-state.
 //
 import Database from 'better-sqlite3';
-import type { Authorization, VerifyOutcome } from '@quarry-systems/pangolin-core';
+import type { Authorization, VerifyOutcome, DepsEvidence } from '@quarry-systems/pangolin-core';
 import type {
   AnchoredRoot,
   AuditEntryRow,
@@ -37,6 +37,7 @@ interface ItemRow {
   next_attempt_at: number | null;
   result_ref: string | null;
   verify: string | null;
+  deps: string | null;
   output_refs: string | null;
   manifest_ref: string | null;
   submitted_at: string | null;
@@ -85,6 +86,7 @@ const MIGRATIONS: ReadonlyArray<readonly [string, string]> = [
   ['submitted_at', 'TEXT'],
   ['needs', 'TEXT'],
   ['running_since', 'INTEGER'],
+  ['deps', 'TEXT'],
 ];
 
 export class SqliteRunStateStore implements RunStateStore, AuditStore {
@@ -263,6 +265,10 @@ export class SqliteRunStateStore implements RunStateStore, AuditStore {
 
   setVerify(itemId: string, verify: VerifyOutcome): void {
     this.db.prepare('UPDATE items SET verify=? WHERE id=?').run(JSON.stringify(verify), itemId);
+  }
+
+  setDeps(itemId: string, deps: DepsEvidence): void {
+    this.db.prepare('UPDATE items SET deps=? WHERE id=?').run(JSON.stringify(deps), itemId);
   }
 
   setOutputRefs(itemId: string, outputRefs: Record<string, string>): void {
@@ -487,6 +493,7 @@ export class SqliteRunStateStore implements RunStateStore, AuditStore {
     nextAttemptAt: r.next_attempt_at ?? undefined,
     resultRef: r.result_ref ?? undefined,
     verify: r.verify ? JSON.parse(r.verify) : undefined,
+    deps: r.deps ? JSON.parse(r.deps) : undefined,
     outputRefs: r.output_refs ? JSON.parse(r.output_refs) : undefined,
     manifestRef: r.manifest_ref ?? undefined,
     submittedAt: r.submitted_at ?? undefined,

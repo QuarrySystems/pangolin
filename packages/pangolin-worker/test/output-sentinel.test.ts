@@ -717,3 +717,62 @@ describe('usage field on OutputSentinel / writeSentinel', () => {
     }
   });
 });
+
+// --- deps ------------------------------------------------------------------
+
+describe('writeSentinel deps', () => {
+  let dir: string;
+  let storage: MemoryStorage;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'sentinel-deps-'));
+    storage = new MemoryStorage();
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  /** Read the sentinel back off disk rather than trusting the return value —
+   *  the written file is what the orchestrator actually reads. */
+  async function readBack(): Promise<Record<string, unknown>> {
+    const bytes = await storage.get(buildDispatchRecordUri('ns', 'd-deps', 'output.json'));
+    return JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>;
+  }
+
+  it('round-trips deps through the written sentinel', async () => {
+    const written = await writeSentinel({
+      workspaceDir: dir,
+      storage,
+      namespace: 'ns',
+      dispatchId: 'd-deps',
+      patchRef: 'pangolin://ns/patch/d/abc',
+      verify: { passed: true },
+      deps: { atSetup: 'sha256:a', atFinish: 'sha256:b', tier: 'recorded' },
+    });
+    expect(written.deps).toEqual({ atSetup: 'sha256:a', atFinish: 'sha256:b', tier: 'recorded' });
+
+    const onDisk = await readBack();
+    expect(onDisk.deps).toEqual({ atSetup: 'sha256:a', atFinish: 'sha256:b', tier: 'recorded' });
+    // The new field displaces nothing.
+    expect(onDisk.patchRef).toBe('pangolin://ns/patch/d/abc');
+    expect(onDisk.verify).toEqual({ passed: true });
+  });
+
+  it('omits deps from the written sentinel when none was supplied', async () => {
+    await writeSentinel({
+      workspaceDir: dir,
+      storage,
+      namespace: 'ns',
+      dispatchId: 'd-deps',
+      verify: { passed: true },
+    });
+    const onDisk = await readBack();
+    // Positive control: the writer ran and emitted its sibling field, so the
+    // absence below is a real omission rather than a sentinel never written.
+    expect(onDisk.verify).toEqual({ passed: true });
+    // Absent, not present-and-null: the sentinel is content-hashed, so a
+    // `deps: null` would change the hash of every dispatch offering no evidence.
+    expect('deps' in onDisk).toBe(false);
+  });
+});

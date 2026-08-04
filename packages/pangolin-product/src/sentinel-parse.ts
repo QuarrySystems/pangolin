@@ -13,6 +13,7 @@ import type {
   OutputEntry,
   BlockOutcome,
   VerifyOutcome,
+  DepsEvidence,
   RuntimeUsage,
 } from '@quarry-systems/pangolin-core';
 
@@ -38,6 +39,29 @@ function buildVerify(raw: unknown): VerifyOutcome | undefined {
     verify.durationMs = v.durationMs;
   }
   return verify;
+}
+
+/**
+ * Mirrors buildVerify above. Both hashes are REQUIRED: spec §4.2 types them as
+ * required strings, so a half-present pair is dropped entirely rather than
+ * reported asymmetrically — "evidence from one phase only" is not a shape this
+ * field can express, and inventing a placeholder for the missing half would
+ * fabricate a hash.
+ *
+ * The `tier` guard is a security control, not a type formality. These bytes come
+ * from a worker-written file inside the agent's own workspace, so the type
+ * system polices nothing here; this runtime check is the only thing preventing a
+ * forged `tier: 'attested'` from reaching an audit row and overclaiming. The
+ * threat model's governing rule is that overclaiming is the one thing an audit
+ * tool cannot afford, so an unrecognised tier drops the whole field rather than
+ * being coerced to 'recorded'.
+ */
+function buildDeps(raw: unknown): DepsEvidence | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const d = raw as Record<string, unknown>;
+  if (typeof d.atSetup !== 'string' || typeof d.atFinish !== 'string') return undefined;
+  if (d.tier !== 'recorded') return undefined;
+  return { atSetup: d.atSetup, atFinish: d.atFinish, tier: 'recorded' };
 }
 
 function buildOutputs(raw: unknown, max: number): OutputEntry[] | undefined {
@@ -126,6 +150,9 @@ export function parseOutputSentinel(bytes: Uint8Array): SentinelReadResult {
 
   const verify = buildVerify(src.verify);
   if (verify) sentinel.verify = verify;
+
+  const deps = buildDeps(src.deps);
+  if (deps) sentinel.deps = deps;
 
   const outputs = buildOutputs(src.outputs, MAX_OUTPUT_ENTRIES);
   if (outputs) sentinel.outputs = outputs;

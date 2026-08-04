@@ -64,6 +64,7 @@ import { overlayCapabilities, type CapabilityBundle } from './overlay-engine.js'
 import { mergeEnv, type EnvBundle } from './env-merger.js';
 import { filterRuntimeEnv } from './runtime-env-filter.js';
 import { runSetupScriptIfPresent, SetupScriptError } from './setup-script.js';
+import { readDepsEvidence } from './deps-evidence.js';
 import { loadChannelIfPresent, type ChannelHandle } from './channel-loader.js';
 import { resolveNeedsInputSentinel } from './needs-input.js';
 import { loadCapabilityNotifications } from './notifications.js';
@@ -534,6 +535,31 @@ export async function runWorker(
       }
     }
 
+    // Dependency evidence, `atSetup` half: whatever the setup script left in
+    // `.pangolin/deps.json`. Read AFTER the context check above rather than
+    // immediately after step 9, so a dispatch that is about to fail its
+    // requirements does not emit an evidence log line for a run that never
+    // happens. Either position observes the setup script's output, since
+    // nothing between them writes to the workspace.
+    //
+    // The local is `depsAtSetup`. The identifier `deps` is RESERVED throughout
+    // this function for runWorker's own `deps: RunWorkerDeps` parameter.
+    //
+    // Never throws, and an unusable sentinel is logged rather than raised:
+    // dependency evidence is informational, so it must never become a new way
+    // for a dispatch to die (contrast the setup script, a hard failure by
+    // design, and the needs_input sentinel, where malformed IS worker-failed).
+    const depsAtSetupRead = await readDepsEvidence(workspaceDir);
+    if (depsAtSetupRead.kind === 'unusable') {
+      logger.log({
+        kind: 'deps.evidence.unusable',
+        phase: 'setup',
+        dispatchId: cfg.dispatchId,
+        reason: depsAtSetupRead.reason,
+      });
+    }
+    const depsAtSetup = depsAtSetupRead.kind === 'ok' ? depsAtSetupRead.hash : undefined;
+
     // Capture workspace baseline BEFORE the adapter runs (post-overlay, post-setup).
     // Best-effort: captureBaseline never throws; it returns { unavailable: true }
     // when git is not available so the escape path degrades gracefully.
@@ -600,6 +626,7 @@ export async function runWorker(
           agentTimeoutSeconds: cfg.agentTimeoutSeconds,
           pluginInstallTimeoutSeconds: cfg.pluginInstallTimeoutSeconds,
           baseline,
+          depsAtSetup,
           redact: (s) => logger.redactString(s),
           log: (e) => logger.log(e),
         },

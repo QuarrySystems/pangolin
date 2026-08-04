@@ -492,6 +492,10 @@ export class PangolinOrchestrator {
       // same readSentinel return and is stored symmetrically; only the export
       // dropped it, which left it invisible to any client reading via audit().
       ...(i.verify !== undefined ? { verify: i.verify } : {}),
+      // `deps` travels the identical route and is exported on the same terms.
+      // Self-reported (`tier: 'recorded'`), so it belongs in the untrusted
+      // export rows exactly as `verify` does — never presented as attested.
+      ...(i.deps !== undefined ? { deps: i.deps } : {}),
     }));
     return { runId, entries, root, items };
   }

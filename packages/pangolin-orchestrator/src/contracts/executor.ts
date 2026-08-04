@@ -1,4 +1,4 @@
-import type { VerifyOutcome } from '@quarry-systems/pangolin-core';
+import type { VerifyOutcome, DepsEvidence } from '@quarry-systems/pangolin-core';
 import type { WorkItem } from './types.js';
 
 /** Outcome of reconciling a fired dispatch. `null` from reconcile = still running. */
@@ -15,6 +15,16 @@ export interface ExecutionResult {
    * green/red without re-running by hand.
    */
   verify?: VerifyOutcome;
+  /**
+   * Dependency evidence the dispatch reported about itself, read from the same
+   * output sentinel as `verify` above and travelling the same route.
+   *
+   * RECORDED, never attested: the sentinel is written inside the workspace in
+   * the same environment the agent runs in, so this says what the dispatch
+   * CLAIMED its dependency set was, not what it provably was. Report-only — it
+   * does not change `status`.
+   */
+  deps?: DepsEvidence;
   /** Wave A (§5): content-addressed deliverable refs read from the worker's output
    *  sentinel, keyed by posix path inside outputs/. Report-only in this wave. */
   outputRefs?: Record<string, string>;
