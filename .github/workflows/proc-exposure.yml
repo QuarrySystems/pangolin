@@ -1,0 +1,44 @@
+name: proc-exposure
+
+# Its OWN workflow, deliberately NOT e2e.yml.
+#
+# `e2e.yml` runs `pnpm test:e2e` without `PANGOLIN_E2E_DOCKER=1`, so its
+# container suites pass-as-skipped. That is the exact mechanism by which a
+# dangling worker digest survived four releases at a clean "77 passed", and by
+# which serve-stack issue 20 shipped unconditionally broken. A tripwire placed
+# in a lane that does not execute is theatre.
+#
+# This job BUILDS the image and runs every arm of scripts/verify-proc-exposure.mjs,
+# whose control arm must find a planted credential in the same run or the whole
+# run is treated as void.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  proc-exposure:
+    name: worker /proc credential exposure
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # BUILD rather than pull: this must test the image THIS commit produces.
+      # Pulling a tag would let the tripwire pass against an image the PR did not
+      # build — the same class of false green the lane note above describes.
+      - name: Build worker image
+        run: docker build -t pangolin-worker:ci -f docker/pangolin-worker/Dockerfile .
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify /proc exposure is closed
+        env:
+          PANGOLIN_WORKER_IMAGE: pangolin-worker:ci
+        run: node scripts/verify-proc-exposure.mjs

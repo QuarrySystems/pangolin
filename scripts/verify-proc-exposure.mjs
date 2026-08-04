@@ -96,29 +96,87 @@ async function armControl() {
   console.log(`Arm control: leaked as expected (${hits} hit(s)) — the probe works.`);
 }
 
-/** Structural properties of the hand-off, through the image's own ENTRYPOINT. */
+/**
+ * The hand-off itself, through the image's own ENTRYPOINT. Asserts four things
+ * in ONE run, because the fd-arrival check is the positive control for the two
+ * absence checks — without it, "not in /proc" is equally consistent with "the
+ * mechanism worked" and "nothing ran".
+ *
+ * A newline-bearing JSON value is planted deliberately: it is what breaks a
+ * newline-framed payload, and it is the shape `PANGOLIN_BUNDLE_REFS_JSON` has.
+ */
 async function armEntrypoint() {
+  const JSON_VAL = '{"a":"line1\nline2","b":"x=y"}';
   const script = [
+    // 1. exec, not fork. `$$` is THIS process (the CMD) — if the entrypoint
+    //    `exec`ed, the CMD reused pid 1; if it forked, the entrypoint shell
+    //    still holds pid 1 and this is a child. Comparing /proc/1/comm would
+    //    NOT discriminate here, since the CMD in this arm is itself a shell.
+    //    A fork regression silently reintroduces C1's surviving launcher, which
+    //    keeps the credential readable in its own /proc entry.
+    'echo "SELFPID:$$"',
     'echo "PID1:$(cat /proc/1/comm 2>/dev/null)"',
-    // The payload file is written then immediately unlinked, so it must not be
-    // reachable by name from inside the container.
-    'echo "STRAY:$(find /tmp /run /dev/shm -maxdepth 2 -name "*pangolin-cred*" 2>/dev/null | wc -l)"',
-  ].join('; ');
+    // 2. CONTROL — the payload arrived on fd 3 and carries the planted secret.
+    `if tr '\\0' '\\n' < /proc/self/fd/3 2>/dev/null | grep -q ${NEEDLE}; then echo "FD:yes"; else echo "FD:no"; fi`,
+    // 2b. and the newline-bearing JSON round-tripped byte-for-byte.
+    `if tr '\\0' '\\n' < /proc/self/fd/3 2>/dev/null | grep -q 'line1'; then echo "JSONA:yes"; else echo "JSONA:no"; fi`,
+    `if tr '\\0' '\\n' < /proc/self/fd/3 2>/dev/null | grep -q 'line2'; then echo "JSONB:yes"; else echo "JSONB:no"; fi`,
+    // 3. ABSENCE — the exec'd process's own environ does not carry it.
+    `if tr '\\0' '\\n' < /proc/1/environ | grep -q ${NEEDLE}; then echo "PROC:leak"; else echo "PROC:clean"; fi`,
+    // 4. no payload file survives anywhere writable.
+    'echo "STRAY:$(find /tmp /run /dev/shm /var/tmp -maxdepth 3 -name payload 2>/dev/null | wc -l)"',
+    // PATH/HOME survive; other names do not.
+    `echo "PATH_OK:$(tr '\\0' '\\n' < /proc/1/environ | grep -c '^PATH=')"`,
+    `echo "HOME_OK:$(tr '\\0' '\\n' < /proc/1/environ | grep -c '^HOME=')"`,
+    // POSIX ERE has no negative lookahead — filter PANGOLIN_CRED_FD with a
+    // second grep rather than a pattern the image's grep would reject.
+    `echo "STRAY_ENV:$(tr '\\0' '\\n' < /proc/1/environ | grep -E '^(AWS_|PANGOLIN_)' | grep -vc '^PANGOLIN_CRED_FD=' || true)"`,
+  ].join('\n');
+
   const { out } = await docker([
     'run', '--rm',
     '-e', `AWS_CONTAINER_CREDENTIALS_RELATIVE_URI=${CRED}`,
+    '-e', `PANGOLIN_BUNDLE_REFS_JSON=${JSON_VAL}`,
     IMAGE, '/bin/sh', '-c', script,
   ]);
-  const stray = /STRAY:(\d+)/.exec(out);
-  if (!stray) {
-    fail(`entrypoint: probe did not run. Output: ${out.slice(-300)}`);
+
+  const g = (re) => re.exec(out)?.[1];
+  if (g(/FD:(\w+)/) === undefined) {
+    fail(`entrypoint: probe did not run — the ENTRYPOINT may not be wired yet. Output: ${out.slice(-300)}`);
     return;
   }
-  if (Number(stray[1]) !== 0) {
-    fail(`entrypoint: ${stray[1]} credential payload file(s) survive on disk — the unlink did not happen`);
+  // Control first: if the payload never arrived, every absence below is vacuous.
+  if (g(/FD:(\w+)/) !== 'yes') {
+    fail('entrypoint: payload did NOT arrive on fd 3 — the absence checks below would be meaningless');
     return;
   }
-  console.log(`Arm entrypoint: no credential payload survives on disk. ${/PID1:\S*/.exec(out)?.[0] ?? ''}`);
+  if (g(/JSONA:(\w+)/) !== 'yes' || g(/JSONB:(\w+)/) !== 'yes') {
+    fail('entrypoint: the newline-bearing JSON value did not survive the payload round-trip');
+  }
+  if (g(/PROC:(\w+)/) !== 'clean') {
+    fail("entrypoint: the credential IS present in /proc/1/environ — the exec'd env was not clean");
+  }
+  if (Number(g(/STRAY:(\d+)/)) !== 0) {
+    fail(`entrypoint: ${g(/STRAY:(\d+)/)} payload file(s) survive on disk — the unlink did not happen`);
+  }
+  if (Number(g(/PATH_OK:(\d+)/)) !== 1 || Number(g(/HOME_OK:(\d+)/)) !== 1) {
+    fail('entrypoint: PATH and/or HOME did not survive into the exec\'d environment');
+  }
+  if (Number(g(/SELFPID:(\d+)/)) !== 1) {
+    fail(
+      `entrypoint: CMD runs as pid ${g(/SELFPID:(\d+)/)}, not 1 — the entrypoint FORKED instead of ` +
+        "exec'ing, so the launcher survives holding the credential in its own /proc entry",
+    );
+  }
+  if (Number(g(/STRAY_ENV:(\d+)/)) !== 0) {
+    fail(
+      `entrypoint: ${g(/STRAY_ENV:(\d+)/)} AWS_*/PANGOLIN_* name(s) other than PANGOLIN_CRED_FD ` +
+        'survived into the exec\'d environment — env -i did not achieve default-deny',
+    );
+  }
+  if (failed === 0) {
+    console.log(`Arm entrypoint: payload on fd 3, /proc/1 clean, nothing on disk. ${g(/(PID1:\S*)/) ?? ''}`);
+  }
 }
 
 /** The shipped image end-to-end — NO --entrypoint override, so this exercises
