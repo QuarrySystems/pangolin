@@ -625,15 +625,25 @@ describe('serve driver', () => {
     });
 
     // Poll until the run reaches done (the loop must survive the throw)
+    // Wait for BOTH conditions this test asserts on, not just the first.
+    //
+    // `published` only becomes non-empty on the SECOND publish call — the first
+    // throws by construction. Breaking as soon as the item reaches `done` and
+    // aborting immediately therefore races the serve loop: if the item
+    // completes on the same tick that made the throwing call, `ac.abort()`
+    // lands before any successful publish and the final assertion fails with
+    // `expected 0 to be greater than 0`. Rare when the suite runs alone,
+    // reproducible under full-suite CPU contention.
+    //
+    // The budget still bounds the wait, so a genuinely broken recovery path
+    // times out and fails on the assertions below rather than hanging.
     const start = Date.now();
     let isDone = false;
     while (Date.now() - start < DONE_POLL_BUDGET_MS) {
       const statuses = orch.getStatus('run-resilience');
       const item = statuses.find((s) => s.id === 'res-a');
-      if (item?.status === 'done') {
-        isDone = true;
-        break;
-      }
+      if (item?.status === 'done') isDone = true;
+      if (isDone && throwingTransport.published.length > 0) break;
       await new Promise((r) => setTimeout(r, 10));
     }
 
