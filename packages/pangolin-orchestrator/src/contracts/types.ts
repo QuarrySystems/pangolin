@@ -1,4 +1,4 @@
-import type { VerifyOutcome } from '@quarry-systems/pangolin-core';
+import type { VerifyOutcome, DepsEvidence } from '@quarry-systems/pangolin-core';
 
 export const RUN_STATUSES = [
   'pending',
@@ -95,6 +95,9 @@ export interface ItemState extends WorkItem {
   resultRef?: string;
   /** Self-verify signal (Gap A) read from the worker's output sentinel. */
   verify?: VerifyOutcome;
+  /** Dependency evidence read from the worker's output sentinel. Self-reported
+   *  (`tier: 'recorded'`), never an attestation. Never interpreted by the store. */
+  deps?: DepsEvidence;
   /** Content-addressed outputs/ deliverable refs (Wave A). Never interpreted by the store. */
   outputRefs?: Record<string, string>;
   /** Opaque dispatch-manifest ref. Never interpreted by the store. */

@@ -326,3 +326,81 @@ describe('getAuditExport', () => {
     store.close();
   });
 });
+
+/**
+ * `deps` travels the identical route `verify` took in #144: sentinel →
+ * readSentinel → reconcile → store → export. These mirror the two `verify`
+ * tests above one-for-one, because the same gap (stored but not exported)
+ * would leave it invisible to any client whose read path is `audit()`.
+ */
+describe('getAuditExport — deps', () => {
+  /** Fires and reconciles done WITH dependency evidence. */
+  function makeDepsExecutor(deps: {
+    atSetup: string;
+    atFinish: string;
+    tier: 'recorded';
+  }): Executor {
+    let fired = false;
+    return {
+      id: 'deps-exec',
+      async fire() {
+        fired = true;
+        return { dispatchHash: 'h-deps' };
+      },
+      async reconcile() {
+        return fired ? { status: 'done' as const, resultRef: 'pangolin://ns/result/r1', deps } : null;
+      },
+    };
+  }
+
+  it('audit export items carry deps when the dispatch reported them', async () => {
+    const store = new SqliteRunStateStore();
+    const deps = { atSetup: 'sha256:aa', atFinish: 'sha256:bb', tier: 'recorded' } as const;
+    const auditLog = new AuditLog({ store, signer: NoneSigner, anchor: new LocalAnchor(store) });
+    const orch = new PangolinOrchestrator({
+      store,
+      executors: { 'deps-exec': makeDepsExecutor(deps) },
+      triggers: { manual: new ManualTrigger() },
+      queues: { default: { concurrency: 5 } },
+      auditLog,
+    });
+
+    const run: Run = {
+      id: 'run-deps-export',
+      queue: 'default',
+      items: [
+        { id: 'step-a', executor: 'deps-exec', inputs: {}, depends_on: [], resourceLocks: [] },
+      ],
+    };
+
+    await orch.submitRun(run);
+    await orch.tick('default');
+    await orch.tick('default');
+
+    const item = orch.getAuditExport('run-deps-export').items.find((i) => i.id === 'step-a')!;
+    // Sibling control: resultRef arrives on the same readSentinel return, so a
+    // missing `deps` would be an export gap rather than a run that never completed.
+    expect(item.resultRef).toBe('pangolin://ns/result/r1');
+    expect(item.deps).toEqual(deps);
+    // The tier literal must survive the whole route intact — this is the field
+    // that stops a reader treating a self-report as an attestation.
+    expect(item.deps!.tier).toBe('recorded');
+
+    store.close();
+  });
+
+  it('items without dependency evidence have no deps key in their outcome', async () => {
+    const store = new SqliteRunStateStore();
+    const { orch } = makeOrchWithAudit(store);
+    await orch.submitRun(oneItemRun);
+    await orch.tick('default');
+    await orch.tick('default');
+
+    const item = orch.getAuditExport('run-export-test').items.find((i) => i.id === 'step-a')!;
+    expect(item.resultRef).toBeDefined(); // control: the run really completed
+    // Absent, not present-and-undefined — these rows are serialized.
+    expect('deps' in item).toBe(false);
+
+    store.close();
+  });
+});

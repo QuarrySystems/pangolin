@@ -108,6 +108,7 @@ export async function tick(
         );
         if (res.status === 'done' && res.resultRef) store.setResultRef(it.id, res.resultRef);
         if (res.status === 'done' && res.verify) store.setVerify(it.id, res.verify);
+        if (res.status === 'done' && res.deps) store.setDeps(it.id, res.deps);
         if (res.status === 'done' && res.outputRefs) store.setOutputRefs(it.id, res.outputRefs);
         store.releaseLocks(it.id);
         if (res.status === 'done') {

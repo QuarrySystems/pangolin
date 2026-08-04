@@ -299,3 +299,102 @@ describe('DispatchExecutor sentinel read (delegated to pangolin-product)', () =>
     expect(res?.outputRefs).toBeUndefined();
   });
 });
+
+describe('DispatchExecutor sentinel read — deps', () => {
+  it('surfaces deps from the sentinel onto the reconcile result', async () => {
+    const storage = makeMemoryStorage() as StorageProvider & ReturnType<typeof makeMemoryStorage>;
+    storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
+    const { compute, resolveExit } = makeDeferredCompute();
+    const { executor } = makeSetup(storage, compute);
+
+    const { dispatchHash } = await executor.fire(baseItem);
+    await storage.put(
+      buildDispatchRecordUri('ns', dispatchHash, 'output.json'),
+      new TextEncoder().encode(
+        JSON.stringify({
+          schemaVersion: 1,
+          patchRef: 'pangolin://ns/artifact/d/sha256:' + 'a'.repeat(64),
+          deps: { atSetup: 'sha256:aa', atFinish: 'sha256:bb', tier: 'recorded' },
+        }),
+      ),
+    );
+    resolveExit({
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+      startedAt: new Date(0),
+      finishedAt: new Date(1),
+    });
+    await new Promise((r) => setImmediate(r));
+
+    const res = await executor.reconcile(dispatchHash);
+    // Positive control: a sibling field came through the SAME read, so a
+    // missing `deps` below would be a projection gap rather than a failed read.
+    expect(res?.resultRef).toBe('pangolin://ns/artifact/d/sha256:' + 'a'.repeat(64));
+    expect(res?.deps).toEqual({ atSetup: 'sha256:aa', atFinish: 'sha256:bb', tier: 'recorded' });
+  });
+
+  it('leaves deps undefined when the sentinel carries none', async () => {
+    const storage = makeMemoryStorage() as StorageProvider & ReturnType<typeof makeMemoryStorage>;
+    storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
+    const { compute, resolveExit } = makeDeferredCompute();
+    const { executor } = makeSetup(storage, compute);
+
+    const { dispatchHash } = await executor.fire(baseItem);
+    await storage.put(
+      buildDispatchRecordUri('ns', dispatchHash, 'output.json'),
+      new TextEncoder().encode(
+        JSON.stringify({
+          schemaVersion: 1,
+          patchRef: 'pangolin://ns/artifact/d/sha256:' + 'a'.repeat(64),
+        }),
+      ),
+    );
+    resolveExit({
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+      startedAt: new Date(0),
+      finishedAt: new Date(1),
+    });
+    await new Promise((r) => setImmediate(r));
+
+    const res = await executor.reconcile(dispatchHash);
+    expect(res?.resultRef).toBeDefined(); // control: the read happened
+    expect(res?.deps).toBeUndefined();
+  });
+
+  it('drops a forged tier — an "attested" claim in the sentinel bytes does not survive the read', async () => {
+    // The security property end-to-end: the worker's sentinel is untrusted
+    // bytes, and nothing between it and an audit row may promote a self-report
+    // to an attestation.
+    const storage = makeMemoryStorage() as StorageProvider & ReturnType<typeof makeMemoryStorage>;
+    storage.seed('s', 'subagent', 'ns', 'sha256:s', { name: 's' });
+    const { compute, resolveExit } = makeDeferredCompute();
+    const { executor } = makeSetup(storage, compute);
+
+    const { dispatchHash } = await executor.fire(baseItem);
+    await storage.put(
+      buildDispatchRecordUri('ns', dispatchHash, 'output.json'),
+      new TextEncoder().encode(
+        JSON.stringify({
+          schemaVersion: 1,
+          patchRef: 'pangolin://ns/artifact/d/sha256:' + 'a'.repeat(64),
+          deps: { atSetup: 'sha256:aa', atFinish: 'sha256:bb', tier: 'attested' },
+        }),
+      ),
+    );
+    resolveExit({
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+      startedAt: new Date(0),
+      finishedAt: new Date(1),
+    });
+    await new Promise((r) => setImmediate(r));
+
+    const res = await executor.reconcile(dispatchHash);
+    expect(res?.resultRef).toBeDefined(); // control
+    expect(res?.deps).toBeUndefined();
+  });
+});

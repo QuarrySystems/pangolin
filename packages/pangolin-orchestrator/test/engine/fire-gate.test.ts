@@ -17,7 +17,7 @@ import type {
 import type { WorkItem } from '../../src/contracts/types.js';
 import { PackRegistry } from '../../src/packs/registry.js';
 import { makeShape } from '../support/make-shape.js';
-import type { VerifyOutcome } from '@quarry-systems/pangolin-core';
+import type { VerifyOutcome, DepsEvidence } from '@quarry-systems/pangolin-core';
 
 // ── Recording executor ───────────────────────────────────────────────────────
 
@@ -126,6 +126,10 @@ function makeMemStore(): RunStateStore {
     setVerify(id: string, verify: VerifyOutcome): void {
       const it = items.get(id);
       if (it) items.set(id, { ...it, verify });
+    },
+    setDeps(id: string, deps: DepsEvidence): void {
+      const it = items.get(id);
+      if (it) items.set(id, { ...it, deps });
     },
     setOutputRefs(id: string, outputRefs: Record<string, string>): void {
       const it = items.get(id);
