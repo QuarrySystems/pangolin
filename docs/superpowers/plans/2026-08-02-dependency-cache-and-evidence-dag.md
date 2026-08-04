@@ -219,7 +219,7 @@ files:
   - packages/pangolin-core/src/audit.ts
   - packages/pangolin-core/src/product.ts
   - packages/pangolin-core/test/deps.test.ts
-status: pending
+status: done
 quality_reviewer_hint: opus
 ```
 
@@ -290,7 +290,7 @@ depends_on: [task-core-deps-contract]
 files:
   - packages/pangolin-product/src/sentinel-parse.ts
   - packages/pangolin-product/test/sentinel-parse.test.ts
-status: pending
+status: done
 quality_reviewer_hint: opus
 ```
 
@@ -507,7 +507,7 @@ depends_on: [task-core-deps-contract]
 files:
   - packages/pangolin-worker/src/deps-evidence.ts
   - packages/pangolin-worker/test/deps-evidence.test.ts
-status: pending
+status: done
 ```
 
 Reads `.pangolin/deps.json` and returns a **discriminated result** — the caller
@@ -593,7 +593,7 @@ depends_on: [task-core-deps-contract]
 files:
   - packages/pangolin-worker/src/output-sentinel.ts
   - packages/pangolin-worker/test/output-sentinel.test.ts
-status: pending
+status: done
 ```
 
 Threads `deps` through `writeSentinel`'s options and onto the written
@@ -651,7 +651,7 @@ files:
   - packages/pangolin-worker/src/entrypoint.ts
   - packages/pangolin-worker/src/pipeline-runner.ts
   - packages/pangolin-worker/test/entrypoint-deps.test.ts
-status: pending
+status: done
 is_wiring_task: true
 ```
 
@@ -722,7 +722,7 @@ files:
   - packages/pangolin-orchestrator/src/contracts/executor.ts
   - packages/pangolin-orchestrator/src/executors/dispatch.ts
   - packages/pangolin-orchestrator/test/dispatch-sentinel-read.test.ts
-status: pending
+status: done
 ```
 
 Adds `deps?: DepsEvidence` to `ExecutionResult` (`contracts/executor.ts:5`) and
@@ -783,7 +783,7 @@ files:
   - packages/pangolin-orchestrator/src/contracts/types.ts
   - packages/pangolin-orchestrator/src/runstate/sqlite.ts
   - packages/pangolin-orchestrator/test/runstate-deps.test.ts
-status: pending
+status: done
 ```
 
 Adds `setDeps` to the `RunStateStore` contract (`runstate-store.ts:29-30`), the
@@ -847,7 +847,7 @@ depends_on: [task-executor-read-deps, task-runstate-persist-deps]
 files:
   - packages/pangolin-orchestrator/src/engine/tick.ts
   - packages/pangolin-orchestrator/test/engine/tick-deps.test.ts
-status: pending
+status: done
 is_wiring_task: true
 ```
 
@@ -882,7 +882,7 @@ depends_on: [task-core-deps-contract, task-runstate-persist-deps, task-tick-stor
 files:
   - packages/pangolin-orchestrator/src/orchestrator.ts
   - packages/pangolin-orchestrator/test/orchestrator-audit-export.test.ts
-status: pending
+status: done
 ```
 
 Adds `deps` to `getAuditExport`'s item rows with the same conditional spread as
@@ -929,7 +929,7 @@ depends_on: [task-entrypoint-wire-deps]
 files:
   - docs-site/src/content/docs/how-to/worker-file-layout.md
   - docs-site/src/content/docs/explanation/threat-model.md
-status: pending
+status: done
 ```
 
 Documents the toolchain recipe, the `.pangolin/deps.json` contract, and the

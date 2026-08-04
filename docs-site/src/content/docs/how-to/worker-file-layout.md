@@ -119,6 +119,56 @@ ways to work around this:
 3. **One subagent, one setup script** — the convention works fine when the
    subagent uses exactly one cap that needs install logic.
 
+## Recipe: install a package manager so a dispatch can run its own gates
+
+If you dispatch a verifier that must run `tsc`, a test suite, or a linter, the
+workspace needs a toolchain. Three parts, and **each one alone leaves you with a
+worker that cannot run the gate**. They fail in three different-looking ways,
+which is why they are easy to get partly right:
+
+**Part one — install into a writable prefix.** The worker runs as uid 1000 and
+npm's global prefix is root-owned, so a bare `npm i -g` fails with `EACCES` in
+about a second:
+
+```sh
+#!/bin/bash
+set -e
+export NPM_CONFIG_PREFIX="$HOME/.npm-global"
+mkdir -p "$NPM_CONFIG_PREFIX"
+npm i -g pnpm --silent
+```
+
+**Part two — put it on `PATH` with an env bundle.** `pangolin-setup.sh` runs as a
+separate process, so its own `export PATH` dies with it. Bind an env bundle
+setting `PATH` to include `/home/pangolin/.npm-global/bin`. Without this the
+binary is present but the agent gets `command not found`.
+
+**Part three — ask for devDependencies explicitly.** The worker image sets
+`NODE_ENV=production`, and that variable reaches your setup script. A plain
+install therefore **skips every devDependency without failing** — it exits 0,
+populates `node_modules`, and simply leaves out `tsc`, your test runner and your
+linter:
+
+```sh
+pnpm install --frozen-lockfile --prod=false   # or: export NODE_ENV=development
+```
+
+:::caution[Part three fails silently]
+Parts one and two announce themselves — an `EACCES` at setup, a `command not
+found` at agent time. Part three does not. The install succeeds, and the failure
+surfaces later as a missing binary or an unresolvable import, which looks like a
+problem with your gate rather than with your install. If you are debugging a
+dispatched verifier that "installed fine" but cannot find its tools, check this
+first.
+:::
+
+**Budget.** The setup script is bounded by `PANGOLIN_SETUP_TIMEOUT_SECONDS`,
+default **120 s**; exceeding it fails the dispatch with `worker-failed`. For
+scale: installing pnpm itself takes ~2–3 s, and a cold, complete,
+dev-inclusive `pnpm install` over a 1052-package lockfile was measured at
+**14 s** in the worker image. Most projects have room; a very large tree or a
+slow registry may not.
+
 ## Recipe: install Claude Code plugins
 
 The Claude Code adapter looks for `pangolin-plugins.json` after overlay and
@@ -134,6 +184,56 @@ my-plugin-cap/
 ```json
 [{ "name": "@org/some-plugin" }]
 ```
+
+## Recipe: report what you installed (`.pangolin/deps.json`)
+
+Optional. Write this file and Pangolin Scale records what dependency set your
+dispatch ran against, in the audit export alongside `resultRef` and `verify`.
+
+Exact path, inside the workspace:
+
+```
+.pangolin/deps.json
+```
+
+```json
+{
+  "ecosystem": "pnpm",
+  "lockfileHash": "sha256:…",
+  "resolvedSetDigest": "sha256:…",
+  "verified": true,
+  "verifier": "pnpm install --verify-store-integrity",
+  "packageCount": 1432
+}
+```
+
+**Pangolin Scale only hashes it.** Every field above is yours; none is parsed,
+validated, or interpreted — the same treatment `executorManifest` gets. Write
+whatever your ecosystem makes sense of, in any key order (the hash is
+canonicalised, so re-serialising the same content does not read as a change).
+The example is a suggestion, not a schema. This is why it works unchanged for
+pip, cargo, nuget and go.
+
+It is read **twice** — once after your setup script, once after the agent
+finishes — and both hashes are sealed:
+
+```json
+"deps": { "atSetup": "sha256:…", "atFinish": "sha256:…", "tier": "recorded" }
+```
+
+Two entries rather than one because an agent may add a package mid-run. When the
+two differ, the dispatch changed its own dependency set — the case a single
+setup-time seal would describe exactly wrongly.
+
+**It can never fail your dispatch.** Absent, malformed, unreadable, or over
+64 KiB are all treated the same as "not offered": no `deps` key is sealed, the
+run proceeds, and the worker logs `deps.evidence.unusable`. Both reads must
+succeed for the field to appear, so a file created for the first time *during*
+the run is not reported — the guarantee is that changes to an existing sentinel
+are visible.
+
+See [the threat model](/pangolin/explanation/threat-model/) for what `tier: "recorded"`
+does and does not claim.
 
 ## Recipe: ship arbitrary files
 
