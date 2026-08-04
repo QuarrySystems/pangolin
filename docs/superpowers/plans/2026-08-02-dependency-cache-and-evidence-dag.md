@@ -111,8 +111,22 @@ depends_on: []
 files:
   - docs/superpowers/specs/experiments/2026-08-02-dep-install-cost/measure.mjs
   - docs/superpowers/specs/experiments/2026-08-02-dep-install-cost/README.md
-status: pending
+status: done
+verdict: cache-not-justified
 ```
+
+> **RESULT (2026-08-03).** `toolchain` 3 s, `full` **14 s** against the 120 s
+> `PANGOLIN_SETUP_TIMEOUT_SECONDS` default — roughly one eighth of the budget,
+> for a cold, complete, dev-inclusive install of this repo's 1052-resolution
+> lockfile. Verdict **`cache-not-justified`**: the *latency* argument for
+> `depCacheDir` does not survive measurement. The *egress* argument
+> (Fargate `assignPublicIp` defaults `'DISABLED'`; no NAT means no registry at
+> all) is untouched by this gate and was never what it tested. Full record and
+> the unmeasured caveats: [`../specs/experiments/2026-08-02-dep-install-cost/README.md`](../specs/experiments/2026-08-02-dep-install-cost/README.md).
+>
+> The run also turned up an undesigned finding that outlives the verdict — the
+> image's `NODE_ENV=production` silently drops devDependencies from a consumer's
+> setup-script install. It is folded into `task-docs-recipe` below.
 
 The decision gate for the transport half (spec §8). Measures a cold `pnpm install`
 of this repo's own lockfile inside the real worker image against the 120 s
@@ -344,8 +358,18 @@ files:
   - packages/pangolin-client/src/client.ts
   - packages/pangolin-client/src/dispatch.ts
   - packages/pangolin-client/test/dep-cache-dir.test.ts
-status: pending
+status: skipped
 ```
+
+> **SKIPPED (2026-08-03)** by this task's own stop condition below:
+> `task-measure-install-cost` returned `cache-not-justified` (14 s against a
+> 120 s budget). Not built.
+>
+> This is a skip on the *latency* rationale only. If `depCacheDir` is revived it
+> should be re-argued from **egress** — a Fargate task in a private subnet with
+> no NAT cannot reach a registry at all, so no install time is small enough to
+> help. That is a different design conversation with a different acceptance
+> test, and it deserves its own measurement rather than inheriting this one.
 
 Adds `depCacheDir?: string` to `TargetConfig` (`client.ts:24`) and emits it as
 `PANGOLIN_DEP_CACHE_DIR` alongside the other `PANGOLIN_*` vars (`dispatch.ts:285`).
@@ -412,8 +436,13 @@ depends_on: [task-measure-install-cost]
 files:
   - packages/pangolin-worker/src/runtime-env-filter.ts
   - packages/pangolin-worker/test/runtime-env-filter.test.ts
-status: pending
+status: skipped
 ```
+
+> **SKIPPED (2026-08-03)**, same gate and same rationale as
+> `task-client-dep-cache-dir`. Nothing is added to the env firewall's allow-list,
+> which is the conservative outcome: the firewall stays exactly as narrow as it
+> is today.
 
 `filterRuntimeEnv` is default-deny and drops every `PANGOLIN_*` var, so
 `PANGOLIN_DEP_CACHE_DIR` never reaches the setup script or the agent without an
@@ -617,7 +646,7 @@ Test file: `packages/pangolin-worker/test/output-sentinel.test.ts`.
 
 ```yaml
 id: task-entrypoint-wire-deps
-depends_on: [task-worker-deps-reader, task-sentinel-deps-field, task-env-filter-allow-cache-dir]
+depends_on: [task-worker-deps-reader, task-sentinel-deps-field]
 files:
   - packages/pangolin-worker/src/entrypoint.ts
   - packages/pangolin-worker/src/pipeline-runner.ts
@@ -666,11 +695,19 @@ if (depsAtSetup.kind === 'unusable') {
   `pangolin-setup.sh` is observed in `atSetup`. Asserted through the real
   lifecycle, not a synthetic env object — every existing `runWorker` call site in
   tests passes a synthetic object, so a test written the usual way is vacuous.
-- With `PANGOLIN_DEP_CACHE_DIR` set in `h.env`, a `pangolin-setup.sh` that echoes
-  `$PANGOLIN_DEP_CACHE_DIR` into a workspace file observes the value — **paired
-  with `PATH` (a `BUILTIN_ALLOW` member) as the positive control**, so an empty
-  result is not an empty env. POSIX-gate with the `itPosix` idiom at
-  `setup-script.test.ts:30`. This discharges spec §9.2.
+- ~~With `PANGOLIN_DEP_CACHE_DIR` set in `h.env`…~~ **DROPPED (2026-08-03).**
+  This AC and the `task-env-filter-allow-cache-dir` edge above were removed when
+  the gate returned `cache-not-justified`: the var is never emitted, so the
+  assertion could only ever have tested a variable no code path sets. It
+  discharged spec §9.2, which is moot for the same reason.
+
+  The edge removal is deliberate and restores the plan's stated intent. Context
+  claims *"the evidence branch is independent of that outcome and runs in
+  parallel"*, but this task — an evidence task — carried a `depends_on` edge to a
+  gated transport task. Left in place, a `skipped` transport task would have
+  halted the evidence branch's whole lineage, which is exactly what Context says
+  must not happen. The edge was a drafting error, not a real dependency: nothing
+  in the two evidence reads touches the env firewall.
 - `grep -c 'const deps' packages/pangolin-worker/src/entrypoint.ts` returns 0 —
   no local shadows `runWorker`'s `deps: RunWorkerDeps` parameter.
 
@@ -884,11 +921,11 @@ it('audit export items carry deps when the dispatch reported them', async () => 
 
 Test file: `packages/pangolin-orchestrator/test/orchestrator-audit-export.test.ts`.
 
-## Task: document the two-half toolchain recipe
+## Task: document the three-part toolchain recipe
 
 ```yaml
 id: task-docs-recipe
-depends_on: [task-client-dep-cache-dir, task-entrypoint-wire-deps]
+depends_on: [task-entrypoint-wire-deps]
 files:
   - docs-site/src/content/docs/how-to/worker-file-layout.md
   - docs-site/src/content/docs/explanation/threat-model.md
@@ -896,9 +933,18 @@ status: pending
 ```
 
 Documents the toolchain recipe, the `.pangolin/deps.json` contract, and the
-`depCacheDir` mount (spec §7). Both halves of the recipe must appear together:
-either alone silently yields a worker with no usable toolchain — the install half
-fails loudly at setup, the PATH half fails as `command not found` at agent time.
+`depCacheDir` mount (spec §7). All three parts of the recipe must appear
+together; each alone yields a worker that cannot run a gate, and they fail in
+three different-looking ways — the install part fails loudly at setup, the PATH
+part fails as `command not found` at agent time, and the `NODE_ENV` part **does
+not fail at all**: the install exits 0 having silently skipped every
+devDependency, so the failure surfaces later as a missing `tsc`/`vitest`.
+
+**The third part was found by running `task-measure-install-cost`, not by
+design** — see [`../specs/experiments/2026-08-02-dep-install-cost/README.md`](../specs/experiments/2026-08-02-dep-install-cost/README.md).
+The worker image bakes `NODE_ENV=production`, and it is on the env firewall's
+`BUILTIN_ALLOW` (`runtime-env-filter.ts:78`), so it reaches the setup script.
+Measured: 802 packages installed instead of 931, `vitest` absent, exit code 0.
 
 ## Implementation
 
@@ -913,12 +959,20 @@ prefix is root-owned, so `npm i -g` fails with EACCES; install into `$HOME`:
     mkdir -p "$NPM_CONFIG_PREFIX"
     npm i -g pnpm --silent
 
-Half two — an **env bundle** must set `PATH` to include
+Part two — an **env bundle** must set `PATH` to include
 `/home/pangolin/.npm-global/bin`. The setup script is a separate process, so its
 own `export PATH` does not survive to the agent.
 
-Locally, mount a cache with the provider's existing `extraBinds` option:
-`extraBinds: ['/host/cache:/var/cache/pangolin-deps:ro']`.
+Part three — the image sets `NODE_ENV=production`, which reaches your setup
+script. A bare install therefore skips devDependencies **without failing**, and
+`tsc` and your test runner will be missing. Ask for them explicitly:
+
+    pnpm install --frozen-lockfile --prod=false   # or: export NODE_ENV=development
+
+(No cache-mount section. `depCacheDir` was not built — see the skip on
+`task-client-dep-cache-dir`. The provider's `extraBinds` option still exists and
+an operator can always use it directly, but that is pre-existing provider
+documentation, not something this recipe introduces.)
 ```
 
 ```markdown
@@ -934,23 +988,34 @@ operator's mount configuration.
 
 ## Acceptance criteria
 
-- The `worker-file-layout` recipe shows **both** halves — the
-  `NPM_CONFIG_PREFIX`-into-`$HOME` install and the env-bundle `PATH` — and states
-  in one sentence that either alone leaves the toolchain unusable.
+- The `worker-file-layout` recipe shows **all three** parts — the
+  `NPM_CONFIG_PREFIX`-into-`$HOME` install, the env-bundle `PATH`, and the
+  `--prod=false`/`NODE_ENV` correction — and states in one sentence that any one
+  alone leaves the toolchain unusable.
+- The recipe states that the `NODE_ENV` failure is **silent** (install exits 0,
+  devDependencies simply absent). A reader who takes away only "set these three"
+  without knowing the third fails quietly will not think to check for it, which
+  is the whole reason it went undocumented until it was measured.
 - The recipe documents `.pangolin/deps.json`: its exact path, the §4.2 example
   body, and that Pangolin only hashes it and treats its fields as opaque. Without
   this no consumer knows what filename to write, and the evidence branch is
   permanently unexercised.
-- The recipe names the 120 s `PANGOLIN_SETUP_TIMEOUT_SECONDS` default, that
-  exceeding it fails the dispatch with `worker-failed`, and shows `extraBinds`
-  as the local/dev cache-mount path.
+- The recipe names the 120 s `PANGOLIN_SETUP_TIMEOUT_SECONDS` default and that
+  exceeding it fails the dispatch with `worker-failed`. It should also state the
+  measured headroom — a cold, dev-inclusive install of a 1052-resolution
+  lockfile took 14 s — so a reader can judge their own tree against a real
+  number instead of guessing.
+- The `extraBinds` local cache-mount line and the `depCacheDir` contract bullet
+  below are **out of scope**: `task-client-dep-cache-dir` is `skipped`, so
+  `depCacheDir` does not exist and documenting it would describe a field no
+  consumer can set.
 - `threat-model.md` gains a `Dependency evidence is recorded, not attested`
   section. Verify with `grep -A6 'recorded, not attested' docs-site/src/content/docs/explanation/threat-model.md`
   returning that section's body — a non-empty result is the control that it was
   written. **The pre-existing occurrences of `attested` at `threat-model.md:113`
   and `:123` are expected, correct, and out of scope — do not remove them.**
-- The `depCacheDir` contract is documented as an operator-provisioned, untrusted
-  mount that Pangolin does not create.
+  (Superseded: the `depCacheDir` contract bullet that stood here is dropped for
+  the same reason — the field does not exist.)
 - `pnpm --filter docs-site build` succeeds.
 
 Test file: `docs-site/src/content/docs/explanation/threat-model.md` is prose; the

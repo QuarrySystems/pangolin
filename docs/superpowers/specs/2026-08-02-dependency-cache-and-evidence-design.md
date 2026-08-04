@@ -1,7 +1,7 @@
 ---
 title: Dependency Cache and Sealed Dependency Evidence — Design
 date: 2026-08-02
-status: **DESIGNED — ready for a plan.** Scope agreed with the human partner over a brainstorming pass. Every load-bearing premise below was measured in the real worker image or read from the provider source; claims that were NOT measured are marked inline.
+status: **PARTIALLY RESOLVED (2026-08-03).** The §8 measurement gate has run — verdict `cache-not-justified` — so the **transport half (§4.1) is NOT built** and its acceptance criteria (§9.1, §9.2) are moot. The **evidence half (§4.2) is unaffected and still pending**. The gate also found a third toolchain trap that outlives the verdict (§2, `NODE_ENV=production`). Every load-bearing premise below was measured in the real worker image or read from the provider source; claims that were NOT measured are marked inline.
 branch: spec/dependency-cache-and-evidence
 authors: [human:Brett, agent:claude-opus-5]
 severity: n/a (performance + audit surface; no existing control is falsified)
@@ -45,9 +45,25 @@ what this design is for.
     an **env bundle** setting PATH, which wins because
     `baseEnv = filterRuntimeEnv(...)` is built first and bundles merge on top
     (`entrypoint.ts:474-478`, `env-merger.ts:27-31`).
-- **Setup runs before the baseline is captured** — step 9 (`entrypoint.ts:487`)
-  precedes `captureBaseline` (`:514`, "post-overlay, post-setup") — so anything
+- **A third trap, found by measurement on 2026-08-03, not by design.** The image
+  bakes **`NODE_ENV=production`**, and `NODE_ENV` is on the env firewall's
+  `BUILTIN_ALLOW` (`runtime-env-filter.ts:78`), so it survives filtering, rides
+  in `mergedEnv`, and reaches the setup script (spawned with `env: mergedEnv`).
+  A bare `pnpm install --frozen-lockfile` therefore **silently skips every
+  devDependency** — measured: 802 packages instead of 931, `vitest` absent,
+  **exit code 0**. Unlike the two traps above, this one never fails loudly; it
+  surfaces later as a missing `tsc` or test runner, which is driver 1's own
+  failure mode one layer deeper. The fix is `--prod=false` (or
+  `NODE_ENV=development`). Full record:
+  `experiments/2026-08-02-dep-install-cost/README.md`.
+- **Setup runs before the baseline is captured** — step 9 (`entrypoint.ts:490`)
+  precedes `captureBaseline` (`:540`, "post-overlay, post-setup") — so anything
   installed is in the baseline and never appears in the captured patch.
+  *(Line refs corrected 2026-08-03: #152 inserted the context-requirements check
+  at `:514`, the line this bullet previously cited for `captureBaseline`. The
+  window between setup and baseline now has a third occupant, so an evidence
+  read placed "after step 9, before captureBaseline" must be positioned
+  deliberately relative to it.)*
 - **Capture honours `.gitignore`.** Measured: an agent that adds a package
   mid-dispatch produces a **165-byte patch** containing the lockfile change, with
   no `node_modules` content. This is what makes §4's mid-dispatch case tractable.
@@ -93,6 +109,13 @@ Pangolin adds exactly two things. Both are generic; Pangolin learns no package
 manager and owns no mount abstraction.
 
 ### 4.1 A path, not a mount
+
+> **NOT BUILT (2026-08-03).** The §8 gate returned `cache-not-justified`, so
+> everything in this subsection describes a mechanism that does not exist in the
+> codebase. It is kept rather than deleted because the *reasoning* — why Pangolin
+> cannot own a mount, and why a passthrough is not an abstraction — is what a
+> revival would need, and re-deriving it would be the expensive part. Read it as
+> a design position, not a description of shipped behaviour.
 
 `depCacheDir?: string` on target config, surfaced to the dispatch as
 `PANGOLIN_DEP_CACHE_DIR`.
@@ -280,21 +303,44 @@ thing an audit tool cannot afford.**
 
 These are part of "done", not follow-ups:
 
-1. A recipe in `how-to/worker-file-layout` covering both halves of the toolchain
-   install (NPM_CONFIG_PREFIX into `$HOME`, **and** the env-bundle PATH), because
-   either alone silently yields a worker with no usable toolchain — one failing
-   loudly at setup, the other as `command not found` at agent time.
-2. The `depCacheDir` contract, stating plainly that the mount is untrusted, that
-   read-only + per-target scoping are the operator's responsibility, and why.
+1. A recipe in `how-to/worker-file-layout` covering **all three parts** of the
+   toolchain install (NPM_CONFIG_PREFIX into `$HOME`, the env-bundle PATH, **and**
+   `--prod=false`/`NODE_ENV`), because any one alone yields a worker that cannot
+   run a gate — the first failing loudly at setup, the second as `command not
+   found` at agent time, and the third **not failing at all** (§2). The recipe
+   must say the third is silent; a reader who does not know that will not think
+   to look for it.
+   *(Amended 2026-08-03: was "both halves". The third was found by measurement.)*
+2. ~~The `depCacheDir` contract…~~ **MOOT (2026-08-03).** The transport half was
+   not built — the gate returned `cache-not-justified` (§8) — so there is no
+   `depCacheDir` field to document.
 3. A threat-model entry for the `recorded` tier that does not overclaim.
 
 ## 8. Open risks
 
-- **`PANGOLIN_SETUP_TIMEOUT_SECONDS` defaults to 120** (`env-parser.ts:200-202`)
-  and a non-zero exit or timeout fails the dispatch with `worker-failed`.
-  Installing the pnpm binary is 2 s. A **cold `pnpm install` over a real lockfile
-  was NOT measured** and is the real risk; sizing it is the first task of any
-  plan, before the cache is assumed to help.
+> **GATE RESOLVED, 2026-08-03 — the transport half is not built.** The first
+> bullet below was the gate on the whole design. It has now been measured in the
+> real worker image: a cold, complete, dev-inclusive `pnpm install` of this
+> repo's 1052-resolution lockfile takes **14 s** against the 120 s budget —
+> roughly one eighth. Verdict **`cache-not-justified`**, so `depCacheDir` and its
+> env-firewall entry are `skipped` in the plan and §4.1 describes an unbuilt
+> mechanism.
+>
+> **What this does not settle.** The gate tested *latency*, which was never the
+> only argument. On Fargate `assignPublicIp` defaults to `'DISABLED'` (§2), so a
+> private subnet with no NAT has no registry reachability at all — there, a
+> mounted cache is a **correctness** mechanism and no install time is small
+> enough to substitute for it. Reviving `depCacheDir` on that basis is legitimate
+> and needs its own measurement, not this one. The evidence half (§4.2) is
+> independent of all of this and proceeds.
+>
+> Record: `experiments/2026-08-02-dep-install-cost/README.md`.
+
+- **`PANGOLIN_SETUP_TIMEOUT_SECONDS` defaults to 120** (`env-parser.ts:202`,
+  verified literal) and a non-zero exit or timeout fails the dispatch with
+  `worker-failed`. Installing the pnpm binary is 2 s (measured 3 s). ~~A cold
+  `pnpm install` over a real lockfile was NOT measured~~ — **measured
+  2026-08-03: 14 s.** See the resolution above.
 - **`pangolin-setup.sh` is single-slot**, last-write-wins on that exact filename.
   A second bound capability shipping one makes the others silently disappear.
   Consumers combining a dependency-install script with any other setup step hit
@@ -302,17 +348,20 @@ These are part of "done", not follow-ups:
 - **Concurrent store access** from parallel dispatches sharing one mount. pnpm is
   designed for concurrent store use, but this was **not measured** under Pangolin's
   dispatch concurrency.
-- **No measurement yet exists** that the cache is faster than a warm in-VPC
-  registry. §8's first bullet is the gate on the whole design.
+- **Still unmeasured: whether a cache beats a warm in-VPC registry.** The gate
+  measured the *cold install*, not the cached case, so the cache's actual saving
+  against 14 s remains unquantified. This bullet outlives the gate and is the
+  measurement any revival of §4.1 must start from.
 
 ## 9. Acceptance criteria
 
-1. `depCacheDir` on a target surfaces as `PANGOLIN_DEP_CACHE_DIR` inside the
-   dispatch, and is absent from the environment when unset.
-2. `PANGOLIN_DEP_CACHE_DIR` reaches the *setup script*, which runs before
-   `captureBaseline` — asserted through a real `runWorker` lifecycle, not on a
-   synthetic env object, since every existing test passes a synthetic one and a
-   test written the usual way would be vacuous.
+1. ~~`depCacheDir` on a target surfaces as `PANGOLIN_DEP_CACHE_DIR`…~~ **MOOT
+   (2026-08-03)** — transport half not built, per the §8 gate.
+2. ~~`PANGOLIN_DEP_CACHE_DIR` reaches the *setup script*…~~ **MOOT (2026-08-03)**,
+   same reason. The *method* this criterion prescribed is not moot and is
+   retained by the evidence branch: assert through a real `runWorker` lifecycle
+   rather than a synthetic env object, because every existing test passes a
+   synthetic one and a test written the usual way would be vacuous.
 3. A dispatch with no `.pangolin/deps.json` emits **no** `deps` key on the output
    sentinel — absent, not `undefined` — and `getAuditExport` carries no `deps`
    for that item.
