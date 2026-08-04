@@ -1,7 +1,7 @@
 ---
 title: SecretStore unification — every secret through one adapter seam
 created: 2026-05-29
-status: draft
+status: **SHIPPED — status corrected 2026-08-03.** Verified on main: `packages/pangolin-secret-store/`. This line previously read "draft", which was stale: the work landed and the marker was never updated. **Originally:** draft
 ---
 
 # SecretStore unification

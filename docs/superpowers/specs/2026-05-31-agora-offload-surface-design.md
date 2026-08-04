@@ -1,7 +1,7 @@
 ---
 title: Agora Offload — offload-surface wave design (operator surface)
 date: 2026-05-31
-status: design (approved direction; DAG plan pending)
+status: **SHIPPED — status corrected 2026-08-03.** Verified on main: `packages/pangolin-cli + packages/pangolin-mcp`. This line previously read "design (approved direction; DAG plan pending)", which was stale: the work landed and the marker was never updated. **Originally:** design (approved direction; DAG plan pending)
 branch: offload-surface
 authors: [human:Brett, agent:claude-opus-4-8]
 builds_on:

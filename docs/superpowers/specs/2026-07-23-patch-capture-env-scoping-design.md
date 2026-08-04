@@ -1,7 +1,7 @@
 ---
 title: Patch-Capture Git Spawn — Environment Scoping — Design Spec
 date: 2026-07-23
-status: draft
+status: **SHIPPED — status corrected 2026-08-03.** Verified on main: `buildGitEnv in pangolin-worker/src/patch-capture.ts`. This line previously read "draft", which was stale: the work landed and the marker was never updated. **Originally:** draft
 branch: security/worker-credential-custody
 authors: [human:Brett, agent:claude-opus-4-8]
 severity: high (verified credential exposure to sandboxed model-driven code)

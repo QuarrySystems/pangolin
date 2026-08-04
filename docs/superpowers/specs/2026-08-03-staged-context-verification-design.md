@@ -1,7 +1,7 @@
 ---
 title: Staged-Context Verification — Design
 date: 2026-08-03
-status: **DESIGNED — ready for a plan.** Scope inverted from the first draft on consumer evidence (see §2). v1 is verification only; declaration and rendering are v2 and are gated on v1 existing.
+status: **SHIPPED — status corrected 2026-08-03.** Verified on main: `context-check.ts + context-requirement.ts, shipped in #152`. This line previously read "**DESIGNED — ready for a plan.** Scope inverted from the first draft on consumer evidence (see §2). v1 is verification only; declaration and rendering are v2 and are gated on v1 existing.", which was stale: the work landed and the marker was never updated. **Originally:** **DESIGNED — ready for a plan.** Scope inverted from the first draft on consumer evidence (see §2). v1 is verification only; declaration and rendering are v2 and are gated on v1 existing.
 branch: spec/staged-context-verification
 authors: [human:Brett, agent:claude-opus-5, consumer:remora]
 severity: medium (no control is falsified; a documented field is inert and a real failure class is misattributed)

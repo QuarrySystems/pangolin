@@ -1,7 +1,7 @@
 ---
 title: Agora dispatch-executor (PR3) — design
 date: 2026-05-29
-status: design (approved; plan pending)
+status: **SHIPPED — status corrected 2026-08-03.** Verified on main: `pangolin-orchestrator/src/executors/dispatch.ts`. This line previously read "design (approved; plan pending)", which was stale: the work landed and the marker was never updated. **Originally:** design (approved; plan pending)
 authors: [human:Brett, agent:claude-opus-4-8]
 relates_to: docs/superpowers/specs/2026-05-28-agora-orchestrator-design.md (§4 Executor, §6 D6)
 ---

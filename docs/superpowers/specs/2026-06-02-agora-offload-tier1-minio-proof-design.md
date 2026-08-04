@@ -1,7 +1,7 @@
 ---
 title: "Agora Offload — Tier-1 MinIO Proof (remote-stack validation for $0)"
 date: 2026-06-02
-status: draft
+status: **SHIPPED — status corrected 2026-08-03.** Verified on main: `examples/offload-minio`. This line previously read "draft", which was stale: the work landed and the marker was never updated. **Originally:** draft
 authors: [human:Brett, agent:claude-opus-4-8]
 builds_on:
   - "[[docs/superpowers/specs/2026-05-28-agora-orchestrator-design.md]]"
