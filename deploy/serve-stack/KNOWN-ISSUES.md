@@ -21,6 +21,30 @@ Line references for issues 1–5 and 7 are to this branch. Issue 6 cites
 `@quarry-systems/pangolin-orchestrator@0.4.0` by compiled `dist/` path, because that
 is the artifact that was read and measured.
 
+## Status at a glance (2026-08-03)
+
+Every issue below carries its own `**Status:**` line; this table exists so a
+reader does not have to scroll 2500 lines to find the one thing still broken.
+
+| | Issue | Status |
+|---|---|---|
+| **1–11, 13, 14** | operator path, outbox, dispatch path | **FIXED** |
+| **6** | outbox growth | **FIXED** — change 3 (`listPrefixes`) deferred by decision |
+| **12** | repo-local git config during capture | **FIXED for known directives** — deliberately partial |
+| **15** | `verify` absent from the audit export | **FIXED** (#144) |
+| **16** | `capturePatch` omits `--binary` | **FIXED** (#140) |
+| **17** | dev shapes pinned to a placeholder image | **PREMISE FALSE** (17a, 17b) — base-tree/patch half still open |
+| **18** | `git()` decodes stdout as UTF-8 | **FIXED** (#145) |
+| **19** | no repository history in the workspace | **WITHDRAWN** (19a) — capabilities *can* carry `.git`, measured |
+| **20** | `env.register()` + inline secret always throws | **OPEN** — root-caused, fix designed, not implemented |
+
+**If you read one line: issue 20 is the only outright breakage left.**
+
+Two entries — 17 and 19 — were filed on premises that did not survive
+verification. They are kept rather than deleted, with the original text intact
+beneath a correcting status, because *what was believed and why it was wrong* is
+the more useful record.
+
 ---
 
 ## 1. `DOCKER_GID` default of `999` is wrong under Docker Desktop
@@ -1791,6 +1815,12 @@ look.
 
 ## 15. `VerifyOutcome` is unreachable from the audit bundle — exported by `getStatus`, absent from `getAuditExport`
 
+**Status: FIXED** ([#144](https://github.com/QuarrySystems/pangolin/pull/144)).
+`getAuditExport` now carries `verify` on its item rows with the same conditional
+spread as `resultRef` / `outputRefs`, so a client whose only read path is
+`audit()` can see it. The entry's diagnosis below was correct as written: it was
+an omission, not a decision.
+
 **Defect-shaped, low urgency, and it looks like an omission rather than a
 decision.** A worker's self-verify result reaches the run-state store and
 `getStatus()`, but never enters the audit export. A client whose read path is
@@ -1867,6 +1897,12 @@ and because the field's two siblings both made it through.
 # Issue 16: a dispatch can succeed and lose its work
 
 ## 16. `capturePatch` omits `--binary`, so a change to any git-binary file is captured as an unappliable stub
+
+**Status: FIXED** ([#140](https://github.com/QuarrySystems/pangolin/pull/140)).
+`capturePatch` passes `--binary`, so a git-binary file's change is captured as an
+applicable patch rather than an unappliable stub. See 18 below: fixing this
+exposed a SECOND corruption path on the same code, which `--binary` alone does
+not close.
 
 **The most consequential of the findings this consumer has filed, because it is
 the only one where a run reports success and the work is gone.**
@@ -1957,6 +1993,22 @@ write; the stray-byte case is the one that actually happens.
 ---
 
 ## 17. Dev shapes are defined, registered and schema-validated, but pinned to a placeholder image — so `dev.verify`'s "repo snapshot + patch applied" context is unreachable
+
+**Status: PREMISE FALSE — partially superseded, one half still open.** The stated
+blocker is not real: 17a ([#143](https://github.com/QuarrySystems/pangolin/pull/143))
+verified three ways that **dev shapes dispatch today** — the placeholder digest
+has a single truthiness reader, `fire()` never consults `subagentShape`, and a
+dev-shaped item run through the real `tick` fired successfully. 17b
+([#147](https://github.com/QuarrySystems/pangolin/pull/147)) then showed the
+toolchain half already has an answer in `pangolin-setup.sh` plus an env-bundle
+`PATH`.
+
+**Still open:** the base-tree / patch half — supplying the verifier with the
+"repo snapshot + patch applied" context itself. That is the remaining substance
+of this request, and it is not addressed by 17a or 17b.
+
+Read the body below as the ORIGINAL report; its central claim did not survive
+verification.
 
 **This is a feature request rather than a defect, and it asks for the last mile
 of work that is already done.** `packs/dev.ts` describes exactly the verifier
@@ -2244,6 +2296,12 @@ a materialized repo snapshot, and patch application ordered relative to
 
 ## 18. `git()` decodes stdout as UTF-8, so a *text* file with non-UTF-8 bytes is captured corrupted
 
+**Status: FIXED** ([#145](https://github.com/QuarrySystems/pangolin/pull/145)).
+`git()` now returns a `Buffer` and hands git's bytes back unchanged; only
+`captureBaseline` decodes, and only a tree oid, which is ASCII hex by
+construction. The same PR removed two raw NUL bytes from `overlay-engine.ts`
+that were making git classify that source file as binary.
+
 **Sibling of 16, and not fixed by 16's fix.** Found while verifying that fix, by
 checking its correctness argument rather than accepting it.
 
@@ -2292,6 +2350,17 @@ is so far only a measured property of the capture path.
 
 
 ## 19. A dispatch workspace has no repository history, so no agent can reason about what changed
+
+**Status: WITHDRAWN — the blocking claim was false.** 19a
+([#146](https://github.com/QuarrySystems/pangolin/pull/146)) measured it: a
+capability bundle CAN carry `.git`, and a 30-file bundle including history was
+materialised into a working repository whose history survived `captureBaseline`.
+The consumer's stated reason for needing a Pangolin-side feature — "bundling
+history as a capability does not work" — does not hold, so the workaround they
+believed unavailable is in fact available today.
+
+What remains is a preference (history without hand-packing a bundle), not a
+blocker. Read the body below as the ORIGINAL report.
 
 **A feature request, and the narrower half of what 17 asks for.** 17 wants
 `dev.verify`'s "repo snapshot + patch applied" context to become reachable. This
@@ -2457,6 +2526,16 @@ with shallow-depth support, rather than a consumer discovering it works by tryin
   unaffected.
 
 ## 20. `env.register()` with an inline secret always throws `IntegrityMismatchError`
+
+**Status: OPEN — root-caused, fix designed, NOT implemented.** The only
+outright-broken item left in this file. Reproduced with a minimal case plus a
+control; the cause is a conflated key at `pangolin-client/src/env-register.ts`,
+where `computeContentHash(def)` serves as BOTH the content address and the
+idempotency key. The content address must INCLUDE the freshly-staged secret ref;
+the idempotency key must EXCLUDE it. Splitting the two is the fix
+([#148](https://github.com/QuarrySystems/pangolin/pull/148) files it and specs
+the split). Keeping the UUID suffix was decided deliberately — for opacity,
+non-clobbering re-stage, and per-staging TTL.
 
 **Unconditional, not flaky, and it affects both shipped secret stores.** A
 registration carrying `secrets: { KEY: { inline: … } }` cannot succeed against a
